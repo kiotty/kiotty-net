@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>비동기 네트워크 라이브러리 분석</title>
+<meta name="description" content="kiotty-net 인터페이스 설계를 위해 libuv, Asio, Mongoose, libevent, HTTP 파서, 고정 메모리 스택의 핵심 아이디어와 인터페이스를 정리한 학습 노트">
+<style>
+:root{--bg:#fbfbfa;--fg:#1f2328;--muted:#59636e;--line:#d8dee4;--code-bg:#f3f5f7;--accent:#0b6bcb;--note:#e8f1fb;--tip:#e9f7ee;--warn:#fdf1e1;--th:#eef1f4;--mark:#fff3bf}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}}
+:root[data-theme="dark"]{--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",Roboto,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+main{max-width:1000px;margin:0 auto;padding:32px 16px 96px}
+header.top{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+h1{font-size:1.9rem;line-height:1.3;margin:0 0 10px}
+h2{font-size:1.45rem;margin:56px 0 14px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:34px 0 10px}
+h4{font-size:1rem;margin:24px 0 8px;color:var(--muted)}
+p{margin:10px 0}
+.sub{color:var(--muted);margin:0}
+.meta{color:var(--muted);font-size:.9rem}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:ui-monospace,"Cascadia Code",Consolas,"D2Coding",Menlo,monospace;font-size:.88em;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre.code{position:relative;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:.84rem;line-height:1.55;margin:12px 0}
+pre.code code{background:none;padding:0;font-size:inherit;white-space:pre}
+pre.code::before{content:attr(data-lang);position:absolute;right:10px;top:6px;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;vertical-align:top;text-align:left}
+th{background:var(--th);white-space:nowrap}
+td code{white-space:nowrap}
+.box{border-left:4px solid var(--accent);background:var(--note);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+.box.tip{border-color:#2e9e5b;background:var(--tip)}
+.box.warn{border-color:#d9822b;background:var(--warn)}
+.box>strong:first-child{display:block;margin-bottom:4px}
+nav.toc{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:20px 0}
+nav.toc ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:28px}
+nav.toc li{margin:3px 0;break-inside:avoid}
+@media (max-width:640px){nav.toc ol{columns:1}}
+ul,ol{padding-left:24px}li{margin:4px 0}
+mark{background:var(--mark);color:inherit;padding:0 3px;border-radius:3px}
+figure{margin:18px 0}figcaption{color:var(--muted);font-size:.88rem;text-align:center;margin-top:6px}
+svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:0 8px;font-size:.8rem;color:var(--muted);margin-right:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+footer{margin-top:60px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<main>
+<header class="top">
+<h1>기성 비동기 네트워크 라이브러리의 핵심 아이디어와 인터페이스</h1>
+<p class="sub">kiotty-net 인터페이스 설계를 위한 학습 노트</p>
+<p class="meta">작성일 2026-10-22 · 기준 요구사항: <code>docs/requirement/requirement_v0.md</code> · 분석 대상: libuv, (Boost.)Asio, Mongoose, libevent, llhttp / picohttpparser, Netty 파이프라인, lwIP</p>
+</header>
+
+<nav class="toc">
+<strong>목차</strong>
+<ol start="0">
+<li><a href="#s0">이 문서를 읽는 법과 요구사항 매핑</a></li>
+<li><a href="#s1">라이브러리들을 관통하는 7가지 핵심 아이디어</a></li>
+<li><a href="#s2">libuv: 호출자 소유 핸들과 요청 객체</a></li>
+<li><a href="#s3">Asio: 프로액터와 완료 핸들러</a></li>
+<li><a href="#s4">Mongoose: 콜백 하나로 끝나는 임베디드 서버</a></li>
+<li><a href="#s5">libevent: 버퍼드 스트림과 워터마크</a></li>
+<li><a href="#s6">프로토콜 파서와 프레이머</a></li>
+<li><a href="#s7">고정 메모리 설계 참고</a></li>
+<li><a href="#s8">비교표: 개념 매핑</a></li>
+<li><a href="#s9">requirement_v0 인터페이스 초안에 대한 시사점</a></li>
+<li><a href="#s10">참고 자료</a></li>
+</ol>
+</nav>
+
+<h2 id="s0">0. 이 문서를 읽는 법과 요구사항 매핑</h2>
+<p>이 문서는 "최대한 이해하기 쉬운 인터페이스"를 목표로 하는 kiotty-net 설계에 앞서, 같은 문제를 이미 풀어 본 라이브러리들이 <em>무엇을 어떤 모양으로 노출했는지</em>, 그리고 <em>그 모양이 나온 이유</em>를 정리한 것입니다. 각 라이브러리 절은 같은 순서로 구성했습니다.</p>
+<ol>
+<li>한 줄 요약과 배경</li>
+<li>개념 모델 (핵심 객체 3~4개)</li>
+<li>인터페이스 표와 최소 예제</li>
+<li>메모리·수명 규칙</li>
+<li>kiotty-net 관점의 평가: 가져올 것 / 피할 것</li>
+</ol>
+<p>시간이 없다면 <a href="#s1">1장</a>, <a href="#s2">2장(libuv)</a>, <a href="#s9">9장</a>만 읽어도 됩니다.</p>
+
+<h3>요구사항 → 참고 포인트</h3>
+<table>
+<thead><tr><th>requirement_v0 항목</th><th>가장 참고가 되는 곳</th><th>이 문서의 위치</th></tr></thead>
+<tbody>
+<tr><td>2, 3. 크로스플랫폼, OS별 백엔드(IOCP / io_uring·epoll / kqueue)</td><td>libuv와 Asio가 네 백엔드를 하나의 완료(completion) 인터페이스로 묶는 방식</td><td><a href="#s1-1">1.1</a>, <a href="#s2-8">2.8</a>, <a href="#s3-1">3.1</a></td></tr>
+<tr><td>4. OpenSSL 외 zero-dependency</td><td>libuv(의존성 없음), Mongoose(단일 파일 amalgam)</td><td><a href="#s4">4</a></td></tr>
+<tr><td>5. 요청/응답 모델 + 이벤트 모델</td><td>Mongoose의 이벤트 코드 모델, Asio의 1회 연산 vs libuv의 지속 읽기</td><td><a href="#s1-7">1.7</a>, <a href="#s9">9</a></td></tr>
+<tr><td>6. HTTP, WebSocket</td><td>Mongoose 내장 HTTP/WS, llhttp 파서</td><td><a href="#s4">4</a>, <a href="#s6">6</a></td></tr>
+<tr><td>7. 커스텀 프로토콜 (추후 DICOM)</td><td>Netty의 프레임 디코더, Mongoose의 raw TCP 처리 패턴</td><td><a href="#s6-3">6.3</a>, <a href="#s6-4">6.4</a></td></tr>
+<tr><td>9. 정적 파일 + 메모리 상주 파일 서빙</td><td>Mongoose packed FS, libevent <code>evbuffer_add_reference</code></td><td><a href="#s4-3">4.3</a>, <a href="#s5">5</a></td></tr>
+<tr><td>10. 최대 32 클라이언트</td><td>슬롯 배열 + 고정 버퍼로 단순화할 수 있는 지점들</td><td><a href="#s1-3">1.3</a>, <a href="#s7">7</a></td></tr>
+<tr><td>11. 런타임 동적 할당 제약, dangling 방지</td><td>libuv 호출자 할당 핸들·비동기 close, Asio 핸들러 할당 훅, lwIP 풀</td><td><a href="#s1-3">1.3</a>, <a href="#s2-6">2.6</a>, <a href="#s3-5">3.5</a>, <a href="#s7">7</a></td></tr>
+<tr><td>11. <code>Result&lt;V, Code&gt;</code> 오류 모델</td><td>libuv 음수 코드, Asio <code>(error_code, bytes)</code> 완료 시그니처</td><td><a href="#s1-5">1.5</a></td></tr>
+<tr><td>12. 배포 (amalgam, 단일 헤더)</td><td>Mongoose <code>mongoose.c/.h</code>, SQLite 방식</td><td><a href="#s4-6">4.6</a></td></tr>
+<tr><td>13. Unix Domain (Windows 포함)</td><td>libuv <code>uv_pipe_t</code>(Windows는 Named Pipe), Asio <code>local::stream_protocol</code>, Windows AF_UNIX</td><td><a href="#s2-7">2.7</a>, <a href="#s9">9</a></td></tr>
+</tbody>
+</table>
+
+<h2 id="s1">1. 라이브러리들을 관통하는 7가지 핵심 아이디어</h2>
+<p>라이브러리마다 이름은 다르지만, 결국 모두 같은 일곱 가지 질문에 답하고 있습니다. kiotty-net의 인터페이스도 결국 이 일곱 질문에 대한 답의 조합이 됩니다.</p>
+
+<h3 id="s1-1">1.1 Readiness(준비됨) vs Completion(완료됨)</h3>
+<p>OS 비동기 I/O는 두 가족으로 나뉩니다. <strong>준비 통지(reactor)</strong>는 "지금 읽으면 블록되지 않는다"만 알려 주고 실제 <code>recv</code>는 앱이 합니다. <strong>완료 통지(proactor)</strong>는 앱이 버퍼와 함께 작업을 먼저 제출하고, 커널이 버퍼를 채운 뒤 "몇 바이트 끝났다"를 알려 줍니다.</p>
+
+<figure>
+<svg viewBox="0 0 860 300" width="860" height="300" font-family="inherit" font-size="13" fill="currentColor" stroke="currentColor">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" stroke="none"/></marker></defs>
+<text x="200" y="22" text-anchor="middle" font-weight="700" stroke="none">Readiness (epoll, kqueue)</text>
+<rect x="30" y="45" width="140" height="40" rx="6" fill="none"/><text x="100" y="70" text-anchor="middle" stroke="none">앱</text>
+<rect x="230" y="45" width="140" height="40" rx="6" fill="none"/><text x="300" y="70" text-anchor="middle" stroke="none">커널</text>
+<line x1="100" y1="85" x2="100" y2="280" stroke-dasharray="4 4" opacity=".5"/><line x1="300" y1="85" x2="300" y2="280" stroke-dasharray="4 4" opacity=".5"/>
+<line x1="100" y1="115" x2="300" y2="115" marker-end="url(#ar)"/><text x="200" y="108" text-anchor="middle" stroke="none">1. fd 등록 (EPOLLIN)</text>
+<line x1="300" y1="160" x2="100" y2="160" marker-end="url(#ar)"/><text x="200" y="153" text-anchor="middle" stroke="none">2. "읽을 수 있음" 통지</text>
+<line x1="100" y1="205" x2="300" y2="205" marker-end="url(#ar)"/><text x="200" y="198" text-anchor="middle" stroke="none">3. 앱이 recv(buf) 호출</text>
+<line x1="300" y1="250" x2="100" y2="250" marker-end="url(#ar)"/><text x="200" y="243" text-anchor="middle" stroke="none">4. 바이트 수 반환 (동기)</text>
+<text x="200" y="290" text-anchor="middle" font-size="12" opacity=".75" stroke="none">버퍼는 3번 시점에만 필요</text>
+<text x="640" y="22" text-anchor="middle" font-weight="700" stroke="none">Completion (IOCP, io_uring)</text>
+<rect x="470" y="45" width="140" height="40" rx="6" fill="none"/><text x="540" y="70" text-anchor="middle" stroke="none">앱</text>
+<rect x="670" y="45" width="140" height="40" rx="6" fill="none"/><text x="740" y="70" text-anchor="middle" stroke="none">커널</text>
+<line x1="540" y1="85" x2="540" y2="280" stroke-dasharray="4 4" opacity=".5"/><line x1="740" y1="85" x2="740" y2="280" stroke-dasharray="4 4" opacity=".5"/>
+<line x1="540" y1="115" x2="740" y2="115" marker-end="url(#ar)"/><text x="640" y="108" text-anchor="middle" stroke="none">1. recv(buf) 제출 (WSARecv / SQE)</text>
+<rect x="690" y="140" width="100" height="36" rx="6" fill="none" stroke-dasharray="3 3"/><text x="740" y="163" text-anchor="middle" stroke="none" font-size="12">커널이 buf 채움</text>
+<line x1="740" y1="205" x2="540" y2="205" marker-end="url(#ar)"/><text x="640" y="198" text-anchor="middle" stroke="none">2. 완료 (bytes, status) 꺼냄</text>
+<text x="640" y="250" text-anchor="middle" stroke="none">GetQueuedCompletionStatus / CQE</text>
+<text x="640" y="290" text-anchor="middle" font-size="12" opacity=".75" stroke="none">버퍼는 1~2 사이 내내 커널 소유 (pinned)</text>
+</svg>
+<figcaption>두 모델의 차이는 "버퍼를 언제 누가 들고 있는가"로 요약된다.</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>플랫폼</th><th>기본 메커니즘</th><th>모델</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td>Windows</td><td>IOCP (OVERLAPPED + <code>GetQueuedCompletionStatus</code>)</td><td>완료</td><td>소켓, 파일, Named Pipe, AF_UNIX 소켓 모두 같은 큐</td></tr>
+<tr><td>Linux</td><td>io_uring (SQ/CQ 링)</td><td>완료</td><td>커널 5.1+. <mark>Android는 seccomp 정책으로 대부분의 앱에서 io_uring 시스템콜이 차단</mark>되므로 epoll 폴백이 필수</td></tr>
+<tr><td>Linux / Android</td><td>epoll</td><td>준비</td><td>레벨/에지 트리거 선택</td></tr>
+<tr><td>macOS / iOS</td><td>kqueue (EVFILT_READ/WRITE)</td><td>준비</td><td><code>data</code> 필드로 읽을 수 있는 바이트 수를 알려 줌</td></tr>
+</tbody>
+</table>
+
+<p><strong>통일 전략.</strong> 크로스플랫폼 라이브러리는 둘 중 하나를 외부 인터페이스로 고르고 나머지를 에뮬레이션합니다.</p>
+<ul>
+<li><strong>완료 인터페이스로 통일</strong> (libuv, Asio, .NET, Java NIO.2). 준비 통지 백엔드 위에서는 "준비되면 라이브러리가 대신 <code>recv</code>를 호출하고 완료 콜백을 부른다"로 에뮬레이션합니다. IOCP 위에서 자연스럽고 io_uring과도 모양이 같습니다.</li>
+<li><strong>준비 인터페이스로 통일</strong> (Rust mio/tokio, libevent의 저수준 <code>event</code>). IOCP 위에서는 반대로 "0바이트 읽기로 준비 신호를 흉내" 내거나 내부 버퍼를 두어야 해 복잡하고 비효율적입니다. mio는 결국 Windows에서 AFD 드라이버를 직접 호출하는 길을 택했습니다.</li>
+</ul>
+<div class="box tip"><strong>결론</strong>IOCP와 io_uring을 1급 백엔드로 삼는 kiotty-net은 <strong>완료 인터페이스</strong>가 자연스럽습니다. 즉 "버퍼를 주면서 읽기를 요청하고, 콜백으로 (코드, 바이트 수)를 받는다"가 모든 플랫폼에서 같은 모양이 됩니다. 현재 초안의 <code>EventClient::onRead(ctx, buffer, capacity, cb)</code>와 <code>NetConnection::readAsync</code>는 이미 이 모양입니다.</div>
+
+<p><strong>에뮬레이션의 실제 내용</strong> (epoll/kqueue 위에서 완료 모델을 만들 때 라이브러리 내부가 하는 일):</p>
+<table>
+<thead><tr><th>연산</th><th>완료 백엔드 (IOCP / io_uring)</th><th>준비 백엔드 (epoll / kqueue) 위에서의 에뮬레이션</th></tr></thead>
+<tbody>
+<tr><td>read</td><td>제출한 버퍼로 OVERLAPPED WSARecv / <code>IORING_OP_RECV</code>. 완료 시 바이트 수 전달</td><td>EPOLLIN 등록 → 준비되면 제출된 버퍼로 <code>recv</code> → 결과를 완료 콜백으로. EAGAIN이면 다음 준비까지 대기</td></tr>
+<tr><td>write</td><td>OVERLAPPED WSASend / <code>IORING_OP_SEND</code></td><td>먼저 즉시 <code>send</code> 시도 → 남은 부분은 큐에 보관하고 EPOLLOUT 등록 → 준비될 때마다 flush → 전부 나가면 완료 콜백</td></tr>
+<tr><td>connect</td><td><code>ConnectEx</code> / <code>IORING_OP_CONNECT</code></td><td>논블로킹 <code>connect</code> → EINPROGRESS → EPOLLOUT 준비 → <code>SO_ERROR</code>로 성공 여부 확인</td></tr>
+<tr><td>accept</td><td><code>AcceptEx</code>(미리 만든 소켓에 받음) / <code>IORING_OP_ACCEPT</code></td><td>리스너 EPOLLIN → <code>accept4</code> 반복</td></tr>
+<tr><td>close</td><td>진행 중 연산이 <code>ERROR_OPERATION_ABORTED</code> / <code>-ECANCELED</code>로 완료된 뒤 핸들 해제</td><td>fd를 epoll에서 제거하고 큐에 남은 연산을 취소 코드로 완료시킴</td></tr>
+</tbody>
+</table>
+<div class="box warn"><strong>버퍼 핀(pin) 문제</strong>완료 모델에서는 제출된 버퍼를 완료 전까지 건드릴 수도 해제할 수도 없습니다. libuv의 <code>alloc_cb</code>(읽을 데이터가 실제로 생긴 순간 버퍼를 달라고 묻는 콜백)는 "유휴 연결 1만 개 × 64KB 버퍼"를 피하려는 장치입니다. <mark>kiotty-net처럼 연결이 최대 32개로 고정된 환경에서는 연결당 버퍼를 미리 잡아 두는 쪽이 훨씬 단순하고, 그것이 곧 IOCP/io_uring의 기본 모양입니다.</mark></div>
+
+<h3 id="s1-2">1.2 이벤트 루프의 소유권: 누가 run을 도는가</h3>
+<p>모든 라이브러리는 "루프를 돌리는 함수"를 사용자에게 노출하되, <em>얼마나 돌고 돌아올지</em>를 선택하게 합니다. GUI 메인 루프나 의료기기 제어 루프가 이미 있는 앱에 끼워 넣으려면 이 선택지가 반드시 필요합니다.</p>
+<table>
+<thead><tr><th>라이브러리</th><th>끝까지 블로킹</th><th>한 바퀴 (대기 포함)</th><th>대기 없이 처리만</th><th>중단</th></tr></thead>
+<tbody>
+<tr><td>libuv</td><td><code>uv_run(loop, UV_RUN_DEFAULT)</code></td><td><code>UV_RUN_ONCE</code></td><td><code>UV_RUN_NOWAIT</code></td><td><code>uv_stop</code></td></tr>
+<tr><td>Asio</td><td><code>io_context::run()</code></td><td><code>run_one()</code>, <code>run_for(dur)</code></td><td><code>poll()</code>, <code>poll_one()</code></td><td><code>stop()</code>, <code>restart()</code></td></tr>
+<tr><td>libevent</td><td><code>event_base_dispatch</code></td><td><code>event_base_loop(base, EVLOOP_ONCE)</code></td><td><code>EVLOOP_NONBLOCK</code></td><td><code>event_base_loopbreak</code> / <code>loopexit</code></td></tr>
+<tr><td>Mongoose</td><td>(없음) 사용자가 <code>for(;;)</code></td><td><code>mg_mgr_poll(&amp;mgr, timeout_ms)</code></td><td><code>mg_mgr_poll(&amp;mgr, 0)</code></td><td>루프를 빠져나오면 끝</td></tr>
+</tbody>
+</table>
+<p>Mongoose의 선택이 가장 단순합니다. 라이브러리는 "한 번 폴링"만 제공하고 루프 자체는 사용자 코드에 둡니다. 인터페이스가 작아지고 통합이 쉬워지는 대신, "백그라운드 스레드에서 알아서 돌아가는" 편의 기능은 사용자가 만들어야 합니다.</p>
+
+<h3 id="s1-3">1.3 객체 수명과 메모리 소유권</h3>
+<p>동적 할당 제약과 dangling 방지라는 요구사항에 가장 직접 닿는 질문입니다. 네 라이브러리가 네 가지 다른 답을 냅니다.</p>
+<table>
+<thead><tr><th></th><th>연결 객체를 누가 할당하나</th><th>1회성 작업 상태는 어디에</th><th>닫기와 해제</th></tr></thead>
+<tbody>
+<tr><td><strong>libuv</strong></td><td><strong>호출자</strong>. <code>uv_tcp_t</code>를 사용자가 스택·정적·풀 어디에든 두고 <code>uv_tcp_init</code>으로 초기화. 라이브러리는 핸들을 malloc하지 않음</td><td><strong>호출자</strong>가 <code>uv_write_t</code> 같은 요청(req) 객체를 제공. 완료 콜백 후 재사용 가능</td><td><code>uv_close(h, cb)</code>는 <strong>비동기</strong>. <code>cb</code>가 불린 뒤에야 메모리를 재사용할 수 있고, 진행 중 요청은 <code>UV_ECANCELED</code>로 모두 완료됨</td></tr>
+<tr><td><strong>Asio</strong></td><td><strong>호출자</strong>(<code>tcp::socket</code> 객체). 다만 비동기 연산 중 살아 있어야 하므로 관용적으로 <code>shared_ptr</code> + <code>shared_from_this</code>를 씀</td><td>라이브러리가 연산마다 내부 op 객체를 만들되, <strong>핸들러에 연결된 allocator</strong>로 할당. 사용자가 완전히 통제 가능</td><td><code>close()</code>는 동기지만 진행 중 연산은 <code>operation_aborted</code>로 나중에 완료됨. 그래서 핸들러가 소켓 수명을 잡아야 함</td></tr>
+<tr><td><strong>Mongoose</strong></td><td><strong>라이브러리</strong>가 <code>calloc</code>(매크로로 교체 가능). 사용자는 수명을 신경 쓰지 않음</td><td>연결마다 내부 <code>recv</code>/<code>send</code> 버퍼에 누적. 요청 객체 없음</td><td><code>c-&gt;is_closing = 1</code> 표시 → 다음 폴링에서 <code>MG_EV_CLOSE</code> 이벤트 후 해제</td></tr>
+<tr><td><strong>lwIP</strong></td><td>컴파일 타임 고정 풀(<code>memp</code>). <code>MEMP_NUM_TCP_PCB</code>로 개수 확정</td><td>패킷 버퍼도 고정 풀(<code>pbuf</code>)</td><td>콜백 안에서 <code>tcp_close</code>, 실패 시 재시도 규약</td></tr>
+</tbody>
+</table>
+<div class="box"><strong>공통 규약 하나</strong>모든 라이브러리가 <mark>"진행 중인 비동기 작업이 있는 객체를 해제하면 안 되며, 라이브러리는 취소된 작업도 반드시 완료 콜백으로 끝내 준다"</mark>를 지킵니다. dangling pointer 방지의 핵심은 이 규약을 인터페이스에 명시하고(예: 닫기를 비동기로 만들거나, <code>onDisconnected</code> 이후에만 해제 가능하다고 못 박기) 라이브러리가 예외 없이 지키는 것입니다.</div>
+
+<h3 id="s1-4">1.4 콜백 + <code>void*</code> 컨텍스트</h3>
+<p>C ABI를 갖는 라이브러리는 모두 "함수 포인터 + 불투명 사용자 포인터" 패턴입니다. libuv는 <code>handle-&gt;data</code>와 <code>req-&gt;data</code>, Mongoose는 <code>c-&gt;fn_data</code>와 연결당 32바이트 스크래치 <code>c-&gt;data[]</code>, libevent는 콜백 등록 시 <code>ctx</code> 인자입니다. C++ 래퍼는 정적 thunk에서 <code>this</code>를 복원하는 한 줄로 끝납니다.</p>
+<p>이보다 중요한 것은 <strong>콜백 호출 시점 규약</strong>입니다. libuv와 Asio는 모두 "비동기 함수 안에서 콜백을 직접(동기적으로) 부르지 않는다"를 보장합니다. 데이터가 이미 도착해 있어도 콜백은 루프의 다음 단계에서 불립니다. 이 규약이 없으면 사용자 코드가 재진입(reentrancy)을 항상 방어해야 하고, 그게 가장 흔한 버그 원인입니다.</p>
+
+<h3 id="s1-5">1.5 오류 모델</h3>
+<table>
+<thead><tr><th>라이브러리</th><th>표현</th><th>EOF</th><th>취소</th><th>문자열화</th></tr></thead>
+<tbody>
+<tr><td>libuv</td><td>음수 <code>int</code>. Unix는 <code>-errno</code>, Windows 오류는 같은 코드 공간으로 번역(<code>uv_translate_sys_error</code>)</td><td><code>UV_EOF</code> (읽기 콜백의 <code>nread</code>로 전달)</td><td><code>UV_ECANCELED</code></td><td><code>uv_strerror</code>, <code>uv_err_name</code></td></tr>
+<tr><td>Asio</td><td><code>error_code</code> (값 + 카테고리). 모든 연산에 예외/비예외 오버로드</td><td><code>asio::error::eof</code></td><td><code>asio::error::operation_aborted</code></td><td><code>ec.message()</code></td></tr>
+<tr><td>Mongoose</td><td><code>MG_EV_ERROR</code> 이벤트, <code>ev_data</code>는 <code>char*</code> 메시지</td><td><code>MG_EV_CLOSE</code></td><td>없음</td><td>문자열 자체</td></tr>
+<tr><td>libevent</td><td><code>BEV_EVENT_EOF | ERROR | TIMEOUT</code> 비트 + <code>EVUTIL_SOCKET_ERROR()</code></td><td>비트 플래그</td><td>없음</td><td><code>evutil_socket_error_to_string</code></td></tr>
+</tbody>
+</table>
+<p>비동기 완료 결과는 어느 라이브러리나 <strong>(오류 코드, 전송 바이트 수)</strong> 한 쌍입니다. Asio의 <code>void(error_code, size_t)</code>, libuv의 <code>nread</code>(양수는 바이트 수, 음수는 코드)가 그것입니다. 초안의 <code>NetResult { NetCode code; int32_t bytes; }</code>는 이 공통 형태와 정확히 같습니다. 한 가지 결정 사항은 <strong>부분 성공</strong>(일부 바이트만 보내고 오류)을 어떻게 전달할지인데, Asio는 코드와 바이트 수를 둘 다 채워 주고 libuv는 쓰기에서 바이트 수를 아예 주지 않습니다.</p>
+
+<h3 id="s1-6">1.6 스레딩 모델</h3>
+<p>네 라이브러리 모두 기본은 <strong>"루프 하나 = 스레드 하나, 객체는 그 스레드에서만 만진다"</strong>입니다. 다른 스레드에서 할 수 있는 일은 단 하나, 루프를 깨우는 것입니다 (<code>uv_async_send</code>, <code>asio::post</code>, <code>mg_wakeup</code>, <code>event_active</code>). Asio만 여러 스레드가 같은 <code>io_context</code>를 run할 수 있고 그 경우 <code>strand</code>로 직렬화합니다. 32 클라이언트 전제에서는 단일 루프 스레드가 충분하고, 외부 스레드(예: UI, 장비 제어)가 데이터를 보내고 싶을 때 쓰는 "깨우기 + 큐" 하나만 있으면 됩니다.</p>
+
+<h3 id="s1-7">1.7 프로토콜 계층화: TCP → TLS → HTTP → WebSocket</h3>
+<p>세 가지 방식이 있습니다.</p>
+<ol>
+<li><strong>타입 합성</strong> (Asio): <code>ssl::stream&lt;tcp::socket&gt;</code>처럼 아래 계층을 템플릿 인자로 감싸고, 위 계층(Beast의 HTTP/WS)은 "<code>async_read_some</code>/<code>async_write_some</code>이 있는 아무 스트림"을 요구합니다. 컴파일 타임에 결정되고 가상 호출이 없지만 C 인터페이스로 내보낼 수 없습니다.</li>
+<li><strong>필터 체인</strong> (libevent filter bufferevent, Netty ChannelPipeline): 바이트가 핸들러 목록을 순서대로 통과합니다. TLS는 "암호문 ↔ 평문" 필터, HTTP 파서는 "바이트 → 메시지" 디코더. 런타임에 끼우고 뺄 수 있어 커스텀 프로토콜에 가장 유연합니다.</li>
+<li><strong>연결 상태 플래그 + 이벤트 분기</strong> (Mongoose): 연결 구조체에 <code>is_tls</code>, <code>is_websocket</code> 같은 비트가 있고, 라이브러리가 <code>MG_EV_READ</code> 바이트를 보고 현재 상태에 맞는 상위 이벤트(<code>MG_EV_HTTP_MSG</code>, <code>MG_EV_WS_MSG</code>)로 바꿔 올려 줍니다. 가장 단순하고 C에 잘 맞습니다.</li>
+</ol>
+<p>어느 방식이든 <strong>요청/응답 모델과 이벤트 모델의 차이는 계층의 맨 위에서만</strong> 나타납니다. 아래 계층(TCP, TLS)은 항상 양방향 바이트 스트림이고, HTTP는 그 위에 "요청 하나에 응답 하나"라는 규칙을 얹은 것이며, WebSocket과 커스텀 이벤트 프로토콜은 "메시지가 아무 때나 양방향으로 온다"는 규칙을 얹은 것입니다. 따라서 기반 인터페이스는 이벤트(메시지 도착 콜백) 모델 하나면 되고, 요청/응답은 그 위에서 "보낸 뒤 다음 메시지를 기다린다"로 만들 수 있습니다. Mongoose가 정확히 이렇게 되어 있습니다.</p>
+
+<h2 id="s2">2. libuv: 호출자 소유 핸들과 요청 객체</h2>
+<p><span class="pill">C89</span><span class="pill">MIT</span><span class="pill">의존성 없음</span><span class="pill">IOCP / epoll / kqueue</span><span class="pill">Node.js 기반 계층</span></p>
+<p><strong>한 줄 요약.</strong> "루프 하나, 오래 사는 <em>핸들</em>, 1회성 <em>요청</em>" 세 개념으로 TCP·UDP·파이프·파일·타이머·프로세스까지 전부 덮는 C 라이브러리입니다. 메모리를 거의 전부 호출자가 소유하게 설계되어 있어 kiotty-net의 "동적 할당 제약" 요구에 가장 직접적인 참고가 됩니다. 범위는 kiotty-net보다 훨씬 넓습니다(파일 I/O, DNS, 스레드풀, 시그널, 자식 프로세스).</p>
+
+<h3 id="s2-2">2.2 개념 모델: loop / handle / request</h3>
+<pre class="code" data-lang="text"><code>uv_loop_t                          루프. 백엔드 fd(epoll/kqueue/IOCP 포트)와 큐들을 가짐
+ ├─ handles  (오래 사는 것, 닫기 전까지 루프를 살아 있게 함)
+ │    uv_handle_t                  공통 필드: loop, type, data(사용자 포인터), close_cb, flags
+ │     ├─ uv_stream_t              읽기/쓰기 가능한 것. write 큐, read_cb, alloc_cb 보유
+ │     │    ├─ uv_tcp_t
+ │     │    ├─ uv_pipe_t           Unix domain socket / Windows named pipe
+ │     │    └─ uv_tty_t
+ │     ├─ uv_udp_t
+ │     ├─ uv_timer_t   uv_async_t   uv_idle_t  uv_prepare_t  uv_check_t
+ │     └─ uv_poll_t    uv_signal_t  uv_process_t  uv_fs_event_t  uv_fs_poll_t
+ └─ requests (1회성 작업. 시작부터 콜백까지 살아 있어야 함)
+      uv_req_t                     공통 필드: type, data
+       ├─ uv_write_t  uv_connect_t  uv_shutdown_t  uv_udp_send_t
+       └─ uv_fs_t  uv_getaddrinfo_t  uv_getnameinfo_t  uv_work_t</code></pre>
+<p><strong>C 방식 상속.</strong> <code>uv_tcp_t</code>의 앞부분은 <code>uv_stream_t</code>와, 그 앞부분은 <code>uv_handle_t</code>와 레이아웃이 같습니다(<code>UV_HANDLE_FIELDS</code>, <code>UV_STREAM_FIELDS</code> 매크로). 그래서 <code>(uv_stream_t*)&amp;tcp</code>처럼 캐스팅만으로 상위 API를 씁니다. 구조체 정의가 공개 헤더에 있어서 사용자가 <strong>크기를 알고 직접 할당</strong>할 수 있고, 다른 언어 바인딩을 위해 <code>uv_handle_size(type)</code> / <code>uv_req_size(type)</code>도 제공합니다. 이것이 "파생 타입의 최대 크기를 알고 base 자리에 보관한다"는 <code>kiotty-holder.hpp</code> 아이디어와 같은 계열입니다.</p>
+
+<h3 id="s2-3">2.3 루프 한 바퀴</h3>
+<p><code>uv_run</code> 한 바퀴는 고정된 순서로 돕니다. 모든 콜백은 이 단계 중 하나에서만 불립니다.</p>
+<ol>
+<li><strong>timers</strong>: 만료된 <code>uv_timer_t</code> 콜백</li>
+<li><strong>pending callbacks</strong>: 직전 바퀴에서 미뤄 둔 I/O 콜백(예: 즉시 완료된 write의 콜백)</li>
+<li><strong>idle, prepare</strong> 핸들</li>
+<li><strong>poll</strong>: 백엔드에 블로킹 대기. 대기 시간은 가장 가까운 타이머까지. 여기서 읽기/쓰기/accept/connect 콜백이 불림</li>
+<li><strong>check</strong> 핸들</li>
+<li><strong>closing callbacks</strong>: <code>uv_close</code>로 닫은 핸들의 <code>close_cb</code></li>
+</ol>
+<p>루프는 "살아 있는(active) 핸들이나 진행 중 요청"이 하나도 없으면 <code>uv_run</code>에서 돌아옵니다. <code>uv_unref(handle)</code>로 특정 핸들(예: 주기 타이머)을 종료 조건 계산에서 빼는 장치가 있습니다. 즉 <strong>루프의 종료 조건을 객체 참조 수로 정의</strong>하는 것인데, 사용자가 "언제 끝났는지"를 따로 관리하지 않아도 되는 대신 왜 안 끝나는지 디버깅하기 어렵다는 단점도 있습니다.</p>
+
+<h3 id="s2-4">2.4 핵심 인터페이스 (TCP 스트림 중심)</h3>
+<table>
+<thead><tr><th>구분</th><th>함수</th><th>메모</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">루프</td><td><code>int uv_loop_init(uv_loop_t*)</code> / <code>uv_default_loop()</code></td><td>루프도 호출자가 할당</td></tr>
+<tr><td><code>int uv_run(uv_loop_t*, uv_run_mode)</code></td><td><code>UV_RUN_DEFAULT | ONCE | NOWAIT</code></td></tr>
+<tr><td><code>void uv_stop(uv_loop_t*)</code>, <code>int uv_loop_close(uv_loop_t*)</code></td><td>close는 모든 핸들이 닫힌 뒤에만 성공</td></tr>
+<tr><td rowspan="5">TCP</td><td><code>int uv_tcp_init(uv_loop_t*, uv_tcp_t*)</code></td><td>소켓은 아직 안 만듦(bind/connect 때 생성)</td></tr>
+<tr><td><code>int uv_tcp_bind(uv_tcp_t*, const struct sockaddr*, unsigned flags)</code></td><td></td></tr>
+<tr><td><code>int uv_listen(uv_stream_t*, int backlog, uv_connection_cb)</code></td><td><code>void cb(uv_stream_t* server, int status)</code></td></tr>
+<tr><td><code>int uv_accept(uv_stream_t* server, uv_stream_t* client)</code></td><td><strong>사용자가</strong> 준비한 클라이언트 핸들로 받음. connection_cb 안에서 호출해야 함</td></tr>
+<tr><td><code>int uv_tcp_connect(uv_connect_t*, uv_tcp_t*, const struct sockaddr*, uv_connect_cb)</code></td><td><code>void cb(uv_connect_t*, int status)</code></td></tr>
+<tr><td rowspan="5">스트림</td><td><code>int uv_read_start(uv_stream_t*, uv_alloc_cb, uv_read_cb)</code></td><td><strong>지속 읽기</strong>: 한 번 켜면 <code>uv_read_stop</code>까지 계속 콜백</td></tr>
+<tr><td><code>void alloc_cb(uv_handle_t*, size_t suggested, uv_buf_t* buf)</code></td><td>읽을 데이터가 생길 때마다 버퍼를 요청</td></tr>
+<tr><td><code>void read_cb(uv_stream_t*, ssize_t nread, const uv_buf_t* buf)</code></td><td><code>nread</code>: 양수=바이트 수, 0=EAGAIN 상당, 음수=오류(<code>UV_EOF</code> 포함)</td></tr>
+<tr><td><code>int uv_write(uv_write_t*, uv_stream_t*, const uv_buf_t[], unsigned n, uv_write_cb)</code></td><td>큐잉됨. <code>void cb(uv_write_t*, int status)</code></td></tr>
+<tr><td><code>int uv_try_write(uv_stream_t*, const uv_buf_t[], unsigned n)</code></td><td>지금 보낼 수 있는 만큼만 동기로. 큐가 비어 있을 때만 성공</td></tr>
+<tr><td rowspan="2">닫기</td><td><code>int uv_shutdown(uv_shutdown_t*, uv_stream_t*, uv_shutdown_cb)</code></td><td>쓰기 큐를 다 비운 뒤 FIN</td></tr>
+<tr><td><code>void uv_close(uv_handle_t*, uv_close_cb)</code></td><td><strong>비동기</strong>. 모든 핸들은 해제 전 반드시 close</td></tr>
+<tr><td>기타</td><td><code>uv_timer_t</code>, <code>uv_async_t</code>(<code>uv_async_send</code>는 스레드 안전), <code>uv_pipe_t</code></td><td></td></tr>
+<tr><td>오류</td><td>음수 <code>int</code>, <code>uv_strerror(int)</code>, <code>uv_err_name(int)</code></td><td></td></tr>
+</tbody>
+</table>
+
+<h3 id="s2-5">2.5 최소 예제: 고정 슬롯 에코 서버</h3>
+<p>libuv 공식 예제는 콜백마다 <code>malloc</code>을 쓰지만, 호출자 소유 설계 덕분에 아래처럼 <strong>malloc 없이</strong> 쓸 수 있습니다. kiotty-net의 32 슬롯 모델과 거의 같은 모양이 됩니다.</p>
+<pre class="code" data-lang="c"><code>#include &lt;uv.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+enum { MAX_CONN = 32, BUF = 4096 };
+
+typedef struct {
+    uv_tcp_t   handle;       /* 반드시 첫 멤버: (conn_t*)stream 캐스팅을 위해 */
+    uv_write_t wreq;         /* 연결당 쓰기 요청 객체 1개 (동시 쓰기 1개 정책) */
+    char       rbuf[BUF];    /* 고정 읽기 버퍼 */
+    char       wbuf[BUF];    /* 고정 쓰기 버퍼: write_cb까지 건드리면 안 됨 */
+    int        in_use;
+    int        writing;
+} conn_t;
+
+static conn_t   slots[MAX_CONN];   /* 시작 시점에 전부 확보 */
+static uv_tcp_t server;
+
+static conn_t* take_slot(void) {
+    for (int i = 0; i &lt; MAX_CONN; i++) if (!slots[i].in_use) { slots[i].in_use = 1; return &amp;slots[i]; }
+    return NULL;
+}
+
+static void on_close(uv_handle_t* h) {
+    conn_t* c = (conn_t*)h;
+    c-&gt;in_use = 0;           /* close_cb 이후에만 슬롯 재사용 가능 */
+}
+
+static void on_alloc(uv_handle_t* h, size_t suggested, uv_buf_t* buf) {
+    conn_t* c = (conn_t*)h;
+    *buf = uv_buf_init(c-&gt;rbuf, BUF);        /* malloc 대신 고정 버퍼 */
+}
+
+static void on_write(uv_write_t* req, int status) {
+    conn_t* c = (conn_t*)req-&gt;handle;
+    c-&gt;writing = 0;                          /* 여기서부터 wreq, wbuf 재사용 가능 */
+    if (status &lt; 0) uv_close((uv_handle_t*)&amp;c-&gt;handle, on_close);
+}
+
+static void on_read(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
+    conn_t* c = (conn_t*)s;
+    if (nread &gt; 0) {
+        if (c-&gt;writing) return;              /* 단순화: 진행 중 쓰기가 있으면 버림 (실제론 큐잉/백프레셔) */
+        memcpy(c-&gt;wbuf, buf-&gt;base, (size_t)nread);
+        uv_buf_t out = uv_buf_init(c-&gt;wbuf, (unsigned)nread);
+        c-&gt;writing = 1;
+        uv_write(&amp;c-&gt;wreq, s, &amp;out, 1, on_write);
+    } else if (nread &lt; 0) {                  /* UV_EOF 포함. 콜백은 항상 루프에서 호출됨 */
+        if (nread != UV_EOF) fprintf(stderr, &quot;read: %s\n&quot;, uv_err_name((int)nread));
+        uv_close((uv_handle_t*)s, on_close);
+    }
+    /* nread == 0 : 아무 일도 안 함 */
+}
+
+static void on_connection(uv_stream_t* srv, int status) {
+    if (status &lt; 0) return;
+    conn_t* c = take_slot();
+    if (!c) return;                          /* 가득 참: accept 안 하면 백로그에 남음 (정책 결정 필요) */
+    uv_tcp_init(srv-&gt;loop, &amp;c-&gt;handle);
+    c-&gt;handle.data = c;                      /* 사용자 포인터 */
+    if (uv_accept(srv, (uv_stream_t*)&amp;c-&gt;handle) == 0)
+        uv_read_start((uv_stream_t*)&amp;c-&gt;handle, on_alloc, on_read);
+    else
+        uv_close((uv_handle_t*)&amp;c-&gt;handle, on_close);
+}
+
+int main(void) {
+    uv_loop_t* loop = uv_default_loop();
+    struct sockaddr_in addr;
+    uv_ip4_addr(&quot;0.0.0.0&quot;, 7000, &amp;addr);
+    uv_tcp_init(loop, &amp;server);
+    uv_tcp_bind(&amp;server, (const struct sockaddr*)&amp;addr, 0);
+    int r = uv_listen((uv_stream_t*)&amp;server, MAX_CONN, on_connection);
+    if (r) { fprintf(stderr, &quot;listen: %s\n&quot;, uv_strerror(r)); return 1; }
+    return uv_run(loop, UV_RUN_DEFAULT);
+}</code></pre>
+<p>클라이언트 쪽은 요청 객체 하나가 더 등장합니다.</p>
+<pre class="code" data-lang="c"><code>static uv_tcp_t     sock;
+static uv_connect_t creq;                     /* connect도 1회성 요청 객체 */
+
+static void on_connected(uv_connect_t* req, int status) {
+    if (status &lt; 0) { /* uv_strerror(status) */ return; }
+    uv_read_start(req-&gt;handle, on_alloc, on_read);   /* req-&gt;handle 로 스트림 접근 */
+}
+
+uv_tcp_init(loop, &amp;sock);
+uv_tcp_connect(&amp;creq, &amp;sock, (const struct sockaddr*)&amp;addr, on_connected);</code></pre>
+<h3 id="s2-6">2.6 메모리·수명 규칙 (문서에 명시된 것들)</h3>
+<ul>
+<li><strong>핸들과 요청은 호출자가 할당</strong>하고 라이브러리는 포인터만 보관합니다. 핸들은 <code>close_cb</code>가 불릴 때까지, 요청은 완료 콜백이 불릴 때까지 이동·해제 금지.</li>
+<li><strong>읽기 버퍼</strong>는 <code>alloc_cb</code>가 줍니다. <code>read_cb</code>가 끝나면 라이브러리는 그 버퍼를 다시 참조하지 않으므로, 정리(또는 재사용) 책임은 사용자에게 있습니다. <code>nread &lt; 0</code>인 경우에도 <code>buf</code>는 전달되고 사용자가 정리해야 합니다.</li>
+<li><strong>쓰기 버퍼</strong>(<code>uv_buf_t</code>가 가리키는 메모리)는 <code>write_cb</code>까지 유효해야 합니다. <code>uv_buf_t</code> 배열 자체는 복사되므로 스택에 있어도 됩니다.</li>
+<li><strong>쓰기는 큐잉</strong>됩니다. 여러 <code>uv_write</code>를 연달아 호출해도 순서대로 나가며, <code>stream-&gt;write_queue_size</code>로 밀린 바이트 수를 볼 수 있습니다. 이 값이 커지면 사용자가 <code>uv_read_stop</code> 등으로 백프레셔를 걸어야 합니다. 라이브러리는 한도를 두지 않습니다.</li>
+<li><strong><code>uv_close</code>는 비동기</strong>입니다. 호출 즉시 fd는 닫히지만 <code>close_cb</code>는 다음 바퀴의 closing 단계에서 불리고, 진행 중이던 요청들은 그 전에 <code>UV_ECANCELED</code>로 콜백이 호출됩니다. 그래서 "요청 콜백이 모두 끝난 뒤 close_cb가 온다"는 순서를 믿고 정리할 수 있습니다.</li>
+<li><strong>콜백은 동기적으로 호출되지 않습니다.</strong> 예를 들어 Unix에서 <code>uv_write</code>는 즉시 <code>writev</code>를 시도해 전부 보냈더라도 <code>write_cb</code>는 pending 큐에 넣어 다음 단계에서 부릅니다.</li>
+<li>스레드 안전한 함수는 <code>uv_async_send</code>뿐입니다. 나머지는 루프 스레드에서만.</li>
+</ul>
+
+<h3 id="s2-7">2.7 Unix Domain / Named Pipe: <code>uv_pipe_t</code></h3>
+<p>libuv는 로컬 IPC를 <code>uv_pipe_t</code> 하나로 추상화합니다. Unix에서는 <code>AF_UNIX</code> 소켓이고, Windows에서는 <code>\\.\pipe\이름</code> 형식의 <strong>Named Pipe</strong>입니다. 둘 다 <code>uv_stream_t</code>이므로 read/write 코드는 TCP와 완전히 같습니다. <code>ipc=1</code>로 만들면 fd(소켓 핸들)를 넘길 수도 있습니다.</p>
+<div class="box"><strong>kiotty-net 요구사항 13과의 관계</strong>Windows 10 1803부터는 Winsock이 <code>AF_UNIX</code> 스트림 소켓을 직접 지원하고, 이 소켓은 보통의 소켓이므로 IOCP·<code>WSARecv</code>·<code>AcceptEx</code> 경로를 TCP와 그대로 공유합니다. libuv처럼 Named Pipe용 코드를 따로 두지 않아도 됩니다. 제약은 (1) 파일 시스템 경로만 가능(추상 네임스페이스 없음), (2) <code>SOCK_STREAM</code>만, (3) <code>bind</code> 전에 기존 소켓 파일을 지워야 함, (4) <code>socketpair</code> 없음 정도입니다. Asio도 최근 버전에서 같은 방식으로 Windows를 지원하기 시작했습니다.</div>
+
+<h3 id="s2-8">2.8 백엔드 내부: 같은 인터페이스가 세 백엔드에서 어떻게 구현되나</h3>
+<table>
+<thead><tr><th></th><th>Unix (epoll / kqueue) — <code>src/unix/stream.c</code></th><th>Windows (IOCP) — <code>src/win/tcp.c</code></th></tr></thead>
+<tbody>
+<tr><td>read</td><td><code>uv_read_start</code>는 watcher에 POLLIN을 켤 뿐. 준비되면 <code>uv__read</code>가 <code>alloc_cb → read(2) → read_cb</code>를 반복(공정성을 위해 한 번에 최대 32회). EAGAIN이면 멈추고 다음 준비 대기, 0이면 <code>UV_EOF</code></td><td><code>uv_tcp_t</code> 안에 <strong>읽기 요청 객체(<code>read_req</code>)가 하나 내장</strong>. <code>uv_read_start</code> 시 <code>alloc_cb</code>를 먼저 불러 버퍼를 받고 OVERLAPPED <code>WSARecv</code> 제출. 완료가 IOCP에서 나오면 <code>read_cb</code> 후 다시 제출. 버퍼를 미리 잡고 싶지 않은 상황에는 <strong>0바이트 WSARecv</strong>로 준비 통지만 받고 논블로킹 <code>recv</code>를 하는 트릭도 섞어 씀</td></tr>
+<tr><td>write</td><td>즉시 <code>writev</code> 시도 → 남으면 <code>write_queue</code>에 두고 POLLOUT 켬 → 준비될 때마다 flush. 완료된 요청은 <code>write_completed_queue</code>로 옮기고 콜백은 pending 단계에서</td><td><code>uv_write_t</code> 안에 OVERLAPPED가 있어 요청 객체 자체가 커널에 제출됨. 완료 패킷의 OVERLAPPED 포인터에서 요청을 복원(<code>container_of</code>)</td></tr>
+<tr><td>accept</td><td>리스너 POLLIN → <code>accept4</code> 반복. 새 fd는 리스너 핸들의 <code>accepted_fd</code>에 잠시 보관되고 사용자가 <code>uv_accept</code>로 가져감. 가져가지 않으면 다음 accept를 멈춤(자연스러운 백프레셔)</td><td><code>AcceptEx</code>는 <strong>미리 만든 소켓</strong>에 연결을 받으므로, 리스너가 accept 요청 여러 개(<code>simultaneous_accepts</code>)를 미리 걸어 둠. 사용자의 <code>uv_accept</code>는 그중 하나를 넘겨받음</td></tr>
+<tr><td>connect</td><td>논블로킹 <code>connect</code> → POLLOUT → <code>SO_ERROR</code></td><td><code>ConnectEx</code> (bind가 먼저 필요)</td></tr>
+<tr><td>io_uring</td><td colspan="2">1.45(2023)부터 <strong>파일 작업(<code>uv_fs_*</code>)에만</strong> io_uring을 사용하고 소켓은 여전히 epoll. 커널 버전별 문제로 일부 작업은 기본 비활성화되었고 <code>UV_USE_IO_URING</code> 환경변수로 켜고 끕니다. 즉 네트워크 소켓을 io_uring으로 돌리는 것은 libuv도 아직 기본 경로가 아닙니다</td></tr>
+</tbody>
+</table>
+<div class="box tip"><strong>시사점</strong>IOCP의 <code>AcceptEx</code>가 "미리 만든 소켓"을 요구한다는 점과 libuv가 Windows에서 읽기 요청 객체를 핸들에 내장했다는 점은, <mark>연결 슬롯이 32개로 고정된 설계에서는 "슬롯마다 읽기 요청 객체 1개 + 쓰기 요청 객체 1개 + 버퍼"를 내장하는 것이 모든 백엔드에서 가장 자연스러운 모양</mark>임을 보여 줍니다. io_uring 역시 SQE의 <code>user_data</code>에 그 요청 객체 포인터를 넣으면 IOCP의 OVERLAPPED와 1:1로 대응됩니다.</div>
+
+<h3 id="s2-9">2.9 kiotty-net 관점 평가</h3>
+<div class="two">
+<div class="box tip"><strong>가져올 것</strong>
+<ul>
+<li>호출자 할당 핸들 + 1회성 요청 객체 분리. 풀/스택 할당이 자연스러움</li>
+<li>비동기 close와 "취소된 요청도 반드시 콜백" 규약 → dangling 방지의 뼈대</li>
+<li>음수 정수 하나로 통일된 오류 코드 + 이름/메시지 함수 → <code>NetCode</code>와 바로 대응</li>
+<li>콜백은 절대 동기 호출하지 않음</li>
+<li>run 모드 3종과 <code>uv_stop</code></li>
+<li>핸들의 <code>data</code> 필드 하나로 끝나는 사용자 컨텍스트</li>
+<li>스트림 추상 하나로 TCP와 로컬 소켓을 같은 코드로 다루기</li>
+<li><code>uv_accept</code>를 사용자가 호출하게 해서 "가득 찼을 때" 정책을 사용자에게 맡기기</li>
+</ul></div>
+<div class="box warn"><strong>피하거나 단순화할 것</strong>
+<ul>
+<li><code>alloc_cb</code>: 수만 연결용 장치. 32 슬롯이면 사전 할당 버퍼가 단순</li>
+<li>무제한 쓰기 큐: 고정 메모리 환경에서는 "동시 쓰기 1개" 또는 고정 길이 큐 + BUSY 코드가 안전</li>
+<li>C 상속(캐스팅) 기반 API: C 인터페이스에는 맞지만 C++ 래퍼에서 타입 안전성을 따로 보강해야 함</li>
+<li>범위(fs, dns, process, 스레드풀)는 kiotty-net 목표 밖</li>
+<li>HTTP/TLS 없음: 별도 설계 필요</li>
+</ul></div>
+</div>
+
+<h2 id="s3">3. Asio: 프로액터와 완료 핸들러</h2>
+<p><span class="pill">C++11 (standalone)</span><span class="pill">Boost Software License</span><span class="pill">헤더 온리</span><span class="pill">IOCP / epoll / kqueue / io_uring(옵션)</span></p>
+<p id="s3-1"><strong>한 줄 요약.</strong> "비동기 연산 = 시작 함수 + 완료 핸들러"라는 프로액터 패턴을 C++ 타입 시스템으로 가장 정교하게 구현한 라이브러리입니다. Boost.Asio와 standalone Asio는 같은 코드이고, standalone은 C++11만 있으면 됩니다. 모든 플랫폼에서 완료 모델을 노출하며, Windows는 IOCP를 그대로, Linux/macOS는 epoll/kqueue 위에서 에뮬레이션합니다. <code>ASIO_HAS_IO_URING</code>(liburing 필요)을 켜면 Linux에서 io_uring 백엔드를 씁니다.</p>
+
+<h3 id="s3-2">3.2 개념 모델</h3>
+<table>
+<thead><tr><th>개념</th><th>Asio 이름</th><th>설명</th></tr></thead>
+<tbody>
+<tr><td>실행 컨텍스트</td><td><code>io_context</code></td><td>완료 큐 + 백엔드. <code>run()</code>을 부른 스레드가 핸들러를 실행</td></tr>
+<tr><td>I/O 객체</td><td><code>tcp::socket</code>, <code>tcp::acceptor</code>, <code>steady_timer</code>, <code>local::stream_protocol::socket</code></td><td>생성 시 <code>io_context</code>에 묶임. 복사 불가, 이동 가능</td></tr>
+<tr><td>비동기 연산</td><td><code>async_read_some(buffers, handler)</code> 등</td><td>시작 함수는 즉시 반환, 핸들러는 나중에 <code>run()</code> 안에서. 시그니처는 거의 항상 <code>void(error_code, size_t)</code></td></tr>
+<tr><td>버퍼</td><td><code>asio::buffer(ptr, n)</code> → <code>mutable_buffer</code> / <code>const_buffer</code></td><td><strong>소유권 없는 뷰</strong>. scatter/gather를 위해 버퍼 시퀀스도 받음. 유효 기간은 사용자 책임</td></tr>
+<tr><td>조합 연산</td><td><code>async_write</code>, <code>async_read</code>, <code>async_read_until</code></td><td><code>*_some</code>을 반복해 "전부 보낼 때까지"를 만든 것. 같은 스트림에 동시에 두 개를 걸면 바이트가 섞임(사용자 책임)</td></tr>
+<tr><td>완료 토큰</td><td>콜백, <code>use_future</code>, <code>use_awaitable</code>, <code>yield_context</code></td><td>같은 시작 함수에 토큰만 바꿔 콜백/future/코루틴 스타일을 고름</td></tr>
+<tr><td>직렬화</td><td><code>strand</code></td><td>멀티스레드 <code>run()</code> 시 핸들러를 순서대로 실행</td></tr>
+<tr><td>취소</td><td><code>socket.cancel()</code>, <code>close()</code>, per-operation <code>cancellation_slot</code>(1.21+)</td><td>진행 중 연산이 <code>operation_aborted</code>로 완료됨</td></tr>
+</tbody>
+</table>
+
+<h3 id="s3-3">3.3 최소 예제: 에코 세션 (C++11)</h3>
+<pre class="code" data-lang="cpp"><code>#include &lt;asio.hpp&gt;
+#include &lt;memory&gt;
+using asio::ip::tcp;
+
+class session : public std::enable_shared_from_this&lt;session&gt; {
+public:
+    explicit session(tcp::socket s) : socket_(std::move(s)) {}
+    void start() { do_read(); }
+private:
+    void do_read() {
+        auto self = shared_from_this();                        // 핸들러가 살아 있는 동안 세션 유지
+        socket_.async_read_some(asio::buffer(data_),           // 1회성 읽기: 한 번 완료되면 끝
+            [this, self](std::error_code ec, std::size_t n) {  // (오류, 바이트 수)
+                if (ec) return;                                // eof, operation_aborted 포함 → 세션 소멸
+                do_write(n);
+            });
+    }
+    void do_write(std::size_t n) {
+        auto self = shared_from_this();
+        asio::async_write(socket_, asio::buffer(data_, n),     // 조합 연산: n바이트 전부 나갈 때까지
+            [this, self](std::error_code ec, std::size_t) {
+                if (!ec) do_read();
+            });
+    }
+    tcp::socket socket_;
+    char data_[4096];
+};
+
+class server {
+public:
+    server(asio::io_context&amp; io, unsigned short port)
+      : acceptor_(io, tcp::endpoint(tcp::v4(), port)) { do_accept(); }
+private:
+    void do_accept() {
+        acceptor_.async_accept([this](std::error_code ec, tcp::socket s) {
+            if (!ec) std::make_shared&lt;session&gt;(std::move(s))-&gt;start();
+            do_accept();                                       // 다음 접속을 다시 건다
+        });
+    }
+    tcp::acceptor acceptor_;
+};
+
+int main() {
+    asio::io_context io;
+    server srv(io, 7000);
+    io.run();                                                  // 블로킹. poll()/run_one()/run_for()도 있음
+}</code></pre>
+<p><strong>계층화는 타입으로.</strong> TLS를 얹어도 읽기/쓰기 호출은 그대로입니다. 위 계층(Beast의 HTTP/WS)은 <code>async_read_some</code>/<code>async_write_some</code>만 있으면 되는 스트림 템플릿 인자를 받습니다.</p>
+<pre class="code" data-lang="cpp"><code>asio::ssl::context ctx(asio::ssl::context::tls_server);
+asio::ssl::stream&lt;tcp::socket&gt; tls(std::move(sock), ctx);     // 평문 소켓을 감쌈
+tls.async_handshake(asio::ssl::stream_base::server, [](std::error_code ec){ /* ... */ });
+tls.async_read_some(asio::buffer(buf), handler);              // 평문 소켓과 같은 시그니처
+tls.next_layer().close();                                     // 아래 계층 접근</code></pre>
+<p><strong>타임아웃은 타이머와 취소의 조합.</strong> Asio에는 "읽기 타임아웃" 같은 옵션이 없고, 타이머를 따로 걸고 만료 시 <code>socket.cancel()</code>을 부르면 진행 중 읽기가 <code>operation_aborted</code>로 완료됩니다. 단순하지만 매번 두 개의 비동기 연산을 짝지어야 해서, 초보자가 가장 자주 틀리는 부분입니다. kiotty-net이 "이해하기 쉬움"을 노린다면 연결 단위 타임아웃을 내장 옵션으로 두는 편이 낫습니다(Mongoose와 libevent는 내장).</p>
+
+<h3 id="s3-5">3.5 메모리 모델: 핸들러 할당 훅</h3>
+<p>Asio는 비동기 연산마다 내부 상태(op 객체)를 하나 만들어야 하는데, 이를 <strong>핸들러에 연결된 allocator</strong>(<code>associated_allocator</code>)로 할당합니다. 그리고 중요한 보장이 하나 있습니다. <mark>"연산을 위해 할당된 메모리는 핸들러를 호출하기 <em>직전에</em> 해제된다."</mark> 그래서 핸들러 안에서 다음 연산을 시작하면 방금 해제된 같은 블록을 재사용할 수 있고, 결과적으로 연결당 고정 블록 1~2개로 모든 연산을 처리할 수 있습니다. 공식 예제 <code>allocation/server.cpp</code>의 <code>handler_memory</code>가 정확히 이것이고, <code>asio::recycling_allocator</code>는 이를 스레드 로컬 캐시로 일반화한 것입니다.</p>
+<pre class="code" data-lang="cpp"><code>// 연결당 고정 블록 하나로 모든 비동기 연산의 내부 상태를 처리하는 패턴 (Asio 예제 축약)
+class handler_memory {
+public:
+    void* allocate(std::size_t size) {
+        if (!in_use_ &amp;&amp; size &lt; sizeof(storage_)) { in_use_ = true; return &amp;storage_; }
+        return ::operator new(size);                 // 넘치면 폴백 (크기를 미리 재서 없애는 게 목표)
+    }
+    void deallocate(void* p) {
+        if (p == &amp;storage_) in_use_ = false; else ::operator delete(p);
+    }
+private:
+    typename std::aligned_storage&lt;1024&gt;::type storage_;
+    bool in_use_ = false;
+};
+// 이 메모리를 가리키는 allocator를 핸들러에 &quot;associated&quot; 시키면 Asio가 op 객체를 여기서 꺼내 쓴다.</code></pre>
+<p>반면 <strong>소켓 객체의 수명</strong>은 Asio가 전혀 관리하지 않습니다. 진행 중 연산이 있는 소켓이 파괴되면 미정의 동작이므로, 관용구는 세션을 <code>shared_ptr</code>로 만들고 모든 핸들러가 <code>self</code>를 캡처하는 것입니다. 이것이 Asio 코드가 동적 할당을 피하기 어려운 이유입니다. 풀에 둔 세션 객체 + "진행 중 연산 수" 카운터로 대체할 수 있지만 라이브러리가 도와주지는 않습니다.</p>
+
+<h3 id="s3-6">3.6 Beast가 보여 주는 HTTP 계층의 모양</h3>
+<p>Boost.Beast는 HTTP/WebSocket을 Asio 위에 얹되, HTTP 계층이 <strong>스트림을 소유하지 않습니다</strong>. <code>http::async_read(stream, buffer, message, handler)</code>처럼 스트림·누적 버퍼·메시지 컨테이너를 인자로 받는 자유 함수입니다. WebSocket만 상태(핸드셰이크 여부, 프레임 마스킹)가 있어서 <code>websocket::stream&lt;next_layer&gt;</code>라는 래퍼 타입이 됩니다. "요청/응답은 함수, 이벤트 스트림은 상태를 가진 객체"라는 구분은 kiotty-net의 Stream/Event 두 모델과 잘 맞습니다.</p>
+
+<h3 id="s3-7">3.7 kiotty-net 관점 평가</h3>
+<div class="two">
+<div class="box tip"><strong>가져올 것</strong>
+<ul>
+<li><code>(error_code, bytes_transferred)</code> 완료 시그니처. <code>NetResult</code>와 동일</li>
+<li>버퍼를 뷰로 받고 소유권은 사용자에게: 복사가 없고 규칙이 단순</li>
+<li>"시작 함수 안에서 핸들러를 호출하지 않는다" 규칙</li>
+<li>"연산 메모리는 핸들러 호출 전에 해제" 보장으로 고정 블록 재활용</li>
+<li><code>*_some</code>(부분) vs 조합(전부) 연산을 이름으로 구분</li>
+<li>계층(TLS)을 끼워도 호출 시그니처가 변하지 않는 설계</li>
+<li>동기 오버로드와 비동기 오버로드를 같은 객체에 두는 것 (초안의 StreamClient / EventClient 구분과 비교할 지점)</li>
+</ul></div>
+<div class="box warn"><strong>피할 것</strong>
+<ul>
+<li>템플릿 기반 합성은 C 인터페이스로 내보낼 수 없음</li>
+<li><code>shared_from_this</code> 수명 관리는 동적 할당을 전제</li>
+<li>타임아웃을 사용자가 조립하게 하는 것</li>
+<li>조합 연산 동시 호출 시 바이트 섞임을 사용자 책임으로 두는 것 → 라이브러리가 BUSY를 돌려주는 쪽이 안전</li>
+</ul></div>
+</div>
+
+<h2 id="s4">4. Mongoose: 콜백 하나로 끝나는 임베디드 서버</h2>
+<p><span class="pill">C99</span><span class="pill">GPLv2 또는 상용</span><span class="pill">mongoose.c + mongoose.h 두 파일</span><span class="pill">select / poll / epoll (IOCP·kqueue 없음)</span><span class="pill">HTTP · WS · MQTT · TLS 내장</span></p>
+<p><strong>한 줄 요약.</strong> 임베디드와 RTOS까지 겨냥한 단일 파일 네트워크 라이브러리로, 사용자가 배워야 할 것이 <em>매니저 하나, 연결 구조체 하나, 이벤트 핸들러 함수 하나</em>뿐입니다. 성능보다 단순성을 우선하고, HTTP/WebSocket/TLS/정적 파일 서빙이 모두 내장되어 있어 kiotty-net 요구사항 5·6·9·10·12에 가장 가까운 <strong>인터페이스</strong> 참고입니다(백엔드 참고는 아닙니다). 라이선스가 GPLv2라 제품에 쓰려면 상용 라이선스가 필요합니다.</p>
+
+<h3 id="s4-2">4.2 인터페이스 전체</h3>
+<table>
+<thead><tr><th>객체</th><th>역할</th><th>주요 필드 / 함수</th></tr></thead>
+<tbody>
+<tr><td><code>struct mg_mgr</code></td><td>루프 + 연결 목록 + 타이머 + DNS</td><td><code>mg_mgr_init</code>, <code>mg_mgr_poll(&amp;mgr, ms)</code>, <code>mg_mgr_free</code></td></tr>
+<tr><td><code>struct mg_connection</code></td><td>연결. 리스너도 클라이언트도 같은 타입</td><td><code>id</code>(증가 번호), <code>fd</code>, <code>loc</code>/<code>rem</code> 주소, <code>recv</code>/<code>send</code>(<code>mg_iobuf</code>), <code>fn</code>/<code>fn_data</code>(사용자 핸들러), <code>pfn</code>/<code>pfn_data</code>(내부 프로토콜 핸들러), <code>data[32]</code>(연결당 스크래치), 상태 비트 <code>is_listening, is_client, is_accepted, is_resolving, is_connecting, is_tls, is_tls_hs, is_udp, is_websocket, is_draining, is_closing, is_full, is_readable, is_writable</code></td></tr>
+<tr><td>이벤트 핸들러</td><td>모든 일이 여기로 옴</td><td><code>void fn(struct mg_connection *c, int ev, void *ev_data)</code></td></tr>
+<tr><td><code>struct mg_iobuf</code></td><td>성장형 바이트 버퍼</td><td><code>buf, size, len, align</code>; <code>mg_iobuf_add / del / resize</code></td></tr>
+</tbody>
+</table>
+<table>
+<thead><tr><th>이벤트</th><th><code>ev_data</code></th><th>의미</th></tr></thead>
+<tbody>
+<tr><td><code>MG_EV_OPEN</code> / <code>MG_EV_CLOSE</code></td><td>NULL</td><td>연결 구조체 생성 직후 / 해제 직전. 사용자 정리는 CLOSE에서</td></tr>
+<tr><td><code>MG_EV_ACCEPT</code> / <code>MG_EV_CONNECT</code></td><td>NULL</td><td>서버가 받음 / 클라이언트 연결 완료</td></tr>
+<tr><td><code>MG_EV_READ</code> / <code>MG_EV_WRITE</code></td><td><code>long*</code> 바이트 수</td><td>raw 바이트가 <code>c-&gt;recv</code>에 추가됨 / <code>c-&gt;send</code>에서 나감</td></tr>
+<tr><td><code>MG_EV_ERROR</code></td><td><code>char*</code></td><td>오류 메시지</td></tr>
+<tr><td><code>MG_EV_POLL</code></td><td><code>uint64_t*</code> 현재 시각</td><td>매 폴링마다 모든 연결에. 타임아웃 구현용</td></tr>
+<tr><td><code>MG_EV_TLS_HS</code></td><td>NULL</td><td>TLS 핸드셰이크 완료</td></tr>
+<tr><td><code>MG_EV_HTTP_HDRS</code> / <code>MG_EV_HTTP_MSG</code></td><td><code>struct mg_http_message*</code></td><td>헤더까지 / 메시지 전체 수신</td></tr>
+<tr><td><code>MG_EV_WS_OPEN</code> / <code>MG_EV_WS_MSG</code> / <code>MG_EV_WS_CTL</code></td><td><code>struct mg_ws_message*</code></td><td>WebSocket 핸드셰이크 완료 / 데이터 프레임 / 제어 프레임</td></tr>
+<tr><td><code>MG_EV_WAKEUP</code></td><td><code>struct mg_str*</code></td><td>다른 스레드의 <code>mg_wakeup(mgr, conn_id, data, len)</code></td></tr>
+<tr><td><code>MG_EV_USER</code></td><td>사용자 정의</td><td></td></tr>
+</tbody>
+</table>
+
+<h3 id="s4-3">4.3 최소 예제: HTTP + WebSocket + 메모리 상주 정적 파일</h3>
+<pre class="code" data-lang="c"><code>#include &quot;mongoose.h&quot;
+
+static void fn(struct mg_connection *c, int ev, void *ev_data) {
+  if (ev == MG_EV_HTTP_MSG) {                              /* 요청/응답 모델 */
+    struct mg_http_message *hm = (struct mg_http_message *) ev_data;
+    if (mg_match(hm-&gt;uri, mg_str(&quot;/ws&quot;), NULL)) {
+      mg_ws_upgrade(c, hm, NULL);                          /* 이후 이 연결은 WS 이벤트를 받음 */
+    } else if (mg_match(hm-&gt;uri, mg_str(&quot;/api/status&quot;), NULL)) {
+      mg_http_reply(c, 200, &quot;Content-Type: application/json\r\n&quot;, &quot;{%m:%d}\n&quot;, MG_ESC(&quot;ok&quot;), 1);
+    } else {
+      struct mg_http_serve_opts opts = { .root_dir = &quot;/web_root&quot;, .fs = &amp;mg_fs_packed };
+      mg_http_serve_dir(c, hm, &amp;opts);                     /* 바이너리에 패킹된 파일을 서빙 */
+    }
+  } else if (ev == MG_EV_WS_MSG) {                         /* 이벤트 모델 */
+    struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
+    mg_ws_send(c, wm-&gt;data.buf, wm-&gt;data.len, WEBSOCKET_OP_TEXT);
+  } else if (ev == MG_EV_CLOSE) {
+    /* 연결별 정리. c-&gt;data[32] 또는 c-&gt;fn_data 사용 */
+  }
+}
+
+int main(void) {
+  struct mg_mgr mgr;
+  mg_mgr_init(&amp;mgr);
+  mg_http_listen(&amp;mgr, &quot;http://0.0.0.0:8000&quot;, fn, NULL);   /* fn_data = NULL */
+  for (;;) mg_mgr_poll(&amp;mgr, 1000);                        /* 루프는 사용자가 돈다 */
+  mg_mgr_free(&amp;mgr);
+}</code></pre>
+<p class="meta">7.1x 기준. 버전에 따라 <code>mg_str</code> 필드명(<code>ptr</code>/<code>buf</code>)과 핸들러 시그니처(과거에는 <code>fn_data</code>가 4번째 인자)가 조금 다릅니다.</p>
+
+<p><strong>정적 파일과 메모리 상주 파일(요구사항 9).</strong> <code>mg_http_serve_dir</code> / <code>mg_http_serve_file</code>은 Range 요청, <code>ETag</code>/<code>If-Modified-Since</code>, 디렉터리 목록, MIME 매핑, 사전 압축된 <code>.gz</code> 서빙을 처리합니다. 파일 시스템은 <code>struct mg_fs</code>(open/read/seek/stat/list 함수 포인터 묶음)로 추상화되어 있어 <code>mg_fs_posix</code>, <code>mg_fs_fat</code>, 그리고 <code>pack</code> 도구로 파일들을 C 배열로 바꿔 넣은 <strong><code>mg_fs_packed</code></strong>를 같은 코드로 씁니다. 즉 "메모리에 올라온 바이너리를 정적 파일처럼 제공"은 <em>파일 시스템 인터페이스를 함수 포인터 5개로 추상화</em>하는 것으로 해결됩니다.</p>
+
+<h3 id="s4-4">4.4 프로토콜 계층화: 연결에 꽂힌 내부 핸들러</h3>
+<p>Mongoose의 계층화는 놀랄 만큼 단순합니다. <code>mg_http_listen</code>은 <code>mg_listen</code>을 부른 뒤 <code>c-&gt;pfn = http_cb</code>를 설정할 뿐입니다. 폴링 중 바이트가 <code>c-&gt;recv</code>에 쌓이면 <code>MG_EV_READ</code>가 먼저 <code>pfn</code>(내부 핸들러)에 전달되고, 내부 핸들러가 메시지를 완성하면 <code>MG_EV_HTTP_MSG</code>로 바꿔 사용자 <code>fn</code>에 넘긴 뒤 <code>mg_iobuf_del</code>로 소비합니다. WebSocket으로 업그레이드하면 <code>pfn</code>이 <code>ws_cb</code>로 바뀌고 <code>is_websocket</code> 비트가 켜집니다. TLS는 <code>is_tls</code> 비트와 송수신 직전의 암복호화 단계로 처리됩니다.</p>
+<pre class="code" data-lang="c"><code>/* 커스텀 프로토콜: raw TCP 리스너 + MG_EV_READ에서 직접 프레이밍 (예: DICOM PDU 6바이트 헤더) */
+static void pdu_fn(struct mg_connection *c, int ev, void *ev_data) {
+  if (ev == MG_EV_READ) {
+    struct mg_iobuf *r = &amp;c-&gt;recv;
+    while (r-&gt;len &gt;= 6) {                                  /* 헤더가 모였는가 */
+      uint32_t body;
+      memcpy(&amp;body, r-&gt;buf + 2, 4); body = mg_ntohl(body); /* type(1) reserved(1) length(4 BE) */
+      if (r-&gt;len &lt; 6 + body) break;                        /* 바디가 덜 왔다 → 다음 READ에서 재시도 */
+      handle_pdu(c, r-&gt;buf, 6 + body);
+      mg_iobuf_del(r, 0, 6 + body);                        /* 소비 */
+    }
+    if (r-&gt;len &gt; MAX_PDU) c-&gt;is_closing = 1;               /* 프레임이 버퍼 한도를 넘으면 끊기 */
+  }
+}
+mg_listen(&amp;mgr, &quot;tcp://0.0.0.0:104&quot;, pdu_fn, NULL);</code></pre>
+<h3 id="s4-5">4.5 수명과 메모리</h3>
+<ul>
+<li>연결 구조체는 라이브러리가 <code>calloc</code>으로 만들고 <code>MG_EV_CLOSE</code> 후 <code>free</code>합니다. <code>MG_ENABLE_CUSTOM_CALLOC</code>으로 <code>mg_calloc</code>/<code>mg_free</code>를 풀 할당자로 바꿀 수 있습니다.</li>
+<li>닫기는 플래그입니다. <code>c-&gt;is_closing = 1</code>은 다음 폴링에서 즉시 닫기, <code>c-&gt;is_draining = 1</code>은 <code>send</code> 버퍼를 비운 뒤 닫기. 사용자가 핸들러 안에서 <code>free</code>를 직접 부를 일이 없으므로 재진입·dangling 문제가 구조적으로 줄어듭니다.</li>
+<li><mark>연결 포인터를 보관하지 말고 <code>c-&gt;id</code>를 보관하라</mark>고 문서가 권장합니다. <code>mg_wakeup</code>도 id로 연결을 지정합니다. id는 단조 증가하므로 재사용된 슬롯을 옛 id로 건드리는 일이 없습니다. 이것이 7장에서 다루는 <em>세대 번호 핸들</em>의 가장 단순한 형태입니다.</li>
+<li>수신·송신 버퍼는 <code>MG_IO_SIZE</code> 단위로 <code>realloc</code> 성장합니다. 고정 메모리 요구에는 맞지 않지만, <code>is_full</code> 비트로 "수신 버퍼가 한도에 닿았으니 읽기를 멈춘다"는 백프레셔 개념은 있습니다.</li>
+<li>쓰기는 항상 <code>c-&gt;send</code>에 <strong>복사</strong>됩니다. 사용자 버퍼는 <code>mg_send</code>가 돌아오면 즉시 재사용 가능합니다. 복사 비용 대신 "쓰기 버퍼 수명" 규칙이 아예 사라집니다. 32 클라이언트 규모에서는 매우 합리적인 교환입니다.</li>
+<li>타임아웃은 <code>MG_EV_POLL</code>에서 <code>c-&gt;data</code>에 저장한 마지막 활동 시각과 비교하는 식으로 사용자가 구현하거나 <code>mg_timer_add</code>를 씁니다.</li>
+</ul>
+
+<h3 id="s4-6">4.6 kiotty-net 관점 평가</h3>
+<div class="two">
+<div class="box tip"><strong>가져올 것</strong>
+<ul>
+<li>"객체 둘 + 콜백 하나"라는 인터페이스 크기의 하한선. 이해하기 쉬움의 기준점</li>
+<li>이벤트 코드 하나로 요청/응답(HTTP_MSG)과 이벤트(WS_MSG)를 같은 핸들러에서 받는 구조</li>
+<li>연결에 꽂힌 프로토콜 핸들러 포인터로 계층화 → C에서 가장 단순한 방법</li>
+<li>파일 시스템을 함수 포인터 묶음으로 추상화해 메모리 상주 파일을 서빙</li>
+<li>연결 id로 참조, 플래그로 닫기 요청</li>
+<li>쓰기는 복사 → 버퍼 수명 규칙 제거</li>
+<li>단일 <code>.c/.h</code> amalgam 배포와 <code>MG_ENABLE_*</code> 컴파일 스위치</li>
+<li>루프를 사용자에게 맡기는 <code>poll(ms)</code> 하나</li>
+</ul></div>
+<div class="box warn"><strong>피할 것 / 다른 점</strong>
+<ul>
+<li>IOCP·kqueue·io_uring 백엔드 없음. 백엔드 설계는 libuv/Asio 참고</li>
+<li>동적 성장 버퍼와 <code>calloc</code> 연결 → 고정 풀로 바꿔야 함</li>
+<li>GPLv2</li>
+<li>오류가 문자열이라 <code>Result&lt;V, Code&gt;</code>와 맞지 않음</li>
+<li>연결당 사용자 상태가 <code>data[32]</code>와 <code>void*</code> 하나뿐</li>
+</ul></div>
+</div>
+
+<h2 id="s5">5. libevent: 버퍼드 스트림과 워터마크</h2>
+<p><span class="pill">C</span><span class="pill">BSD-3</span><span class="pill">select / poll / epoll / kqueue / evport, Windows select + IOCP(부분)</span><span class="pill">Tor, memcached</span></p>
+<p><strong>한 줄 요약.</strong> 저수준 <code>event</code>(준비 통지 그대로)와 그 위의 <code>bufferevent</code>(입출력 버퍼를 가진 스트림) 두 층으로 된 C 라이브러리입니다. kiotty-net에 참고가 되는 것은 <code>bufferevent</code>와 <code>evbuffer</code>의 설계, 특히 <strong>워터마크</strong>와 <strong>참조 추가(zero-copy) 송신</strong>, <strong>필터</strong>입니다.</p>
+
+<h3 id="s5-2">5.2 개념 모델</h3>
+<table>
+<thead><tr><th>개념</th><th>설명</th></tr></thead>
+<tbody>
+<tr><td><code>event_base</code></td><td>루프. <code>event_base_dispatch</code> / <code>event_base_loop(base, EVLOOP_ONCE|EVLOOP_NONBLOCK)</code></td></tr>
+<tr><td><code>event</code></td><td>fd + 관심 플래그(<code>EV_READ|EV_WRITE|EV_PERSIST|EV_TIMEOUT</code>) + 콜백. 준비 모델이 그대로 노출됨</td></tr>
+<tr><td><code>bufferevent</code></td><td>소켓 + 입력 <code>evbuffer</code> + 출력 <code>evbuffer</code> + 콜백 3개(<code>readcb, writecb, eventcb</code>) + 워터마크 + 읽기/쓰기 타임아웃. 라이브러리가 읽어서 입력 버퍼에 쌓고, 출력 버퍼에서 꺼내 보냄</td></tr>
+<tr><td><code>evbuffer</code></td><td>체인 버퍼. <code>evbuffer_add</code>(복사), <code>evbuffer_add_reference</code>(참조 + 해제 콜백), <code>evbuffer_add_file</code>(sendfile/mmap), <code>evbuffer_remove</code>, <code>evbuffer_pullup</code>(연속화), <code>evbuffer_drain</code>, <code>evbuffer_search</code>, <code>evbuffer_readln</code></td></tr>
+<tr><td><code>evconnlistener</code></td><td>accept 루프를 감싼 리스너. 콜백에 새 fd가 옴</td></tr>
+<tr><td>필터</td><td><code>bufferevent_filter_new(underlying, in_filter, out_filter, ...)</code>로 변환 계층을 끼움. <code>bufferevent_openssl_filter_new</code>가 TLS를 이 방식으로 구현</td></tr>
+</tbody>
+</table>
+<pre class="code" data-lang="c"><code>static void read_cb(struct bufferevent *bev, void *ctx) {
+    struct evbuffer *in  = bufferevent_get_input(bev);
+    struct evbuffer *out = bufferevent_get_output(bev);
+    evbuffer_add_buffer(out, in);                            /* 에코: 입력을 출력으로 이동(복사 없음) */
+}
+static void write_cb(struct bufferevent *bev, void *ctx) {
+    /* 출력 버퍼가 low watermark(기본 0) 아래로 내려감 = &quot;더 보내도 됨&quot; 신호 */
+}
+static void event_cb(struct bufferevent *bev, short what, void *ctx) {
+    if (what &amp; (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT))
+        bufferevent_free(bev);                               /* 동기 해제. 콜백 밖에서 다시 참조하지 않는 규약 */
+}
+static void accept_cb(struct evconnlistener *l, evutil_socket_t fd,
+                      struct sockaddr *a, int alen, void *ctx) {
+    struct event_base *base = evconnlistener_get_base(l);
+    struct bufferevent *bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_setcb(bev, read_cb, write_cb, event_cb, NULL);
+    bufferevent_setwatermark(bev, EV_READ, 0, 64 * 1024);    /* 입력이 64KB를 넘으면 읽기 중단 */
+    struct timeval to = { 30, 0 };
+    bufferevent_set_timeouts(bev, &amp;to, &amp;to);                 /* 읽기/쓰기 타임아웃 내장 */
+    bufferevent_enable(bev, EV_READ | EV_WRITE);
+}</code></pre>
+<h3 id="s5-3">5.3 가져올 만한 아이디어</h3>
+<ul>
+<li><strong>워터마크 = 백프레셔를 인터페이스 1급으로.</strong> 읽기 high watermark를 넘으면 라이브러리가 읽기를 멈추고, low 아래로 내려오면 재개합니다. 쓰기 low watermark에 닿으면 <code>writecb</code>가 "더 넣어도 된다"고 알립니다. 고정 메모리 환경에서는 사실상 필수 개념인데, libuv와 Asio는 사용자에게 맡깁니다.</li>
+<li><strong><code>evbuffer_add_reference(buf, data, len, cleanup_cb, arg)</code>.</strong> 메모리에 이미 있는 데이터를 복사 없이 송신 큐에 넣고, 다 나가면 <code>cleanup_cb</code>가 불립니다. 메모리 상주 바이너리를 HTTP 응답 본문으로 보내는 데 필요한 정확한 프리미티브입니다. <code>evbuffer_add_file</code>은 디스크 파일 버전(sendfile/mmap)입니다.</li>
+<li><strong>필터 bufferevent.</strong> TLS를 "바이트 변환 계층"으로 끼우는 방식은, kiotty-net의 "TLS 적용 여부" 계층을 런타임 스위치로 만들 때의 모델이 됩니다.</li>
+<li><strong><code>bufferevent_pair_new</code>.</strong> 소켓 없이 메모리로 연결된 bufferevent 쌍. 프로토콜 코드를 네트워크 없이 단위 테스트하는 데 쓰입니다. kiotty-net에서도 "루프백 메모리 커넥션"을 테스트용으로 제공하면 프로토콜 계층 테스트가 쉬워집니다.</li>
+<li>읽기/쓰기 타임아웃이 연결 객체의 속성입니다.</li>
+</ul>
+<div class="box warn"><strong>주의</strong>IOCP 지원은 <code>bufferevent_async</code>에 한정된 부분 지원이고, 내부에서 <code>malloc</code>을 많이 쓰며, 저수준 <code>event</code> API와 고수준 <code>bufferevent</code> API가 섞여 있어 배우는 비용이 큽니다. 백엔드 통합의 참고로는 부적합하고, 버퍼드 스트림 추상의 참고로만 보는 것이 좋습니다.</div>
+
+<h2 id="s6">6. 프로토콜 파서와 프레이머</h2>
+<p>HTTP, WebSocket, 그리고 커스텀 프로토콜(DICOM 포함)은 결국 "바이트 스트림에서 메시지 경계를 찾는 일"입니다. 이 일을 하는 코드의 인터페이스에는 두 가지 전통이 있습니다.</p>
+
+<h3 id="s6-1">6.1 Push 파서: llhttp</h3>
+<p>Node.js가 쓰는 HTTP 파서. 상태 기계가 파서 객체(수십 바이트)에만 상태를 두고, 입력 조각이 어디서 끊기든 상관없이 콜백을 호출합니다. 메모리 할당이 전혀 없고, 데이터 콜백은 입력 버퍼 내부를 가리키는 포인터(제로카피)를 줍니다. 대신 <strong>한 헤더 값이 여러 조각으로 나뉘어 여러 번 콜백될 수 있어</strong> 사용자가 누적해야 합니다.</p>
+<pre class="code" data-lang="c"><code>static int on_url(llhttp_t* p, const char* at, size_t len) {
+    conn_t* c = (conn_t*)p-&gt;data;
+    return append_bounded(&amp;c-&gt;url, at, len) ? 0 : -1;        /* 조각일 수 있음: 고정 버퍼에 누적 */
+}
+static int on_headers_complete(llhttp_t* p) { return 0; }    /* 1을 돌려주면 바디 생략, 2면 업그레이드 */
+static int on_body(llhttp_t* p, const char* at, size_t len) { return 0; }
+static int on_message_complete(llhttp_t* p) { /* 요청 1개 완성 */ return 0; }
+
+llhttp_settings_t st; llhttp_settings_init(&amp;st);
+st.on_url = on_url; st.on_headers_complete = on_headers_complete;
+st.on_body = on_body; st.on_message_complete = on_message_complete;
+
+llhttp_t parser; llhttp_init(&amp;parser, HTTP_REQUEST, &amp;st);
+parser.data = conn;
+
+/* 들어온 조각마다: */
+llhttp_errno_t err = llhttp_execute(&amp;parser, data, len);
+if (err == HPE_PAUSED_UPGRADE) { /* 헤더 끝 이후 바이트는 WebSocket 등 다른 프로토콜로 */ }
+else if (err != HPE_OK) { /* llhttp_errno_name(err), llhttp_get_error_reason(&amp;parser) */ }</code></pre>
+<p><code>llhttp_pause</code>/<code>llhttp_resume</code>으로 "지금은 더 처리하지 말라"는 백프레셔를 걸 수 있고, 업그레이드(WebSocket) 지점에서 <code>HPE_PAUSED_UPGRADE</code>로 멈춰 나머지 바이트를 다음 프로토콜에 넘기는 규약이 깔끔합니다.</p>
+
+<h3 id="s6-2">6.2 Pull 파서: picohttpparser</h3>
+<p>H2O 서버의 파서. "완성된 요청 헤더가 버퍼에 다 있으면 파싱하고, 아니면 -2를 돌려준다"는 단순한 함수 하나입니다. 헤더 배열을 호출자가 넘기므로 완전 무할당이고, 조각 누적은 호출자 버퍼에서 자연스럽게 이뤄집니다.</p>
+<pre class="code" data-lang="c"><code>const char *method, *path; size_t method_len, path_len; int minor;
+struct phr_header headers[32]; size_t nh = 32;                /* 호출자 제공 → 무할당 */
+
+int n = phr_parse_request(buf, len, &amp;method, &amp;method_len, &amp;path, &amp;path_len,
+                          &amp;minor, headers, &amp;nh, prev_len);    /* prev_len: 지난번까지 본 길이(재스캔 최소화) */
+if (n &gt; 0)       { /* 헤더 끝까지 n바이트 소비. 포인터들은 buf 내부 */ }
+else if (n == -2){ /* 더 받아야 함. 버퍼가 가득 찼다면 431/413 후 끊기 */ }
+else             { /* -1 파싱 오류 */ }</code></pre>
+<p>32 클라이언트에 요청 크기가 작은 환경이라면 pull 방식이 더 단순합니다. 요청 헤더 상한(예: 8KB)을 고정 버퍼로 두고, 넘치면 오류로 끊으면 됩니다. 바디(청크 포함)는 <code>phr_decode_chunked</code>처럼 별도 단계로 처리합니다.</p>
+
+<h3 id="s6-3">6.3 Netty의 파이프라인과 프레임 디코더</h3>
+<p>Java 라이브러리지만 "커스텀 프로토콜을 가장 적은 코드로 지원하는 인터페이스"의 사실상 표준이므로 짚고 갑니다. 연결(<code>Channel</code>)마다 핸들러 목록(<code>ChannelPipeline</code>)이 있고, 바이트는 목록을 순서대로 통과하며 변환됩니다. 핵심은 <code>ByteToMessageDecoder</code>의 규약 하나입니다.</p>
+<pre class="code" data-lang="java"><code>// 규약: in(누적 버퍼)에서 메시지를 만들 수 있으면 out에 추가하고 소비한다.
+//       아무것도 추가하지 않고 돌아오면 &quot;더 받을 때까지 기다리겠다&quot;는 뜻. 누적은 프레임워크가 한다.
+protected abstract void decode(ChannelHandlerContext ctx, ByteBuf in, List&lt;Object&gt; out);
+
+// 길이 프리픽스 프로토콜은 디코더를 쓰지 않고 매개변수 5개로 끝난다.
+new LengthFieldBasedFrameDecoder(
+    maxFrameLength,      // 이보다 큰 프레임은 오류 (메모리 상한)
+    lengthFieldOffset,   // 길이 필드가 시작되는 오프셋
+    lengthFieldLength,   // 길이 필드 크기 (1, 2, 3, 4, 8)
+    lengthAdjustment,    // 길이 값이 가리키는 범위 보정
+    initialBytesToStrip  // 프레임 앞에서 떼어낼 바이트 수
+);</code></pre>
+<table>
+<thead><tr><th>프로토콜</th><th>프레임 구조</th><th>길이 필드 디코더로 표현</th></tr></thead>
+<tbody>
+<tr><td>DICOM 상위 계층 PDU (PS3.8)</td><td><code>type(1) reserved(1) length(4, big-endian) payload(length)</code></td><td>offset 2, length 4, adjustment 0, strip 0, max = 협상된 최대 PDU 크기</td></tr>
+<tr><td>흔한 자체 프로토콜</td><td><code>length(4) payload</code></td><td>offset 0, length 4, adjustment 0, strip 4</td></tr>
+<tr><td>WebSocket 프레임</td><td>길이 필드가 7/16/64비트로 가변, 마스킹 키 선택적</td><td>표현 불가 → 전용 디코더 필요</td></tr>
+<tr><td>HTTP/1.1</td><td>헤더는 <code>\r\n\r\n</code> 구분, 바디는 <code>Content-Length</code> 또는 chunked</td><td>표현 불가 → 전용 파서 (6.1, 6.2)</td></tr>
+</tbody>
+</table>
+<p>따라서 "서버 개발자가 프로토콜 정의만 하면 되게" 하려면 <strong>일반적인 디코더 규약</strong>이 필요하고, 길이 프리픽스는 그 위의 편의 기능입니다.</p>
+
+<h3 id="s6-4">6.4 kiotty-net용 프레이머 인터페이스 스케치</h3>
+<p>위 세 전통을 C로 가장 작게 줄이면 함수 하나가 남습니다. 라이브러리가 수신 버퍼에 누적하고, 매번 이 함수에 "여기 메시지 하나가 완성됐나?"를 묻습니다.</p>
+<pre class="code" data-lang="c"><code>typedef struct KiottyFramer {
+    void* ctx;
+    /* 누적 버퍼 [data, data+len) 를 보고 메시지 1개의 경계를 판단한다.
+       반환 &gt; 0 : 첫 메시지의 전체 길이(바이트). 라이브러리가 onMessage(data, 반환값)를 부르고 그만큼 소비한다.
+       반환 = 0 : 아직 모자람. 더 받은 뒤 다시 묻는다. need_hint 에 최소 몇 바이트가 더 필요한지 적어도 된다.
+       반환 &lt; 0 : 프로토콜 오류 코드(NetCode). 라이브러리가 연결을 끊는다.                                */
+    int32_t (*frame)(void* ctx, const uint8_t* data, size_t len, size_t* need_hint);
+} KiottyFramer;
+
+/* DICOM PDU 프레이머는 이게 전부다 */
+static int32_t dicom_frame(void* ctx, const uint8_t* d, size_t len, size_t* need) {
+    if (len &lt; 6) { *need = 6 - len; return 0; }
+    uint32_t body = ((uint32_t)d[2] &lt;&lt; 24) | ((uint32_t)d[3] &lt;&lt; 16) | ((uint32_t)d[4] &lt;&lt; 8) | d[5];
+    if (body &gt; ((dicom_ctx*)ctx)-&gt;max_pdu) return NET_PROTOCOL_ERROR;
+    if (len &lt; 6 + body) { *need = 6 + body - len; return 0; }
+    return (int32_t)(6 + body);
+}</code></pre>
+<ul>
+<li>사용자는 <strong>상태 없는 함수 하나</strong>만 씁니다. 누적·분할·호출 순서는 라이브러리 책임입니다.</li>
+<li>수신 버퍼가 고정 크기이므로 "버퍼가 꽉 찼는데 아직 0을 돌려준다"면 라이브러리가 <code>NET_FRAME_TOO_LARGE</code>로 끊습니다. 메모리 상한이 자동으로 프로토콜 상한이 됩니다.</li>
+<li>HTTP처럼 경계가 파싱에 달린 프로토콜은 <code>frame()</code> 안에서 picohttpparser를 호출하면 됩니다(-2 → 0). 바디가 버퍼보다 큰 경우를 지원하려면 push 스타일 스트리밍 콜백이 추가로 필요한데, 이것은 설계 결정 사항입니다.</li>
+<li>Mongoose의 <code>pfn</code>처럼 연결마다 프레이머를 바꿔 끼울 수 있게 하면 HTTP → WebSocket 업그레이드가 "프레이머 교체"가 됩니다.</li>
+</ul>
+
+<h2 id="s7">7. 고정 메모리 설계 참고</h2>
+<p>요구사항 11(시작 시 전부 할당, 풀 재사용, dangling 방지)은 네트워크 라이브러리보다 <strong>임베디드 TCP/IP 스택</strong>이 먼저 풀어 둔 문제입니다.</p>
+
+<h3 id="s7-1">7.1 lwIP: 모든 상한을 컴파일 타임에</h3>
+<p><code>lwipopts.h</code>에서 <code>MEMP_NUM_TCP_PCB</code>(연결 수), <code>MEMP_NUM_TCP_SEG</code>, <code>PBUF_POOL_SIZE</code>, <code>TCP_SND_BUF</code>, <code>TCP_WND</code> 등을 정하면 <code>memp</code>(타입별 고정 풀)와 <code>pbuf</code>(패킷 버퍼 풀)가 정적으로 잡힙니다. 런타임에는 풀에서 꺼내고 돌려줄 뿐이며, 풀이 비면 <code>ERR_MEM</code>을 돌려주고 호출자가 나중에 재시도합니다. raw API는 콜백 기반입니다.</p>
+<pre class="code" data-lang="c"><code>tcp_recv(pcb, recv_cb);            /* err_t recv_cb(void* arg, struct tcp_pcb*, struct pbuf* p, err_t) */
+tcp_sent(pcb, sent_cb);            /* 상대가 ACK한 바이트 수를 알려 줌 = 송신 버퍼 공간이 생겼다는 신호 */
+tcp_err(pcb, err_cb);              /* pcb가 이미 해제된 뒤 불림: 포인터를 쓰지 말라는 규약 */
+tcp_write(pcb, data, len, TCP_WRITE_FLAG_COPY);   /* COPY 없이 쓰면 ACK될 때까지 data 유효해야 함 */
+tcp_recved(pcb, len);              /* 앱이 처리한 만큼 수신 윈도우를 다시 열어 줌 = 명시적 백프레셔 */</code></pre>
+<p>눈여겨볼 점은 (1) 송신 버퍼의 소유권 규칙이 libuv와 같다는 것(복사 플래그로 선택 가능), (2) 수신 윈도우를 앱이 <code>tcp_recved</code>로 직접 연다는 것, (3) 오류 콜백이 "이미 해제됨"을 뜻한다는 규약입니다. Zephyr의 <code>net_buf</code>도 같은 철학으로, <code>NET_BUF_POOL_DEFINE(name, count, size, user_data, destroy)</code> 매크로로 정적 풀을 선언하고 참조 카운트로 돌려줍니다.</p>
+
+<h3 id="s7-2">7.2 포인터 대신 세대 번호 핸들</h3>
+<p>dangling pointer를 "오류 코드"로 바꾸는 가장 확실한 방법은 외부에 포인터 대신 <strong>(슬롯 인덱스, 세대 번호)</strong>를 주는 것입니다. 슬롯이 재사용될 때마다 세대가 1 증가하므로, 옛 핸들로 접근하면 세대가 맞지 않아 <code>NET_STALE_HANDLE</code>이 반환됩니다. Mongoose의 <code>c-&gt;id</code>, Vulkan 핸들, 게임 엔진의 ECS, Rust의 slotmap이 모두 이 기법입니다.</p>
+<pre class="code" data-lang="c"><code>typedef struct { uint16_t index; uint16_t gen; } NetHandle;      /* 값 타입, 32비트 */
+
+typedef struct { uint16_t gen; int in_use; /* ...연결 상태... */ } Slot;
+static Slot slots[32];
+
+static Slot* resolve(NetHandle h) {
+    if (h.index &gt;= 32) return NULL;
+    Slot* s = &amp;slots[h.index];
+    return (s-&gt;in_use &amp;&amp; s-&gt;gen == h.gen) ? s : NULL;          /* 세대 불일치 = 이미 닫힌 연결 */
+}
+static void release(Slot* s) { s-&gt;in_use = 0; s-&gt;gen++; }       /* 다음 사용자는 새 세대 */</code></pre>
+<p>비용은 C++ 인터페이스에서 <code>NetConnection*</code> 같은 포인터 대신 값 핸들을 들고 다녀야 한다는 점입니다. 절충안은 <strong>내부 콜백 인자로는 포인터</strong>를 주고(콜백 동안은 유효가 보장됨), <strong>콜백 밖에서 보관</strong>할 때만 핸들을 쓰게 하는 것입니다. libuv도 핸들 포인터를 그대로 쓰지만 비동기 close 규약으로 같은 안전성을 얻는다는 점에서, 두 방식 중 하나는 반드시 있어야 합니다.</p>
+
+<h3 id="s7-3">7.3 메모리 예산을 표로 먼저 쓰기</h3>
+<p>고정 할당 설계의 장점은 메모리 사용량을 <strong>문서에 표로 쓸 수 있다</strong>는 것입니다. 의료기기 소프트웨어 문서화에도 유리합니다. 아래는 예시 수치이며 설계 결정에 따라 달라집니다.</p>
+<table>
+<thead><tr><th>항목</th><th>개수</th><th>단위 크기(예)</th><th>소계</th></tr></thead>
+<tbody>
+<tr><td>연결 슬롯 (상태 + 읽기/쓰기 요청 객체)</td><td>32</td><td>~512 B</td><td>16 KB</td></tr>
+<tr><td>수신 버퍼</td><td>32</td><td>16 KB</td><td>512 KB</td></tr>
+<tr><td>송신 버퍼</td><td>32</td><td>16 KB</td><td>512 KB</td></tr>
+<tr><td>HTTP 헤더 파싱 영역 (수신 버퍼와 공유 가능)</td><td>32</td><td>8 KB</td><td>0 ~ 256 KB</td></tr>
+<tr><td>TLS 세션 (OpenSSL 내부, 외부 할당)</td><td>32</td><td>수십 KB</td><td>OpenSSL 설정에 따름</td></tr>
+<tr><td>리스너, 타이머, 깨우기 큐</td><td>소수</td><td>작음</td><td>&lt; 8 KB</td></tr>
+</tbody>
+</table>
+<div class="box warn"><strong>OpenSSL 주의</strong>유일한 외부 의존성인 OpenSSL은 내부적으로 <code>malloc</code>을 씁니다. <code>CRYPTO_set_mem_functions</code>로 할당자를 교체할 수 있으므로, "시작 시 전부 할당" 정책을 TLS까지 확장하려면 이 훅에 풀 할당자를 연결해야 합니다.</div>
+
+<h2 id="s8">8. 비교표: 개념 매핑</h2>
+<table>
+<thead><tr><th></th><th>libuv</th><th>Asio</th><th>Mongoose</th><th>libevent</th></tr></thead>
+<tbody>
+<tr><td>언어 / 라이선스</td><td>C89 / MIT</td><td>C++11 / Boost</td><td>C99 / GPLv2·상용</td><td>C / BSD-3</td></tr>
+<tr><td>루프 객체</td><td><code>uv_loop_t</code></td><td><code>io_context</code></td><td><code>mg_mgr</code></td><td><code>event_base</code></td></tr>
+<tr><td>루프 실행</td><td><code>uv_run</code> 3모드</td><td><code>run / run_one / poll / poll_one</code></td><td><code>mg_mgr_poll(ms)</code>만</td><td><code>dispatch / loop(ONCE|NONBLOCK)</code></td></tr>
+<tr><td>연결 객체</td><td><code>uv_tcp_t</code> (스트림)</td><td><code>tcp::socket</code></td><td><code>mg_connection</code></td><td><code>bufferevent</code></td></tr>
+<tr><td>연결 객체 할당</td><td>호출자</td><td>호출자 (관용적으로 <code>shared_ptr</code>)</td><td>라이브러리 (<code>calloc</code>, 교체 가능)</td><td>라이브러리</td></tr>
+<tr><td>읽기 모델</td><td>지속: <code>uv_read_start</code> + <code>alloc_cb</code></td><td>1회: <code>async_read_some</code>; 조합 <code>async_read</code></td><td>이벤트 <code>MG_EV_READ</code>, <code>c-&gt;recv</code>에 누적</td><td><code>readcb</code>, 입력 <code>evbuffer</code>에 누적</td></tr>
+<tr><td>읽기 버퍼 소유</td><td>사용자 (<code>alloc_cb</code>가 제공)</td><td>사용자 (뷰 전달)</td><td>라이브러리 (성장형)</td><td>라이브러리 (체인)</td></tr>
+<tr><td>쓰기</td><td><code>uv_write(req, bufs)</code> 큐잉, <code>uv_try_write</code></td><td><code>async_write_some</code> / <code>async_write</code>, 동시 1개 규칙</td><td><code>mg_send</code> → <code>c-&gt;send</code>에 복사</td><td><code>bufferevent_write</code> → 출력 <code>evbuffer</code></td></tr>
+<tr><td>쓰기 버퍼 수명</td><td>콜백까지 유효</td><td>완료까지 유효</td><td>즉시 재사용 가능 (복사)</td><td>즉시 재사용 (복사) 또는 <code>add_reference</code></td></tr>
+<tr><td>백프레셔</td><td><code>write_queue_size</code> 확인, <code>uv_read_stop</code></td><td>사용자 구현</td><td><code>is_full</code>, 송신 버퍼 길이 확인</td><td>워터마크 내장</td></tr>
+<tr><td>닫기</td><td><code>uv_close</code> + <code>close_cb</code> (비동기)</td><td><code>close()</code> 동기, 진행 연산은 <code>operation_aborted</code></td><td><code>is_closing</code>/<code>is_draining</code> 플래그 → <code>MG_EV_CLOSE</code></td><td><code>bufferevent_free</code> 동기</td></tr>
+<tr><td>오류</td><td>음수 int, <code>uv_strerror</code></td><td><code>error_code</code></td><td><code>MG_EV_ERROR</code> 문자열</td><td>이벤트 비트 + errno</td></tr>
+<tr><td>사용자 데이터</td><td><code>handle-&gt;data</code>, <code>req-&gt;data</code></td><td>클로저 캡처</td><td><code>c-&gt;fn_data</code>, <code>c-&gt;data[32]</code></td><td>콜백 <code>ctx</code></td></tr>
+<tr><td>스레드 간 깨우기</td><td><code>uv_async_send</code></td><td><code>post</code>, <code>strand</code></td><td><code>mg_wakeup</code></td><td><code>event_active</code> (evthread 필요)</td></tr>
+<tr><td>타이머 / 타임아웃</td><td><code>uv_timer_t</code> (연결 타임아웃은 사용자)</td><td><code>steady_timer</code> + <code>cancel</code></td><td><code>mg_timer_add</code>, <code>MG_EV_POLL</code></td><td>bufferevent 타임아웃 내장</td></tr>
+<tr><td>TLS</td><td>없음</td><td><code>ssl::stream</code> (OpenSSL)</td><td>내장 TLS 1.3 / mbedTLS / OpenSSL</td><td><code>bufferevent_openssl</code></td></tr>
+<tr><td>HTTP / WS</td><td>없음</td><td>Beast (별도)</td><td>내장</td><td>evhttp (WS 없음)</td></tr>
+<tr><td>Unix domain</td><td><code>uv_pipe_t</code> (Win: Named Pipe)</td><td><code>local::stream_protocol</code> (최근 Win 지원)</td><td>없음</td><td>fd로 가능</td></tr>
+<tr><td>Windows 백엔드</td><td>IOCP</td><td>IOCP</td><td>select</td><td>select, IOCP(부분)</td></tr>
+<tr><td>Linux 백엔드</td><td>epoll (io_uring은 파일만)</td><td>epoll, io_uring(옵션)</td><td>select / poll / epoll</td><td>epoll</td></tr>
+<tr><td>macOS 백엔드</td><td>kqueue</td><td>kqueue</td><td>select / poll</td><td>kqueue</td></tr>
+</tbody>
+</table>
+
+<h2 id="s9">9. requirement_v0 인터페이스 초안에 대한 시사점</h2>
+<p>초안의 각 요소를 위 라이브러리들의 대응 개념과 나란히 놓고, 그들이 겪은 문제에서 나온 교훈과 <strong>결정해야 할 질문</strong>을 정리했습니다. 결정 자체는 설계 단계의 몫이며, 여기서는 선택지와 근거만 적습니다.</p>
+
+<table>
+<thead><tr><th>초안 요소</th><th>대응 개념</th><th>기성 라이브러리가 준 교훈</th><th>결정할 것</th></tr></thead>
+<tbody>
+<tr><td><code>NetContext</code><br>(opaque, winsock init, block pool)</td><td><code>uv_loop_t</code>, <code>io_context</code>, <code>mg_mgr</code></td><td>루프·풀·플랫폼 초기화를 한 객체에 두는 것은 공통. 모두 "루프 실행 함수"와 "외부 스레드에서 깨우기"를 이 객체에 둠</td><td>run 모드(블로킹 / 한 바퀴 / 폴링)와 stop. 컨텍스트 하나에 서버·클라이언트 여러 개를 허용할지. 풀 크기를 컴파일 타임 상수로 할지 <code>init</code> 인자로 할지</td></tr>
+<tr><td><code>StreamClient</code><br>동기 <code>read/write</code></td><td>Asio의 동기 오버로드. libuv·Mongoose에는 없음</td><td>동기 API를 비동기 루프 위에 "완료까지 run"으로 얹으면 다른 연결의 콜백이 그 사이에 끼어드는 문제가 생김. Asio는 동기 경로를 블로킹 소켓 호출로 따로 둠</td><td>동기 클라이언트가 루프를 전혀 쓰지 않는 독립 경로인지. 타임아웃을 어떻게 줄지(<code>SO_RCVTIMEO</code> vs poll)</td></tr>
+<tr><td><code>EventClient::onRead(ctx, buffer, capacity, cb)</code> + <code>runLoop</code></td><td>libuv <code>uv_read_start</code>(지속 읽기)에 버퍼를 고정한 형태</td><td>버퍼를 한 번 등록하는 지속 읽기는 IOCP/io_uring과 자연스럽고 단순. 대신 <strong>콜백이 돌아오면 버퍼가 즉시 덮어써질 수 있다</strong>는 규칙을 못 박아야 하고, 읽기 중단/재개(<code>uv_read_stop</code>)가 없으면 백프레셔를 걸 수 없음</td><td>콜백 반환 후 버퍼 재사용 규칙. <code>pauseRead/resumeRead</code> 제공 여부. 콜백이 "처리한 바이트 수"를 돌려줘 라이브러리가 나머지를 앞으로 당겨 주는 방식(Netty 디코더 규약)을 쓸지</td></tr>
+<tr><td><code>NetConnection::readAsync / writeAsync</code> + <code>onReadCompleted / onWriteCompleted</code></td><td>Asio 1회 연산 모델. 콜백을 연결에 한 번 등록하는 점은 libuv/Mongoose식</td><td>(1) 동시 쓰기: libuv는 요청 객체 큐로 허용, Asio는 사용자 책임(섞임). 고정 메모리에서는 <mark>"연결당 진행 중 쓰기 1개, 두 번째는 <code>BUSY</code> 코드"</mark>가 가장 단순하고 dangling이 없음. (2) 완료 콜백에 버퍼 포인터·길이를 되돌려 주는 것은 libuv의 <code>req-&gt;data</code>와 같은 역할로 좋음. (3) 읽기 역시 1회 연산이면 사용자가 매번 다시 걸어야 하므로 백프레셔는 자연스럽지만 코드가 길어짐</td><td>1회 읽기(Asio) vs 지속 읽기(libuv) 중 하나로 통일할지, 둘 다 둘지. 쓰기 큐 길이(1 또는 고정 N). 부분 쓰기 시 <code>bytes</code>에 무엇을 넣을지</td></tr>
+<tr><td><code>disconnect()</code>, 연결 해제</td><td><code>uv_close(cb)</code>, <code>socket.close()</code>, <code>is_closing</code></td><td>모든 라이브러리가 "진행 중 콜백이 모두 끝난 뒤에만 재사용"을 보장. 동기 닫기 + 아직 안 돌아온 콜백 조합이 dangling의 근원</td><td>세 가지 중 택일: (A) libuv식 비동기 <code>close(cb)</code>, (B) Mongoose식 닫기 요청 플래그 + <code>onDisconnected</code> 보장, (C) Asio식 즉시 닫기 + 진행 중 콜백은 <code>CANCELED</code>로 반드시 호출. 어느 쪽이든 문서에 한 문장으로 명시</td></tr>
+<tr><td><code>NetResult { code, bytes }</code></td><td>Asio <code>(error_code, size_t)</code>, libuv <code>nread</code></td><td>공통 형태와 일치. EOF·CANCELED·BUSY·FRAME_TOO_LARGE·STALE_HANDLE 같은 "정상 경로의 종료 사유"도 코드에 포함하는 것이 libuv 방식</td><td>코드 번호 체계(libuv처럼 OS errno 번역 포함 여부). 코드 → 이름/메시지 함수</td></tr>
+<tr><td><code>UserContext</code> 2종 (endpoint / connection)</td><td><code>handle-&gt;data</code>, <code>c-&gt;fn_data</code></td><td>동일 패턴. 충분함</td><td>연결 식별자(id 또는 세대 핸들)를 추가로 노출할지 (7.2)</td></tr>
+<tr><td><code>Server</code>, <code>NetEndpoint</code>, <code>ServerHandler</code></td><td>libuv <code>connection_cb</code> + <code>uv_accept</code>; Mongoose 리스너 = 연결</td><td>초안은 같은 역할이 세 타입에 걸쳐 있음. Mongoose처럼 "엔드포인트 콜백(<code>onConnected/onDisconnected</code>) + 연결 콜백(읽기/쓰기 완료)" 2단이면 충분. libuv처럼 accept를 사용자가 호출하게 하면 "32개가 찼을 때 거절할지 대기시킬지"를 사용자가 정할 수 있음</td><td>accept를 자동으로 할지 사용자 호출로 둘지. 가득 찼을 때의 정책</td></tr>
+<tr><td>콜백 호출 규약 (초안에 없음)</td><td>libuv/Asio의 "동기 호출 금지"</td><td>이 한 줄이 재진입 버그의 대부분을 없앰</td><td>"콜백은 <code>runLoop</code> 안에서만, 시작 함수 안에서 동기 호출되지 않으며, 같은 연결의 콜백은 순서가 보장된다"를 문서 첫 장에</td></tr>
+<tr><td>HTTP / WebSocket / 커스텀 프로토콜</td><td>Mongoose <code>pfn</code>, Netty 디코더, Beast 자유 함수</td><td>기반은 이벤트(메시지 도착) 모델 하나로 충분하고 요청/응답은 그 위에 얹음. 커스텀은 프레이머 함수 하나(6.4)</td><td>프로토콜을 "연결에 꽂는 핸들러"로 할지 "스트림을 감싸는 객체"로 할지. 프레이머 규약</td></tr>
+<tr><td>Unix Domain (Windows 포함)</td><td><code>uv_pipe_t</code>, Asio <code>local</code></td><td>Windows 10 1803+ <code>AF_UNIX</code>는 일반 소켓이라 IOCP 경로를 TCP와 공유. libuv처럼 Named Pipe 코드를 따로 둘 필요 없음</td><td>최소 지원 Windows 버전. 소켓 파일 정리 책임</td></tr>
+<tr><td>C 인터페이스 + C++ 래퍼, <code>kiotty-holder.hpp</code></td><td>libuv 공개 구조체 + <code>uv_handle_size</code>; Asio <code>handler_memory</code></td><td>두 방식: (a) libuv처럼 사용자가 구조체를 할당(크기 공개 또는 size 함수), (b) opaque 포인터/핸들 + 라이브러리 내부 풀. (b)가 ABI 안정성과 dangling 방지(세대 핸들)에 유리하고, (a)가 "스택 활용" 요구에 유리</td><td>C 헤더에서 연결 객체를 어떻게 표현할지. C++ 클래스가 C 핸들을 감싸는 얇은 값 타입인지 상태를 가진 객체인지</td></tr>
+</tbody>
+</table>
+
+<div class="box tip"><strong>한 문단 요약</strong>백엔드 통합은 libuv/Asio처럼 <strong>완료 모델</strong>로, 메모리는 libuv처럼 <strong>호출자(또는 시작 시 풀) 소유 + 비동기 닫기 규약</strong>으로, 인터페이스 크기는 Mongoose처럼 <strong>컨텍스트·연결·콜백 셋</strong>으로, 프로토콜 확장은 Netty처럼 <strong>프레이머 함수 하나</strong>로, 백프레셔는 libevent처럼 <strong>인터페이스에 명시</strong>하는 것이 네 라이브러리가 각자 가장 잘한 부분을 합친 모양입니다.</div>
+
+<h2 id="s10">10. 참고 자료</h2>
+<ul>
+<li>libuv: <a href="https://docs.libuv.org/en/v1.x/design.html">Design overview</a>, <a href="https://docs.libuv.org/en/v1.x/stream.html">uv_stream_t</a>, <a href="https://docs.libuv.org/en/v1.x/guide.html">An Introduction to libuv (uvbook)</a>, <a href="https://github.com/libuv/libuv">소스</a> (<code>src/unix/stream.c</code>, <code>src/win/tcp.c</code>)</li>
+<li>Asio: <a href="https://think-async.com/Asio/">standalone Asio</a>, <a href="https://www.boost.org/doc/libs/release/doc/html/boost_asio/overview.html">Boost.Asio Overview</a> (Proactor 설명, Custom memory allocation), <a href="https://www.boost.org/doc/libs/release/doc/html/boost_asio/example/cpp11/allocation/server.cpp">allocation/server.cpp 예제</a>, <a href="https://github.com/boostorg/beast">Boost.Beast</a></li>
+<li>Mongoose: <a href="https://mongoose.ws/documentation/">Documentation</a>, <a href="https://github.com/cesanta/mongoose">소스</a> (<code>mongoose.c</code>의 <code>http_cb</code>, <code>mg_fs_packed</code>)</li>
+<li>libevent: <a href="https://libevent.org/libevent-book/">Fast portable non-blocking network programming with Libevent</a> (bufferevent, evbuffer 장)</li>
+<li>HTTP 파서: <a href="https://github.com/nodejs/llhttp">llhttp</a>, <a href="https://github.com/h2o/picohttpparser">picohttpparser</a></li>
+<li>Netty: <a href="https://netty.io/4.1/api/io/netty/handler/codec/ByteToMessageDecoder.html">ByteToMessageDecoder</a>, <a href="https://netty.io/4.1/api/io/netty/handler/codec/LengthFieldBasedFrameDecoder.html">LengthFieldBasedFrameDecoder</a></li>
+<li>고정 메모리: <a href="https://www.nongnu.org/lwip/2_1_x/group__tcp__raw.html">lwIP raw TCP API</a>, <a href="https://docs.zephyrproject.org/latest/connectivity/networking/api/net_buf.html">Zephyr net_buf</a></li>
+<li>플랫폼: <a href="https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/">AF_UNIX comes to Windows</a>, <a href="https://kernel.dk/io_uring.pdf">Efficient IO with io_uring</a>, <a href="https://github.com/piscisaureus/wepoll">wepoll</a> (IOCP 위에서 준비 모델을 흉내 내는 사례), <a href="https://man7.org/linux/man-pages/man7/epoll.7.html">epoll(7)</a>, <a href="https://man.freebsd.org/cgi/man.cgi?kqueue">kqueue(2)</a></li>
+<li>DICOM: <a href="https://dicom.nema.org/medical/dicom/current/output/html/part08.html">PS3.8 Network Communication Support for Message Exchange</a> (PDU 구조)</li>
+</ul>
+<footer>이 문서는 각 라이브러리의 공개 문서와 소스 구조를 바탕으로 작성한 학습 노트입니다. 버전에 따라 세부 API 이름이 다를 수 있으므로 구현 전에는 해당 버전 문서를 확인하세요.</footer>
+</main>
+</body>
+</html>
