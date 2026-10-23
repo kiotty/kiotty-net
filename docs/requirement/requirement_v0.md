@@ -95,6 +95,7 @@ struct NetResult {
 
 1. 서버 Configuration과 클라이언트 Configuration은 구분되어야 한다.
     - TLS가 다르기 때문에
+    - 동기 Connect, Read, Write 때문에 클라이언트 Configuration은 max_trial과 time_interval_between_trival이 있는 것이 좋다. (아이디어의 유효성 검증 필요)
 
 2. Pipe, TCP, TLS 3가지 연결 방식이 지원된다.
 
@@ -144,7 +145,123 @@ enum class TlsV13CipherSuite {
         1. 신원 인증 방식 (인증할 수 있으면 인증함 (Optional), 반드시 인증해야 함(REQUIRED))
         2. 인증을 한다면, (server_trust_store_path)
 
-### 4. Client
+### 4. Stage
+
+```cpp
+class Stage
+{
+public:
+    Stage(size_t capacity);
+    ~Stage();
+
+    class Provider {
+        // 현재 쓸 수 있는 길이를 준다.
+        size_t writable() const;
+        // 외부에서 요청한 길이만큼 쓸 수 있으면 버퍼를 준다.
+        void* prepare(size_t requested_length);
+        // 외부에서 실제 쓴 길이만큼 알려준다.
+        void commit(size_t written_length);
+    }
+
+
+    class Consumer {
+        // 현재  읽을 수 있는 길이만큼 준다.
+        size_t readalbe() const;
+        // 외부에서 요청한 길이만큼 읽을 수 있으면 버퍼를 준다.
+        void* prepare(size_t requested_length);
+        // 외부에서 실제 읽은 길이만큼 알려준다.
+        void commit(size_t consumed_length);
+    };    
+
+    Provider& provider();
+    Consumer& consumer();
+    
+    // _begin_pos를 0으로 남아있는 데이터의 길이만큼을 _end_pos로 돌리고, 데이터를 memmove.
+    void compact();
+
+private:
+    char* _buffer;
+    size_t _capacity;
+    size_t _begin_pos; // 데어터가 시작하는 index
+    size_t _end_pos; // 데이터가 끝나는 index
+};
+
+/*
+IOThread
+    // Read의 완료 루틴 (IOCP 또는 io_uring)
+    ... (int32_t read_length // 실제 읽은 길이)
+    auto& provider = stage.provider();
+    auto& consumer = stage.consumer();
+    
+    provider.commit(read_length);
+
+    int64_t length {0};
+    while ((length = connection->latest_read_request_length) > 0) {
+        auto* buffer = consumer.prepare(length);
+        if (buffer) {
+            handler.onRead(user_context, connection, buffer, Ok(length));
+            consumer.commit(length);
+        }
+    }
+    
+    stage.compact();
+    socket.read(); // provider.prepare(), provider.remained()를 인자로 넘기기    
+*/
+
+```
+
+### 5. Connection
+
+- 비동기 Socket IO 모델에서 연결을 추상화하는 객체
+- EventClient, Server에서 사용됨
+  - EventClient : 비동기 read, 동기 write
+  - Server : 비동기 read, 비동기 write
+- read, write
+  - Pipe, TLS, TCP에 따라서 달라짐
+
+```cpp
+
+struct ConnectionInfo
+{
+    char hostname[128]; // ip 또는 pipe
+    int32_t port;
+}
+
+struct Connection {
+    ConnectionInfo& info();
+    
+    // 읽기 요청을 하고, onRead에서 읽은 값을 받는다. 
+    // onRead는 Connection을 관리하는 주체가 내부적으로 가지고 있는 Stage에 값을 담아서 준다.
+    void read(void* user_context, size_t size);
+
+    // 쓰기 요청
+    // Connection에서 송신 Stage로 데이터를 복사하고 제출함
+    void write(void* user_context, const void* data, size_t size);
+
+    /* 라이브러리 내부에서 HTTP, WebSocket을 위한 확장 함수 */
+    // 요구한 길이만큼 버퍼 여유가 되면 pointer를 돌려줌
+    // 요구한 길이만큼 버퍼가 없다면 nullptr
+    // 어떻게 이 함수를 라이브러리 사용자한테는 공개 안하고 내부적으로만 쓸지는 고민
+    void* beginWrite(size_t requested_length);
+    void endWrite(void* user_context, size_t written_length);
+
+    // Long term 작업을 하기 위해 IO Thread에서 polling을 하지 않음.
+    detach();
+    attach();
+}
+
+struct ConnectionHandler {
+    void* user_context;
+    void (*onConnected)(void* user_context, Connection* connection);
+    void (*onDisconnected)(void* user_context, Connection* connection, NetResult result);
+    // 상대방에서 종료 / 내가 종료 (shutdown) / Routine 멈춤 / 에러 
+    void (*onRead)(void* user_context, Connection* connection, const void* buf, NetResult result); // read에서 주입한 user_context
+    void (*onWritten)(void* user_context, Connection* connection, NetResult result); // write에서 주입한 user_context
+}
+```
+
+
+### 6. Client
 
 1. Client는 Configuration과 상관 없이 동일한 기능을 제공해야 한다.
 
@@ -154,37 +271,90 @@ enum class TlsV13CipherSuite {
 
 - StreamClient
 
-    1. read
-    2. write
-    3. connect, disconnect를 제공할지. 생성자에서 connect하고 isConnected 함수를 제공하고 소멸자에서 disconnect할지 고민 중. 생각해보니 c 함수 형태로 제공하려면 connect, disconnect가 맞겠다..
-
+    1. connect
+    2. disconnect
+    3. read
+    4. write
+    
 -  EventClient
 
-    1. connect, disconnect를 제공할지. 생성자에서 connect하고 isConnected 함수를 제공하고 소멸자에서 disconnect할지 고민 중. 생각해보니 c 함수 형태로 제공하려면 connect, disconnect가 맞을지도.. 헷갈
-    2. write
-    3. run();
-    4. stop();
-    5. 초기화할 때 EventClinetHandler와 read_buffer_size도 같이 넣어야할 듯.
-    EventClientHandler {
-        void* user_context;
-        void (*onRead)(void* user_context, const void* buffer, NetResult result)
-        void (*onClosed)(void* user_context, NetResult result)
-    }
+    1. 생성자 (송신 버퍼 크기, 수신 버퍼 크기, Endpoint 주입) 
+    2. connect
+    3. disconnect
+    4. run // 해당 thread를 점유하여 event를 계속 폴링함.
+    5. stop // 연결은 끊지 않고, polling을 중간에 취소함.
 
-### 5. Server
+> 고민되는 부분. 생각보다 network 환경이 열악할 때도 있기 때문에 timeout만 걸어두는 게 아니라,
+> 재시도 횟수와 시도와 시도 사이의 time interval도 걸어두는 게 좋다.
+
+### 7. Server
 
 1. Server는 Configuration과 상관 없이 동일한 기능으로 돌아간다.
-2. backend는 아래와 같다.
+2. Server 인터페이스는 아래와 같다.
 
-|Windows|Linux|Android|Darwin(MacOS, ios)|
-|:-:|:-:|:-:|:-:|
-|IOCP|io_uring, epoll|epoll|kqueue|
+- Server
 
-3. Server 인터페이스는 아래와 같다.
+    1. 생성자 (송신 버퍼 크기, 수신 버퍼 크기, Endpoint 주입)
+    2. open(); // listen까지는 해줌
+    3. close(); // 
+    4. run(); // 해당 thread를 점유하여 event를 계속 폴링함
+    5. stop(); // listen은 유지한 상태로, polling을 중간에 취소함.
 
-- EventServer
+### StateMachine
 
-    1. 생성자
-    2. open(void
-        )
-    3. close()
+onReadComplete(Connection* connection, void* user_context, const char* buffer, size_t length)
+{
+    // 1. 현재 상태
+    auto& current_state = user_context->state;
+    auto& next_state = when(current_state)
+    {
+        State::V1 -> doSomething(buffer, length);
+        State::V2 -> doSomething(buffer, length);
+        State::V3 -> doSomething(buffer, length);
+        State::V4 -> doLongtermSomething(buffer, length, [](auto& next_state){
+            // 상대방이 호출한 thread에서 실행
+            when(next_state)
+            {
+                State::V1 -> connection->read(user_context->buffer, length);
+                State::V2 -> connection->write(user_context->buffer, length);
+                State::V3 -> connection->read(user_context->buffer, length);
+            }
+        });
+    }
+    when(next_state) 
+    {
+        State::V1 -> connection->read(user_context->buffer, length);
+        State::V2 -> connection->write(user_context->buffer, length);
+        State::V3 -> connection->read(user_context->buffer, length);
+    }
+}
+
+onWriteComplete(Connection* connection, void* user_context, const char* buffer, size_t length)
+{
+    // 1. 현재 상태
+    auto& current_state = user_context->state;
+    auto& next_state = when(current_state)
+    {
+        State::V1 -> doSomething(buffer, length);
+        State::V2 -> doSomething(buffer, length);
+        State::V3 -> doSomething(buffer, length);
+        State::V4 -> doLongtermSomething(buffer, length, [](auto& next_state){
+            // 상대방이 호출한 thread에서 실행
+            when(next_state)
+            {
+                State::V1 -> connection->read(user_context->buffer, length);
+                State::V2 -> connection->write(user_context->buffer, length);
+                State::V3 -> connection->read(user_context->buffer, length);
+            }
+        });
+    }
+    when(next_state) 
+    {
+        State::V1 -> connection->read(user_context->buffer, length);
+        State::V2 -> connection->write(user_context->buffer, length);
+        State::V3 -> connection->read(user_context->buffer, length);
+    }
+}
+
+
+```
