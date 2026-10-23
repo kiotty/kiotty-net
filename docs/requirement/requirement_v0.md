@@ -227,6 +227,13 @@ struct ConnectionInfo
     int32_t port;
 }
 
+struct ConnectionSuspension {
+    ConnectionInfo& info();
+    // Connection이 다시 IO Thread로부터 event를 받도록 붙이기.
+    // 내부적으로는 eventfd나 PostIO 뭐시기를 통해서 IOThread가 ConnectionHandler의 onAttached를 호출시키도록 함
+    void resume(void* user_context);
+};
+
 struct Connection {
     ConnectionInfo& info();
     
@@ -238,6 +245,12 @@ struct Connection {
     // Connection에서 송신 Stage로 데이터를 복사하고 제출함
     void write(void* user_context, const void* data, size_t size);
 
+    // Long term 작업을 하기 위해 IO Thread에서 polling을 하지 않음.
+    // peer가 끊거나 더 이상 polling을 하지 않(stop)거나 내가 disconnect해도 다시 attach할 때까지 connection은 유지됨.
+    // detach와 동시에 Connection이 내부적으로 보유하고 있는 Stage의 lifecycle도 connection에 옮겨가면 좋을듯.
+    ConnectionSuspension suspend();
+}
+
     /* 라이브러리 내부에서 HTTP, WebSocket을 위한 확장 함수 */
     // 요구한 길이만큼 버퍼 여유가 되면 pointer를 돌려줌
     // 요구한 길이만큼 버퍼가 없다면 nullptr
@@ -245,11 +258,8 @@ struct Connection {
     void* beginWrite(size_t requested_length);
     void endWrite(void* user_context, size_t written_length);
 
-    // Long term 작업을 하기 위해 IO Thread에서 polling을 하지 않음.
-    detach();
-    attach();
-}
 
+};
 struct ConnectionHandler {
     void* user_context;
     void (*onConnected)(void* user_context, Connection* connection);
@@ -257,6 +267,8 @@ struct ConnectionHandler {
     // 상대방에서 종료 / 내가 종료 (shutdown) / Routine 멈춤 / 에러 
     void (*onRead)(void* user_context, Connection* connection, const void* buf, NetResult result); // read에서 주입한 user_context
     void (*onWritten)(void* user_context, Connection* connection, NetResult result); // write에서 주입한 user_context
+
+    void (*onAttached)(void* user_context, Connection* connection)
 }
 ```
 
@@ -302,6 +314,8 @@ struct ConnectionHandler {
 
 ### StateMachine
 
+onConnection
+
 onReadComplete(Connection* connection, void* user_context, const char* buffer, size_t length)
 {
     // 1. 현재 상태
@@ -311,15 +325,12 @@ onReadComplete(Connection* connection, void* user_context, const char* buffer, s
         State::V1 -> doSomething(buffer, length);
         State::V2 -> doSomething(buffer, length);
         State::V3 -> doSomething(buffer, length);
-        State::V4 -> doLongtermSomething(buffer, length, [](auto& next_state){
-            // 상대방이 호출한 thread에서 실행
-            when(next_state)
-            {
-                State::V1 -> connection->read(user_context->buffer, length);
-                State::V2 -> connection->write(user_context->buffer, length);
-                State::V3 -> connection->read(user_context->buffer, length);
-            }
-        });
+        State::V4 -> {
+            connection->detach(); 
+            doLongtermSomething(connection, user_context, buffer, length);
+            // 여기서 작업이 끝나면 connection->attach(user_context);
+            를 통해 작업이 끝났음을 알린다.
+        }
     }
     when(next_state) 
     {
