@@ -66,29 +66,85 @@ src/ //
             kiotty-holder.hpp // Derived class의 최대 크기가 정해진 Base class를 별도로 동적할당하지 않고 보관하기 위한 container.
         
 tests/ // 
+docs/
+    requirement/
+        requirement_v0.md           // 이 문서. 외부 인터페이스와 규칙만
+        implementation_guide_v0.md  // 구현 예시와 설계 근거
 
 
 
 ## 외부 인터페이스
 
+이 장은 인터페이스 선언과 그 의미를 주석으로만 적는다. 구현 예시, 흐름 의사코드, 프로토콜 예제는 [implementation_guide_v0.md](implementation_guide_v0.md) 에 있다.
+
+인터페이스는 C 와 C++ 두 벌이다. 규약은 다음과 같다.
+
+- `include/kiotty-net.h` 하나에 C 인터페이스가 있고, C++ 로 빌드하면 같은 헤더가 C++ 인터페이스를 함께 노출한다. C++ 인터페이스는 C 구조체 위의 얇은 typed wrapper 다.
+- C 는 `kiotty_` 접두사, 불투명 핸들 (`kiotty_server_t*`), 콜백은 `void* user_context` 를 첫 인자로 받는 함수 포인터 구조체다.
+- 두 벌 모두 런타임 동적 할당이 없다. 객체 생성 시점(서버 생성, Runner 생성)에 `max_clients` 분량을 한 번 잡고 재사용한다.
+- **thread 규칙.** 모든 콜백은 IO Thread 에서 순서대로 호출되고, `Connection` / `WebSocket` / `HttpResponse` 는 IO Thread 에서만 쓴다.
+  다른 thread 가 할 수 있는 일은 소유자(Server, EventClient, HttpServer)의 `resume(id, payload)` 와 `stop()` 뿐이다. `resume` 은 IO Thread 에서 `onResumed` 콜백 한 번으로 돌아온다.
+- 각 절은 C++ 선언을 먼저 적고 C 선언을 뒤에 적는다. 이름은 1:1 로 대응한다.
+
+공통 타입
+
+```cpp
+struct Span {                     // 읽기 전용 바이트 범위. 텍스트와 바이너리 모두 이것으로 받는다. 소유하지 않는다
+    const char* data;
+    size_t      length;
+};
+
+typedef uint64_t ConnectionId;    // 상위 32비트 generation + 하위 32비트 slot index. 0 은 무효. 연결이 닫히면 같은 slot 이라도 값이 달라진다
+```
+
+```c
+typedef struct kiotty_span { const char* data; size_t length; } kiotty_span_t;
+typedef uint64_t kiotty_connection_id_t;
+```
+
 ### 1. Error 처리
 
 ```cpp
 enum NetCode {
-    SUCCESS
+    SUCCESS,
+    PEER_CLOSED,          // 상대가 FIN 을 보냄. resume: 그 id 의 연결이 이미 닫힘
+    SOCKET_ERROR,         // OS 소켓 에러
+    PROTOCOL_ERROR,       // readUntil 의 max 안에 delimiter 가 없음, 프로토콜 파서 실패
+    REQUEST_TOO_LARGE,    // read 요구 길이가 수신 Stage capacity 보다 큼
+    UNHANDLED_EVENT,      // StateMachine 표에 (state, event) 행이 없음
+    ILLEGAL_TRANSITION,   // StateMachine 핸들러가 .to() 목록에 없는 상태로 감 (debug)
+    SESSION_EXHAUSTED,    // max_clients 초과
+    DUPLICATE_RULE,       // C StateMachine 표에 같은 (state, event) 가 두 번
+    TIMEOUT,              // 동기 API 의 timeout 만료
+    TABLE_FULL,           // 라우트 / 정적 경로 / 승격 경로 등록 표가 가득 참
+    BUFFER_FULL,          // 송신 Stage, 응답 버퍼, resume 큐에 여유가 없음
+    NOT_FOUND,            // 파일 없음
+    INVALID_ARGUMENT
 };
+```
+
+```c
+typedef enum kiotty_code {
+    KIOTTY_SUCCESS, KIOTTY_PEER_CLOSED, KIOTTY_SOCKET_ERROR, KIOTTY_PROTOCOL_ERROR, KIOTTY_REQUEST_TOO_LARGE,
+    KIOTTY_UNHANDLED_EVENT, KIOTTY_ILLEGAL_TRANSITION, KIOTTY_SESSION_EXHAUSTED, KIOTTY_DUPLICATE_RULE,
+    KIOTTY_TIMEOUT, KIOTTY_TABLE_FULL, KIOTTY_BUFFER_FULL, KIOTTY_NOT_FOUND, KIOTTY_INVALID_ARGUMENT
+} kiotty_code_t;
 ```
 
 ### 2. 예외 처리
 
-무조건, Result<V, ErrorCode>로.
-외부 인터페이스는 아래 방식으로 처리
+무조건, Result<V, ErrorCode>로. 예외를 던지지 않는다.
+길이와 코드를 같이 돌려주는 동기 API (StreamClient) 는 아래 타입을 쓴다.
 
 ```cpp
 struct NetResult {
-    int32_t bytes;
+    int32_t bytes;   // 전달 또는 송신한 길이. 에러면 0
     NetCode code;
-}
+};
+```
+
+```c
+typedef struct kiotty_result { int32_t bytes; kiotty_code_t code; } kiotty_result_t;
 ```
 
 ### 3. Configuration 구성 방식
@@ -145,7 +201,48 @@ enum class TlsV13CipherSuite {
         1. 신원 인증 방식 (인증할 수 있으면 인증함 (Optional), 반드시 인증해야 함(REQUIRED))
         2. 인증을 한다면, (server_trust_store_path)
 
+6. Endpoint 와 공통 설정. TLS 설정(5번 Builder)은 미결이므로 포인터로만 둔다.
+
+```cpp
+enum class Transport { Tcp, Tls, Pipe };
+
+struct Endpoint {
+    Transport   transport;
+    const char* host;        // Tcp / Tls: ip 또는 hostname. Pipe: pipe 이름 (Windows: \\.\pipe\name, Unix: 경로)
+    uint16_t    port;        // Pipe 면 무시
+};
+
+struct ServerConfig {
+    Endpoint          endpoint;
+    size_t            max_clients;        // 동시 연결 수. 이만큼의 Connection, Stage, Session, resume 큐가 생성 시점에 잡힌다
+    size_t            recv_capacity;      // Connection 당 수신 Stage 크기
+    size_t            send_capacity;      // Connection 당 송신 Stage 크기
+    const TlsServerConfig* tls;           // Transport::Tls 일 때만. 미결 (5번)
+};
+
+struct ClientConfig {
+    Endpoint          endpoint;
+    size_t            recv_capacity;
+    size_t            send_capacity;
+    uint32_t          connect_timeout_ms;
+    uint32_t          max_trial;          // 연결 재시도 횟수
+    uint32_t          trial_interval_ms;  // 재시도 간격
+    const TlsClientConfig* tls;           // 미결 (5번)
+};
+```
+
+```c
+typedef enum kiotty_transport { KIOTTY_TCP, KIOTTY_TLS, KIOTTY_PIPE } kiotty_transport_t;
+typedef struct kiotty_endpoint { kiotty_transport_t transport; const char* host; uint16_t port; } kiotty_endpoint_t;
+typedef struct kiotty_server_config { kiotty_endpoint_t endpoint; size_t max_clients; size_t recv_capacity; size_t send_capacity; const kiotty_tls_server_config_t* tls; } kiotty_server_config_t;
+typedef struct kiotty_client_config { kiotty_endpoint_t endpoint; size_t recv_capacity; size_t send_capacity; uint32_t connect_timeout_ms; uint32_t max_trial; uint32_t trial_interval_ms; const kiotty_tls_client_config_t* tls; } kiotty_client_config_t;
+```
+
 ### 4. Stage
+
+Connection 하나가 수신용, 송신용으로 두 개 가지는 고정 크기 버퍼. 라이브러리 내부 객체이며 C 인터페이스로 노출하지 않는다.
+IO Thread 는 read 요청이 있든 없든 계속 recv 해서 수신 Stage 에 쌓고, `Connection::read*` 는 "이 조건이 되면 onRead 한 번" 이라는 조건 등록일 뿐이다.
+수신 흐름(ReadRequest, pump)은 구현 가이드 1절에 있다.
 
 ```cpp
 class Stage
@@ -154,462 +251,654 @@ public:
     Stage(size_t capacity);
     ~Stage();
 
-    class Provider {
-        // 현재 쓸 수 있는 길이를 준다.
-        size_t writable() const;
-        // 외부에서 요청한 길이만큼 쓸 수 있으면 버퍼를 준다.
-        void* prepare(size_t requested_length);
-        // 외부에서 실제 쓴 길이만큼 알려준다.
-        void commit(size_t written_length);
-    }
+    class Provider {                          // 쓰는 쪽 (recv 완료, write 요청)
+        size_t writable() const;              // 현재 쓸 수 있는 길이
+        void*  prepare(size_t requested);     // requested 만큼 쓸 수 있으면 버퍼, 아니면 nullptr
+        void   commit(size_t written);        // 실제 쓴 길이
+    };
 
-
-    class Consumer {
-        // 현재  읽을 수 있는 길이만큼 준다.
-        size_t readalbe() const;
-        // 외부에서 요청한 길이만큼 읽을 수 있으면 버퍼를 준다.
-        void* prepare(size_t requested_length);
-        // 외부에서 실제 읽은 길이만큼 알려준다.
-        void commit(size_t consumed_length);
-    };    
+    class Consumer {                          // 읽는 쪽 (onRead 전달, send 제출)
+        size_t readable() const;              // 현재 읽을 수 있는 길이
+        void*  prepare(size_t requested);     // requested 만큼 읽을 수 있으면 버퍼, 아니면 nullptr. commit 전까지는 peek
+        void   commit(size_t consumed);       // 실제 소비한 길이
+    };
 
     Provider& provider();
     Consumer& consumer();
-    
-    // _begin_pos를 0으로 남아있는 데이터의 길이만큼을 _end_pos로 돌리고, 데이터를 memmove.
-    void compact();
+    size_t    capacity() const;
+    void      compact();                      // 남은 데이터를 버퍼 앞으로 memmove 해서 provider 공간 확보
 
 private:
-    char* _buffer;
+    char*  _buffer;
     size_t _capacity;
-    size_t _begin_pos; // 데어터가 시작하는 index
-    size_t _end_pos; // 데이터가 끝나는 index
+    size_t _begin_pos;                        // 데이터가 시작하는 index
+    size_t _end_pos;                          // 데이터가 끝나는 index
 };
-
-/*
-IOThread
-    // Read의 완료 루틴 (IOCP 또는 io_uring)
-    ... (int32_t read_length // 실제 읽은 길이)
-    auto& provider = stage.provider();
-    auto& consumer = stage.consumer();
-    
-    provider.commit(read_length);
-
-    int64_t length {0};
-    while ((length = connection->latest_read_request_length) > 0) {
-        auto* buffer = consumer.prepare(length);
-        if (buffer) {
-            handler.onRead(user_context, connection, buffer, Ok(length));
-            consumer.commit(length);
-        }
-    }
-    
-    stage.compact();
-    socket.read(); // provider.prepare(), provider.remained()를 인자로 넘기기    
-*/
-
 ```
 
 ### 5. Connection
 
-- 비동기 Socket IO 모델에서 연결을 추상화하는 객체
-- EventClient, Server에서 사용됨
-  - EventClient : 비동기 read, 동기 write
-  - Server : 비동기 read, 비동기 write
-- read, write
-  - Pipe, TLS, TCP에 따라서 달라짐
+- 비동기 Socket IO 모델에서 연결을 추상화하는 객체. EventClient, Server 에서 사용된다.
+- Pipe, TLS, TCP 에 따라 read / write 의 내부가 달라지지만 인터페이스는 같다.
+- **IO Thread 에서만 사용한다.** 다른 thread 는 `id()` 값을 들고 있다가 소유자의 `resume(id, payload)` 를 부른다 (6, 7절).
+- read 요청은 두 종류뿐이고 한 번에 하나만 걸린다. 새 요청은 이전 요청을 대체한다. write 는 read 와 독립이다.
+- `suspend()` 는 콜백을 멈추고 slot 을 붙잡아 둔다. peer 가 끊어도 slot 은 재사용되지 않고, `resume` 뒤 `onResumed` 다음에 `onDisconnected` 가 온다. 재개는 `resume` 으로만 된다.
 
 ```cpp
-
-struct ConnectionInfo
-{
-    char hostname[128]; // ip 또는 pipe
+struct ConnectionInfo {
+    char    hostname[128];   // ip 또는 pipe 이름
     int32_t port;
-}
-
-struct ConnectionBlock {
-    ConnectionInfo& info();
-    // Connection이 다시 IO Thread로부터 event를 받도록 붙이기.
-    // 내부적으로는 eventfd나 PostIO 뭐시기를 통해서 IOThread가 ConnectionHandler의 onAttached를 호출시키도록 함
-    void resume(void* user_context);
 };
 
 struct Connection {
     ConnectionInfo& info();
-    
-    // 읽기 요청을 하고, onRead에서 읽은 값을 받는다. 
-    // onRead는 Connection을 관리하는 주체가 내부적으로 가지고 있는 Stage에 값을 담아서 준다.
-    void read(void* user_context, size_t size);
+    ConnectionId    id() const;                      // 다른 thread 에 넘길 값. Session 에 저장해 둔다
 
-    // 쓰기 요청
-    // Connection에서 송신 Stage로 데이터를 복사하고 제출함
-    void write(void* user_context, const void* data, size_t size);
+    void* context() const;                           // per-connection slot. 라이브러리는 읽지도 쓰지도 않는다. (StateMachine Runner 는 여기에 Session 을 둔다)
+    void  setContext(void* context);
 
-    // Long term 작업을 하기 위해 IO Thread에서 polling을 하지 않음.
-    // peer가 끊거나 더 이상 polling을 하지 않(stop)거나 내가 disconnect해도 다시 attach할 때까지 connection은 유지됨.
-    // detach와 동시에 Connection이 내부적으로 보유하고 있는 Stage의 lifecycle도 connection에 옮겨가면 좋을듯.
-    ConnectionBlock suspend();
+    // 수신 Stage 에 정확히 exact 바이트가 모이면 onRead(data) 한 번. data.length == exact.
+    // exact 가 recv_capacity 보다 크면 즉시 close(REQUEST_TOO_LARGE).
+    void read(size_t exact);
 
-    /* 라이브러리 내부에서 HTTP, WebSocket을 위한 확장 함수 */
-    // 요구한 길이만큼 버퍼 여유가 되면 pointer를 돌려줌
-    // 요구한 길이만큼 버퍼가 없다면 nullptr
-    // 어떻게 이 함수를 라이브러리 사용자한테는 공개 안하고 내부적으로만 쓸지는 고민
-    void* beginWrite(size_t requested_length);
-    void endWrite(void* user_context, size_t written_length);
+    // delimiter 가 나타나면 onRead(data) 한 번. data 는 delimiter 를 포함한다.
+    // max 바이트 안에 delimiter 가 없으면 close(PROTOCOL_ERROR). delimiter 는 1..4 바이트이며 등록 시 Connection 안으로 복사된다.
+    void readUntil(Span delim, size_t max);
 
+    // 송신 Stage 로 복사하고 제출. 완료되면 onWritten(length) 한 번. 여유가 없으면 즉시 close(BUFFER_FULL).
+    void write(Span data);
+
+    // Long term 작업을 위해 IO Thread 의 polling 을 멈춘다. 콜백이 나가지 않으며 들어온 데이터는 수신 Stage 에 쌓인다.
+    // Server::resume(id, payload) 가 올 때까지 유지된다. 그동안 slot 은 재사용되지 않는다.
+    void suspend();
+
+    // 종료. 마지막으로 onDisconnected(reason) 한 번이 오고, 그 뒤 이 Connection 에 콜백은 없다.
+    void close(NetCode reason = SUCCESS);
+
+    // deadline 하나. 만료되면 onTimeout 한 번이 오고 deadline 은 해제된다. 0 이면 해제.
+    void setTimeout(uint32_t ms);
 };
 
+// 모든 콜백의 첫 인자는 ConnectionHandler::user_context (handler 소유자) 다. per-connection 데이터는 Connection::context() 에 둔다.
 struct ConnectionHandler {
     void* user_context;
-    void (*onConnected)(void* user_context, Connection* connection);
-    void (*onDisconnected)(void* user_context, Connection* connection, NetResult result);
-    // 상대방에서 종료 / 내가 종료 (shutdown) / Routine 멈춤 / 에러 
-    void (*onRead)(void* user_context, Connection* connection, const void* buf, NetResult result); // read에서 주입한 user_context
-    void (*onWritten)(void* user_context, Connection* connection, NetResult result); // write에서 주입한 user_context
-
-    // Connection 이벤트를 받아오지 않다가(외부 thread에서 긴 작업을 수행하기 위해서) 다시 받아오게 붙었을 때
-    void (*onResumed)(void* user_context, Connection* connection);
-}
+    void (*onConnected)   (void* user_context, Connection* connection);                   // accept / connect 완료
+    void (*onDisconnected)(void* user_context, Connection* connection, NetCode reason);   // 마지막 콜백
+    void (*onRead)        (void* user_context, Connection* connection, Span data);        // data 는 수신 Stage. return 하면 무효
+    void (*onWritten)     (void* user_context, Connection* connection, size_t length);    // Connection::write 하나의 완료
+    void (*onResumed)     (void* user_context, Connection* connection, void* payload);    // Server::resume(id, payload). 이 안에서 다시 suspend() 하면 유지
+    void (*onTimeout)     (void* user_context, Connection* connection);                   // setTimeout 만료
+};
 ```
 
+```c
+typedef struct kiotty_connection kiotty_connection_t;                                   /* 불투명 */
+typedef struct kiotty_connection_info { char hostname[128]; int32_t port; } kiotty_connection_info_t;
+
+const kiotty_connection_info_t* kiotty_connection_info(kiotty_connection_t* c);
+kiotty_connection_id_t kiotty_connection_id(kiotty_connection_t* c);
+void*  kiotty_connection_context(kiotty_connection_t* c);
+void   kiotty_connection_set_context(kiotty_connection_t* c, void* context);
+void   kiotty_connection_read(kiotty_connection_t* c, size_t exact);
+void   kiotty_connection_read_until(kiotty_connection_t* c, kiotty_span_t delim, size_t max);
+void   kiotty_connection_write(kiotty_connection_t* c, kiotty_span_t data);
+void   kiotty_connection_suspend(kiotty_connection_t* c);
+void   kiotty_connection_close(kiotty_connection_t* c, kiotty_code_t reason);
+void   kiotty_connection_set_timeout(kiotty_connection_t* c, uint32_t ms);
+
+typedef struct kiotty_connection_handler {
+    void* user_context;
+    void (*on_connected)   (void* user_context, kiotty_connection_t* c);
+    void (*on_disconnected)(void* user_context, kiotty_connection_t* c, kiotty_code_t reason);
+    void (*on_read)        (void* user_context, kiotty_connection_t* c, kiotty_span_t data);
+    void (*on_written)     (void* user_context, kiotty_connection_t* c, size_t length);
+    void (*on_resumed)     (void* user_context, kiotty_connection_t* c, void* payload);
+    void (*on_timeout)     (void* user_context, kiotty_connection_t* c);
+} kiotty_connection_handler_t;
+```
 
 ### 6. Client
 
 1. Client는 Configuration과 상관 없이 동일한 기능을 제공해야 한다.
 
 2. StreamClient와 EventClient를 구분한다.
-    2.1 StreamClient의 목적은 User-space의 데이터를 direct하게 바로 network로 보내주기 위함이다.
-    2.2 EventClient의 목적은 서버에서 먼저 날아오는 이벤트를 효과적으로 handle하면서도 User-space의 데이터를 direct하게 network로 보내는 것이 목적이다.
+    2.1 StreamClient의 목적은 User-space의 데이터를 direct하게 바로 network로 보내주기 위함이다. 동기 API 이며 IO Thread 가 없다.
+    2.2 EventClient의 목적은 서버에서 먼저 날아오는 이벤트를 효과적으로 handle하면서도 User-space의 데이터를 direct하게 network로 보내는 것이 목적이다. Connection 하나와 IO Thread 를 가지며 ConnectionHandler (또는 StateMachine Runner) 를 주입받는다.
 
-- StreamClient
+```cpp
+class StreamClient {
+public:
+    StreamClient(const ClientConfig& config);
+    NetCode   connect();                                            // max_trial / trial_interval_ms 만큼 재시도
+    void      disconnect();
+    NetResult read(void* buffer, size_t length, uint32_t timeout_ms);   // 최대 length. 0 바이트면 PEER_CLOSED
+    NetResult write(Span data, uint32_t timeout_ms);
+};
 
-    1. connect
-    2. disconnect
-    3. read
-    4. write
-    
--  EventClient
+class EventClient {
+public:
+    EventClient(const ClientConfig& config, ConnectionHandler handler);
+    NetCode connect();                                              // 성공하면 run() 안에서 onConnected 가 호출된다
+    void    disconnect();
+    NetCode run();                                                  // 호출한 thread 를 점유하고 event 를 polling. stop() 까지 return 하지 않는다
+    void    stop();                                                 // 연결은 끊지 않고 polling 만 중단. 다른 thread 에서 호출 가능
+    NetCode resume(ConnectionId id, void* payload);                 // 7절 Server::resume 과 동일. 다른 thread 에서 호출 가능
+};
+```
 
-    1. 생성자 (송신 버퍼 크기, 수신 버퍼 크기, Endpoint 주입) 
-    2. connect
-    3. disconnect
-    4. run // 해당 thread를 점유하여 event를 계속 폴링함.
-    5. stop // 연결은 끊지 않고, polling을 중간에 취소함.
+```c
+typedef struct kiotty_stream_client kiotty_stream_client_t;
+kiotty_stream_client_t* kiotty_stream_client_create(const kiotty_client_config_t* config);
+void                    kiotty_stream_client_destroy(kiotty_stream_client_t* c);
+kiotty_code_t           kiotty_stream_client_connect(kiotty_stream_client_t* c);
+void                    kiotty_stream_client_disconnect(kiotty_stream_client_t* c);
+kiotty_result_t         kiotty_stream_client_read(kiotty_stream_client_t* c, void* buffer, size_t length, uint32_t timeout_ms);
+kiotty_result_t         kiotty_stream_client_write(kiotty_stream_client_t* c, kiotty_span_t data, uint32_t timeout_ms);
+
+typedef struct kiotty_event_client kiotty_event_client_t;
+kiotty_event_client_t*  kiotty_event_client_create(const kiotty_client_config_t* config, kiotty_connection_handler_t handler);
+void                    kiotty_event_client_destroy(kiotty_event_client_t* c);
+kiotty_code_t           kiotty_event_client_connect(kiotty_event_client_t* c);
+void                    kiotty_event_client_disconnect(kiotty_event_client_t* c);
+kiotty_code_t           kiotty_event_client_run(kiotty_event_client_t* c);
+void                    kiotty_event_client_stop(kiotty_event_client_t* c);
+kiotty_code_t           kiotty_event_client_resume(kiotty_event_client_t* c, kiotty_connection_id_t id, void* payload);
+```
 
 > 고민되는 부분. 생각보다 network 환경이 열악할 때도 있기 때문에 timeout만 걸어두는 게 아니라,
-> 재시도 횟수와 시도와 시도 사이의 time interval도 걸어두는 게 좋다.
+> 재시도 횟수와 시도와 시도 사이의 time interval도 걸어두는 게 좋다. (ClientConfig 의 max_trial / trial_interval_ms 로 반영)
 
 ### 7. Server
 
 1. Server는 Configuration과 상관 없이 동일한 기능으로 돌아간다.
-2. Server 인터페이스는 아래와 같다.
-
-- Server
-
-    1. 생성자 (송신 버퍼 크기, 수신 버퍼 크기, Endpoint 주입)
-    2. open(); // listen까지는 해줌
-    3. close(); // 
-    4. run(); // 해당 thread를 점유하여 event를 계속 폴링함
-    5. stop(); // listen은 유지한 상태로, polling을 중간에 취소함.
-
-### StateMachine
-
-State Machine이 없으면 이렇게 표현될 것이다.
+2. 생성 시점에 `max_clients` 분량의 Connection, Stage, resume 큐를 모두 잡는다. 이후 런타임 할당은 없다.
+3. 프로토콜은 `ConnectionHandler` 로 주입한다. StateMachine 을 쓰면 `Runner::handler()` 가 그것을 돌려준다 (8절). HTTP / WebSocket 은 9, 10절의 전용 서버가 내부에서 이것을 쓴다.
+4. `resume(id, payload)` 가 다른 thread 에서 IO Thread 로 들어오는 유일한 길이다. 긴 작업의 완료와 Event 모델의 push 가 모두 이것이다.
 
 ```cpp
-onResumed(Connection* connection, void* user_context)
-{
-    auto& next_state = user_context->state;
-    when(next_state) 
-    {
-        State::V1 -> connection->read(user_context->buffer, length);
-        State::V2 -> connection->write(user_context->buffer, length);
-        State::V3 -> connection->read(user_context->buffer, length);
-    }
-}
+class Server {
+public:
+    Server(const ServerConfig& config, ConnectionHandler handler);
+    NetCode open();      // bind + listen 까지
+    void    close();     // listen 소켓과 모든 Connection 종료. 각 Connection 에 onDisconnected(SUCCESS)
+    NetCode run();       // 호출한 thread 를 점유하고 accept / IO event 를 polling. stop() 까지 return 하지 않는다
+    void    stop();      // listen 은 유지한 채 polling 만 중단. 다른 thread 에서 호출 가능
 
-onReadComplete, onWriteComplete(Connection* connection, void* user_context, const char* buffer, size_t length)
-{
-    // 1. 현재 상태
-    auto& current_state = user_context->state;
-    auto& next_state = when(current_state)
-    {
-        State::V1 -> doSomething(buffer, length);
-        State::V2 -> doSomething(buffer, length);
-        State::V3 -> doSomething(buffer, length);
-        State::V4 -> {
-            auto block = connection->suspend(); 
-            doLongtermSomething(block, user_context, buffer, length);
-            // 여기서 작업이 끝나면 block.resume(user_context);
-            를 통해 작업이 끝났음을 알린다.
-        }
-    }
-    when(next_state) 
-    {
-        State::V1 -> connection->read(user_context->buffer, length);
-        State::V2 -> connection->write(user_context->buffer, length);
-        State::V3 -> connection->read(user_context->buffer, length);
-    }
-}
+    // 아무 thread 에서나. IO Thread 에서 onResumed(user_context, connection, payload) 가 한 번 호출된다.
+    //   suspend 된 연결 : 살아 있음이 보장된다. onResumed 가 return 하면 재개된다. 그 안에서 다시 suspend() 하면 유지
+    //   그 외 (push)    : 호출 시점에 살아 있으면 큐에 넣고, 전달 전에 닫히면 조용히 버린다. payload 의 수명은 호출자 책임
+    // 반환값은 호출 시점 기준. id 의 연결이 이미 닫혔으면 PEER_CLOSED, 큐(max_clients * 4)가 가득 차면 BUFFER_FULL
+    NetCode resume(ConnectionId id, void* payload);
+};
 ```
 
-(Old State, Event) { Action } -> (NewState, Next Event Request)
+```c
+typedef struct kiotty_server kiotty_server_t;
+kiotty_server_t* kiotty_server_create(const kiotty_server_config_t* config, kiotty_connection_handler_t handler);
+void             kiotty_server_destroy(kiotty_server_t* s);
+kiotty_code_t    kiotty_server_open(kiotty_server_t* s);
+void             kiotty_server_close(kiotty_server_t* s);
+kiotty_code_t    kiotty_server_run(kiotty_server_t* s);
+void             kiotty_server_stop(kiotty_server_t* s);
+kiotty_code_t    kiotty_server_resume(kiotty_server_t* s, kiotty_connection_id_t id, void* payload);
+```
 
-Old State, Event Result((WRITE, READ, RESUMED), data, length)
-{ ACTION }
-New State, Event Request((WRITE, READ, RESUMED), data, length)
+### 8. StateMachine
 
-#### 제안: StateMachine Interface
+HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Connection 과 ConnectionHandler (5절) 위에 얹히며 그 둘은 이 계층을 모른다.
+프로토콜 작성자는 **(1) State enum, (2) Session struct, (3) Handler 함수들, (4) rules(...) 표** 네 가지만 쓴다.
+콜백을 직접 구현하지 않고, Handler 안에서 Connection 의 IO 함수를 직접 부르지도 않는다. Handler 는 `(Session, Event) -> Transition` 인 순수 함수이고, Transition 의 Request 를 Runner 가 Connection 호출로 바꾼다.
 
-위 3줄을 그대로 코드로 옮긴다.
+규칙
 
-- `Event`  = "Event Result"  : IO Thread가 StateMachine에게 알려주는 **무슨 일이 일어났는가**
-- `Request` = "Event Request" : StateMachine이 IO Thread에게 돌려주는 **다음에 무엇을 해 달라**
-- `Transition` = (New State, Request)
-- `Handler` = `(Session&, Connection&, const Event&) -> Transition` 인 **순수 함수 하나**
-- `Rule` = (Old State, Event Kind) -> Handler 를 묶은 한 줄. `Rule` 배열이 곧 상태 전이표다.
-
-프로토콜 작성자는 **(1) State enum, (2) Session struct, (3) Handler 함수들, (4) Rule 테이블** 4가지만 쓴다.
-onRead / onWritten / onResumed / onConnected / onDisconnected 를 직접 구현하지 않으며, 그 안에서 state를 switch 하지도 않는다.
-라이브러리가 ConnectionHandler 5개 콜백을 전부 `Event`로 바꿔 Rule 테이블로 dispatch 한다.
+- `Event` 는 IO Thread 가 알려주는 "무슨 일이 일어났는가", `Request` 는 표가 돌려주는 "다음에 무엇을 해 달라" 다. 한 Transition 은 Request 하나만 가진다.
+- `RESUMED` 는 `Server::resume(id, payload)` 가 도착한 것이다. 긴 작업의 완료와 다른 thread 의 push 가 모두 이 이벤트로 들어온다. 핸들러가 return 한 Request 가 곧 재개다.
+- `Transition::stay(request)` 는 상태를 바꾸지 않는다. ANY 행(push, WRITTEN 흡수)에서 현재 상태를 모른 채 요청만 낼 때 쓴다.
+- `WRITTEN` 은 `Request::write` 의 완료에 온다. push 로 낸 write 의 완료도 온다. 수신 흐름과 무관한 WRITTEN 은 `when(WRITTEN).then(ignore)` 한 행이 `stay()` 로 흡수한다.
+- `CLOSED` 는 마지막 Event 다. 그 핸들러의 Transition 은 무시된다.
+- 표에 (state, event) 행이 없으면 `close(UNHANDLED_EVENT)`. 조용히 무시하지 않는다. 정확 일치 행이 ANY 행보다 우선한다.
+- `.to(...)` 는 핸들러가 갈 수 있는 다음 상태 목록이다. debug 빌드의 Runner 는 목록 밖으로 가면 `close(ILLEGAL_TRANSITION)`. `.to()` 가 없는 행은 검사하지 않는다. `stay` 는 검사 대상이 아니다.
+- `Event::data` 는 수신 Stage 를 가리키며 핸들러가 return 하면 무효다. 보관하려면 Session 으로 복사한다.
+- state 는 Runner 가 소유한다. Session 에 state 멤버를 두지 않는다.
+- 표는 컴파일 타임 상수다. C++ 의 `rules()` 는 (state, event) 로 정렬하고 중복 행을 컴파일 에러로 만든다. C 의 표는 `static const` 배열이며 Runner init 이 중복을 검사한다.
 
 ```cpp
-// ------------------------------------------------------------------
-// 1. Event : IO Thread -> StateMachine. "Event Result"
-// ------------------------------------------------------------------
+namespace fsm {
+
 struct Event {
-    enum Kind {
-        CONNECTED,  // 연결 완료 (Server: accept 완료, EventClient: connect 완료)
-        READ,       // Request::read* 가 요구한 조건이 충족됨. data/length 유효
-        WRITTEN,    // Request::write 가 송신 완료됨. length = 보낸 바이트 수
-        RESUMED,    // ConnectionBlock::resume(payload) 가 IO Thread에 도착함. payload 유효
-        TIMEOUT,    // Request 에 걸어둔 timeout 만료
-        CLOSED      // 상대방 종료 / 내 close / stop / 에러. code 에 원인. 이 다음 Event 는 없다
-    };
-
-    Kind        kind;
-    const void* data;     // READ 전용. 수신 Stage 내부 버퍼. Handler 가 return 하면 무효가 된다
-    size_t      length;   // READ: data 길이, WRITTEN: 송신 길이
-    void*       payload;  // RESUMED 전용. resume(payload) 로 넘긴 포인터
-    NetCode     code;     // CLOSED 전용. 그 외에는 SUCCESS
+    enum Kind { CONNECTED, READ, WRITTEN, RESUMED, TIMEOUT, CLOSED };
+    Kind    kind;
+    Span    data;         // READ: 수신 데이터 (return 하면 무효). WRITTEN: data.length = 보낸 길이, data.data = nullptr
+    void*   payload;      // RESUMED 전용. Server::resume(id, payload) 의 payload
+    NetCode code;         // CLOSED 전용. 그 외 SUCCESS
 };
+enum { ANY = -1, MAX_NEXT = 4 };
 
-// ------------------------------------------------------------------
-// 2. Request : StateMachine -> IO Thread. "Event Request"
-//    한 Transition 은 read 또는 write 중 하나를 "주 요청" 으로 가진다.
-// ------------------------------------------------------------------
 struct Request {
-    // --- read 계열 : 조건이 충족되면 READ 이벤트 한 번 ---
-    static Request read(size_t exact);                          // 정확히 exact 바이트
-    static Request readSome(size_t max);                        // 1 ~ max 바이트, 들어오는 즉시
-    static Request readUntil(const char* delim, size_t max);    // delimiter 까지(포함). max 초과시 CLOSED(PROTOCOL_ERROR)
-
-    // --- write : 송신 Stage 로 복사. 완료되면 WRITTEN 이벤트 한 번 ---
-    static Request write(const void* data, size_t length);
-
-    // --- 제어 ---
-    static Request suspend();   // 이 Connection 의 polling 중단. ConnectionBlock::resume() 이 RESUMED 로 들어온다
-    static Request close();     // 정상 종료. 마지막으로 CLOSED(SUCCESS) 가 한 번 온다
-    static Request none();      // 새 요청 없음. 이미 걸려 있는 요청을 유지 (full-duplex 상황에서 사용)
-
-    // --- modifier (chaining) ---
-    Request& timeout(uint32_t ms);                               // 이 요청에 timeout. 만료시 TIMEOUT 이벤트
-    Request& andWrite(const void* data, size_t length);         // read 요청과 동시에 write 하나를 같이 던진다 (예: pong 보내고 다음 frame 읽기)
+    Request();                                               // 기본값 = 새 요청 없음
+    static Request read(size_t exact);                       // 정확히 exact 바이트가 모이면 READ 한 번
+    static Request readUntil(Span delim, size_t max);        // delimiter(1..4 바이트, 등록 시 복사) 까지 포함해서 READ 한 번. max 안에 없으면 CLOSED(PROTOCOL_ERROR)
+    static Request write(Span data);                         // 송신 Stage 로 복사. 완료되면 WRITTEN 한 번
+    static Request suspend();                                // 콜백 중단 + slot hold. Server::resume 이 RESUMED 로 온다
+    static Request close();                                  // 정상 종료. 마지막으로 CLOSED(SUCCESS) 한 번
+    Request& timeout(uint32_t ms);                           // 이 요청에 deadline. 만료되면 TIMEOUT. 핸들러가 순수 함수인 모델에서 시간이 들어오는 유일한 입구
 };
 
-// ------------------------------------------------------------------
-// 3. Transition : (New State, Request)
-// ------------------------------------------------------------------
 template <typename State>
 struct Transition {
-    State   next;
-    Request request;
+    Transition(State next);                                  // 상태 전이, 요청 없음 (CLOSED 핸들러 등)
+    Transition(State next, Request request);                 // 상태 전이 + 요청
+    static Transition stay(Request request = Request());     // 상태 유지 + 요청 (push, WRITTEN 흡수)
 };
 
-// ------------------------------------------------------------------
-// 4. StateMachine : Rule 테이블 + 초기 상태.  동적 할당 없음, 전부 static const.
-// ------------------------------------------------------------------
 template <typename State, typename Session>
-struct StateMachine {
+struct Rule {                                                // 표의 한 행. 사용자가 직접 만들지 않고 from / when 으로 만든다
     typedef Transition<State> (*Handler)(Session& session, Connection& connection, const Event& event);
-
-    enum { ANY_STATE = -1 };
-    static const Event::Kind ANY_EVENT = (Event::Kind)-1;
-
-    struct Rule {
-        int         state;    // State 값 또는 ANY_STATE
-        Event::Kind event;    // Event::Kind 또는 ANY_EVENT
-        Handler     handler;
-    };
-
-    const Rule* rules;
-    size_t      rule_count;
-    State       initial;
+    template <typename... S> constexpr Rule to(S... next) const;   // .to(A, B)    : 갈 수 있는 다음 상태 1..MAX_NEXT 개
+    template <State... next> constexpr Rule to() const;            // .to<A, B>()  : 같은 뜻
 };
 
-// Session 은 사용자가 정의하는 per-connection struct. 라이브러리의 Pool 에 고정 크기로 미리 할당된다.
-// 라이브러리는 Session 안에 state 를 보관할 자리만 요구한다 (예: State state; 멤버 또는 CRTP base).
+// 표 작성. State 와 Session 은 .then(handler) 의 함수 타입에서 추론되므로 접두사가 필요 없다.
+//   from(S).when(E).then(handler).to(S1, S2)   이 (상태, 이벤트) 에서 handler 가 돌고 S1 또는 S2 로 간다
+//   when(E).then(handler)                      모든 상태에서 (ANY). 다음 상태 검사 없음
+template <typename State> constexpr From<State> from(State state);
+constexpr When when(Event::Kind event);
+
+// 행들을 (state, event) 순으로 컴파일 타임 정렬한 표. 같은 (state, event) 가 두 번이면 컴파일 에러.
+template <typename R, typename... Rs> constexpr Table<R, 1 + sizeof...(Rs)> rules(R first, Rs... rest);
+
+template <typename State, typename Session>
+struct Machine {                                             // 표 + 초기 상태. 포인터 + 개수라서 C 의 kiotty_state_machine_t 와 같은 모양
+    const Rule<State, Session>* rule; size_t count; State initial;
+    template <size_t N> constexpr Machine(const Table<Rule<State, Session>, N>& table, State initial);
+};
+
+template <typename State, typename Session, size_t N>
+struct Slots;                                                // Connection N 개 분의 { state, in_use, Session }. 사용자가 한 번 잡아 두는 저장소
+
+template <typename State, typename Session>
+class Runner {                                               // ConnectionHandler 를 구현하는 어댑터. Connection 을 만지는 코드는 여기뿐
+public:
+    template <size_t N> Runner(const Machine<State, Session>& machine, Slots<State, Session, N>& storage);
+    ConnectionHandler handler();                             // Server / EventClient 에 주입
+};
+
+} // namespace fsm
 ```
 
-라이브러리 내부 dispatch 는 다음 한 가지 루틴으로 끝난다. 5개 ConnectionHandler 콜백은 전부 이 루틴을 호출한다.
+사용 예
 
 ```cpp
-// IO Thread 내부. 모든 ConnectionHandler 콜백은 Event 로 변환되어 여기로 들어온다.
-void dispatch(Session& session, Connection& connection, const Event& event)
-{
-    const Rule* rule = findRule(machine, session.state, event.kind);
-    //   매칭 우선순위 : (state, event) 정확 일치 > (ANY_STATE, event) > (state, ANY_EVENT) > (ANY_STATE, ANY_EVENT)
-    //   매칭 없음     : 프로토콜 정의 오류. CLOSED(UNHANDLED_EVENT) 로 종료시킨다. 조용히 무시하지 않는다.
-
-    Transition<State> t = rule->handler(session, connection, event);
-
-    session.state = t.next;
-    apply(connection, t.request);   // read -> Stage 에 "요구 길이/delimiter" 등록, write -> 송신 Stage 복사 후 제출,
-                                    // suspend -> polling 해제, close -> shutdown, none -> 아무것도 안 함
-}
-```
-
-##### 예시 1. HTTP/1.1 Server (keep-alive, long-term 작업 포함)
-
-```cpp
+using namespace fsm;
 enum class HttpState { Idle, ReadingHeader, ReadingBody, Processing, Responding };
+struct HttpSession { ConnectionId id; /* per-connection 데이터. state 멤버 없음 */ };
+typedef Transition<HttpState> Next;
 
-struct HttpSession {
-    HttpState       state;
-    HttpRequest     request;       // 파싱 결과 (고정 크기)
-    char            body[64 * 1024];
-    HttpResponse    response;      // 고정 크기 응답 버퍼
-    ConnectionBlock block;         // suspend 중 다른 thread 가 resume 할 때 사용
-};
+static Next onHeader(HttpSession& s, Connection& c, const Event& e);   // ... 핸들러들 (구현 가이드 3.1)
 
-typedef StateMachine<HttpState, HttpSession> Http;
-typedef Transition<HttpState>               Next;
+static constexpr auto HTTP_RULES = rules(
+    when(Event::CONNECTED)                              .then(onConnected).to(HttpState::ReadingHeader),
+    from(HttpState::ReadingHeader).when(Event::READ)    .then(onHeader)   .to(HttpState::ReadingBody, HttpState::Processing, HttpState::Responding),
+    from(HttpState::ReadingBody)  .when(Event::READ)    .then(onBody)     .to(HttpState::Processing, HttpState::Responding),
+    from(HttpState::Processing)   .when(Event::RESUMED) .then(onResumed)  .to(HttpState::Responding),
+    from(HttpState::Responding)   .when(Event::WRITTEN) .then(onResponded).to(HttpState::ReadingHeader, HttpState::Idle),
+    when(Event::TIMEOUT)                                .then(onTimeout)  .to(HttpState::Idle),
+    when(Event::CLOSED)                                 .then(onClosed)
+);
+static constexpr Machine<HttpState, HttpSession> HTTP_MACHINE(HTTP_RULES, HttpState::Idle);
 
-static Next readHeader() { return { HttpState::ReadingHeader, Request::readUntil("\r\n\r\n", 8 * 1024).timeout(10000) }; }
+Slots<HttpState, HttpSession, 32> slots;
+Runner<HttpState, HttpSession>    runner(HTTP_MACHINE, slots);
+Server                            server(config, runner.handler());
 
-static Next onConnected(HttpSession&, Connection&, const Event&) { return readHeader(); }
-
-static Next onHeader(HttpSession& s, Connection& c, const Event& e)
-{
-    if (!parseRequestLineAndHeaders(s.request, e.data, e.length))
-        return { HttpState::Responding, Request::write(BAD_REQUEST, sizeof(BAD_REQUEST) - 1) };
-
-    if (s.request.content_length > 0)
-        return { HttpState::ReadingBody, Request::read(s.request.content_length) };
-
-    return process(s, c);
-}
-
-static Next onBody(HttpSession& s, Connection& c, const Event& e)
-{
-    memcpy(s.body, e.data, e.length);        // e.data 는 Handler 가 return 하면 무효. 필요하면 Session 으로 복사
-    return process(s, c);
-}
-
-static Next process(HttpSession& s, Connection& c)
-{
-    if (isLongJob(s.request)) {
-        s.block = c.block();                 // resume 용 handle (아래 "Connection 변경점" 참고)
-        workerPool.post(&s);                 // 다른 thread 에서 작업 후 s.block.resume(&s.response)
-        return { HttpState::Processing, Request::suspend() };
-    }
-    buildResponse(s.response, s.request);
-    return { HttpState::Responding, Request::write(s.response.data, s.response.length) };
-}
-
-static Next onResumed(HttpSession& s, Connection&, const Event& e)
-{
-    HttpResponse* r = static_cast<HttpResponse*>(e.payload);
-    return { HttpState::Responding, Request::write(r->data, r->length) };
-}
-
-static Next onResponded(HttpSession& s, Connection&, const Event&)
-{
-    if (s.request.keep_alive) return readHeader();
-    return { HttpState::Idle, Request::close() };
-}
-
-static Next onTimeout(HttpSession&, Connection&, const Event&) { return { HttpState::Idle, Request::close() }; }
-static Next onClosed (HttpSession& s, Connection&, const Event&) { releaseResources(s); return { HttpState::Idle, Request::none() }; }
-
-// 이 표가 곧 상태 전이 다이어그램이다. 이 표만 보면 프로토콜의 흐름이 보여야 한다.
-static const Http::Rule HTTP_RULES[] = {
-//    Old State                 Event              Handler
-    { Http::ANY_STATE,          Event::CONNECTED,  onConnected },
-    { (int)HttpState::ReadingHeader, Event::READ,  onHeader    },
-    { (int)HttpState::ReadingBody,   Event::READ,  onBody      },
-    { (int)HttpState::Processing,    Event::RESUMED, onResumed },
-    { (int)HttpState::Responding,    Event::WRITTEN, onResponded },
-    { Http::ANY_STATE,          Event::TIMEOUT,    onTimeout   },
-    { Http::ANY_STATE,          Event::CLOSED,     onClosed    },
-};
-
-static const Http HTTP_MACHINE = { HTTP_RULES, sizeof(HTTP_RULES) / sizeof(HTTP_RULES[0]), HttpState::Idle };
+// worker thread : 긴 작업이 끝나면
+server.resume(session->id, &session->response);              // IO Thread 에서 Event::RESUMED 로 표에 들어간다
 ```
 
-##### 예시 2. WebSocket frame 수신 (full-duplex, 가변 길이 header)
+C 인터페이스. 표는 `static const kiotty_rule_t[]` 이고 `KIOTTY_RULE` 매크로가 next 개수를 컴파일 타임에 센다 (C99 이상).
+
+```c
+typedef enum kiotty_event_kind { KIOTTY_EVENT_CONNECTED, KIOTTY_EVENT_READ, KIOTTY_EVENT_WRITTEN, KIOTTY_EVENT_RESUMED, KIOTTY_EVENT_TIMEOUT, KIOTTY_EVENT_CLOSED } kiotty_event_kind_t;
+
+typedef struct kiotty_event {
+    kiotty_event_kind_t kind;
+    kiotty_span_t       data;      /* READ: 수신 데이터 (return 하면 무효). WRITTEN: length = 보낸 길이 */
+    void*               payload;   /* RESUMED 전용 */
+    kiotty_code_t       code;      /* CLOSED 전용 */
+} kiotty_event_t;
+
+typedef enum kiotty_request_op { KIOTTY_REQUEST_NONE, KIOTTY_REQUEST_READ, KIOTTY_REQUEST_READ_UNTIL, KIOTTY_REQUEST_WRITE, KIOTTY_REQUEST_SUSPEND, KIOTTY_REQUEST_CLOSE } kiotty_request_op_t;
+
+typedef struct kiotty_request {
+    kiotty_request_op_t op;
+    size_t              n;         /* READ: exact, READ_UNTIL: max */
+    kiotty_span_t       data;      /* WRITE: 보낼 데이터, READ_UNTIL: delimiter (등록 시 복사됨) */
+    uint32_t            timeout_ms;/* 0 == 없음 */
+} kiotty_request_t;
+
+typedef struct kiotty_transition {
+    int32_t          next;         /* keep == 0 일 때 다음 상태 */
+    int32_t          keep;         /* 1 이면 상태 유지 (stay) */
+    kiotty_request_t request;
+} kiotty_transition_t;
+
+typedef kiotty_transition_t (*kiotty_handler_t)(void* session, kiotty_connection_t* c, const kiotty_event_t* event);
+
+#define KIOTTY_ANY_STATE (-1)
+#define KIOTTY_MAX_NEXT  4
+
+typedef struct kiotty_rule {
+    int32_t          state;                    /* 사용자 enum 값 또는 KIOTTY_ANY_STATE */
+    int32_t          event;                    /* kiotty_event_kind_t */
+    kiotty_handler_t handler;
+    int32_t          next[KIOTTY_MAX_NEXT];    /* 갈 수 있는 다음 상태. debug 에서 검사 */
+    int32_t          next_count;               /* 0 이면 검사 안 함 */
+} kiotty_rule_t;
+
+typedef struct kiotty_state_machine {
+    const kiotty_rule_t* rules;
+    size_t               count;
+    int32_t              initial;
+    size_t               session_size;         /* Runner 가 Connection 마다 잡아 두는 사용자 session 크기 */
+} kiotty_state_machine_t;
+
+/* 행 작성 */
+#define KIOTTY_RULE(state, event, handler, ...)  { (state), (event), (handler), { __VA_ARGS__ }, (int32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
+#define KIOTTY_RULE_UNCHECKED(state, event, handler) { (state), (event), (handler), { 0 }, 0 }
+#define KIOTTY_RULE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
+
+/* Transition / Request 생성 (C 에는 메서드가 없으므로 함수) */
+kiotty_transition_t kiotty_go(int32_t next, kiotty_request_t request);      /* 상태 전이 + 요청 */
+kiotty_transition_t kiotty_stay(kiotty_request_t request);                  /* 상태 유지 + 요청 */
+kiotty_request_t    kiotty_none(void);                                      /* 요청 없음 */
+kiotty_request_t    kiotty_read(size_t exact);
+kiotty_request_t    kiotty_read_until(kiotty_span_t delim, size_t max);
+kiotty_request_t    kiotty_write(kiotty_span_t data);
+kiotty_request_t    kiotty_suspend(void);
+kiotty_request_t    kiotty_close(void);
+kiotty_request_t    kiotty_timeout(kiotty_request_t request, uint32_t ms);  /* 체이닝 대신 */
+
+/* Runner. pool 은 max_clients * (16 + session_size, 16 정렬) 바이트. 사용자가 한 번 잡아 둔다 */
+typedef struct kiotty_fsm_runner kiotty_fsm_runner_t;
+#define KIOTTY_FSM_POOL_SIZE(session_size, max_clients) ((max_clients) * (16 + (((session_size) + 15) & ~(size_t)15)))
+kiotty_code_t               kiotty_fsm_runner_init(kiotty_fsm_runner_t* runner, const kiotty_state_machine_t* machine, void* pool, size_t max_clients);   /* DUPLICATE_RULE 검사 */
+kiotty_connection_handler_t kiotty_fsm_handler(kiotty_fsm_runner_t* runner);
+```
+
+```c
+/* 사용 예 */
+static const kiotty_rule_t HTTP_RULES[] = {
+    KIOTTY_RULE(KIOTTY_ANY_STATE,    KIOTTY_EVENT_CONNECTED, on_connected, HTTP_READING_HEADER),
+    KIOTTY_RULE(HTTP_READING_HEADER, KIOTTY_EVENT_READ,      on_header,    HTTP_READING_BODY, HTTP_PROCESSING, HTTP_RESPONDING),
+    KIOTTY_RULE(HTTP_PROCESSING,     KIOTTY_EVENT_RESUMED,   on_resumed,   HTTP_RESPONDING),
+    KIOTTY_RULE(HTTP_RESPONDING,     KIOTTY_EVENT_WRITTEN,   on_responded, HTTP_READING_HEADER, HTTP_IDLE),
+    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_EVENT_CLOSED, on_closed),
+};
+static const kiotty_state_machine_t HTTP_MACHINE = { HTTP_RULES, KIOTTY_RULE_COUNT(HTTP_RULES), HTTP_IDLE, sizeof(http_session_t) };
+
+static char         pool[KIOTTY_FSM_POOL_SIZE(sizeof(http_session_t), 32)];
+kiotty_fsm_runner_t runner;
+kiotty_fsm_runner_init(&runner, &HTTP_MACHINE, pool, 32);
+kiotty_server_t*    server = kiotty_server_create(&config, kiotty_fsm_handler(&runner));
+
+/* worker thread */
+kiotty_server_resume(server, session->id, &session->response);
+```
+
+### 9. HttpServer
+
+HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine (구현 가이드 3.1) 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다.
+
+- 라우트는 `route(method, path, HttpRoute)` 로 등록하며 `get / post / put / del / patch / options` 는 그 별칭이다. 콜백을 등록하는 방식이지 하나의 handler 구조체를 넘기는 방식이 아니다. 등록은 `open()` 전에만 되고 표는 고정 크기다 (`HttpLimits::max_routes`).
+- path 매칭은 정확 일치와 `/*` 접미 wildcard 두 가지다. 등록 순서대로 검사한다. `:id` 같은 파라미터 파싱은 하지 않으며 `request.path` 를 사용자가 파싱한다.
+- 정적 서빙은 세 가지다. 디렉토리 매핑, 파일 하나 매핑, 메모리 바이너리 매핑. 라우트와 같은 표에서 등록 순서대로 매칭하며 GET / HEAD 에만 적용된다.
+- 아무것도 매칭되지 않으면 `notFound` 라우트, 그것도 없으면 404.
+- 요청과 응답은 Connection 마다 고정 크기 버퍼(`HttpLimits`)에 있다. body 가 `max_body_bytes` 를 넘으면 413 으로 라이브러리가 거절한다. 응답 버퍼가 넘치면 setter 가 `BUFFER_FULL` 을 돌려준다.
+- 긴 작업은 `HttpResponse::defer()` 로 Connection 을 suspend 하고, worker 가 결과를 만든 뒤 `HttpServer::resume(request.id, payload)` 를 부르면 IO Thread 에서 같은 라우트의 `resumed` 콜백이 호출된다. 응답 객체는 IO Thread 에서만 만지므로 worker 는 결과를 자기 메모리에 만들어 payload 로 넘긴다. `defer()` 한 뒤 `resumed` 까지 request 는 유효하다.
+- keep-alive 는 라이브러리가 처리한다. `Connection: close` 또는 HTTP/1.0 이면 응답 후 닫는다.
 
 ```cpp
-enum class WsState { Header, ExtLength, Mask, Payload };
+enum class HttpMethod { Get, Head, Post, Put, Delete, Patch, Options };
 
-static Next onHeader(WsSession& s, Connection&, const Event& e)
-{
-    s.frame.parseFixedHeader(e.data);                       // 2 bytes
-    if (s.frame.len7 == 126) return { WsState::ExtLength, Request::read(2) };
-    if (s.frame.len7 == 127) return { WsState::ExtLength, Request::read(8) };
-    return { WsState::Mask, Request::read(4) };             // 서버 수신 frame 은 항상 masked
-}
-static Next onExtLength(WsSession& s, Connection&, const Event& e) { s.frame.parseExtLength(e.data, e.length); return { WsState::Mask, Request::read(4) }; }
-static Next onMask(WsSession& s, Connection&, const Event& e)      { s.frame.parseMask(e.data);                return { WsState::Payload, Request::read(s.frame.payload_length) }; }
+struct HttpHeader { Span name; Span value; };
 
-static Next onPayload(WsSession& s, Connection& c, const Event& e)
-{
-    s.frame.unmask(e.data, e.length);
-    switch (s.frame.opcode) {
-    case PING:  return { WsState::Header, Request::read(2).andWrite(s.pong(e.data, e.length), s.pongLength()) };
-    case CLOSE: return { WsState::Header, Request::close() };
-    default:    s.onMessage(e.data, e.length);  return { WsState::Header, Request::read(2) };
-    }
-}
+struct HttpRequest {
+    ConnectionId      id;              // resume 에 쓴다
+    HttpMethod        method;
+    Span              path;            // query 제외. percent-decoding 하지 않음
+    Span              query;           // '?' 뒤. 없으면 길이 0
+    const HttpHeader* headers;
+    size_t            header_count;    // 최대 HttpLimits::max_headers
+    Span              body;            // Content-Length 만큼. 없으면 길이 0
+    bool              keep_alive;
+    Span              header(const char* name) const;   // 대소문자 무시. 없으면 { nullptr, 0 }
+    ConnectionInfo&   peer() const;
+};
 
-// 서버 push : 다른 thread 가 ConnectionBlock::write() 로 보낸 것의 완료. 수신 state 와 무관하므로 그냥 무시.
-static Next ignore(WsSession&, Connection&, const Event&) { return { /*state 유지*/ ..., Request::none() }; }
+struct HttpResponse {                                                              // IO Thread 전용
+    NetCode status(int code);                                                      // 기본 200. 호출하지 않으면 404
+    NetCode header(const char* name, const char* value);                           // Content-Length, Connection, Date 는 라이브러리가 채운다
+    NetCode body(Span data, const char* content_type);                             // 응답 버퍼로 복사
+    NetCode bodyRef(Span data, const char* content_type);                          // 복사하지 않음. data 는 송신 완료까지 유효해야 한다 (정적 데이터, 메모리 바이너리)
+    NetCode file(const char* path, const char* content_type);                      // 파일을 chunk 로 스트리밍. 가능하면 sendfile / TransmitFile. 없으면 NOT_FOUND
+    void    defer();                                                               // 긴 작업. handle 이 return 하면 Connection 은 suspend. HttpServer::resume 으로 돌아온다
+};
 
-static const Ws::Rule WS_RULES[] = {
-    { (int)WsState::Header,    Event::READ,    onHeader    },
-    { (int)WsState::ExtLength, Event::READ,    onExtLength },
-    { (int)WsState::Mask,      Event::READ,    onMask      },
-    { (int)WsState::Payload,   Event::READ,    onPayload   },
-    { Ws::ANY_STATE,           Event::WRITTEN, ignore      },
-    { Ws::ANY_STATE,           Event::CLOSED,  onClosed    },
+struct HttpRoute {                                                                 // C 의 kiotty_http_route_t 와 같은 모양
+    void* user_context;
+    void (*handle) (void* user_context, const HttpRequest& request, HttpResponse& response);
+    void (*resumed)(void* user_context, const HttpRequest& request, HttpResponse& response, void* payload);   // defer 한 뒤 resume 이 오면. defer 하지 않는 라우트는 nullptr
+};
+
+struct HttpLimits {
+    size_t   max_routes;            // 라우트 + 정적 경로 + 승격 경로 합계. 기본 64
+    size_t   max_header_bytes;      // request line + headers. 기본 8 KiB
+    size_t   max_headers;           // 기본 32
+    size_t   max_body_bytes;        // 기본 64 KiB. 초과시 413
+    size_t   response_bytes;        // 응답 버퍼 (status + headers + 복사된 body). 기본 64 KiB
+    uint32_t header_timeout_ms;     // 헤더 수신 완료까지. 기본 10000
+    uint32_t keep_alive_timeout_ms; // 다음 요청 대기. 기본 15000
+};
+
+class HttpServer {
+public:
+    HttpServer(const ServerConfig& config, const HttpLimits& limits);
+
+    // 라우트 등록. 세 가지 오버로드가 있다.
+    //   HttpRoute               : user_context + 함수 포인터. C 와 같은 모양
+    //   함수 포인터             : capture 없는 람다가 여기로 온다.   server.get("/health", [](const HttpRequest&, HttpResponse& r) { r.status(200); });
+    //   F&                      : capture 있는 람다나 functor 의 lvalue. 포인터만 보관하므로 서버보다 오래 살아야 한다. 할당 없음
+    NetCode route(HttpMethod method, const char* path, HttpRoute route);
+    NetCode route(HttpMethod method, const char* path, void (*fn)(const HttpRequest&, HttpResponse&));
+    template <typename F> NetCode route(HttpMethod method, const char* path, F& fn);
+    // get / post / put / del / patch / options : route(Method, ...) 의 별칭. 같은 세 오버로드
+    NetCode get (const char* path, HttpRoute route);
+    NetCode post(const char* path, HttpRoute route);
+    NetCode notFound(HttpRoute route);                                                           // 아무 라우트도 안 맞을 때
+
+    // 정적 서빙 등록
+    NetCode serveDirectory(const char* url_prefix, const char* directory);                       // "/static/" -> "./www/". ".." 포함 경로는 403. content type 은 확장자로
+    NetCode serveFile(const char* url_path, const char* file_path);                              // "/favicon.ico" -> "./www/favicon.ico"
+    NetCode serveMemory(const char* url_path, Span data, const char* content_type);              // 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다
+
+    // WebSocket 승격 경로 등록 (10절)
+    NetCode upgrade(const char* url_path, WebSocketHandler handler, const WebSocketLimits& limits);
+
+    NetCode open();
+    void    close();
+    NetCode run();
+    void    stop();
+
+    // 아무 thread 에서나. 7절 Server::resume 과 같은 규칙.
+    //   defer 된 HTTP 요청 : 그 라우트의 resumed(ctx, request, response, payload)
+    //   WebSocket 연결     : WebSocketHandler::onResumed(ctx, ws, payload)
+    NetCode resume(ConnectionId id, void* payload);
 };
 ```
 
-> `ignore` 가 state 를 유지하려면 Handler 가 현재 state 를 알아야 한다. `Transition::stay(Request)` 를 두고
-> dispatch 에서 "next 를 바꾸지 않음" 으로 처리하는 것이 간단하다.
+사용 예
 
-##### 설계 포인트
+```cpp
+HttpServer server(config, limits);
 
-1. **Handler 는 순수 함수**: 입력 (Session, Event) 과 출력 (Transition) 만 있다. connection 을 인자로 받지만 `read/write/suspend` 를 직접 호출하지 않는 것이 규칙이다 (`info()`, `block()` 조회 용도). IO 를 직접 호출하면 "Request 를 return 했는데 이미 read 가 걸려 있음" 같은 상태 불일치가 생긴다. 라이브러리가 debug 빌드에서 Handler 안에서의 IO 호출을 assert 로 막는다.
-2. **Rule 테이블 = 문서**: `static const Rule[]` 하나가 프로토콜의 상태 전이표다. 목표 8번(AI 또는 사람이 읽기 좋은 문서)과 직접 연결된다. 매칭되지 않는 (state, event) 는 조용히 무시하지 않고 `CLOSED(UNHANDLED_EVENT)` 로 끊어서 프로토콜 정의 누락을 바로 드러낸다.
-3. **메모리**: Rule 테이블은 static const, Session 은 Pool 에 고정 크기, `Event::data` 는 수신 Stage 를 직접 가리킨다. Handler 가 return 하는 순간 `consumer.commit()` 되므로 보관이 필요하면 Session 으로 복사한다 (Stage 섹션의 IOThread 의사코드와 일치). 런타임 동적 할당은 0.
-4. **`Request::read*` 와 Stage 의 관계**: `read(exact)` 는 `consumer.prepare(exact)` 가 성공할 때, `readSome(max)` 는 `readable() > 0` 일 때, `readUntil` 은 consumer 영역을 scan 해서 delimiter 를 찾았을 때 READ 를 발생시킨다. `exact` 또는 `max` 가 Stage capacity 보다 크면 등록 시점에 CLOSED(REQUEST_TOO_LARGE). 큰 body 는 `readSome` 으로 streaming 하는 것이 프로토콜 작성자의 책임이다.
-5. **Full-duplex**: 수신 state machine 은 한 번에 read 요청 하나만 가진다. write 는 (a) Transition 의 주 요청, (b) `andWrite` 로 read 에 동반, (c) 다른 thread 에서 `ConnectionBlock::write()` 로 push, 세 경로가 있고 완료는 모두 WRITTEN 으로 들어온다. 수신 흐름과 무관한 WRITTEN 은 `{ANY_STATE, WRITTEN, ignore}` 한 줄로 흡수한다.
-6. **프로토콜 교체 (HTTP Upgrade -> WebSocket)**: machine 이 타입이 아니라 값(`const StateMachine*`) 이므로 Session 이 가리키는 machine 을 바꾸면 된다. `Request::handoff(const StateMachine* next_machine, int initial_state)` 를 제어 요청으로 추가하면 `onResponded` 에서 101 응답 완료 후 WS machine 으로 넘어갈 수 있다. Session 은 두 프로토콜의 union 또는 공용 base 로 둔다.
-7. **Timeout**: `Request::timeout(ms)` 는 IO loop 에 timer 가 있어야 한다 (IOCP: timer queue 또는 GetQueuedCompletionStatusEx 의 wait, epoll: timerfd, kqueue: EVFILT_TIMER). 목표 10번(최대 32 client) 수준이면 Connection 별 deadline 하나를 가진 단순 배열 scan 으로 충분하다. 클라이언트 쪽 "재시도 횟수 / 시도 간 interval" 고민은 Handler 가 `TIMEOUT` 을 받아 Session 의 retry counter 를 보고 같은 Request 를 다시 return 하는 것으로 표현된다.
-8. **C interface**: 동일 구조를 C 로 내린다. `kiotty_event_t`, `kiotty_request_t`, `kiotty_transition_t`, `kiotty_rule_t { int32_t state; int32_t event; kiotty_handler_t handler; }`, `kiotty_state_machine_t { const kiotty_rule_t* rules; size_t count; int32_t initial; size_t session_size; }`. Handler 는 `kiotty_transition_t (*)(void* session, kiotty_connection_t*, const kiotty_event_t*)`. C++ template 은 이 C 구조체 위의 얇은 typed wrapper 다.
+server.get("/health", [](const HttpRequest&, HttpResponse& r) { r.status(200); });
 
-##### Connection 섹션 변경점
+auto report = [&](const HttpRequest& q, HttpResponse& r) {   // capture 있는 람다. lvalue 로 등록
+    r.defer();
+    workerPool.post(new_job(q.id));                            // worker: 결과를 만들고 server.resume(id, result)
+};
+server.get("/report", report);
+HttpRoute reportRoute = { &app, nullptr, [](void*, const HttpRequest&, HttpResponse& r, void* result) {
+    r.body(static_cast<Result*>(result)->span(), "application/json");
+}};
+server.route(HttpMethod::Get, "/report", reportRoute);        // resumed 콜백은 HttpRoute 형태로
 
-- `ConnectionBlock Connection::suspend()` 를 **`ConnectionBlock Connection::block()` + `Request::suspend()`** 로 분리한다.
-  `block()` 은 언제든 호출 가능한 handle 조회이고 polling 중단은 Request 로만 표현된다. Handler 안에서 worker 에 post 한 뒤 `Request::suspend()` 를 return 해도, worker 의 `resume()` 은 IO Thread 의 큐(eventfd / PostQueuedCompletionStatus)에 들어가므로 dispatch 가 끝난 뒤에 RESUMED 로 처리되어 race 가 없다.
-- `ConnectionBlock::resume(void* payload)` 의 payload 는 `Event::payload` 로 그대로 전달된다.
-- 서버 push 를 위해 `ConnectionBlock::write(const void*, size_t)` 를 추가한다 (IO Thread 로 post 되어 송신 Stage 에 복사됨).
-- `ConnectionHandler` 의 5개 콜백은 외부 인터페이스에서 사라지고, 사용자는 `StateMachine` 과 `Session` 타입만 Server / EventClient 에 주입한다. 콜백 모델을 직접 쓰고 싶은 사용자를 위해 남겨둘지는 미결.
+server.serveDirectory("/", "./www/");
+server.serveMemory("/app.wasm", wasm, "application/wasm");
+server.upgrade("/ws", wsHandler, wsLimits);
+server.open();
+server.run();
+```
 
-##### 미결
+```c
+typedef enum kiotty_http_method { KIOTTY_HTTP_GET, KIOTTY_HTTP_HEAD, KIOTTY_HTTP_POST, KIOTTY_HTTP_PUT, KIOTTY_HTTP_DELETE, KIOTTY_HTTP_PATCH, KIOTTY_HTTP_OPTIONS } kiotty_http_method_t;
+typedef struct kiotty_http_header { kiotty_span_t name; kiotty_span_t value; } kiotty_http_header_t;
 
-- `Transition::stay()` 표기 (state 유지) 를 둘지, Handler 가 `s.state` 를 그대로 return 하게 할지.
-- `readUntil` 의 delimiter 최대 길이 (4 bytes 고정이면 memchr + 비교로 충분).
-- 32 client 기준으로 Rule 테이블은 선형 탐색으로 충분하지만, 2차원 `[state][event]` 테이블을 compile time 에 만들어 O(1) 로 갈지.
-- Rule 테이블의 `(int)HttpState::X` 캐스팅이 거슬린다. `Http::rule(HttpState::ReadingHeader, Event::READ, onHeader)` 같은 constexpr helper 로 감출 수 있다 (C++11 constexpr 생성자면 가능).
+typedef struct kiotty_http_request {
+    kiotty_connection_id_t      id;
+    kiotty_http_method_t        method;
+    kiotty_span_t               path;
+    kiotty_span_t               query;
+    const kiotty_http_header_t* headers;
+    size_t                      header_count;
+    kiotty_span_t               body;
+    int                         keep_alive;
+    kiotty_connection_t*        connection;        /* peer 정보 조회용 */
+} kiotty_http_request_t;
+kiotty_span_t kiotty_http_request_header(const kiotty_http_request_t* request, const char* name);
+
+typedef struct kiotty_http_response kiotty_http_response_t;                      /* 불투명. IO Thread 전용 */
+kiotty_code_t kiotty_http_response_status(kiotty_http_response_t* r, int code);
+kiotty_code_t kiotty_http_response_header(kiotty_http_response_t* r, const char* name, const char* value);
+kiotty_code_t kiotty_http_response_body(kiotty_http_response_t* r, kiotty_span_t data, const char* content_type);
+kiotty_code_t kiotty_http_response_body_ref(kiotty_http_response_t* r, kiotty_span_t data, const char* content_type);
+kiotty_code_t kiotty_http_response_file(kiotty_http_response_t* r, const char* path, const char* content_type);
+void          kiotty_http_response_defer(kiotty_http_response_t* r);
+
+typedef struct kiotty_http_route {
+    void* user_context;
+    void (*handle) (void* user_context, const kiotty_http_request_t* request, kiotty_http_response_t* response);
+    void (*resumed)(void* user_context, const kiotty_http_request_t* request, kiotty_http_response_t* response, void* payload);   /* NULL 가능 */
+} kiotty_http_route_t;
+
+typedef struct kiotty_http_limits { size_t max_routes; size_t max_header_bytes; size_t max_headers; size_t max_body_bytes; size_t response_bytes; uint32_t header_timeout_ms; uint32_t keep_alive_timeout_ms; } kiotty_http_limits_t;
+
+typedef struct kiotty_http_server kiotty_http_server_t;
+kiotty_http_server_t* kiotty_http_server_create(const kiotty_server_config_t* config, const kiotty_http_limits_t* limits);
+void                  kiotty_http_server_destroy(kiotty_http_server_t* s);
+kiotty_code_t         kiotty_http_server_route(kiotty_http_server_t* s, kiotty_http_method_t method, const char* path, kiotty_http_route_t route);
+kiotty_code_t         kiotty_http_server_not_found(kiotty_http_server_t* s, kiotty_http_route_t route);
+kiotty_code_t         kiotty_http_server_serve_directory(kiotty_http_server_t* s, const char* url_prefix, const char* directory);
+kiotty_code_t         kiotty_http_server_serve_file(kiotty_http_server_t* s, const char* url_path, const char* file_path);
+kiotty_code_t         kiotty_http_server_serve_memory(kiotty_http_server_t* s, const char* url_path, kiotty_span_t data, const char* content_type);
+kiotty_code_t         kiotty_http_server_upgrade(kiotty_http_server_t* s, const char* url_path, kiotty_websocket_handler_t handler, const kiotty_websocket_limits_t* limits);
+kiotty_code_t         kiotty_http_server_open(kiotty_http_server_t* s);
+void                  kiotty_http_server_close(kiotty_http_server_t* s);
+kiotty_code_t         kiotty_http_server_run(kiotty_http_server_t* s);
+void                  kiotty_http_server_stop(kiotty_http_server_t* s);
+kiotty_code_t         kiotty_http_server_resume(kiotty_http_server_t* s, kiotty_connection_id_t id, void* payload);
+```
+
+### 10. WebSocket / WebSocketHandler
+
+WebSocket (RFC 6455) 은 HTTP Upgrade 로만 시작되므로 서버 쪽 진입점은 `HttpServer::upgrade(url_path, handler, limits)` 다. HttpServer 하나가 HTTP 라우트와 WebSocketHandler 를 동시에 가진다.
+101 응답이 송신 완료되면 그 Connection 은 HTTP StateMachine 에서 WebSocket StateMachine (구현 가이드 3.2) 으로 넘어가고, 이후 HTTP 콜백은 오지 않는다.
+
+- 수신 frame 의 조각(fragment)은 라이브러리가 합쳐서 `onMessage` 에 메시지 하나로 준다. `max_message_bytes` 를 넘으면 1009 로 close 한다.
+- ping / pong 은 라이브러리가 처리한다. 들어온 ping 에는 pong 을 보내고, `ping_interval_ms` 마다 ping 을 보내며 `pong_timeout_ms` 안에 pong 이 없으면 1001 로 close 한다.
+- `send` 는 frame 으로 감싸 송신 Stage 로 복사한다. 여유가 없으면 `BUFFER_FULL` 이며 아무것도 보내지 않는다. 송신 frame 은 masking 하지 않는다 (서버).
+- `close` 는 close handshake 를 시작한다. 상대의 close frame 이 오거나 `close_timeout_ms` 가 지나면 `onClose`.
+- **다른 thread 의 push** 는 `HttpServer::resume(ws.id(), payload)` 다. IO Thread 에서 `onResumed(ctx, ws, payload)` 가 호출되고 거기서 `ws.send()` 한다. 다른 thread 에서 `WebSocket` 을 직접 만지지 않는다.
+
+```cpp
+enum class WebSocketOpcode { Text = 1, Binary = 2 };
+
+struct WebSocketMessage {
+    WebSocketOpcode opcode;
+    Span            data;      // 수신 버퍼. onMessage 가 return 하면 무효
+};
+
+struct WebSocket {                                               // Connection 위의 per-connection 객체. IO Thread 에서만 사용
+    ConnectionInfo& info();
+    ConnectionId    id() const;                                  // HttpServer::resume 에 쓴다
+    void*  context() const;                                      // per-connection slot. 라이브러리는 건드리지 않는다
+    void   setContext(void* context);
+    NetCode send(WebSocketOpcode opcode, Span data);
+    NetCode close(uint16_t code, const char* reason);            // reason 은 123 바이트 이하
+};
+
+struct WebSocketAccept {                                         // onUpgrade 에서 응답 헤더를 고른다
+    NetCode protocol(const char* subprotocol);                   // Sec-WebSocket-Protocol. 요청에 없던 값이면 INVALID_ARGUMENT
+};
+
+struct WebSocketHandler {
+    void* user_context;
+    bool (*onUpgrade)(void* user_context, const HttpRequest& request, WebSocketAccept& accept);   // false 면 403 으로 거절하고 HTTP 로 남는다. nullptr 이면 모두 허용
+    void (*onOpen)   (void* user_context, WebSocket& ws);                                         // 101 송신 완료
+    void (*onMessage)(void* user_context, WebSocket& ws, const WebSocketMessage& message);
+    void (*onResumed)(void* user_context, WebSocket& ws, void* payload);                          // HttpServer::resume(ws.id(), payload). push 는 여기서 ws.send()
+    void (*onClose)  (void* user_context, WebSocket& ws, uint16_t code, NetCode reason);          // code: close frame 의 status. 없으면 1006. 마지막 콜백
+};
+
+struct WebSocketLimits {
+    size_t   max_message_bytes;     // 조각을 합친 메시지 최대 크기. 기본 64 KiB. 초과시 1009
+    uint32_t ping_interval_ms;      // 0 이면 ping 을 보내지 않음. 기본 30000
+    uint32_t pong_timeout_ms;       // 기본 10000
+    uint32_t close_timeout_ms;      // close handshake 대기. 기본 5000
+};
+```
+
+사용 예
+
+```cpp
+// IO Thread
+void onOpen(void* ctx, WebSocket& ws)                     { app.clients.add(ws.id()); }
+void onResumed(void* ctx, WebSocket& ws, void* payload)   { ws.send(WebSocketOpcode::Text, static_cast<Message*>(payload)->span()); }
+void onClose(void* ctx, WebSocket& ws, uint16_t, NetCode) { app.clients.remove(ws.id()); }
+
+// 앱 thread : 센서 값이 바뀌면 모든 클라이언트에게 push
+for (ConnectionId id : app.clients.snapshot()) server.resume(id, &message);   // 이미 닫힌 id 는 PEER_CLOSED 를 돌려준다
+```
+
+```c
+typedef enum kiotty_websocket_opcode { KIOTTY_WS_TEXT = 1, KIOTTY_WS_BINARY = 2 } kiotty_websocket_opcode_t;
+typedef struct kiotty_websocket_message { kiotty_websocket_opcode_t opcode; kiotty_span_t data; } kiotty_websocket_message_t;
+
+typedef struct kiotty_websocket kiotty_websocket_t;                                /* 불투명. IO Thread 전용 */
+const kiotty_connection_info_t* kiotty_websocket_info(kiotty_websocket_t* ws);
+kiotty_connection_id_t kiotty_websocket_id(kiotty_websocket_t* ws);
+void*         kiotty_websocket_context(kiotty_websocket_t* ws);
+void          kiotty_websocket_set_context(kiotty_websocket_t* ws, void* context);
+kiotty_code_t kiotty_websocket_send(kiotty_websocket_t* ws, kiotty_websocket_opcode_t opcode, kiotty_span_t data);
+kiotty_code_t kiotty_websocket_close(kiotty_websocket_t* ws, uint16_t code, const char* reason);
+
+typedef struct kiotty_websocket_accept kiotty_websocket_accept_t;                  /* 불투명 */
+kiotty_code_t kiotty_websocket_accept_protocol(kiotty_websocket_accept_t* accept, const char* subprotocol);
+
+typedef struct kiotty_websocket_handler {
+    void* user_context;
+    int  (*on_upgrade)(void* user_context, const kiotty_http_request_t* request, kiotty_websocket_accept_t* accept);   /* 0 이면 거절. NULL 이면 모두 허용 */
+    void (*on_open)   (void* user_context, kiotty_websocket_t* ws);
+    void (*on_message)(void* user_context, kiotty_websocket_t* ws, const kiotty_websocket_message_t* message);
+    void (*on_resumed)(void* user_context, kiotty_websocket_t* ws, void* payload);
+    void (*on_close)  (void* user_context, kiotty_websocket_t* ws, uint16_t code, kiotty_code_t reason);
+} kiotty_websocket_handler_t;
+
+typedef struct kiotty_websocket_limits { size_t max_message_bytes; uint32_t ping_interval_ms; uint32_t pong_timeout_ms; uint32_t close_timeout_ms; } kiotty_websocket_limits_t;
+```
+
+미결
+
+- WebSocket 클라이언트. EventClient 위에 같은 `WebSocketHandler` 를 올리는 `WebSocketClient(config, url_path, handler, limits)` 로 두되 인터페이스는 다음 버전에서.
+- 조각을 합치지 않고 그대로 전달하는 streaming 모드 (`max_message_bytes` 보다 큰 메시지).
+- permessage-deflate 확장은 지원하지 않는다.
