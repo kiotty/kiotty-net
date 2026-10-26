@@ -160,52 +160,35 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 }
 ```
 
-### 1.5 suspend / resume 큐 / timeout
+### 1.5 Work / timeout
 
-**ConnectionId.** 상위 32비트 generation, 하위 32비트 slot index. Connection 이 닫힐 때 generation 을 1 올린다. 그래서 같은 slot 이 새 peer 에게 재사용되어도 옛 id 는 맞지 않는다.
+**pool handle.** 하위 32비트 slot index, 상위 32비트 generation. Connection 이 닫힐 때 generation 을 1 올린다. 그래서 같은 slot 이 새 peer 에게 재사용되어도 옛 handle 은 맞지 않는다. `KiottyNetWorkHandle` 은 그 연결의 handle 과 같은 값이다. 타입만 다르다.
 
-**suspend.** `_suspended = true` 로 두는 것뿐이다. pump 는 콜백을 내보내지 않고(1.3 의 첫 break), recv 는 계속 걸어 데이터를 Stage 에 쌓는다. timeout 도 전달하지 않는다.
-suspend 중에 peer 가 끊으면 `close()` 는 `_pending_close = reason` 만 기록하고 return 한다. slot 은 재사용되지 않고 generation 도 그대로다. worker 가 Session 을 쓰고 있을 수 있기 때문이다.
+**Connection 의 Work 상태.** atomic 하나로 표현한다. IO Thread 와 worker 가 모두 CAS 로만 바꾸므로 lock 이 없다.
 
-**resume 큐.** `Server::resume(id, payload)` 는 아무 thread 에서나 불린다.
-
-```cpp
-// 호출 thread
-NetCode Server::resume(ConnectionId id, void* payload)
-{
-    Connection* c = &_connections[slotIndex(id)];
-    if (c->_generation.load() != generation(id)) return PEER_CLOSED;   // 이미 닫힘 (호출 시점 기준)
-    if (!_resume_queue.push(ResumeItem{ id, payload })) return BUFFER_FULL;   // 고정 크기 MPSC 큐. max_clients * 4
-    wake();                                                           // eventfd / PostQueuedCompletionStatus / io_uring msg ring
-    return SUCCESS;
-}
-
-// IO Thread. wake 를 받으면 큐를 비운다
-void IOThread::drainResumeQueue()
-{
-    ResumeItem item;
-    while (_resume_queue.pop(item)) {
-        Connection* c = &_connections[slotIndex(item.id)];
-        if (c->_generation != generation(item.id)) continue;          // 큐에 있는 동안 닫힘. 조용히 버린다 (push 경로에서만 일어난다)
-
-        bool was_suspended = c->_suspended;
-        c->_suspended = false;                                        // 콜백 안에서 다시 suspend() 하면 다시 true 가 된다
-        c->_handler.onResumed(c->_handler.user_context, c, item.payload);
-
-        if (c->_pending_close != NONE) {                              // suspend 중에 peer 가 끊었던 경우. onResumed 다음에 전달한다
-            close(c, c->_pending_close);
-            continue;
-        }
-        (void)was_suspended;
-        pump(c);                                                      // 콜백이 등록한 read 가 쌓인 데이터로 바로 충족될 수 있다
-    }
-}
+```
+RUNNING ──startWork──> DRAINING ──(송신 비움, 다음 loop)──> WORKING ──finish*──> DONE ──(IO Thread 가 요청 적용)──> RUNNING
 ```
 
-suspend 된 연결에 대해 `onResumed` 의 `c` 가 항상 유효한 이유는 위의 `_pending_close` 때문이다. push 경로(suspend 하지 않은 연결)에서는 큐에 있는 동안 닫힐 수 있고, 그 경우 콜백 없이 버려진다. 그래서 push 의 payload 수명은 Session 이 아니라 호출자가 가져야 한다.
+| 전이 | 누가 | 방법 |
+|---|---|---|
+| RUNNING → DRAINING | startWork 를 부른 thread (IO Thread 콜백 안이거나 앱 thread) | CAS. 실패하면 `KIOTTY_BUSY`. payload 와 generation 을 슬롯에 기록하고 IO Thread 를 깨운다 |
+| DRAINING → WORKING | IO Thread | 송신 Stage 가 비고 걸린 send 완료가 모두 돌아온 뒤, 다음 loop 에서 저장(store). 걸려 있던 read 요청과 남은 deadline 을 `_saved_request`, `_saved_deadline` 에 옮긴다. 그 다음 onWorkStarted |
+| WORKING → DONE | finish* 를 부른 thread | 요청(op, n, delimiter, timeout)을 `_finish_request` 에 쓰고 CAS. 실패하면 `KIOTTY_BUSY` (이미 finish 됨). generation 이 다르면 `KIOTTY_PEER_CLOSED`. 성공하면 done ring 에 index 를 넣고 깨운다 |
+| DONE → RUNNING | IO Thread | done ring 에서 꺼내 `_finish_request` 를 적용한다. `finishWork` / `finishWithWrite` 는 `_saved_request` 와 `_saved_deadline` 을 복원. 그 뒤 pump 한 번 (쌓인 데이터로 바로 onRead 가 나올 수 있다) |
+
+**finishWithWrite 의 복사.** WORKING 상태에서 송신 Stage 를 만지는 thread 는 worker 하나뿐이다 (IO Thread 는 DRAINING 에서 다 비웠고 WORKING 에서는 송신 Stage 를 건드리지 않는다). 그래서 worker 가 Stage 의 Provider 로 직접 복사해도 된다. 복사는 CAS 전에 끝나므로 IO Thread 가 DONE 을 본 시점에는 데이터가 다 들어 있다. 여유가 없으면 상태를 바꾸지 않고 `KIOTTY_BUFFER_FULL`.
+
+**WORKING 중 IO Thread 가 하는 일.** recv 는 계속 걸어 수신 Stage 에 쌓는다. 가득 차면 recv 를 걸지 않는다. FIN / 에러는 `_peer_closed` (atomic) 에 기록만 하고 close 는 미룬다. deadline scan 은 WORKING 인 연결을 건너뛴다. `KiottyNet_isWorkConnected` 는 generation 일치와 `_peer_closed == false` 를 읽는다. DONE → RUNNING 전이에서 `_peer_closed` 면 요청을 적용하는 대신 `close(KIOTTY_PEER_CLOSED)` 한다.
+
+**깨우기.** Windows 는 `PostQueuedCompletionStatus` 로 index 를 실어 보낸다. Linux 는 eventfd (io_uring 은 msg ring), mac 은 pipe 로 깨운 뒤 done ring 을 비운다.
+
+**done ring.** 연결 하나는 동시에 하나의 DONE 만 가질 수 있으므로 `max_clients` 칸이면 넘치지 않는다. worker 가 여럿이라 producer 는 여럿, consumer 는 IO Thread 하나다. `fetch_add` 로 칸을 받아 index 를 쓰고 그 칸의 ready 플래그를 release 로 세운다. IO Thread 는 head 부터 ready 가 세워진 칸을 acquire 로 읽어 비운다. startWork 를 앱 thread 가 부르는 경우도 같은 ring 과 깨우기를 쓴다 (전이만 다르다).
+
+**소유자 close().** WORKING 인 연결은 `_peer_closed` 와 무관하게 `onDisconnected(KIOTTY_CLOSED)` 를 내고 generation 을 올린다. 뒤늦은 finish* 는 generation 불일치로 `KIOTTY_PEER_CLOSED` 다. destroy 뒤의 finish* 도 같은 길로 no-op 이 되려면 handle 에서 소유자를 찾는 전역 표에도 generation 이 있어야 한다 (요구사항 미결).
 
 **timeout.** `Connection::setTimeout(ms)` 는 Connection 의 deadline 하나를 갱신한다. IO loop 는 대기 시간을 가장 가까운 deadline 으로 잡고 (IOCP: `GetQueuedCompletionStatusEx` 의 timeout,
-epoll: timerfd 또는 timeout 인자, kqueue: `EVFILT_TIMER`), 깨어나면 배열 scan 으로 만료된 Connection 에 `onTimeout` 을 전달한다. suspend 중인 Connection 은 건너뛴다. 32 client 면 scan 으로 충분하다.
+epoll: timerfd 또는 timeout 인자, kqueue: `EVFILT_TIMER`), 깨어나면 배열 scan 으로 만료된 Connection 에 `onTimeout` 을 전달한다. DRAINING 인 연결은 만료되면 onTimeout 대신 `close(KIOTTY_TIMEOUT)`, WORKING 인 연결은 건너뛴다. 32 client 면 scan 으로 충분하다.
 
 ---
 
@@ -752,5 +735,5 @@ kiotty_server_resume(server, s->id, &s->response);
 - `[state][event]` 2차원 index 표 (2.3 대안).
 - CONNECTED 이벤트를 `Machine::initial` 을 `Transition` 으로 바꿔 없앨지. 서버는 거의 항상 첫 read 만, 클라이언트는 첫 요청만 던진다.
 - 송신 Stage 에서 `Connection::write` 호출 단위로 onWritten 을 내보내기 위한 길이 큐 (여러 write 가 Stage 에 연달아 복사될 때 경계 추적).
-- resume 큐의 MPSC 구현 (32 client 면 mutex + 고정 배열로 충분. lock-free 는 필요해지면).
+- done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
 - gcc `-std=c++11` / `-std=c99` 검증.
