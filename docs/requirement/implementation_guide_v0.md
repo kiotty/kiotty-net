@@ -5,7 +5,7 @@
 
 목차
 
-1. Stage 와 수신 흐름 (ReadRequest, Connection::read / readUntil, IOThread::pump, resume 큐)
+1. Stage 와 수신 / 송신 흐름 (ReadRequest, Connection::read / readUntil, IOThread::pump, Work, write lane / push lane / drain, broadcast)
 2. StateMachine 내부 (설계 근거, rules() 컴파일 타임 정렬, C++ Runner, C runner)
 3. StateMachine 활용 예제 (HTTP/1.1 서버, WebSocket frame 수신, C 표)
 4. 검증 상태
@@ -13,9 +13,9 @@
 
 ---
 
-## 1. Stage 와 수신 흐름
+## 1. Stage 와 수신 / 송신 흐름
 
-requirement_v0.md 4절의 `Stage` 와 5절의 `Connection::read / readUntil` 이 IO Thread 에서 어떻게 맞물리는지다.
+requirement_v0.md 4절의 `Stage` 와 5절의 `Connection::read / readUntil` 이 IO Thread 에서 어떻게 맞물리는지다. 송신 (write lane, push lane, drain, broadcast) 은 1.6 이다.
 핵심은 세 가지다.
 
 - IO Thread 는 read 요청이 있든 없든 계속 recv 해서 수신 Stage 에 쌓는다. `Connection::read*` 는 "이 조건이 되면 onRead 한 번" 이라는 **조건 등록**일 뿐이다.
@@ -167,19 +167,19 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 **Connection 의 Work 상태.** atomic 하나로 표현한다. IO Thread 와 worker 가 모두 CAS 로만 바꾸므로 lock 이 없다.
 
 ```
-RUNNING ──startWork──> DRAINING ──(송신 비움, 다음 loop)──> WORKING ──finish*──> DONE ──(IO Thread 가 요청 적용)──> RUNNING
+RUNNING ──startWork──> DRAINING ──(write lane 비움, 다음 loop)──> WORKING ──finish*──> DONE ──(IO Thread 가 요청 적용)──> RUNNING
 ```
 
 | 전이 | 누가 | 방법 |
 |---|---|---|
 | RUNNING → DRAINING | startWork 를 부른 thread (IO Thread 콜백 안이거나 앱 thread) | CAS. 실패하면 `KIOTTY_BUSY`. payload 와 generation 을 슬롯에 기록하고 IO Thread 를 깨운다 |
-| DRAINING → WORKING | IO Thread | 송신 Stage 가 비고 걸린 send 완료가 모두 돌아온 뒤, 다음 loop 에서 저장(store). 걸려 있던 read 요청과 남은 deadline 을 `_saved_request`, `_saved_deadline` 에 옮긴다. 그 다음 onWorkStarted |
+| DRAINING → WORKING | IO Thread | write lane 이 비고 (onWritten 까지 나간 뒤) 다음 loop 에서 저장(store). push lane 은 비어 있을 필요가 없다. 걸려 있던 read 요청과 남은 deadline 을 `_saved_request`, `_saved_deadline` 에 옮긴다. 그 다음 onWorkStarted |
 | WORKING → DONE | finish* 를 부른 thread | 요청(op, n, delimiter, timeout)을 `_finish_request` 에 쓰고 CAS. 실패하면 `KIOTTY_BUSY` (이미 finish 됨). generation 이 다르면 `KIOTTY_PEER_CLOSED`. 성공하면 done ring 에 index 를 넣고 깨운다 |
-| DONE → RUNNING | IO Thread | done ring 에서 꺼내 `_finish_request` 를 적용한다. `finishWork` / `finishWithWrite` 는 `_saved_request` 와 `_saved_deadline` 을 복원. 그 뒤 pump 한 번 (쌓인 데이터로 바로 onRead 가 나올 수 있다) |
+| DONE → RUNNING | IO Thread | done ring 에서 꺼내 `_finish_request` 를 적용한다. `finishWithWrite` 는 `_saved_request` 와 `_saved_deadline` 을 복원하고 drain 한 번 (1.6, write lane 의 메시지가 나간다). 그 뒤 pump 한 번 (쌓인 데이터로 바로 onRead 가 나올 수 있다) |
 
-**finishWithWrite 의 복사.** WORKING 상태에서 송신 Stage 를 만지는 thread 는 worker 하나뿐이다 (IO Thread 는 DRAINING 에서 다 비웠고 WORKING 에서는 송신 Stage 를 건드리지 않는다). 그래서 worker 가 Stage 의 Provider 로 직접 복사해도 된다. 복사는 CAS 전에 끝나므로 IO Thread 가 DONE 을 본 시점에는 데이터가 다 들어 있다. 여유가 없으면 상태를 바꾸지 않고 `KIOTTY_BUFFER_FULL`.
+**finishWithWrite 의 복사.** WORKING 상태에서 write lane 을 만지는 thread 는 worker 하나뿐이다 (IO Thread 는 DRAINING 에서 다 비웠고 WORKING 에서는 write lane 을 읽지도 쓰지도 않는다. push lane 만 drain 한다). 그래서 worker 가 write lane 에 직접 복사해도 된다. 복사는 CAS 전에 끝나므로 IO Thread 가 DONE 을 본 시점에는 데이터가 다 들어 있고, DONE → RUNNING 에서 drain 이 보낸다. data 가 `send_capacity` 보다 크면 상태를 바꾸지 않고 `KIOTTY_BUFFER_FULL`.
 
-**WORKING 중 IO Thread 가 하는 일.** recv 는 계속 걸어 수신 Stage 에 쌓는다. 가득 차면 recv 를 걸지 않는다. FIN / 에러는 `_peer_closed` (atomic) 에 기록만 하고 close 는 미룬다. deadline scan 은 WORKING 인 연결을 건너뛴다. `KiottyNet_isWorkConnected` 는 generation 일치와 `_peer_closed == false` 를 읽는다. DONE → RUNNING 전이에서 `_peer_closed` 면 요청을 적용하는 대신 `close(KIOTTY_PEER_CLOSED)` 한다.
+**WORKING 중 IO Thread 가 하는 일.** recv 는 계속 걸어 수신 Stage 에 쌓는다. 가득 차면 recv 를 걸지 않는다. push lane 은 평소처럼 drain 한다 (broadcast 와 WebSocket control frame 이 Work 중에도 나간다). FIN / 에러는 `_peer_closed` (atomic) 에 기록만 하고 close 는 미룬다. deadline scan 은 WORKING 인 연결을 건너뛴다. `KiottyNet_isWorkConnected` 는 generation 일치와 `_peer_closed == false` 를 읽는다. DONE → RUNNING 전이에서 `_peer_closed` 면 요청을 적용하는 대신 `close(KIOTTY_PEER_CLOSED)` 한다.
 
 **깨우기.** Windows 는 `PostQueuedCompletionStatus` 로 index 를 실어 보낸다. Linux 는 eventfd (io_uring 은 msg ring), mac 은 pipe 로 깨운 뒤 done ring 을 비운다.
 
@@ -189,6 +189,209 @@ RUNNING ──startWork──> DRAINING ──(송신 비움, 다음 loop)──
 
 **timeout.** `Connection::setTimeout(ms)` 는 Connection 의 deadline 하나를 갱신한다. IO loop 는 대기 시간을 가장 가까운 deadline 으로 잡고 (IOCP: `GetQueuedCompletionStatusEx` 의 timeout,
 epoll: timerfd 또는 timeout 인자, kqueue: `EVFILT_TIMER`), 깨어나면 배열 scan 으로 만료된 Connection 에 `onTimeout` 을 전달한다. DRAINING 인 연결은 만료되면 onTimeout 대신 `close(KIOTTY_TIMEOUT)`, WORKING 인 연결은 건너뛴다. 32 client 면 scan 으로 충분하다.
+
+### 1.6 송신 : write lane, push lane, drain, broadcast
+
+requirement 4절의 두 lane 이다. 둘 다 Connection 안의 고정 버퍼이고, socket 에 쓰는 코드는 `drain` 하나다. 설계의 요점은 셋이다.
+
+- write lane 은 메시지 하나다. 사용자의 `write → onWritten → write` 교대가 곧 흐름 제어이므로 경계 큐가 없다.
+- push lane 은 IO Thread 혼자 쓰고 읽는다. 다른 thread (broadcast 호출자, worker) 는 push lane 을 직접 만지지 않는다. 그래서 Work 상태와 무관하고 lock 이 없다.
+- broadcast 호출자가 돌아오는 시점은 "모든 연결의 push lane 에 복사됐다" 이고 socket 상태와 무관하다. 느린 peer 는 자기 push lane 만 채우고 `close(KIOTTY_BUFFER_FULL)` 로 떨어진다. 호출자를 붙잡지 않는다.
+
+```cpp
+struct WriteLane {                       // 메시지 하나. ring 이 아니다
+    char*             bytes;             // send_capacity
+    size_t            length;
+    size_t            sent;              // kernel 로 넘어간 길이
+    std::atomic<bool> pending;           // 메시지가 들어 있다. RUNNING 에서는 IO Thread 가, WORKING 에서는 worker 가 세운다 (release). IO Thread 가 acquire 로 읽는다
+};
+
+struct PushLane {                        // [uint32_t 길이][바이트] 가 여러 개. 수신 Stage 와 같은 클래스
+    Stage  ring;                         // push_capacity
+    size_t head_sent;                    // head 메시지 중 kernel 로 넘어간 길이
+};
+
+enum Lane { NONE, WRITE, PUSH };         // Connection::_sending : 지금 보내는 중인 메시지가 어느 lane 인지. 메시지 경계에서만 바뀐다
+```
+
+**producer.** 셋 모두 복사만 하고 socket 은 만지지 않는다.
+
+```cpp
+void Connection::write(Span data)                      // IO Thread (콜백 안). RUNNING
+{
+    if (_write.pending)              { close(KIOTTY_BUSY); return; }          // 이전 write 의 onWritten 전
+    if (data.length > send_capacity) { close(KIOTTY_BUFFER_FULL); return; }
+    memcpy(_write.bytes, data.data, data.length);
+    _write.length = data.length;
+    _write.sent   = 0;
+    _write.pending.store(true, std::memory_order_release);
+    _io.drain(this);                                                           // (W)
+}
+// finishWorkWithWrite 는 같은 복사를 worker 가 한 뒤 done ring 에 넣는다 (1.5). drain 은 DONE → RUNNING 에서 IO Thread 가 부른다 (D).
+
+bool Connection::push(Span data)                       // IO Thread 만. broadcast 분배, WebSocket control frame
+{
+    uint32_t length = (uint32_t)data.length;
+    char* p = (char*)_push.ring.provider().prepare(sizeof length + data.length);
+    if (!p) return false;                                                      // 호출자가 close(KIOTTY_BUFFER_FULL) 또는 BUFFER_FULL 반환
+    memcpy(p, &length, sizeof length);
+    memcpy(p + sizeof length, data.data, data.length);
+    _push.ring.provider().commit(sizeof length + data.length);
+    _io.drain(this);                                                           // (B)
+    return true;
+}
+```
+
+**consumer.** `pickSegment` 가 보낼 구간을 고른다. 보내던 메시지는 끝까지 보내고, 메시지 경계에서만 lane 을 바꾼다. 둘 다 있으면 write lane 먼저. WORKING 이면 write lane 은 worker 것이므로 push lane 만 본다.
+
+```cpp
+Segment IOThread::pickSegment(Connection* c)
+{
+    if (c->_sending == NONE) {
+        if (c->_state == RUNNING && c->_write.pending.load(std::memory_order_acquire)) c->_sending = WRITE;
+        else if (c->_push.ring.consumer().readable() > 0)                                 c->_sending = PUSH;
+        else return Segment();                                                             // 보낼 것 없음
+    }
+    if (c->_sending == WRITE) return Segment(c->_write.bytes + c->_write.sent, c->_write.length - c->_write.sent);
+
+    Stage::Consumer& consumer = c->_push.ring.consumer();
+    uint32_t length; memcpy(&length, consumer.prepare(sizeof length), sizeof length);
+    const char* bytes = (const char*)consumer.prepare(sizeof length + length) + sizeof length;
+    return Segment(bytes + c->_push.head_sent, length - c->_push.head_sent);
+}
+
+void IOThread::advance(Connection* c, size_t n)      // n 바이트가 kernel 로 넘어갔다
+{
+    if (c->_sending == WRITE) {
+        c->_write.sent += n;
+        if (c->_write.sent < c->_write.length) return;                        // 메시지가 아직 남았다
+        c->_write.pending = false;
+        c->_written       = c->_write.length;                                 // onWritten 은 loop 끝의 notify 에서 (아래)
+    } else {
+        c->_push.head_sent += n;
+        Stage::Consumer& consumer = c->_push.ring.consumer();
+        uint32_t length; memcpy(&length, consumer.prepare(sizeof length), sizeof length);
+        if (c->_push.head_sent < length) return;
+        consumer.commit(sizeof length + length);                              // 콜백 없음
+        c->_push.head_sent = 0;
+    }
+    c->_sending = NONE;                                                        // 다음 pickSegment 가 lane 을 다시 고른다
+}
+```
+
+**drain.** 플랫폼이 다른 곳은 여기뿐이다. IOCP 는 "이 구간을 보내 달라고 걸어 두고 완료를 받는다", epoll 은 "지금 kernel 에 넣고 안 받아 주면 EPOLLOUT 을 기다린다".
+
+```cpp
+// IOCP (proactor). 연결마다 WSASend 는 항상 하나만 걸려 있다.
+void IOThread::drain(Connection* c)
+{
+    if (c->_send_pending) return;                                              // 완료가 오면 onSendComplete 가 다시 부른다
+    Segment s = pickSegment(c);
+    if (s.empty()) return;
+    c->_send_pending = true;
+    WSASend(c->_socket, s.ptr, s.length, &c->_send_ov);                        // 유일한 WSASend. 완료까지 s 가 가리키는 구간은 그대로 둔다
+}
+
+void IOThread::onSendComplete(Connection* c, DWORD bytes)                      // (S)
+{
+    c->_send_pending = false;
+    if (bytes == 0) { close(c, KIOTTY_SOCKET_ERROR); return; }
+    advance(c, bytes);
+    drain(c);                                                                  // 남았으면 다음 WSASend
+}
+
+// epoll (reactor). 받아 주는 만큼 반복해서 넣고, EAGAIN 이면 EPOLLOUT 을 켠다. Stage 가 비면 끈다 (level-triggered 에서 매 loop 깨어나지 않게).
+void IOThread::drain(Connection* c)
+{
+    for (;;) {
+        Segment s = pickSegment(c);
+        if (s.empty()) {
+            if (c->_epollout) { epoll_ctl(_ep, EPOLL_CTL_MOD, c->_socket, EPOLLIN); c->_epollout = false; }
+            return;
+        }
+        ssize_t n = send(c->_socket, s.ptr, s.length, MSG_NOSIGNAL);           // 유일한 send
+        if (n > 0) { advance(c, (size_t)n); continue; }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (!c->_epollout) { epoll_ctl(_ep, EPOLL_CTL_MOD, c->_socket, EPOLLIN | EPOLLOUT); c->_epollout = true; }
+            return;
+        }
+        close(c, KIOTTY_SOCKET_ERROR); return;
+    }
+}
+// EPOLLOUT 이 오면 drain(c) 를 부른다 (S).
+```
+
+drain 을 부르는 곳은 네 군데이고 모두 IO Thread 다. worker 와 broadcast 호출자는 WSASend / send 를 부르지 않는다. 복사하고 깨우기만 한다.
+
+| | 누가 | 언제 |
+|---|---|---|
+| (W) | `Connection::write` | 콜백 안에서 write 한 직후 |
+| (D) | DONE → RUNNING | worker 의 `finishWithWrite` 가 깨운 뒤 요청을 적용한 직후 |
+| (B) | `Connection::push` | broadcast 분배 / control frame 을 push lane 에 복사한 직후 |
+| (S) | 완료 패킷 / EPOLLOUT | 이전에 보낸 것이 끝났을 때 |
+
+**notify.** `advance` 는 `onWritten` 을 바로 내지 않고 `_written` 에 길이만 기록한다. loop 는 그 바퀴의 콜백이 모두 돌아온 뒤 `_written != 0` 인 RUNNING 연결에 `onWritten(_written)` 을 내고 0 으로 돌린 다음 pump 한 번 (1.3) 을 돈다. 두 가지를 막기 위해서다. epoll 에서 `send()` 가 `write()` 안에서 바로 성공하면 `onWritten` 이 `write()` 안에서 재진입으로 나오게 되는 것, 그리고 콜백 안에서 콜백이 나오는 것이다. IOCP 는 완료가 늘 GQCS 로 오므로 재진입은 없지만 같은 자리에서 내서 두 플랫폼의 순서를 같게 한다.
+
+**broadcast.** Server 의 broadcast 버퍼는 없다. 호출자가 돌아올 때까지 block 되므로 호출자의 `data` 가 유효하고, IO Thread 가 거기서 각 연결의 push lane 으로 바로 복사한다. 동시 호출은 slot 으로 받고 slot 이 모두 차면 `KIOTTY_BUSY` 다.
+
+```cpp
+struct PushSlot {                                   // Server 에 4 개, EventClient 에 1 개. 고정
+    std::atomic<int>        state;                  // IDLE → FILLED (호출자) → DONE (IO Thread) → IDLE (호출자)
+    Span                    data;                   // 호출자 버퍼
+    KiottyNetCode           code;
+    std::mutex              mutex;
+    std::condition_variable cv;
+};
+
+KiottyNetCode Server::broadcast(Span data)          // 아무 thread
+{
+    if (data.length == 0 || data.length > _push_capacity) return KIOTTY_INVALID_ARGUMENT;
+    if (_io.isCurrentThread()) return distribute(data);                        // 콜백 안. 기다릴 것이 없다
+    PushSlot* slot = acquireSlot();                                            // IDLE → FILLED CAS. 전부 실패면 nullptr
+    if (!slot) return KIOTTY_BUSY;
+    slot->data = data;
+    _io.wake();                                                                // done ring 과 같은 PostQueuedCompletionStatus / eventfd
+    {
+        std::unique_lock<std::mutex> lock(slot->mutex);
+        slot->cv.wait(lock, [slot] { return slot->state.load() == DONE; });
+    }
+    KiottyNetCode code = slot->code;
+    slot->state = IDLE;
+    return code;
+}
+
+void IOThread::processPushSlots()                   // 깨어난 직후, socket 이벤트와 콜백 전에. index 순서라 모든 연결이 같은 순서로 받는다
+{
+    for (PushSlot& slot : _slots) {
+        if (slot.state.load() != FILLED) continue;
+        slot.code = _owner.distribute(slot.data);
+        { std::lock_guard<std::mutex> lock(slot.mutex); slot.state = DONE; }
+        slot.cv.notify_one();
+    }
+}
+
+KiottyNetCode Server::distribute(Span data)         // IO Thread
+{
+    if (_closing) return KIOTTY_CLOSED;
+    for (Connection& c : _pool) {
+        if (!c.connected() || c._closing) continue;                            // onConnected 전 (accept, TLS 핸드셰이크 중) 이거나 닫히는 중
+        if (!c.push(data)) close(&c, KIOTTY_BUFFER_FULL);                      // slow consumer. WORKING 이면 1.5 규칙대로 finish 뒤 onDisconnected
+    }
+    return KIOTTY_SUCCESS;
+}
+```
+
+`EventClient::write` 는 연결이 하나인 같은 코드다. 다른 점은 `push` 가 실패했을 때 닫지 않고 `KIOTTY_BUFFER_FULL` 을 돌려주는 것과, 연결 전이면 `KIOTTY_PEER_CLOSED` 인 것뿐이다. WebSocket 의 pong / close frame 은 IO Thread 가 `Connection::push` 를 직접 부른다. slot 을 거치지 않는다.
+
+IO Thread loop 한 바퀴의 순서는 다음과 같다. (b) 가 (c) 앞에 있어서 분배는 콜백 사이에서만 일어난다.
+
+```
+a. 이벤트 대기 (GetQueuedCompletionStatusEx / epoll_wait, timeout 은 가장 가까운 deadline)
+b. 깨우기 신호면 : done ring 처리 (D), push slot 처리 (B)
+c. socket 이벤트 : recv 완료 → pump → onRead 등 (W 가 이 안에서), send 완료 / EPOLLOUT → drain (S)
+d. deadline scan → onTimeout
+e. notify : _written 인 RUNNING 연결에 onWritten, 그 뒤 pump
+```
 
 ---
 
@@ -734,6 +937,5 @@ kiotty_server_resume(server, s->id, &s->response);
 - 2.6 의 단일 C core 통합 시점.
 - `[state][event]` 2차원 index 표 (2.3 대안).
 - CONNECTED 이벤트를 `Machine::initial` 을 `Transition` 으로 바꿔 없앨지. 서버는 거의 항상 첫 read 만, 클라이언트는 첫 요청만 던진다.
-- 송신 Stage 에서 `Connection::write` 호출 단위로 onWritten 을 내보내기 위한 길이 큐 (여러 write 가 Stage 에 연달아 복사될 때 경계 추적).
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
 - gcc `-std=c++11` / `-std=c99` 검증.
