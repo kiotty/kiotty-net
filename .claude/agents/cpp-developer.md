@@ -56,7 +56,7 @@ tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 |---|---|---|
 | C 함수 | `KiottyNet_` + 소문자로 시작하는 타동사 + 명사 | `KiottyNet_createServer`, `KiottyNet_readConnection` |
 | C++ 공개 클래스 | `KiottyNet_` + PascalCase. namespace 없음 | `KiottyNet_Server` |
-| C++ 멤버 함수 | camelCase | `readUntil`, `setContext` |
+| C++ 멤버 함수 | camelCase | `readUntil`, `startWork` |
 | C / C++ 공용 struct, enum, handle | `KiottyNet` + PascalCase, 언더스코어 없음 | `KiottyNetServerConfig`, `KiottyNetCode` |
 | 공개 enum 값, 매크로 | `KIOTTY_` + 대문자 | `KIOTTY_SUCCESS`, `KIOTTY_MAX_PATH_LENGTH` |
 | 내부 구현 | `namespace kiotty { namespace net { } }`, 접두어 없음 | `kiotty::net::Stage` |

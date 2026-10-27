@@ -6,9 +6,9 @@
 목차
 
 1. Stage 와 수신 / 송신 흐름 (ReadRequest, Connection::read / readUntil, IOThread::pump, Work, write lane / push lane / drain, broadcast)
-2. StateMachine 내부 (설계 근거, rules() 컴파일 타임 정렬, C++ Runner, C runner)
-3. StateMachine 활용 예제 (HTTP/1.1 서버, WebSocket frame 수신, C 표)
-4. 검증 상태
+2. StateMachine (Stateful run, Connection 이 기억하는 것, dispatch, entry action 적용, HTTP / WebSocket 이 얹히는 방법)
+3. 예제 : Echo (프로토콜, EchoServer, EchoClient 두 가지, C 판)
+4. HttpServer : Connection 별 Request / Response 공급 (HttpSession, 줄 단위 헤더 읽기, 응답 버퍼 배치, handle, Work, 조각 송신)
 5. 미결
 
 ---
@@ -29,7 +29,7 @@ requirement_v0.md 4절의 `Stage` 와 5절의 `Connection::read / readUntil` 이
 // 한 Connection 은 read 요청을 동시에 하나만 가진다. 요청 하나가 충족되면 onRead 한 번이고, 그 즉시 NONE 으로 돌아간다.
 struct ReadRequest {
     enum Kind { NONE, EXACT, UNTIL };
-    Kind     kind;          // NONE  : read 요청 없음 (write 중, suspend 중, close 중). 들어온 데이터는 Stage 에 쌓아만 둔다
+    Kind     kind;          // NONE  : read 요청 없음 (write 중, Work 중, close 중). 들어온 데이터는 Stage 에 쌓아만 둔다
     size_t   length;        // EXACT : 정확히 받을 길이.  UNTIL : 최대 길이. 이 안에 delimiter 가 없으면 CLOSED(PROTOCOL_ERROR)
     char     delim[4];      // UNTIL : delimiter 바이트. 고정 4 바이트로 Connection 안에 복사 (호출자 버퍼에 대한 dangling 없음)
     uint8_t  delim_length;  // UNTIL : 1..4
@@ -70,7 +70,7 @@ void IOThread::onRecvComplete(Connection* connection, int32_t read_length)
 {
     connection->_recv_pending = false;
     if (read_length <= 0) {                                    // 0: peer 가 FIN, <0: 소켓 에러
-        close(connection, read_length == 0 ? PEER_CLOSED : SOCKET_ERROR);   // suspend 중이면 미뤄 둔다 (1.5). 아니면 onDisconnected 한 번
+        close(connection, read_length == 0 ? PEER_CLOSED : SOCKET_ERROR);   // WORKING 이면 미뤄 둔다 (1.5). 아니면 onDisconnected 한 번
         return;
     }
     connection->_recv_stage.provider().commit(read_length);
@@ -78,14 +78,14 @@ void IOThread::onRecvComplete(Connection* connection, int32_t read_length)
 }
 
 // 쌓인 데이터로 충족되는 read 요청을 전부 처리하고, 필요하면 recv 를 다시 건다.
-// recv 완료 뒤에만 부르는 것이 아니다. onConnected / onWritten / onResumed / onTimeout 어떤 콜백이든 전달이 끝나면
+// recv 완료 뒤에만 부르는 것이 아니다. onConnected / onWritten / onTimeout / finish* 적용 어떤 경우든 전달이 끝나면
 // IOThread 는 pump() 를 한 번 돈다. 콜백 안에서 등록한 요청이 이미 Stage 에 있는 데이터로 충족될 수 있기 때문이다.
 void IOThread::pump(Connection* connection)
 {
     Stage&             stage    = connection->_recv_stage;
     Stage::Provider&   provider = stage.provider();
     Stage::Consumer&   consumer = stage.consumer();
-    ConnectionHandler& handler  = connection->_handler;
+    const ConnectionHandler& handler = *_handler;              // run 에 넘겨받은 함수 표
 
     // 한 번의 recv 로 요청 여러 개가 연달아 충족될 수 있다 (예: WS 의 header, ext length, mask, payload 가 한 패킷에 들어옴).
     for (;;) {
@@ -93,7 +93,7 @@ void IOThread::pump(Connection* connection)
         const char*  buffer = 0;
         size_t       length = 0;
 
-        if (connection->_suspended) break;                     // suspend 중. 콜백을 내보내지 않는다
+        if (connection->_work_state != RUNNING) break;         // Work 중. 콜백을 내보내지 않는다
         if (req.kind == ReadRequest::NONE) break;              // write / close 중. 데이터는 Stage 에 남겨 둔다
 
         if (req.kind == ReadRequest::EXACT) {
@@ -123,14 +123,14 @@ void IOThread::pump(Connection* connection)
         // 그 요청이 등록되고, 루프 다음 회차에서 남은 데이터로 바로 검사된다.
         req.kind = ReadRequest::NONE;
         Span data = { buffer, length };
-        handler.onRead(handler.user_context, connection, data);
+        handler.onRead(connection->_connection_context, connection, data);
         consumer.commit(length);                               // 콜백이 return 한 뒤에 commit. 이 줄부터 data 는 무효
         if (connection->_closing) return;                      // 콜백 안에서 close() 가 불림. 이후 recv 를 걸지 않는다
     }
 
     stage.compact();                                           // 남은 데이터를 앞으로 당겨 provider 공간을 확보
 
-    // recv 재등록. 요청이 NONE 이거나 suspend 중이어도 상대가 보내는 데이터는 계속 받아 Stage 에 쌓는다. Stage 가 가득 차면
+    // recv 재등록. 요청이 NONE 이거나 Work 중이어도 상대가 보내는 데이터는 계속 받아 Stage 에 쌓는다. Stage 가 가득 차면
     // writable == 0 이 되어 recv 를 걸지 않게 되고, 그것이 TCP backpressure 가 된다. 요청이 걸려 있는데 writable == 0 이면
     // 등록 시 capacity 검사에 걸렸어야 하므로 논리 오류다.
     if (connection->_recv_pending) return;                     // IOCP / io_uring: outstanding recv 는 한 번에 하나만
@@ -196,7 +196,7 @@ requirement 4절의 두 lane 이다. 둘 다 Connection 안의 고정 버퍼이�
 
 - write lane 은 메시지 하나다. 사용자의 `write → onWritten → write` 교대가 곧 흐름 제어이므로 경계 큐가 없다.
 - push lane 은 IO Thread 혼자 쓰고 읽는다. 다른 thread (broadcast 호출자, worker) 는 push lane 을 직접 만지지 않는다. 그래서 Work 상태와 무관하고 lock 이 없다.
-- broadcast 호출자가 돌아오는 시점은 "모든 연결의 push lane 에 복사됐다" 이고 socket 상태와 무관하다. 느린 peer 는 자기 push lane 만 채우고 `close(KIOTTY_BUFFER_FULL)` 로 떨어진다. 호출자를 붙잡지 않는다.
+- notify 와 broadcast 호출자가 돌아오는 시점은 "push lane 에 복사됐다" 이고 socket 상태와 무관하다. 느린 peer 는 자기 push lane 만 채운다. 가득 차면 그 notify 만 들어가지 않고 연결은 그대로다. 호출자를 붙잡지 않는다.
 
 ```cpp
 struct WriteLane {                       // 메시지 하나. ring 이 아니다
@@ -229,11 +229,11 @@ void Connection::write(Span data)                      // IO Thread (콜백 안)
 }
 // finishWorkWithWrite 는 같은 복사를 worker 가 한 뒤 done ring 에 넣는다 (1.5). drain 은 DONE → RUNNING 에서 IO Thread 가 부른다 (D).
 
-bool Connection::push(Span data)                       // IO Thread 만. broadcast 분배, WebSocket control frame
+bool Connection::push(Span data)                       // IO Thread 만. notify / broadcast 분배, WebSocket control frame
 {
     uint32_t length = (uint32_t)data.length;
     char* p = (char*)_push.ring.provider().prepare(sizeof length + data.length);
-    if (!p) return false;                                                      // 호출자가 close(KIOTTY_BUFFER_FULL) 또는 BUFFER_FULL 반환
+    if (!p) return false;                                                      // 호출자가 KIOTTY_BUFFER_FULL 을 돌려준다. 연결은 그대로
     memcpy(p, &length, sizeof length);
     memcpy(p + sizeof length, data.data, data.length);
     _push.ring.provider().commit(sizeof length + data.length);
@@ -266,7 +266,7 @@ void IOThread::advance(Connection* c, size_t n)      // n 바이트가 kernel �
         c->_write.sent += n;
         if (c->_write.sent < c->_write.length) return;                        // 메시지가 아직 남았다
         c->_write.pending = false;
-        c->_written       = c->_write.length;                                 // onWritten 은 loop 끝의 notify 에서 (아래)
+        c->_written       = c->_write.length;                                 // onWritten 은 loop 끝의 completion 에서 (아래)
     } else {
         c->_push.head_sent += n;
         Stage::Consumer& consumer = c->_push.ring.consumer();
@@ -321,35 +321,37 @@ void IOThread::drain(Connection* c)
 // EPOLLOUT 이 오면 drain(c) 를 부른다 (S).
 ```
 
-drain 을 부르는 곳은 네 군데이고 모두 IO Thread 다. worker 와 broadcast 호출자는 WSASend / send 를 부르지 않는다. 복사하고 깨우기만 한다.
+drain 을 부르는 곳은 네 군데이고 모두 IO Thread 다. worker 와 notify / broadcast 호출자는 WSASend / send 를 부르지 않는다. 복사하고 깨우기만 한다.
 
 | | 누가 | 언제 |
 |---|---|---|
 | (W) | `Connection::write` | 콜백 안에서 write 한 직후 |
 | (D) | DONE → RUNNING | worker 의 `finishWithWrite` 가 깨운 뒤 요청을 적용한 직후 |
-| (B) | `Connection::push` | broadcast 분배 / control frame 을 push lane 에 복사한 직후 |
+| (B) | `Connection::push` | notify / broadcast 분배 / control frame 을 push lane 에 복사한 직후 |
 | (S) | 완료 패킷 / EPOLLOUT | 이전에 보낸 것이 끝났을 때 |
 
-**notify.** `advance` 는 `onWritten` 을 바로 내지 않고 `_written` 에 길이만 기록한다. loop 는 그 바퀴의 콜백이 모두 돌아온 뒤 `_written != 0` 인 RUNNING 연결에 `onWritten(_written)` 을 내고 0 으로 돌린 다음 pump 한 번 (1.3) 을 돈다. 두 가지를 막기 위해서다. epoll 에서 `send()` 가 `write()` 안에서 바로 성공하면 `onWritten` 이 `write()` 안에서 재진입으로 나오게 되는 것, 그리고 콜백 안에서 콜백이 나오는 것이다. IOCP 는 완료가 늘 GQCS 로 오므로 재진입은 없지만 같은 자리에서 내서 두 플랫폼의 순서를 같게 한다.
+**completion.** `advance` 는 `onWritten` 을 바로 내지 않고 `_written` 에 길이만 기록한다. loop 는 그 바퀴의 콜백이 모두 돌아온 뒤 `_written != 0` 인 RUNNING 연결에 `onWritten(_written)` 을 내고 0 으로 돌린 다음 pump 한 번 (1.3) 을 돈다. 두 가지를 막기 위해서다. epoll 에서 `send()` 가 `write()` 안에서 바로 성공하면 `onWritten` 이 `write()` 안에서 재진입으로 나오게 되는 것, 그리고 콜백 안에서 콜백이 나오는 것이다. IOCP 는 완료가 늘 GQCS 로 오므로 재진입은 없지만 같은 자리에서 내서 두 플랫폼의 순서를 같게 한다.
 
-**broadcast.** Server 의 broadcast 버퍼는 없다. 호출자가 돌아올 때까지 block 되므로 호출자의 `data` 가 유효하고, IO Thread 가 거기서 각 연결의 push lane 으로 바로 복사한다. 동시 호출은 slot 으로 받고 slot 이 모두 차면 `KIOTTY_BUSY` 다.
+**notify / broadcast.** 라이브러리 쪽 버퍼는 없다. 호출자가 돌아올 때까지 block 되므로 호출자의 `data` 가 유효하고, IO Thread 가 거기서 push lane 으로 바로 복사한다. 동시 호출은 slot 으로 받고 slot 이 모두 차면 `KIOTTY_BUSY` 다. notify 와 broadcast 는 같은 slot 을 쓰고 대상만 다르다.
 
 ```cpp
 struct PushSlot {                                   // Server 에 4 개, EventClient 에 1 개. 고정
-    std::atomic<int>        state;                  // IDLE → FILLED (호출자) → DONE (IO Thread) → IDLE (호출자)
-    Span                    data;                   // 호출자 버퍼
-    KiottyNetCode           code;
-    std::mutex              mutex;
-    std::condition_variable cv;
+    std::atomic<int>          state;                // IDLE → FILLED (호출자) → DONE (IO Thread) → IDLE (호출자)
+    KiottyNetConnectionHandle target;               // 0 이면 broadcast. 아니면 그 연결 하나
+    Span                      data;                 // 호출자 버퍼
+    KiottyNetCode             code;
+    std::mutex                mutex;
+    std::condition_variable   cv;
 };
 
-KiottyNetCode Server::broadcast(Span data)          // 아무 thread
+KiottyNetCode Owner::post(KiottyNetConnectionHandle target, Span data)   // 아무 thread. notifyConnection, notifyEventClient, broadcastServer 가 모두 여기로
 {
     if (data.length == 0 || data.length > _push_capacity) return KIOTTY_INVALID_ARGUMENT;
-    if (_io.isCurrentThread()) return distribute(data);                        // 콜백 안. 기다릴 것이 없다
+    if (_io.isCurrentThread()) return deliver(target, data);                   // 콜백 안. 기다릴 것이 없다
     PushSlot* slot = acquireSlot();                                            // IDLE → FILLED CAS. 전부 실패면 nullptr
     if (!slot) return KIOTTY_BUSY;
-    slot->data = data;
+    slot->target = target;
+    slot->data   = data;
     _io.wake();                                                                // done ring 과 같은 PostQueuedCompletionStatus / eventfd
     {
         std::unique_lock<std::mutex> lock(slot->mutex);
@@ -364,24 +366,30 @@ void IOThread::processPushSlots()                   // 깨어난 직후, socket 
 {
     for (PushSlot& slot : _slots) {
         if (slot.state.load() != FILLED) continue;
-        slot.code = _owner.distribute(slot.data);
+        slot.code = _owner.deliver(slot.target, slot.data);
         { std::lock_guard<std::mutex> lock(slot.mutex); slot.state = DONE; }
         slot.cv.notify_one();
     }
 }
 
-KiottyNetCode Server::distribute(Span data)         // IO Thread
+KiottyNetCode Owner::deliver(KiottyNetConnectionHandle target, Span data)   // IO Thread
 {
     if (_closing) return KIOTTY_CLOSED;
+    if (target != 0) {
+        Connection* c = find(target);                                          // generation 이 다르면 nullptr
+        if (!c || !c->connected() || c->_closing) return KIOTTY_PEER_CLOSED;
+        return c->push(data) ? KIOTTY_SUCCESS : KIOTTY_BUFFER_FULL;
+    }
+    KiottyNetCode code = KIOTTY_SUCCESS;
     for (Connection& c : _pool) {
         if (!c.connected() || c._closing) continue;                            // onConnected 전 (accept, TLS 핸드셰이크 중) 이거나 닫히는 중
-        if (!c.push(data)) close(&c, KIOTTY_BUFFER_FULL);                      // slow consumer. WORKING 이면 1.5 규칙대로 finish 뒤 onDisconnected
+        if (!c.push(data)) code = KIOTTY_BUFFER_FULL;                          // 그 연결만 건너뛴다. 끊지 않는다
     }
-    return KIOTTY_SUCCESS;
+    return code;
 }
 ```
 
-`EventClient::write` 는 연결이 하나인 같은 코드다. 다른 점은 `push` 가 실패했을 때 닫지 않고 `KIOTTY_BUFFER_FULL` 을 돌려주는 것과, 연결 전이면 `KIOTTY_PEER_CLOSED` 인 것뿐이다. WebSocket 의 pong / close frame 은 IO Thread 가 `Connection::push` 를 직접 부른다. slot 을 거치지 않는다.
+`notifyEventClient` 는 target 이 EventClient 의 연결 하나인 같은 코드다. 연결 전이면 `KIOTTY_PEER_CLOSED` 다. WebSocket 의 pong / close frame 은 IO Thread 가 `Connection::push` 를 직접 부른다. slot 을 거치지 않는다.
 
 IO Thread loop 한 바퀴의 순서는 다음과 같다. (b) 가 (c) 앞에 있어서 분배는 콜백 사이에서만 일어난다.
 
@@ -390,552 +398,1063 @@ a. 이벤트 대기 (GetQueuedCompletionStatusEx / epoll_wait, timeout 은 가�
 b. 깨우기 신호면 : done ring 처리 (D), push slot 처리 (B)
 c. socket 이벤트 : recv 완료 → pump → onRead 등 (W 가 이 안에서), send 완료 / EPOLLOUT → drain (S)
 d. deadline scan → onTimeout
-e. notify : _written 인 RUNNING 연결에 onWritten, 그 뒤 pump
+e. completion : _written 인 RUNNING 연결에 onWritten, 그 뒤 pump
 ```
 
 ---
 
-## 2. StateMachine 내부
+## 2. StateMachine
 
-### 2.1 왜 StateMachine 인가
+requirement_v0.md 8절의 구현이다. 공개 API 는 `KiottyNet_runStatefulServer` / `KiottyNet_runStatefulEventClient` 둘뿐이고 나머지는 모두 라이브러리 안이다. Runner 객체도 사용자 pool 도 없다. 사용자가 보는 것은 `KiottyNetStatefulAppContext` 하나다.
 
-콜백 모델만 있으면 프로토콜 작성자는 콜백마다 `switch (state)` 를 쓰게 된다.
+### 2.1 Stateful run
 
 ```cpp
-onResumed(Connection* connection, void* user_context)
+static const KiottyNetConnectionHandler STATEFUL_HANDLER = { &statefulOnConnected, &statefulOnDisconnected, &statefulOnRead, &statefulOnWritten, &statefulOnWorkStarted, &statefulOnTimeout };
+
+KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetStatefulAppContext* app_context)
 {
-    auto& next_state = user_context->state;
-    when(next_state) {
-        State::V1 -> connection->read(user_context->buffer, length);
-        State::V2 -> connection->write(user_context->buffer, length);
-    }
-}
-onRead, onWritten(Connection* connection, void* user_context, const char* buffer, size_t length)
-{
-    auto& next_state = when(user_context->state) {
-        State::V1 -> doSomething(buffer, length);
-        State::V4 -> { connection->suspend(); doLongtermSomething(connection->id(), ...); }
-    }
-    when(next_state) { State::V1 -> connection->read(...); State::V2 -> connection->write(...); }
+    KiottyNetCode code = validate(app_context);        // NULL, machine NULL, rules NULL → KIOTTY_INVALID_ARGUMENT. 같은 (state, event) 가 두 번 → KIOTTY_DUPLICATE_RULE
+    if (code != KIOTTY_SUCCESS) return code;
+    return KiottyNet_runServer(server, &STATEFUL_HANDLER, const_cast<KiottyNetStatefulAppContext*>(app_context));   // 7절 run 그대로. app_context 자리에 사용자의 struct 가 들어간다
 }
 ```
 
-같은 switch 가 콜백 수만큼 복제되고, "지금 read 가 걸려 있는데 또 read 를 부른다" 같은 상태 불일치를 막을 방법이 없다.
-StateMachine 은 이것을 `(Old State, Event) -> Handler -> (New State, Request)` 한 줄로 바꾼다. Handler 는 Request 를 **return** 할 뿐 IO 를 직접 부르지 않으므로
-라이브러리가 요청의 개수와 순서를 보장할 수 있다.
+- 사용자의 `KiottyNetStatefulAppContext` 가 그대로 base 의 app_context 다. 라이브러리가 따로 잡는 per-run 객체는 없다. Stateful handler 는 이것을 읽기만 하므로 `const` 를 벗기는 것은 안전하다.
+- 사용자는 이 struct 를 run 을 부른 함수의 stack 에 두어도 된다. run 이 모든 onDisconnected 뒤에 return 하기 때문이다 (7절).
+- 검사는 표를 한 번 훑는다. 행 수가 작아서 O(n²) 비교로 충분하다. C++ 의 `KiottyNet_rules` 는 컴파일 타임에 이미 거른 표라 그냥 통과한다.
+- 표는 정렬되어 있을 필요가 없다. 찾기는 선형 탐색이다 (2.3).
 
-### 2.2 설계 포인트
+### 2.2 Connection 이 기억하는 것
 
-1. **Handler 는 순수 함수.** 입력 (Session, Event), 출력 Transition. `Connection&` 을 받지만 `info()`, `id()` 조회용이다. debug 빌드에서는 Handler 안의 `read/write/suspend/close` 호출을 assert 로 막는다.
-2. **표 = 문서 = 계약.** `rules(...)` 하나가 상태 전이표다. `.to()` 가 목적지를 표에 올리고 debug Runner 가 그것을 검사한다. 매칭되지 않는 (state, event) 는 `CLOSED(UNHANDLED_EVENT)` 로 끊는다. 조용히 무시하지 않는다.
-3. **메모리.** 표는 `.rodata` 의 상수, Session 은 Runner 의 Slot 배열에 고정 크기, `Event::data` 는 수신 Stage 를 직접 가리킨다. 핸들러가 return 하면 `consumer.commit()` 되므로 보관하려면 Session 으로 복사한다. 런타임 동적 할당은 0.
-4. **read 요청은 두 종류뿐.** `read(exact)` 와 `readUntil(delim, max)`. 큰 body 는 `read(min(remaining, chunk))` 반복으로, chunked encoding 은 `readUntil("\r\n")` 뒤 `read(size + 2)` 로 된다. `readSome` 은 프레이밍 없는 raw 터널링에만 필요해서 뺐다.
-5. **Transition 은 요청 하나.** read 또는 write 중 하나다. `andWrite` 로 둘을 같이 던질 필요가 없는 이유는 1절의 흐름 때문이다. write 하는 동안 들어온 데이터는 Stage 에 쌓였다가 다음 read 가 등록되는 즉시 READ 로 온다. "pong 보내고 다음 frame 읽기" 는 상태 하나(`PongSent`)로 표현하고, 그게 오히려 표에 흐름을 드러낸다.
-6. **push 도 표를 거친다.** 다른 thread 의 `Server::resume(id, payload)` 는 `RESUMED` 이벤트로 들어온다. 수신 흐름 중간(예: WS 의 Mask 상태)에 올 수 있으므로 핸들러는 `Transition::stay(Request::write(frame))` 로 상태를 유지한 채 write 만 낸다. 그 write 의 `WRITTEN` 은 `when(WRITTEN).then(ignore)` 행이 `stay()` 로 흡수한다. 정확 일치 행이 ANY 행보다 우선하므로 `from(PongSent).when(WRITTEN)` 같은 행은 영향받지 않는다. 단, PongSent 상태에서 push 의 WRITTEN 이 pong 의 WRITTEN 보다 먼저 오면 onPongSent 가 한 번 일찍 불린다. read(2) 가 그만큼 일찍 등록될 뿐 동작은 같다.
-7. **timeout 은 시간이 들어오는 유일한 입구.** 헤더 반만 보내고 멈춘 peer 가 슬롯을 영원히 잡는 것을 막고, WS keep-alive ping 을 "30초간 READ 가 없으면 ping" 으로, 클라이언트 재시도를 "TIMEOUT 이면 카운터 올리고 같은 Request 재반환" 으로 표현한다.
-8. **state 는 Runner 가 소유.** Session 구조체에 `state` 멤버를 요구하지 않는다. Runner 의 Slot 이 `{ state, in_use, session }` 이다. C runner 가 불투명한 session 안에서 state 를 찾을 수 없기 때문이고, C++ 도 같은 구조를 쓰면 C core 위에 얇게 얹을 수 있다 (2.6).
-9. **Runner 는 Server 를 모른다.** worker 는 `Server::resume(id, payload)` 를 직접 부르고, Runner 는 자기 `onResumed` 콜백을 `Event::RESUMED` 로 바꿀 뿐이다. 생성 순서 의존이 없다.
-
-### 2.3 rules() : 컴파일 타임 정렬과 중복 검출
-
-`rules(row, row, ...)` 는 행을 `(state, event)` 키로 컴파일 타임에 정렬한 `Table<Rule, N>` 을 돌려준다. `ANY = -1` 이므로 ANY 행이 맨 앞에 모인다.
-작성자는 행 순서를 신경 쓰지 않고, Runner 는 이진 탐색한다. 같은 `(state, event)` 가 두 번 나오면 컴파일 에러다.
-
-C++11 constexpr 의 제약 때문에 모양이 이렇다.
-
-- constexpr 함수 본문은 return 하나(와 static_assert) 뿐이다. 정렬은 **삽입 정렬을 재귀로** 표현한다. `sorted(first, rest...) = insert(sorted(rest...), first)`.
-- `std::index_sequence` 가 없다. 삽입은 "새 표의 k 번째 원소는 무엇인가" 를 고르는 `pick()` 을 직접 만든 `MakeSeq<N>` 의 인덱스 팩에 펼쳐 한 번에 만든다.
-- 중복 검출은 `checked()` 가 선언만 된 non-constexpr 함수를 조건부로 호출한다. 중복이 있으면 그 호출이 평가되어 "식이 상수로 계산되지 않았습니다" 에러가 나고, 메시지에 `duplicate_rule_in_table` 이 보인다. 예외도 런타임 비용도 없다.
-- N 은 인자 개수에서 추론된다. 깊이 N 의 재귀이므로 수십 행이면 충분하다.
+내부 `Connection` 에 필드 둘이 있다. 둘 다 공개 API 로 읽거나 쓰는 함수가 없다.
 
 ```cpp
-namespace fsm {
-
-template <typename R, size_t N> struct Table { R rule[N]; };
-
-template <size_t... I> struct Seq {};
-template <size_t N, size_t... I> struct MakeSeq : MakeSeq<N - 1, N - 1, I...> {};
-template <size_t... I> struct MakeSeq<0, I...> { typedef Seq<I...> type; };
-
-template <typename R> constexpr bool less (const R& a, const R& b) { return a.state < b.state || (a.state == b.state && a.event < b.event); }
-template <typename R> constexpr bool equal(const R& a, const R& b) { return a.state == b.state && a.event == b.event; }
-
-// r 이 들어갈 위치 : 정렬된 t 에서 r 보다 큰 첫 원소의 index (같으면 뒤에. 안정 정렬)
-template <typename R, size_t N>
-constexpr size_t insertPos(const Table<R, N>& t, const R& r, size_t i) { return i == N ? N : (less(r, t.rule[i]) ? i : insertPos(t, r, i + 1)); }
-
-// 새 표의 k 번째 원소
-template <typename R, size_t N>
-constexpr R pick(const Table<R, N>& t, const R& r, size_t pos, size_t k) { return k < pos ? t.rule[k] : (k == pos ? r : t.rule[k - 1]); }
-
-template <typename R, size_t N, size_t... I>
-constexpr Table<R, N + 1> insertImpl(const Table<R, N>& t, const R& r, size_t pos, Seq<I...>) { return Table<R, N + 1>{{ pick(t, r, pos, I)... }}; }
-template <typename R, size_t N>
-constexpr Table<R, N + 1> insert(const Table<R, N>& t, const R& r) { return insertImpl(t, r, insertPos(t, r, 0), typename MakeSeq<N + 1>::type()); }
-
-// 인접한 두 행의 키가 같으면 중복
-template <typename R, size_t N>
-constexpr bool unique(const Table<R, N>& t, size_t i) { return i + 1 >= N ? true : (!equal(t.rule[i], t.rule[i + 1]) && unique(t, i + 1)); }
-template <typename R, size_t N> Table<R, N> duplicate_rule_in_table();        // 선언만. 평가되면 상수식이 아니므로 컴파일 에러
-template <typename R, size_t N>
-constexpr Table<R, N> checked(const Table<R, N>& t) { return unique(t, 0) ? t : duplicate_rule_in_table<R, N>(); }
-
-template <typename R>
-constexpr Table<R, 1> sorted(R r) { return Table<R, 1>{{ r }}; }
-template <typename R, typename... Rs>
-constexpr Table<R, 1 + sizeof...(Rs)> sorted(R first, Rs... rest) { return insert(sorted(rest...), first); }
-
-template <typename R, typename... Rs>
-constexpr Table<R, 1 + sizeof...(Rs)> rules(R first, Rs... rest) { return checked(sorted(first, rest...)); }
-
-} // namespace fsm
-```
-
-빌더 쪽 (`from`, `when`, `.then`, `.to`) 은 requirement_v0.md 8절의 선언 그대로다. 모두 단일 return constexpr 이고, `State` 와 `Session` 은 `.then(handler)` 에 넘긴 함수 포인터 타입에서 추론된다.
-
-검토한 대안: `[state][event]` 2차원 index 표를 컴파일 타임에 만들면 O(1) 이지만 State 개수를 라이브러리가 알아야 한다 (enum 의 `COUNT` 또는 템플릿 인자).
-행 10개 남짓의 이진 탐색은 3~4번 비교이므로 v0 는 정렬 + 이진 탐색으로 둔다.
-
-### 2.4 Runner (C++)
-
-`ConnectionHandler` 를 채우는 어댑터다. Connection 을 만지는 코드는 `apply()` 한 곳뿐이다. 상태는 Slot 에 있고, 사용자 Session 에는 state 멤버가 없다.
-
-```cpp
-namespace fsm {
-
-template <typename State>
-struct Transition {
-    State   next;
-    bool    keep;                                                     // true 면 상태 유지 (stay)
-    Request request;
-    Transition(State s)            : next(s), keep(false), request()  {}
-    Transition(State s, Request r) : next(s), keep(false), request(r) {}
-    static Transition stay(Request r = Request()) { Transition t(State(), r); t.keep = true; return t; }
+struct Connection {
+    // ...
+    KiottyNetConnectionContext _connection_context;   // onConnected 가 return 한 값. 이후 콜백의 첫 인자. 라이브러리는 읽지 않는다
+    int32_t                    _state;                // Stateful 계층만 쓴다. onConnected 에서 machine->initial 로 놓는다
+    Owner*                     _owner;                // Server 또는 EventClient. 지금 run 의 app_context 를 안다
 };
+```
 
-template <typename State, typename Session>
-struct Slot { State state; bool in_use; Session session; };
+- `_connection_context` 는 base 가 `handler.onConnected()` 의 반환값을 저장하는 자리다. 지워진 `KiottyNet_setConnectionContext` 의 대신이다. base 는 저장하고 넘겨주기만 한다.
+- `_state` 는 base 가 건드리지 않는다. Stateful handler 만 읽고 쓴다. Connection 마다 int32 하나가 Stateful 계층의 per-connection 비용 전부다.
+- machine 은 `connection->_owner->statefulAppContext()` 로 찾는다. 소유자가 들고 있는 지금 run 의 app_context 가 사용자의 `KiottyNetStatefulAppContext*` 이고 그 안에 machine 이 있다. onRead 같은 콜백은 app_context 를 받지 않지만 Stateful 모듈은 라이브러리 안이라 이 길로 간다.
 
-template <typename State, typename Session, size_t N>
-struct Slots { Slot<State, Session> slot[N]; };                    // 사용자가 한 번 잡아 두는 저장소. heap 없음
+### 2.3 dispatch
 
-template <typename State, typename Session>
-class Runner {
-public:
-    typedef Rule<State, Session> R;
-    typedef Slot<State, Session> S;
-
-    template <size_t N>
-    Runner(const Machine<State, Session>& m, Slots<State, Session, N>& storage) : _m(m), _slot(storage.slot), _count(N) {
-        for (size_t i = 0; i < N; ++i) _slot[i].in_use = false;
+```cpp
+static const KiottyNetRule* find(const KiottyNetStateMachine& m, int32_t state, KiottyNetConnectionEventType event)
+{
+    const KiottyNetRule* any = nullptr;
+    for (size_t i = 0; i < m.count; ++i) {
+        const KiottyNetRule& r = m.rules[i];
+        if (r.event != event) continue;
+        if (r.state == state) return &r;                                        // 정확 일치가 우선
+        if (r.state == KIOTTY_ANY_STATE) any = &r;
     }
+    return any;
+}
 
-    ConnectionHandler handler() {
-        ConnectionHandler h = { this, &onConnected, &onDisconnected, &onRead, &onWritten, &onResumed, &onTimeout };
-        return h;
-    }
+static void deliver(Connection* c, const KiottyNetConnectionEvent& event)
+{
+    const KiottyNetStatefulAppContext& app = *c->_owner->statefulAppContext();
+    const KiottyNetRule* rule = find(*app.machine, c->_state, event.type);
+    if (!rule) { fail(c, event, KIOTTY_UNHANDLED_EVENT); return; }
 
-private:
-    static Runner& self(void* ctx)      { return *static_cast<Runner*>(ctx); }
-    static S&      slot(Connection* c)  { return *static_cast<S*>(c->context()); }
-
-    S* acquire() { for (size_t i = 0; i < _count; ++i) if (!_slot[i].in_use) { _slot[i].in_use = true; return &_slot[i]; } return 0; }
-
-    static void onConnected(void* ctx, Connection* c) {
-        S* s = self(ctx).acquire();
-        if (!s) { c->close(SESSION_EXHAUSTED); return; }
-        s->state = self(ctx)._m.initial;
-        c->setContext(s);
-        Event e = { Event::CONNECTED, Span{ 0, 0 }, 0, SUCCESS };
-        self(ctx).deliver(c, e);
-    }
-    static void onDisconnected(void* ctx, Connection* c, NetCode reason) {
-        Event e = { Event::CLOSED, Span{ 0, 0 }, 0, reason };
-        self(ctx).deliver(c, e);                                                // 핸들러는 정리만 한다. Transition 은 무시된다
-        slot(c).in_use = false;
-        c->setContext(0);
-    }
-    static void onRead(void* ctx, Connection* c, Span data)         { Event e = { Event::READ,    data,              0, SUCCESS }; self(ctx).deliver(c, e); }
-    static void onWritten(void* ctx, Connection* c, size_t length)  { Event e = { Event::WRITTEN, Span{ 0, length }, 0, SUCCESS }; self(ctx).deliver(c, e); }
-    static void onResumed(void* ctx, Connection* c, void* payload)  { Event e = { Event::RESUMED, Span{ 0, 0 }, payload, SUCCESS }; self(ctx).deliver(c, e); }
-    static void onTimeout(void* ctx, Connection* c)                 { Event e = { Event::TIMEOUT, Span{ 0, 0 }, 0, SUCCESS };       self(ctx).deliver(c, e); }
-
-    // (state, event) 로 정렬된 표의 이진 탐색
-    const R* find(int state, int event) const {
-        size_t lo = 0, hi = _m.count;
-        while (lo < hi) {
-            size_t mid = lo + (hi - lo) / 2;
-            const R& r = _m.rule[mid];
-            if (r.state < state || (r.state == state && r.event < event)) lo = mid + 1;
-            else if (r.state == state && r.event == event)                return &r;
-            else                                                          hi = mid;
-        }
-        return 0;
-    }
-
-    void deliver(Connection* c, const Event& e) {
-        S& s = slot(c);
-        const R* r = find(static_cast<int>(s.state), e.kind);                   // 정확 일치 먼저
-        if (!r) r = find(ANY, e.kind);                                           // 없으면 ANY 행
-        if (!r) { c->close(UNHANDLED_EVENT); return; }                          // 프로토콜 정의 누락. 조용히 무시하지 않는다
-
-        Transition<State> t = r->handler(s.session, *c, e);
-        if (e.kind == Event::CLOSED) return;                                     // CLOSED 다음은 없다
+    KiottyNetTransition t = rule->transition_action(c->_connection_context, c->handle(), event);
+    if (event.type == KIOTTY_CONNECTION_EVENT_CLOSED) return;                  // 마지막 이벤트. Transition 은 무시
 #ifndef NDEBUG
-        if (!t.keep && r->next.count) {                                          // .to() 계약 검사. stay 는 검사 대상이 아니다
-            bool ok = false;
-            for (int i = 0; i < r->next.count; ++i) ok = ok || (r->next.state[i] == static_cast<int>(t.next));
-            if (!ok) { c->close(ILLEGAL_TRANSITION); return; }
-        }
+    if (!allowed(*rule, t)) { fail(c, event, KIOTTY_ILLEGAL_TRANSITION); return; }
 #endif
-        if (!t.keep) s.state = t.next;
-        apply(c, t.request);
-    }
+    c->_state = t.next;
+    if (event.type == KIOTTY_CONNECTION_EVENT_WORK_STARTED) { applyToWork(event.as.work_started.work, t.entry_action); return; }
+    apply(c, t.entry_action);
+}
 
-    static void apply(Connection* c, const Request& q) {
-        switch (q.op) {
-        case Request::READ:       c->read(q.n);                                  break;
-        case Request::READ_UNTIL: c->readUntil(q.data, q.n);                     break;   // q.data == delimiter
-        case Request::WRITE:      c->write(q.data);                              break;
-        case Request::SUSPEND:    c->suspend();                                  break;
-        case Request::CLOSE:      c->close(SUCCESS);                             break;
-        case Request::NONE:                                                      break;
-        }
-        if (q.op != Request::NONE) c->setTimeout(q.timeout_ms);                  // 0 == deadline 해제. stay() 로 요청이 없으면 기존 deadline 유지
-    }
+static bool allowed(const KiottyNetRule& rule, const KiottyNetTransition& t)
+{
+    if (rule.next_count == 0) return true;
+    for (uint32_t i = 0; i < rule.next_count && i < KIOTTY_MAX_NEXT; ++i) if (rule.next[i] == t.next) return true;
+    return false;
+}
 
-    const Machine<State, Session>& _m;
-    S*                             _slot;
-    size_t                         _count;
-};
-
-} // namespace fsm
+static void fail(Connection* c, const KiottyNetConnectionEvent& event, KiottyNetCode code)
+{
+    if (event.type == KIOTTY_CONNECTION_EVENT_CLOSED) return;
+    if (event.type == KIOTTY_CONNECTION_EVENT_WORK_STARTED) { KiottyNet_finishWorkWithClose(event.as.work_started.work, code); return; }
+    KiottyNet_closeConnection(c->handle(), code);
+}
 ```
 
-### 2.5 C runner
+onRead / onWritten / onWorkStarted / onTimeout 은 event 를 채워 `deliver` 를 부르는 한 줄짜리다.
 
-C 에는 constexpr 가 없으므로 정렬하지 않고 선형 탐색한다. 정확 일치를 먼저, 없으면 ANY 행을 쓰는 우선순위는 한 번의 scan 으로 된다.
-행 10개 남짓이면 이진 탐색과 차이가 없다. 중복 행은 init 에서 한 번 O(N²) 로 검사한다.
+### 2.4 entry action 적용
 
-Pool 은 Connection 마다 `[16 바이트 header | session_size 바이트]` 블록을 하나씩 준다. header 에 state 와 in_use 가 있다. `kiotty_state_machine_t::session_size` 가 이 때문에 필요하다.
+| entry action | Connection 에 (`apply`) | Work 에 (`applyToWork`, WORK_STARTED 에서만) |
+|---|---|---|
+| NONE | 아무것도 안 함. deadline 도 그대로 | Work 를 그대로 둔다. action 이 worker 에게 넘겼다 |
+| READ(exact) | `readConnection(exact)` 뒤 `setConnectionTimeout(timeout_ms)` | `finishWorkWithRead(exact, timeout_ms)` |
+| READ_UNTIL(delimiter, max) | `readConnectionUntil` 뒤 `setConnectionTimeout` | `finishWorkWithReadUntil` |
+| WRITE(data) | `writeConnection(data)` 뒤 `setConnectionTimeout` | `finishWorkWithWrite(data)` |
+| START_WORK | `startWork()`. 실패 코드면 `close(code)`. 성공이면 `setConnectionTimeout` | `KIOTTY_INVALID_ARGUMENT` 로 `finishWorkWithClose` |
+| CLOSE(reason) | `closeConnection(reason)` | `finishWorkWithClose(reason)` |
+
+- `setConnectionTimeout(0)` 은 deadline 해제다. 그래서 timeout 없는 entry action 은 이전 deadline 을 지운다. NONE 만 예외다.
+- `finishWorkWith*` 가 실패하면 그 코드로 `finishWorkWithClose` 한다.
+
+### 2.5 onConnected / onDisconnected
+
+```cpp
+static KiottyNetConnectionContext statefulOnConnected(KiottyNetAppContext raw, KiottyNetConnectionHandle handle)
+{
+    const KiottyNetStatefulAppContext& app = *static_cast<const KiottyNetStatefulAppContext*>(raw);
+    Connection* c = Connection::of(handle);
+    KiottyNetConnectionContext session = app.createConnectionContext ? app.createConnectionContext(app.app_context, handle) : nullptr;
+    if (app.createConnectionContext && !session) { KiottyNet_closeConnection(handle, KIOTTY_SESSION_EXHAUSTED); return nullptr; }
+    c->_state              = app.machine->initial;
+    c->_connection_context = session;                                           // CONNECTED 행이 보기 전에 붙인다
+    deliver(c, makeEvent(KIOTTY_CONNECTION_EVENT_CONNECTED));
+    return session;
+}
+
+static void statefulOnDisconnected(KiottyNetAppContext raw, KiottyNetConnectionContext session, KiottyNetConnectionHandle handle, KiottyNetCode reason)
+{
+    const KiottyNetStatefulAppContext& app = *static_cast<const KiottyNetStatefulAppContext*>(raw);
+    KiottyNetConnectionEvent event = makeEvent(KIOTTY_CONNECTION_EVENT_CLOSED);
+    event.as.closed.reason = reason;
+    deliver(Connection::of(handle), event);                                     // CLOSED 행. Transition 무시
+    if (app.releaseConnectionContext && session) app.releaseConnectionContext(app.app_context, session, handle);
+}
+```
+
+- create 가 NULL 함수면 session 은 NULL 이고 그대로 진행한다. create 가 있는데 NULL 을 돌려주면 `KIOTTY_SESSION_EXHAUSTED` 로 닫는다. 이때 CONNECTED 행은 돌지 않고 onDisconnected 가 바로 온다. 그 CLOSED 행은 돈다 (session 은 NULL).
+- release 는 CLOSED 행 뒤다. action 이 살아 있는 session 을 마지막으로 본다.
+
+### 2.6 HTTP / WebSocket 이 얹히는 방법
+
+`KiottyNet_runHttpServer(http_server)` 는 자기 stack 에 `KiottyNetStatefulAppContext` 를 만든다. machine 은 라이브러리의 HTTP 표, app_context 는 HttpServer 자신 (라우트 표, HttpSession pool), create / release 는 그 pool 의 acquire / release 다. 그 다음 `KiottyNet_runStatefulServer` 를 부른다. 라우트는 run 전에 이미 표에 들어가 있다.
+HttpSession pool 은 `createHttpServer` 가 `max_clients` 만큼 잡는다. 사용자 프로토콜이 Session 저장소를 들고 있는 것과 같은 방식이고, 그 저장소가 라이브러리 안에 있을 뿐이다. HttpSession 이 사용자에게 주는 `KiottyNetHttpRequest` 와 `KiottyNetHttpResponseHandle` 을 어떻게 공급하는지는 4절이다.
+WebSocket 은 HTTP 의 101 뒤에 같은 Connection 에서 machine 과 session 을 바꿔 타야 한다. 방법은 미결이다 (5절).
+
+---
+
+## 3. 예제 : Echo
+
+2절의 StateMachine 을 사용자 쪽에서 쓰는 모습이다. 서버와 클라이언트가 같은 프로토콜을 쓰므로 표 두 장이 서로의 거울이다.
+코드는 `kiotty_net_statemachine.h` 만 포함하면 컴파일되는 형태다. 긴 작업과 notify 는 이 예제에 없다. 긴 작업이 있는 판은 progress 문서의 echo 예제에 있다.
+오류로 닫을 때는 `ErrorOccurred` 로, 정상으로 닫힐 때는 `Closed` 로 옮긴다. Transition 은 언제나 다음 상태를 정한다.
+
+### 3.1 프로토콜
+
+```
+frame = length (4 byte, big endian) + body (length byte, 1..1024)
+```
+
+- 클라이언트가 frame 하나를 보내면 서버가 같은 frame 을 그대로 돌려준다.
+- 서버는 header 를 30 초 안에 받지 못하면 끊는다. body 길이가 0 이거나 1024 를 넘으면 `KIOTTY_PROTOCOL_ERROR` 로 끊는다.
+- 클라이언트는 응답이 보낸 것과 같은지 확인하고 스스로 끊는다.
+
+```cpp
+static const size_t   HEADER_LENGTH = 4;
+static const size_t   MAX_BODY      = 1024;
+static const uint32_t IDLE_TIMEOUT_MS = 30000;
+
+static uint32_t decodeLength(KiottyNetSpan header)
+{
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(header.data);
+    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+}
+
+static void encodeLength(char* header, uint32_t length)
+{
+    header[0] = char(length >> 24);
+    header[1] = char(length >> 16);
+    header[2] = char(length >> 8);
+    header[3] = char(length);
+}
+```
+
+### 3.2 EchoServer
+
+연결마다 들고 있어야 하는 것은 돌려줄 frame 하나다. 상태는 라이브러리가 들고 있으므로 Session 에 없다.
+
+```cpp
+enum class ServerState
+{
+    ReadingHeader,
+    ReadingBody,
+    Writing,
+    ErrorOccurred,
+    Closed
+};
+
+struct ServerSession
+{
+    char   frame[HEADER_LENGTH + MAX_BODY];     // header 를 받은 자리에 그대로 두고 body 를 뒤에 붙여서 통째로 돌려준다
+    size_t frame_length;
+};
+
+typedef KiottyNet_Transition<ServerState> ServerNext;
+
+static ServerSession& serverSession(KiottyNetConnectionContext connection_context)
+{
+    return *static_cast<ServerSession*>(connection_context);
+}
+
+static KiottyNetTransition serverReadHeader()
+{
+    return ServerNext::moveToNextState(ServerState::ReadingHeader, KiottyNet_EntryAction::read(HEADER_LENGTH).timeout(IDLE_TIMEOUT_MS));
+}
+
+static KiottyNetTransition serverOnConnected(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return serverReadHeader();
+}
+
+static KiottyNetTransition serverOnHeader(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    ServerSession& s      = serverSession(connection_context);
+    uint32_t       length = decodeLength(e.as.read.data);
+    if (length == 0 || length > MAX_BODY)
+    {
+        return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_PROTOCOL_ERROR));
+    }
+    std::memcpy(s.frame, e.as.read.data.data, HEADER_LENGTH);                 // data 는 return 하면 무효라 복사
+    s.frame_length = HEADER_LENGTH + length;
+    return ServerNext::moveToNextState(ServerState::ReadingBody, KiottyNet_EntryAction::read(length));
+}
+
+static KiottyNetTransition serverOnBody(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    ServerSession& s = serverSession(connection_context);
+    std::memcpy(s.frame + HEADER_LENGTH, e.as.read.data.data, e.as.read.data.length);
+    KiottyNetSpan frame = { s.frame, s.frame_length };
+    return ServerNext::moveToNextState(ServerState::Writing, KiottyNet_EntryAction::write(frame));   // write lane 으로 복사되므로 s.frame 은 바로 다시 써도 된다
+}
+
+static KiottyNetTransition serverOnWritten(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return serverReadHeader();
+}
+
+static KiottyNetTransition serverOnTimeout(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_TIMEOUT));
+}
+
+static KiottyNetTransition serverOnClosed(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return ServerNext::moveToNextState(ServerState::Closed);
+}
+
+static constexpr auto SERVER_RULES = KiottyNet_rules(
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CONNECTED)                                  .then(serverOnConnected).to(ServerState::ReadingHeader),
+    KiottyNet_from(ServerState::ReadingHeader).when(KIOTTY_CONNECTION_EVENT_READ)      .then(serverOnHeader)   .to(ServerState::ReadingBody, ServerState::ErrorOccurred),
+    KiottyNet_from(ServerState::ReadingBody)  .when(KIOTTY_CONNECTION_EVENT_READ)      .then(serverOnBody)     .to(ServerState::Writing),
+    KiottyNet_from(ServerState::Writing)      .when(KIOTTY_CONNECTION_EVENT_WRITTEN)   .then(serverOnWritten)  .to(ServerState::ReadingHeader),
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_TIMEOUT)                                    .then(serverOnTimeout),
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CLOSED)                                     .then(serverOnClosed));
+static constexpr KiottyNetStateMachine SERVER_MACHINE = KiottyNet_makeStateMachine(SERVER_RULES, ServerState::ReadingHeader);
+```
+
+Session 저장소는 사용자 것이다. 연결 수만큼 고정 배열을 두고 create / release 로 빌려 준다.
+
+```cpp
+template <typename Session, size_t N>
+struct SessionPool
+{
+    Session session[N];
+    bool    in_use[N];
+
+    static KiottyNetConnectionContext acquire(KiottyNetAppContext app_context, KiottyNetConnectionHandle)
+    {
+        SessionPool& self = *static_cast<SessionPool*>(app_context);
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!self.in_use[i])
+            {
+                self.in_use[i]  = true;
+                self.session[i] = Session();
+                return &self.session[i];
+            }
+        }
+        return nullptr;                                                          // 라이브러리가 KIOTTY_SESSION_EXHAUSTED 로 닫는다
+    }
+
+    static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle)
+    {
+        SessionPool& self = *static_cast<SessionPool*>(app_context);
+        self.in_use[static_cast<Session*>(connection_context) - self.session] = false;
+    }
+};
+
+int runEchoServer(uint16_t port)
+{
+    static SessionPool<ServerSession, 32> sessions = {};
+    KiottyNetStatefulAppContext           stateful = { &sessions, &SERVER_MACHINE, &SessionPool<ServerSession, 32>::acquire, &SessionPool<ServerSession, 32>::release };
+
+    KiottyNetServerConfig config;
+    if (KiottyNet_ServerConfigBuilder::tcp(config, "0.0.0.0", port).maxClients(32).build() != KIOTTY_SUCCESS)
+    {
+        return 1;
+    }
+
+    KiottyNet_Context context;
+    KiottyNet_Server  server(context.handle(), config);
+    if (!context.valid() || !server.valid())
+    {
+        return 1;
+    }
+
+    std::thread io([&]() { KiottyNet_runStatefulServer(server.handle(), &stateful); });   // stateful 과 sessions 는 io 가 끝날 때까지 살아 있다
+    if (server.await(3000) != KIOTTY_SUCCESS)
+    {
+        io.join();
+        return 1;
+    }
+    waitForShutdownSignal();
+    server.close();
+    io.join();
+    return 0;
+}
+```
+
+### 3.3 EchoClient : EventClient 판
+
+서버와 같은 StateMachine 을 쓴다. 연결이 하나라 Session 저장소도 하나다. 연결되면 frame 을 보내고, 돌아온 frame 이 보낸 것과 같은지 확인한 뒤 스스로 끊는다.
+
+```cpp
+enum class ClientState
+{
+    Sending,
+    ReadingHeader,
+    ReadingBody,
+    ErrorOccurred,
+    Closed
+};
+
+struct ClientSession
+{
+    char   frame[HEADER_LENGTH + MAX_BODY];
+    size_t frame_length;
+    size_t expected_body;
+    bool   matched;
+};
+
+typedef KiottyNet_Transition<ClientState> ClientNext;
+
+static ClientSession& clientSession(KiottyNetConnectionContext connection_context)
+{
+    return *static_cast<ClientSession*>(connection_context);
+}
+
+static KiottyNetTransition clientOnConnected(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    ClientSession& s     = clientSession(connection_context);
+    KiottyNetSpan  frame = { s.frame, s.frame_length };
+    return ClientNext::moveToNextState(ClientState::Sending, KiottyNet_EntryAction::write(frame).timeout(5000));
+}
+
+static KiottyNetTransition clientOnWritten(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return ClientNext::moveToNextState(ClientState::ReadingHeader, KiottyNet_EntryAction::read(HEADER_LENGTH).timeout(5000));
+}
+
+static KiottyNetTransition clientOnHeader(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    ClientSession& s      = clientSession(connection_context);
+    uint32_t       length = decodeLength(e.as.read.data);
+    if (length != s.frame_length - HEADER_LENGTH)
+    {
+        return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_PROTOCOL_ERROR));
+    }
+    s.expected_body = length;
+    return ClientNext::moveToNextState(ClientState::ReadingBody, KiottyNet_EntryAction::read(length).timeout(5000));
+}
+
+static KiottyNetTransition clientOnBody(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    ClientSession& s = clientSession(connection_context);
+    s.matched = std::memcmp(s.frame + HEADER_LENGTH, e.as.read.data.data, s.expected_body) == 0;
+    return ClientNext::moveToNextState(ClientState::Closed, KiottyNet_EntryAction::close());   // 할 일이 끝났다. CLOSED(KIOTTY_SUCCESS) 가 마지막으로 온다
+}
+
+static KiottyNetTransition clientOnTimeout(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_TIMEOUT));
+}
+
+static KiottyNetTransition clientOnClosed(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+{
+    return ClientNext::moveToNextState(ClientState::Closed);
+}
+
+static constexpr auto CLIENT_RULES = KiottyNet_rules(
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CONNECTED)                                  .then(clientOnConnected).to(ClientState::Sending),
+    KiottyNet_from(ClientState::Sending)      .when(KIOTTY_CONNECTION_EVENT_WRITTEN)   .then(clientOnWritten)  .to(ClientState::ReadingHeader),
+    KiottyNet_from(ClientState::ReadingHeader).when(KIOTTY_CONNECTION_EVENT_READ)      .then(clientOnHeader)   .to(ClientState::ReadingBody, ClientState::ErrorOccurred),
+    KiottyNet_from(ClientState::ReadingBody)  .when(KIOTTY_CONNECTION_EVENT_READ)      .then(clientOnBody)     .to(ClientState::Closed),
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_TIMEOUT)                                    .then(clientOnTimeout),
+    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CLOSED)                                     .then(clientOnClosed));
+static constexpr KiottyNetStateMachine CLIENT_MACHINE = KiottyNet_makeStateMachine(CLIENT_RULES, ClientState::Sending);
+
+static KiottyNetConnectionContext singleSession(KiottyNetAppContext app_context, KiottyNetConnectionHandle)
+{
+    return app_context;                                                          // 연결이 하나라 app_context 가 곧 Session 이다
+}
+
+int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
+{
+    ClientSession session = {};
+    encodeLength(session.frame, uint32_t(message.length));
+    std::memcpy(session.frame + HEADER_LENGTH, message.data, message.length);
+    session.frame_length = HEADER_LENGTH + message.length;
+
+    KiottyNetStatefulAppContext stateful = { &session, &CLIENT_MACHINE, &singleSession, nullptr };   // release 는 할 일이 없어서 NULL
+
+    KiottyNetClientConfig config;
+    if (KiottyNet_ClientConfigBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_SUCCESS)
+    {
+        return 1;
+    }
+
+    KiottyNet_Context     context;
+    KiottyNet_EventClient client(context.handle(), config);
+    if (!context.valid() || !client.valid())
+    {
+        return 1;
+    }
+
+    KiottyNet_runStatefulEventClient(client.handle(), &stateful);               // 연결이 닫히면 return 한다. 이 thread 가 IO Thread 다
+    return session.matched ? 0 : 1;
+}
+```
+
+- 연결이 하나이므로 create 는 app_context 를 그대로 Session 으로 돌려주고 release 는 NULL 이다.
+- `session` 과 `stateful` 은 run 을 부른 함수의 stack 에 있다. run 이 CLOSED 뒤에 return 하므로 안전하다.
+- 결과는 Session 에 남긴 `matched` 로 읽는다. run 의 반환값은 끊어진 이유이고 echo 가 맞았는지는 알려 주지 않는다.
+
+### 3.4 EchoClient : StreamClient 판
+
+이벤트도 표도 없이 같은 일을 하는 동기 판이다. IO Thread 가 없고 호출한 thread 가 기다린다. 한 번 묻고 한 번 받는 도구에는 이쪽이 짧다.
+
+```cpp
+static bool readExact(KiottyNet_StreamClient& client, char* buffer, size_t length, uint32_t timeout_ms)
+{
+    size_t received = 0;
+    while (received < length)
+    {
+        KiottyNetResult result = client.read(buffer + received, length - received, timeout_ms);   // 최대 length 바이트. 모자라면 다시 부른다
+        if (result.code != KIOTTY_SUCCESS)
+        {
+            return false;
+        }
+        received += size_t(result.bytes);
+    }
+    return true;
+}
+
+int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
+{
+    char frame[HEADER_LENGTH + MAX_BODY];
+    encodeLength(frame, uint32_t(message.length));
+    std::memcpy(frame + HEADER_LENGTH, message.data, message.length);
+    KiottyNetSpan request = { frame, HEADER_LENGTH + message.length };
+
+    KiottyNetClientConfig config;
+    if (KiottyNet_ClientConfigBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_SUCCESS)
+    {
+        return 1;
+    }
+
+    KiottyNet_Context      context;
+    KiottyNet_StreamClient client(context.handle(), config);
+    if (!context.valid() || !client.valid() || client.connect() != KIOTTY_SUCCESS)
+    {
+        return 1;
+    }
+
+    char header[HEADER_LENGTH];
+    char body[MAX_BODY];
+    bool ok = client.write(request, 5000).code == KIOTTY_SUCCESS
+           && readExact(client, header, HEADER_LENGTH, 5000)
+           && decodeLength(KiottyNetSpan{ header, HEADER_LENGTH }) == message.length
+           && readExact(client, body, message.length, 5000)
+           && std::memcmp(body, message.data, message.length) == 0;
+    client.disconnect();
+    return ok ? 0 : 1;
+}
+```
+
+### 3.5 C 판 EchoServer
+
+같은 표를 C 로 쓰면 이렇다. 행 순서는 아무렇게나 써도 되고, 중복은 run 이 시작할 때 `KIOTTY_DUPLICATE_RULE` 로 걸러진다. 클라이언트 두 가지도 같은 방법으로 옮겨진다.
 
 ```c
-typedef struct kiotty_fsm_slot {           /* per-connection block: header + user session */
-    int32_t state;
-    int32_t in_use;
-    /* machine->session_size bytes of user session follow, 16-byte aligned */
-} kiotty_fsm_slot_t;
-
-#define KIOTTY_SLOT_HEADER 16
-#define KIOTTY_SLOT_SESSION(slot) ((void*)((char*)(slot) + KIOTTY_SLOT_HEADER))
-
-struct kiotty_fsm_runner {
-    const kiotty_state_machine_t* machine;
-    char*                         pool;        /* max_clients * stride. 서버 생성 시 한 번 */
-    size_t                        stride;
-    size_t                        max_clients;
+enum ServerState
+{
+    SERVER_READING_HEADER,
+    SERVER_READING_BODY,
+    SERVER_WRITING,
+    SERVER_ERROR_OCCURRED,
+    SERVER_CLOSED
 };
 
-kiotty_code_t kiotty_fsm_runner_init(kiotty_fsm_runner_t* r, const kiotty_state_machine_t* m, void* pool, size_t max_clients)
+typedef struct ServerSession
 {
-    size_t i, j;
-    for (i = 0; i < m->count; ++i)
-        for (j = i + 1; j < m->count; ++j)
-            if (m->rules[i].state == m->rules[j].state && m->rules[i].event == m->rules[j].event) return KIOTTY_DUPLICATE_RULE;
-    r->machine = m; r->pool = (char*)pool; r->max_clients = max_clients;
-    r->stride = KIOTTY_SLOT_HEADER + ((m->session_size + 15) & ~(size_t)15);
-    memset(pool, 0, r->stride * max_clients);
-    return KIOTTY_SUCCESS;
+    char   frame[HEADER_LENGTH + MAX_BODY];
+    size_t frame_length;
+} ServerSession;
+
+static KiottyNetTransition server_read_header(void)
+{
+    return KiottyNet_moveToNextState(SERVER_READING_HEADER, KiottyNet_setEntryActionTimeout(KiottyNet_makeReadEntryAction(HEADER_LENGTH), IDLE_TIMEOUT_MS));
 }
 
-static kiotty_fsm_slot_t* kiotty_fsm_acquire(kiotty_fsm_runner_t* r)
+static KiottyNetTransition server_on_connected(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    (void)session;
+    (void)connection;
+    (void)event;
+    return server_read_header();
+}
+
+static KiottyNetTransition server_on_header(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    ServerSession* s      = (ServerSession*)session;
+    uint32_t       length = decode_length(event.as.read.data);
+    (void)connection;
+    if (length == 0 || length > MAX_BODY)
+    {
+        return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_PROTOCOL_ERROR));
+    }
+    memcpy(s->frame, event.as.read.data.data, HEADER_LENGTH);
+    s->frame_length = HEADER_LENGTH + length;
+    return KiottyNet_moveToNextState(SERVER_READING_BODY, KiottyNet_makeReadEntryAction(length));
+}
+
+static KiottyNetTransition server_on_body(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    ServerSession* s = (ServerSession*)session;
+    KiottyNetSpan  frame;
+    (void)connection;
+    memcpy(s->frame + HEADER_LENGTH, event.as.read.data.data, event.as.read.data.length);
+    frame.data   = s->frame;
+    frame.length = s->frame_length;
+    return KiottyNet_moveToNextState(SERVER_WRITING, KiottyNet_makeWriteEntryAction(frame));
+}
+
+static KiottyNetTransition server_on_written(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    (void)session;
+    (void)connection;
+    (void)event;
+    return server_read_header();
+}
+
+static KiottyNetTransition server_on_timeout(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    (void)session;
+    (void)connection;
+    (void)event;
+    return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_TIMEOUT));
+}
+
+static KiottyNetTransition server_on_closed(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+{
+    (void)session;
+    (void)connection;
+    (void)event;
+    return KiottyNet_moveToNextState(SERVER_CLOSED, KiottyNet_makeNoEntryAction());
+}
+
+static const KiottyNetRule SERVER_RULES[] = {
+    KIOTTY_RULE(KIOTTY_ANY_STATE,       KIOTTY_CONNECTION_EVENT_CONNECTED, server_on_connected, SERVER_READING_HEADER),
+    KIOTTY_RULE(SERVER_READING_HEADER,  KIOTTY_CONNECTION_EVENT_READ,      server_on_header,    SERVER_READING_BODY, SERVER_ERROR_OCCURRED),
+    KIOTTY_RULE(SERVER_READING_BODY,    KIOTTY_CONNECTION_EVENT_READ,      server_on_body,      SERVER_WRITING),
+    KIOTTY_RULE(SERVER_WRITING,         KIOTTY_CONNECTION_EVENT_WRITTEN,   server_on_written,   SERVER_READING_HEADER),
+    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_CONNECTION_EVENT_TIMEOUT, server_on_timeout),
+    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_CONNECTION_EVENT_CLOSED,  server_on_closed),
+};
+static const KiottyNetStateMachine SERVER_MACHINE = { SERVER_RULES, KIOTTY_RULE_COUNT(SERVER_RULES), SERVER_READING_HEADER };
+
+static ServerSession sessions[32];
+static bool          in_use[32];
+
+static KiottyNetConnectionContext acquire_session(KiottyNetAppContext app_context, KiottyNetConnectionHandle connection)
 {
     size_t i;
-    for (i = 0; i < r->max_clients; ++i) {
-        kiotty_fsm_slot_t* s = (kiotty_fsm_slot_t*)(r->pool + i * r->stride);
-        if (!s->in_use) { s->in_use = 1; return s; }
+    (void)app_context;
+    (void)connection;
+    for (i = 0; i < 32; ++i)
+    {
+        if (!in_use[i])
+        {
+            in_use[i] = true;
+            memset(&sessions[i], 0, sizeof(sessions[i]));
+            return &sessions[i];
+        }
     }
     return NULL;
 }
 
-static const kiotty_rule_t* kiotty_fsm_find(const kiotty_state_machine_t* m, int32_t state, int32_t event)
+static void release_session(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle connection)
 {
-    const kiotty_rule_t* fallback = NULL;
-    size_t i;
-    for (i = 0; i < m->count; ++i) {
-        const kiotty_rule_t* r = &m->rules[i];
-        if (r->event != event) continue;
-        if (r->state == state) return r;                     /* 정확 일치 우선 */
-        if (r->state == KIOTTY_ANY_STATE && !fallback) fallback = r;
+    (void)app_context;
+    (void)connection;
+    in_use[(ServerSession*)session - sessions] = false;
+}
+
+static const KiottyNetStatefulAppContext SERVER_APP = { NULL, &SERVER_MACHINE, acquire_session, release_session };
+
+int run_echo_server(uint16_t port)
+{
+    KiottyNetContext      context;
+    KiottyNetServerConfig config;
+    KiottyNetServerHandle server;
+    KiottyNetCode         code;
+
+    if (KiottyNet_initializeTcpServerConfig(&config, "0.0.0.0", port) != KIOTTY_SUCCESS)
+    {
+        return 1;
     }
-    return fallback;
-}
-
-static void kiotty_fsm_apply(kiotty_connection_t* c, const kiotty_request_t* q)
-{
-    switch (q->op) {
-    case KIOTTY_REQUEST_READ:       kiotty_connection_read(c, q->n);                  break;
-    case KIOTTY_REQUEST_READ_UNTIL: kiotty_connection_read_until(c, q->data, q->n);   break;   /* data == delimiter */
-    case KIOTTY_REQUEST_WRITE:      kiotty_connection_write(c, q->data);              break;
-    case KIOTTY_REQUEST_SUSPEND:    kiotty_connection_suspend(c);                     break;
-    case KIOTTY_REQUEST_CLOSE:      kiotty_connection_close(c, KIOTTY_SUCCESS);       break;
-    case KIOTTY_REQUEST_NONE:                                                         break;
+    KiottyNet_configureServerMaxClients(&config, 32);
+    context = KiottyNet_initializeContext();
+    if (context == NULL)
+    {
+        return 1;
     }
-    if (q->op != KIOTTY_REQUEST_NONE) kiotty_connection_set_timeout(c, q->timeout_ms);
-}
-
-static void kiotty_fsm_deliver(kiotty_fsm_runner_t* r, kiotty_connection_t* c, const kiotty_event_t* e)
-{
-    kiotty_fsm_slot_t*   slot = (kiotty_fsm_slot_t*)kiotty_connection_context(c);
-    const kiotty_rule_t* rule = kiotty_fsm_find(r->machine, slot->state, (int32_t)e->kind);
-    kiotty_transition_t  t;
-    if (!rule) { kiotty_connection_close(c, KIOTTY_UNHANDLED_EVENT); return; }
-
-    t = rule->handler(KIOTTY_SLOT_SESSION(slot), c, e);
-    if (e->kind == KIOTTY_EVENT_CLOSED) return;
-#ifndef NDEBUG
-    if (!t.keep && rule->next_count) {
-        int32_t i, ok = 0;
-        for (i = 0; i < rule->next_count; ++i) ok = ok || (rule->next[i] == t.next);
-        if (!ok) { kiotty_connection_close(c, KIOTTY_ILLEGAL_TRANSITION); return; }
+    server = KiottyNet_createServer(context, &config, NULL);
+    if (server == NULL)
+    {
+        KiottyNet_releaseContext(context);
+        return 1;
     }
-#endif
-    if (!t.keep) slot->state = t.next;
-    kiotty_fsm_apply(c, &t.request);
+    code = KiottyNet_runStatefulServer(server, &SERVER_APP);                   /* 이 thread 가 IO Thread 다. 다른 thread 의 KiottyNet_closeServer 로 끝난다 */
+    KiottyNet_destroyServer(context, server);
+    KiottyNet_releaseContext(context);
+    return code == KIOTTY_CLOSED ? 0 : 1;
 }
-
-static void fsm_on_connected(void* ctx, kiotty_connection_t* c)
-{
-    kiotty_fsm_runner_t* r = (kiotty_fsm_runner_t*)ctx;
-    kiotty_fsm_slot_t* slot = kiotty_fsm_acquire(r);
-    kiotty_event_t e = { KIOTTY_EVENT_CONNECTED, { NULL, 0 }, NULL, KIOTTY_SUCCESS };
-    if (!slot) { kiotty_connection_close(c, KIOTTY_SESSION_EXHAUSTED); return; }
-    slot->state = r->machine->initial;
-    kiotty_connection_set_context(c, slot);
-    kiotty_fsm_deliver(r, c, &e);
-}
-static void fsm_on_disconnected(void* ctx, kiotty_connection_t* c, kiotty_code_t reason)
-{
-    kiotty_fsm_runner_t* r = (kiotty_fsm_runner_t*)ctx;
-    kiotty_fsm_slot_t* slot = (kiotty_fsm_slot_t*)kiotty_connection_context(c);
-    kiotty_event_t e = { KIOTTY_EVENT_CLOSED, { NULL, 0 }, NULL, reason };
-    kiotty_fsm_deliver(r, c, &e);
-    slot->in_use = 0;
-    kiotty_connection_set_context(c, NULL);
-}
-static void fsm_on_read(void* ctx, kiotty_connection_t* c, kiotty_span_t data)   { kiotty_event_t e = { KIOTTY_EVENT_READ, data, NULL, KIOTTY_SUCCESS }; kiotty_fsm_deliver((kiotty_fsm_runner_t*)ctx, c, &e); }
-static void fsm_on_written(void* ctx, kiotty_connection_t* c, size_t length)     { kiotty_event_t e = { KIOTTY_EVENT_WRITTEN, { NULL, length }, NULL, KIOTTY_SUCCESS }; kiotty_fsm_deliver((kiotty_fsm_runner_t*)ctx, c, &e); }
-static void fsm_on_resumed(void* ctx, kiotty_connection_t* c, void* payload)     { kiotty_event_t e = { KIOTTY_EVENT_RESUMED, { NULL, 0 }, payload, KIOTTY_SUCCESS }; kiotty_fsm_deliver((kiotty_fsm_runner_t*)ctx, c, &e); }
-static void fsm_on_timeout(void* ctx, kiotty_connection_t* c)                    { kiotty_event_t e = { KIOTTY_EVENT_TIMEOUT, { NULL, 0 }, NULL, KIOTTY_SUCCESS }; kiotty_fsm_deliver((kiotty_fsm_runner_t*)ctx, c, &e); }
-
-kiotty_connection_handler_t kiotty_fsm_handler(kiotty_fsm_runner_t* r)
-{
-    kiotty_connection_handler_t h = { r, fsm_on_connected, fsm_on_disconnected, fsm_on_read, fsm_on_written, fsm_on_resumed, fsm_on_timeout };
-    return h;
-}
-```
-
-### 2.6 C++ Runner 를 C core 위에 얹기 (제안)
-
-2.4 와 2.5 는 dispatch 로직이 두 벌이다. 한 벌로 줄이려면 C++ 핸들러 타입 `Transition<State>(*)(Session&, Connection&, const Event&)` 을 C 의 `kiotty_handler_t` 로 넘겨야 하는데,
-포인터를 그대로 캐스팅해서 호출하는 것은 미정의 동작이다. 표준이 보장하는 길은 다음이다.
-
-- `kiotty_rule_t` 에 범용 함수 포인터 슬롯 `void (*typed)(void)` 를 하나 더 둔다.
-- C++ `.then(onHeader)` 는 `handler` 에 `(State, Session)` 당 하나뿐인 thunk 를, `typed` 에 `onHeader` 를 `reinterpret_cast<void(*)(void)>` 로 넣는다.
-- thunk 는 `self` 행의 `typed` 를 원래 타입으로 되돌려 호출한다. 함수 포인터 간 왕복 변환은 원래 값을 보장한다. 그러려면 `kiotty_handler_t` 에 `const kiotty_rule_t* self` 인자가 하나 더 필요하다.
-
-이러면 dispatch 는 C 한 벌만 남고 C++ `Rule` 은 `kiotty_rule_t` 의 typed 껍질이 된다. 이 경우 2.3 의 컴파일 타임 정렬은 C++ 쪽에서만 동작하고, C 표는 정렬 없이 선형 탐색한다 (runner 가 `sorted` 플래그를 보고 고른다). v0 에서는 두 벌로 두고, 구현이 안정되면 합친다.
-
----
-
-## 3. StateMachine 활용 예제
-
-### 3.1 HTTP/1.1 서버 (C++, keep-alive, 긴 작업)
-
-```cpp
-using namespace fsm;
-
-enum class HttpState { Idle, ReadingHeader, ReadingBody, Processing, Responding };
-
-struct HttpSession {                       // state 멤버 없음. Runner 의 Slot 이 가진다
-    ConnectionId    id;                    // worker 가 Server::resume 에 쓴다
-    HttpRequest     request;
-    char            body[64 * 1024];
-    HttpResponse    response;
-};
-typedef Transition<HttpState> Next;
-
-static const Span CRLF2 = { "\r\n\r\n", 4 };
-
-static Next readHeader() { return Next(HttpState::ReadingHeader, Request::readUntil(CRLF2, 8 * 1024).timeout(10000)); }
-
-static Next onConnected(HttpSession& s, Connection& c, const Event&) { s.id = c.id(); return readHeader(); }
-
-static Next onHeader(HttpSession& s, Connection& c, const Event& e)
-{
-    if (!parseRequestLineAndHeaders(s.request, e.data))
-        return Next(HttpState::Responding, Request::write(BAD_REQUEST));
-    if (s.request.content_length > 0)
-        return Next(HttpState::ReadingBody, Request::read(s.request.content_length));
-    return process(s, c);
-}
-
-static Next onBody(HttpSession& s, Connection& c, const Event& e)
-{
-    memcpy(s.body, e.data.data, e.data.length);             // e.data 는 return 하면 무효
-    return process(s, c);
-}
-
-static Next process(HttpSession& s, Connection&)
-{
-    if (isLongJob(s.request)) {
-        workerPool.post(&s);                                // worker: 작업 후 server.resume(s->id, &s->response)
-        return Next(HttpState::Processing, Request::suspend());
-    }
-    buildResponse(s.response, s.request);
-    return Next(HttpState::Responding, Request::write(s.response.span()));
-}
-
-static Next onResumed(HttpSession&, Connection&, const Event& e)
-{
-    HttpResponse* r = static_cast<HttpResponse*>(e.payload);
-    return Next(HttpState::Responding, Request::write(r->span()));
-}
-
-static Next onResponded(HttpSession& s, Connection&, const Event&) { return s.request.keep_alive ? readHeader() : Next(HttpState::Idle, Request::close()); }
-static Next onTimeout  (HttpSession&, Connection&, const Event&)   { return Next(HttpState::Idle, Request::close()); }
-static Next onClosed   (HttpSession& s, Connection&, const Event&) { releaseResources(s); return HttpState::Idle; }
-
-// 이 표가 상태 전이 다이어그램이다. 행 순서는 자유다. rules() 가 정렬한다.
-static constexpr auto HTTP_RULES = rules(
-    when(Event::CONNECTED)                                .then(onConnected).to(HttpState::ReadingHeader),
-    from(HttpState::ReadingHeader).when(Event::READ)      .then(onHeader)   .to(HttpState::ReadingBody, HttpState::Processing, HttpState::Responding),
-    from(HttpState::ReadingBody)  .when(Event::READ)      .then(onBody)     .to(HttpState::Processing, HttpState::Responding),
-    from(HttpState::Processing)   .when(Event::RESUMED)   .then(onResumed)  .to(HttpState::Responding),
-    from(HttpState::Responding)   .when(Event::WRITTEN)   .then(onResponded).to(HttpState::ReadingHeader, HttpState::Idle),
-    when(Event::TIMEOUT)                                  .then(onTimeout)  .to(HttpState::Idle),
-    when(Event::CLOSED)                                   .then(onClosed)
-);
-static constexpr Machine<HttpState, HttpSession> HTTP_MACHINE(HTTP_RULES, HttpState::Idle);
-
-// 주입
-Slots<HttpState, HttpSession, 32> slots;
-Runner<HttpState, HttpSession>    runner(HTTP_MACHINE, slots);
-Server                            server(config, runner.handler());
-
-// worker thread
-void workerMain(HttpSession* s) { buildResponse(s->response, s->request); server.resume(s->id, &s->response); }
-```
-
-### 3.2 WebSocket frame 수신 (C++, full-duplex, 가변 길이 header, push)
-
-pong 은 상태 하나로 표현한다. pong 을 쓰는 동안 들어온 frame 은 Stage 에 쌓였다가 다음 `read(2)` 가 등록되는 즉시 READ 로 온다.
-다른 thread 의 push 는 `Server::resume(id, payload)` 가 `RESUMED` 로 들어오고, 어느 상태에서든 `stay(write)` 로 처리한다. 그 WRITTEN 은 ANY 행이 `stay()` 로 흡수한다.
-
-```cpp
-enum class WsState { Header, ExtLength, Mask, Payload, PongSent };
-typedef Transition<WsState> Next;
-
-static Next onHeader(WsSession& s, Connection&, const Event& e)
-{
-    s.frame.parseFixedHeader(e.data);                       // 2 bytes
-    if (s.frame.len7 == 126) return Next(WsState::ExtLength, Request::read(2));
-    if (s.frame.len7 == 127) return Next(WsState::ExtLength, Request::read(8));
-    return Next(WsState::Mask, Request::read(4));           // 서버 수신 frame 은 항상 masked
-}
-static Next onExtLength(WsSession& s, Connection&, const Event& e) { s.frame.parseExtLength(e.data); return Next(WsState::Mask, Request::read(4)); }
-static Next onMask     (WsSession& s, Connection&, const Event& e) { s.frame.parseMask(e.data);      return Next(WsState::Payload, Request::read(s.frame.payload_length)); }
-
-static Next onPayload(WsSession& s, Connection&, const Event& e)
-{
-    s.frame.unmask(e.data);
-    switch (s.frame.opcode) {
-    case PING:  return Next(WsState::PongSent, Request::write(s.pong(e.data)));
-    case CLOSE: return Next(WsState::Header,   Request::close());
-    default:    s.onMessage(e.data); return Next(WsState::Header, Request::read(2));
-    }
-}
-static Next onPongSent(WsSession&, Connection&, const Event&)      { return Next(WsState::Header, Request::read(2)); }
-static Next onPush    (WsSession& s, Connection&, const Event& e)  { return Next::stay(Request::write(s.frame(static_cast<Message*>(e.payload)))); }   // 상태 유지 + write
-static Next ignore    (WsSession&, Connection&, const Event&)      { return Next::stay(); }                                                             // push 의 WRITTEN
-static Next onClosed  (WsSession& s, Connection&, const Event&)    { s.release(); return WsState::Header; }
-
-static constexpr auto WS_RULES = rules(
-    from(WsState::Header)   .when(Event::READ)   .then(onHeader)   .to(WsState::ExtLength, WsState::Mask),
-    from(WsState::ExtLength).when(Event::READ)   .then(onExtLength).to(WsState::Mask),
-    from(WsState::Mask)     .when(Event::READ)   .then(onMask)     .to(WsState::Payload),
-    from(WsState::Payload)  .when(Event::READ)   .then(onPayload)  .to(WsState::Header, WsState::PongSent),
-    from(WsState::PongSent) .when(Event::WRITTEN).then(onPongSent) .to(WsState::Header),
-    when(Event::RESUMED)                         .then(onPush),                        // 어느 상태에서든. stay
-    when(Event::WRITTEN)                         .then(ignore),                        // push 의 완료. PongSent 는 정확 일치 행이 우선
-    when(Event::CLOSED)                          .then(onClosed)
-);
-```
-
-HTTP Upgrade 뒤 WS 로 넘어가는 것은 requirement_v0.md 9절 `HttpServer` 가 내부에서 한다. 101 응답의 WRITTEN 에서 Connection 의 handler 를 WS Runner 의 것으로 바꾸고 `read(2)` 를 등록한다.
-Session 은 HTTP 와 WS 의 union 이며, Slot 하나에 둘 다 들어간다.
-
-### 3.3 HTTP 표 (C)
-
-C 의 표는 `static const` 배열이다. `KIOTTY_RULE` 매크로가 `sizeof((int32_t[]){ __VA_ARGS__ })` 로 next 개수를 컴파일 타임에 센다. C99 이상이 필요하다.
-
-```c
-enum http_state { HTTP_IDLE, HTTP_READING_HEADER, HTTP_READING_BODY, HTTP_PROCESSING, HTTP_RESPONDING };
-
-typedef struct http_session { kiotty_connection_id_t id; size_t content_length; int keep_alive; } http_session_t;   /* state 멤버 없음 */
-
-static const kiotty_span_t CRLF2 = { "\r\n\r\n", 4 };
-
-static kiotty_transition_t read_header(void) { return kiotty_go(HTTP_READING_HEADER, kiotty_timeout(kiotty_read_until(CRLF2, 8 * 1024), 10000)); }
-
-static kiotty_transition_t on_connected(void* vs, kiotty_connection_t* c, const kiotty_event_t* e) { http_session_t* s = (http_session_t*)vs; (void)e; s->id = kiotty_connection_id(c); return read_header(); }
-static kiotty_transition_t on_header(void* vs, kiotty_connection_t* c, const kiotty_event_t* e)
-{
-    http_session_t* s = (http_session_t*)vs; (void)c; (void)e;
-    if (s->content_length) return kiotty_go(HTTP_READING_BODY, kiotty_read(s->content_length));
-    return kiotty_go(HTTP_RESPONDING, kiotty_write(OK));
-}
-/* on_body, on_resumed, on_responded, on_timeout 은 3.1 과 같은 흐름 */
-static kiotty_transition_t on_closed(void* s, kiotty_connection_t* c, const kiotty_event_t* e) { (void)s; (void)c; (void)e; return kiotty_go(HTTP_IDLE, kiotty_none()); }
-
-static const kiotty_rule_t HTTP_RULES[] = {
-    /*          from                  event                    handler       -> reachable next states */
-    KIOTTY_RULE(KIOTTY_ANY_STATE,     KIOTTY_EVENT_CONNECTED,  on_connected, HTTP_READING_HEADER),
-    KIOTTY_RULE(HTTP_READING_HEADER,  KIOTTY_EVENT_READ,       on_header,    HTTP_READING_BODY, HTTP_PROCESSING, HTTP_RESPONDING),
-    KIOTTY_RULE(HTTP_READING_BODY,    KIOTTY_EVENT_READ,       on_body,      HTTP_PROCESSING, HTTP_RESPONDING),
-    KIOTTY_RULE(HTTP_PROCESSING,      KIOTTY_EVENT_RESUMED,    on_resumed,   HTTP_RESPONDING),
-    KIOTTY_RULE(HTTP_RESPONDING,      KIOTTY_EVENT_WRITTEN,    on_responded, HTTP_READING_HEADER, HTTP_IDLE),
-    KIOTTY_RULE(KIOTTY_ANY_STATE,     KIOTTY_EVENT_TIMEOUT,    on_timeout,   HTTP_IDLE),
-    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_EVENT_CLOSED, on_closed),
-};
-static const kiotty_state_machine_t HTTP_MACHINE = { HTTP_RULES, KIOTTY_RULE_COUNT(HTTP_RULES), HTTP_IDLE, sizeof(http_session_t) };
-
-/* 주입 */
-static char pool[KIOTTY_FSM_POOL_SIZE(sizeof(http_session_t), 32)];
-kiotty_fsm_runner_t runner;
-kiotty_fsm_runner_init(&runner, &HTTP_MACHINE, pool, 32);
-kiotty_server_t* server = kiotty_server_create(&config, kiotty_fsm_handler(&runner));
-
-/* worker thread */
-kiotty_server_resume(server, s->id, &s->response);
 ```
 
 ---
 
-## 4. 검증 상태
+## 4. HttpServer : Connection 별 Request / Response 공급
 
-2절과 3절의 코드는 Connection 을 "마지막 호출을 기록하는 stub" 으로 바꾼 샘플로 MSVC 에서 빌드해 확인했다.
+requirement_v0.md 9절과 `include/kiotty_net_http.h` 의 구현이다. 사용자는 `KiottyNetHttpRequest*` 를 받고 `KiottyNetHttpResponseHandle` 을 채우는데, 둘 다 Connection 마다 하나씩 있는 **HttpSession** 안에 있다. HttpSession 은 2.6 의 "라이브러리 안에 있는 Session 저장소" 다. 사용자 프로토콜이 `createConnectionContext` 로 Session 을 공급하는 것과 같은 자리에서 HttpServer 가 공급한다.
 
-- C++ (`/W4 /permissive-`, 경고 없음): `rules()` 가 뒤섞어 넣은 7행을 `(state, event)` 순으로 정렬한 것, `to<...>()` 템플릿 형태, 행 개수 추론, 핸들러 포인터 보존을 static_assert 로 확인.
-  같은 행을 두 번 넣은 빌드는 `duplicate_rule_in_table` 을 가리키며 컴파일 실패. 런타임은 Slot 방식 Runner 로 onConnected -> onRead -> onWritten -> onDisconnected 를 Slot 상태와 Connection 호출로 확인.
-- C (`/TC /std:c11 /W4`, 경고 없음): 3.3 의 표와 2.5 의 runner 로 같은 네 단계 통과. `KIOTTY_RULE` 의 next 개수 계산 확인.
-- **아직 재검증하지 않은 변경**: 콜백 시그니처의 `Span` 전환, `Transition::stay` / `keep` 플래그, `Request` 의 delimiter 를 Span 으로 받는 것, 1.5 의 resume 큐. 모두 기계적인 변경이지만 샘플을 갱신해 다시 빌드해야 한다.
-- MSVC 는 C++14 미만 모드가 없다. C++ 코드는 C++11 constexpr 규칙(단일 return, mem-initializer, 직접 만든 Seq)을 지켜 작성했으나 gcc `-std=c++11` 과 `-std=c99` 확인은 아직이다.
+핵심은 세 가지다.
+
+- 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `recv_capacity` (기본 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
+- 응답은 HttpSession 의 응답 버퍼 하나에 쌓이고, 송신할 때 `send_capacity` 크기의 조각으로 write lane 에 옮긴다. 응답 버퍼가 write lane 보다 커도 된다.
+- 메모리는 `KiottyNet_createHttpServer` 가 `max_clients` 분량을 한 번 잡는다. 그 뒤 할당은 없다.
+
+### 4.1 HttpServer 가 잡는 것
+
+```cpp
+struct RouteEntry {                                    // 라우트, 정적 경로, Upgrade 경로가 한 표에 들어간다. 등록 순서 = 매칭 순서
+    enum Kind { ROUTE, DIRECTORY, FILE, MEMORY, UPGRADE } kind;
+    uint32_t           methods;                        // KIOTTY_HTTP_METHOD_BIT 의 합. ROUTE 는 비트 하나, 정적 경로는 GET | HEAD
+    char               path[KIOTTY_MAX_URL_LENGTH];    // 등록 때 복사. 끝이 "/*" 면 wildcard, DIRECTORY 는 "/" 로 끝나는 접두
+    size_t             path_length;
+    KiottyNetHttpRoute route;                          // ROUTE, UPGRADE
+    char               file_path[KIOTTY_MAX_PATH_LENGTH];                // DIRECTORY (디렉토리), FILE (파일)
+    KiottyNetSpan      memory;                         // MEMORY. 복사하지 않는다. 서버 생명 동안 사용자가 유효하게 둔다
+    char               content_type[KIOTTY_MAX_CONTENT_TYPE_LENGTH];     // MEMORY
+};
+
+struct HttpServer {
+    KiottyNetContext      _context;
+    KiottyNetServerHandle _server;                     // 7절 Server. HttpServer 는 그 위의 프로토콜일 뿐이다
+    KiottyNetServerConfig _config;                     // recv_capacity, send_capacity, max_clients 를 뒤에 참조한다
+    KiottyNetHttpLimits   _limits;
+    RouteEntry*           _routes;                     // limits.max_routes 개
+    size_t                _route_count;
+    KiottyNetHttpRoute    _not_found;                  // onRequest == NULL 이면 미등록
+    HttpSession*          _sessions;                   // config.max_clients 개 (4.2)
+    int32_t*              _free;                       // 비어 있는 session index 의 stack
+    size_t                _free_count;
+    bool                  _running;                    // run 뒤의 등록은 KIOTTY_BUSY
+};
+```
+
+- `createHttpServer` 는 `_server = KiottyNet_createServer(context, config, tls)` 를 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
+- `sessionBytes(limits) = sizeof(HttpSession) + max_header_bytes + max_headers × sizeof(KiottyNetHttpHeader) + max_body_bytes + response_bytes`. 곱셈과 덧셈은 오버플로를 먼저 검사한다.
+- `KiottyNet_destroyHttpServer` 는 base Server 를 destroy 하고 블록을 돌려준다. run 이 return 한 뒤에만 불린다는 것은 사용자 규칙이다 (base 와 같다).
+
+### 4.2 HttpSession
+
+```cpp
+struct HttpSession {
+    HttpServer*               _server;
+    KiottyNetConnectionHandle _connection;
+    int32_t                   _index;                  // _sessions 안의 위치. handle 의 index 부분
+    int32_t                   _generation;             // 요청마다 1 씩 증가. handle 의 generation 부분 (4.5)
+
+    // 요청. 수신 Stage 에서 여기로 복사된다
+    char*                     _header_buffer;          // limits.max_header_bytes. request line + 헤더 줄들
+    size_t                    _header_length;
+    KiottyNetHttpHeader*      _headers;                // limits.max_headers. name / value 는 _header_buffer 안을 가리킨다
+    char*                     _body_buffer;            // limits.max_body_bytes
+    size_t                    _body_length;
+    size_t                    _body_remaining;         // Content-Length 에서 아직 안 읽은 바이트. chunked 는 현재 chunk 의 남은 바이트
+    KiottyNetHttpRequest      _request;                // 사용자에게 주는 struct. span 들은 위 버퍼를 가리킨다
+    const RouteEntry*         _matched;                // 이번 요청이 고른 표 항목. 없으면 NULL
+    const KiottyNetHttpRoute* _matched_route;          // 실제로 onRequest 를 부른 라우트 (표 항목 또는 _not_found). onWorkStarted 를 여기서 찾는다
+    bool                      _chunked;
+
+    // 응답. setter 가 여기에 쓴다 (4.4)
+    char*                     _response_buffer;        // limits.response_bytes
+    size_t                    _header_end;             // 사용자 헤더가 쌓인 끝. RESPONSE_PREFIX_BYTES 부터 시작
+    int32_t                   _status;                 // 0 = setter 가 하나도 불리지 않음 → 404
+    enum BodyKind { BODY_NONE, BODY_COPIED, BODY_REF, BODY_FILE } _body_kind;
+    KiottyNetSpan             _body;                   // COPIED : _response_buffer 뒤쪽. REF : 사용자 포인터. FILE : 길이만 (stat 결과)
+    char                      _file_path[KIOTTY_MAX_PATH_LENGTH];
+    char                      _content_type[KIOTTY_MAX_CONTENT_TYPE_LENGTH];
+    enum Phase { FILLING, WORKING, SENDING } _phase;   // setter 는 FILLING / WORKING 에서만 받는다
+
+    // Work (4.6)
+    bool                      _work_requested;         // startHttpWork 가 켠다. onRequest 가 return 하면 읽는다
+    KiottyNetWorkHandle       _base_work;              // WORK_STARTED 이벤트가 준 base Work. finishHttpWork* 가 쓴다
+    bool                      _work_finished;          // finish 는 한 번. 두 번째는 KIOTTY_BUSY
+
+    // 송신 (4.7)
+    size_t                    _sent;                   // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
+    size_t                    _header_start;           // 상태줄을 채운 뒤의 헤더 블록 시작 (RESPONSE_PREFIX_BYTES 보다 작거나 같다)
+    FileHandle                _file;                   // BODY_FILE 일 때 열어 둔 파일. OS 의존
+};
+```
+
+session 하나의 포인터 넷 (`_header_buffer`, `_headers`, `_body_buffer`, `_response_buffer`) 은 4.1 의 블록 안을 가리킨다. 포인터를 저장하는 대신 `_index × sessionBytes` 로 계산할 수도 있지만 코드가 길어져서 포인터로 둔다.
+
+acquire / release 는 2.6 의 `createConnectionContext` / `releaseConnectionContext` 다.
+
+```cpp
+static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, KiottyNetConnectionHandle connection)
+{
+    HttpServer* server = static_cast<HttpServer*>(app);
+    if (server->_free_count == 0) return nullptr;                                // Stateful 계층이 KIOTTY_SESSION_EXHAUSTED 로 닫는다 (2.5)
+    HttpSession* s = &server->_sessions[server->_free[--server->_free_count]];
+    s->_connection = connection;
+    beginRequest(s);                                                             // 4.3. generation 을 올리고 요청 / 응답 필드를 비운다
+    return s;
+}
+
+static void releaseSession(KiottyNetAppContext app, KiottyNetConnectionContext session, KiottyNetConnectionHandle)
+{
+    HttpServer*  server = static_cast<HttpServer*>(app);
+    HttpSession* s      = static_cast<HttpSession*>(session);
+    closeFile(s);
+    ++s->_generation;                                                            // 들고 있던 response / work handle 이 모두 무효가 된다
+    server->_free[server->_free_count++] = s->_index;
+}
+```
+
+base 의 `max_clients` 와 session 수가 같으므로 `acquireSession` 이 NULL 을 돌려주는 일은 정상 경로에서는 없다. 그래도 검사한다.
+
+### 4.3 요청 공급 : Stage → HttpSession
+
+HTTP 표의 상태다. 사용자 프로토콜의 표와 같은 `KiottyNetStateMachine` 이고, HttpServer 의 `.cpp` 안에 `static const` 로 있다.
+
+| 상태 | entry action | READ 가 오면 |
+|---|---|---|
+| `ReadingRequestLine` | `readUntil(CRLF, min(max_header_bytes, recv_capacity))` + `header_timeout_ms` | 줄을 `_header_buffer` 에 복사하고 method / path / query 를 자른다. 모르는 method 는 501, 긴 path 는 414 |
+| `ReadingHeaderLine` | `readUntil(CRLF, min(남은 header 공간, recv_capacity))` (timeout 은 그대로 흐른다) | 빈 줄이면 헤더 끝. 아니면 복사하고 `_headers[n] = { name, value }`. `max_headers` 를 넘으면 431 |
+| `ReadingBody` | `read(min(_body_remaining, recv_capacity))` | `_body_buffer` 에 이어 붙이고 `_body_remaining` 을 줄인다. 0 이 되면 `handle(s)` (아래) |
+| `ReadingChunkSize` / `ReadingChunkData` / `ReadingChunkTrailer` | chunked 전용. 크기 줄은 `readUntil(CRLF)`, 데이터는 `ReadingBody` 와 같이 조각으로 | 합친 길이가 `max_body_bytes` 를 넘으면 413 |
+| `Working` | `startWork()` | WORK_STARTED 에서 `onWorkStarted` (4.6) |
+| `Sending` | `write(nextChunk(s))` | WRITTEN 마다 다음 조각. 끝나면 keep-alive 면 `ReadingRequestLine` + `keep_alive_timeout_ms`, 아니면 `close(KIOTTY_SUCCESS)` |
+
+**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ recv_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ recv_capacity" 뿐이고 헤더 전체 크기는 `_header_buffer` 가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. 줄이 `recv_capacity` 를 넘으면 base 가 `KIOTTY_PROTOCOL_ERROR` 로 닫고, 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
+
+```cpp
+static void beginRequest(HttpSession* s)
+{
+    ++s->_generation;                                  // 이전 요청의 response / work handle 무효화
+    s->_header_length = 0;  s->_body_length = 0;  s->_body_remaining = 0;  s->_chunked = false;
+    s->_matched = nullptr;
+    memset(&s->_request, 0, sizeof s->_request);
+    s->_request.connection = s->_connection;
+    s->_request.headers    = s->_headers;
+    s->_header_end = RESPONSE_PREFIX_BYTES;  s->_status = 0;  s->_body_kind = HttpSession::BODY_NONE;
+    s->_phase = HttpSession::FILLING;  s->_work_requested = false;  s->_work_finished = false;  s->_sent = 0;
+}
+
+static KiottyNetTransition onHeaderLine(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    HttpSession*  s    = static_cast<HttpSession*>(session);
+    KiottyNetSpan line = e.as.read.data;                                         // CRLF 포함. return 하면 무효라 먼저 복사한다
+    if (line.length == 2) return afterHeaders(s);                                // 빈 줄 = 헤더 끝
+    if (s->_header_length + line.length > s->_server->_limits.max_header_bytes) return reject(s, 431);
+    if (s->_request.header_count >= s->_server->_limits.max_headers)             return reject(s, 431);
+    char* at = s->_header_buffer + s->_header_length;
+    memcpy(at, line.data, line.length - 2);                                      // CRLF 는 버린다
+    s->_header_length += line.length - 2;
+    KiottyNetHttpHeader* h = &s->_headers[s->_request.header_count++];
+    if (!splitHeader(at, line.length - 2, h)) return reject(s, 400);            // "name: value". name 은 공백 없는 token, value 는 양끝 trim
+    return Next::moveToNextState(HttpState::ReadingHeaderLine, KiottyNet_EntryAction::readUntil(CRLF, lineMax(s)));
+}
+
+static KiottyNetTransition afterHeaders(HttpSession* s)
+{
+    const KiottyNetHttpLimits& limits = s->_server->_limits;
+    KiottyNetSpan te = KiottyNet_findHttpHeader(&s->_request, "Transfer-Encoding");
+    KiottyNetSpan cl = KiottyNet_findHttpHeader(&s->_request, "Content-Length");
+    s->_request.keep_alive = keepAlive(s);                                       // HTTP/1.1 이고 "Connection: close" 가 아니면 1
+    s->_matched = match(s->_server, s->_request.method, s->_request.path);       // 4.4. 405 / 404 판정은 handle 에서
+    if (equalsIgnoreCase(te, "chunked")) { s->_chunked = true; return Next::moveToNextState(HttpState::ReadingChunkSize, KiottyNet_EntryAction::readUntil(CRLF, lineMax(s))); }
+    if (cl.length) {
+        if (!parseLength(cl, &s->_body_remaining))          return reject(s, 400);
+        if (s->_body_remaining > limits.max_body_bytes)     return reject(s, 413);   // 읽기 전에 거절. 연결은 닫는다 (body 를 버릴 수 없다)
+        if (s->_body_remaining > 0) return Next::moveToNextState(HttpState::ReadingBody, KiottyNet_EntryAction::read(bodyChunk(s)));
+    }
+    return handle(s);
+}
+
+static size_t lineMax(const HttpSession* s)  { return min(s->_server->_config.recv_capacity, s->_server->_limits.max_header_bytes - s->_header_length + 2); }
+static size_t bodyChunk(const HttpSession* s) { return min(s->_body_remaining, s->_server->_config.recv_capacity); }
+```
+
+- `_request.path` / `query` / `headers[i].name` / `value` 는 모두 `_header_buffer` 안의 span 이다. 그래서 다음 `beginRequest` 까지, 즉 onRequest 가 return 하거나 Work 가 finish 될 때까지 유효하다. 요구사항 9절의 "request 는 defer 한 뒤 resumed 까지 유효" 가 이것이다.
+- body 는 `recv_capacity` 조각으로 받아 `_body_buffer` 에 이어 붙인다. 조각마다 READ 가 오고 같은 상태로 돌아간다 (`ReadingBody → READ → ReadingBody`). `_request.body = { _body_buffer, _body_length }`.
+- GET / HEAD 에 body 가 와도 같은 길로 읽는다. 읽고 나서 `_request.body` 로 주되 사용자가 보통 보지 않을 뿐이다. 요청 경계를 맞추려면 읽어야 한다.
+- `reject(s, status)` 는 응답 setter 로 status 만 놓고 `_request.keep_alive = 0` 으로 바꾼 뒤 `startSending(s)` 로 간다. 자동 응답도 사용자 응답과 같은 버퍼, 같은 송신 경로다.
+
+`handle(s)` 가 사용자 콜백을 부른다.
+
+```cpp
+static KiottyNetTransition handle(HttpSession* s)
+{
+    const RouteEntry* m = s->_matched;
+    if (!m) {
+        if (s->_server->_not_found.onRequest) callRoute(s, &s->_server->_not_found);
+        else                                  s->_status = 404;
+        return afterHandle(s);
+    }
+    if (!(m->methods & KIOTTY_HTTP_METHOD_BIT(s->_request.method))) {
+        if (s->_request.method == KIOTTY_HTTP_HEAD && (m->methods & KIOTTY_HTTP_METHOD_BIT(KIOTTY_HTTP_GET))) { /* GET 으로 처리 */ }
+        else if (s->_request.method == KIOTTY_HTTP_OPTIONS) { s->_status = 204; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
+        else { s->_status = 405; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
+    }
+    switch (m->kind) {
+        case RouteEntry::ROUTE:     callRoute(s, &m->route); break;
+        case RouteEntry::DIRECTORY: serveFile(s, joinUnderRoot(m->file_path, s->_request.path, m->path_length)); break;   // ".." 가 있으면 403
+        case RouteEntry::FILE:      serveFile(s, m->file_path); break;
+        case RouteEntry::MEMORY:    s->_status = 200; setBodyRef(s, m->memory, m->content_type); break;
+        case RouteEntry::UPGRADE:   /* websocket 모듈. 5절 미결 */ break;
+    }
+    return afterHandle(s);
+}
+
+static void callRoute(HttpSession* s, const KiottyNetHttpRoute* route)
+{
+    s->_matched_route = route;                                                   // onWorkStarted 를 찾기 위해
+    route->onRequest(route->app_context, &s->_request, responseHandle(s));       // 사용자 코드. 여기서 setter 또는 startHttpWork
+}
+
+static KiottyNetTransition afterHandle(HttpSession* s)
+{
+    if (s->_work_requested) { s->_phase = HttpSession::WORKING; return Next::moveToNextState(HttpState::Working, KiottyNet_EntryAction::startWork()); }
+    return startSending(s);
+}
+```
+
+- `match` 는 표를 등록 순서대로 훑어 **path 가 맞는 첫 항목**을 돌려준다. method 는 그 뒤에 본다. 같은 path 에 GET 과 POST 라우트가 따로 등록되어 있으면 두 항목의 path 가 같으므로, `match` 는 path 가 같은 항목들 중 method 비트가 맞는 것을 고르고, 하나도 없으면 첫 항목을 돌려준다 (405 판정용). `allowList` 는 path 가 같은 모든 항목의 methods 를 OR 해서 `"GET, HEAD, OPTIONS"` 꼴로 만든다.
+- 사용자 콜백은 IO Thread 에서, Stateful 계층의 transition action 안에서 불린다. 그래서 콜백 안에서 부른 setter 는 2절의 규칙과 충돌하지 않는다. 콜백 안에서 Connection 함수를 직접 부를 길은 없다 (handle 을 주지 않는다).
+
+### 4.4 응답 공급 : setter → 응답 버퍼
+
+응답 버퍼 (`response_bytes`) 의 배치다.
+
+```
+_response_buffer
+│← RESPONSE_PREFIX_BYTES →│← 사용자 헤더 (앞에서 뒤로) →│      (빈 공간)      │← 복사된 body (뒤에서 앞으로) →│
+│  상태줄 + 라이브러리 헤더  │  "X-Foo: bar\r\n" ...          │                     │                                 │
+^                          ^                                 ^                     ^                                 ^
+0                 RESPONSE_PREFIX_BYTES                  _header_end         _body.data                      response_bytes
+```
+
+- `RESPONSE_PREFIX_BYTES` 는 상태줄과 라이브러리가 넣는 헤더 (`Content-Length`, `Connection`, `Date`, `Content-Type`) 의 최대 길이다. 상수 (예: 192) 로 두고 `createHttpServer` 가 `response_bytes > RESPONSE_PREFIX_BYTES + 2` 를 검사한다.
+- 사용자 헤더는 `_header_end` 에서 앞으로 쌓인다. 복사된 body 는 **버퍼 끝에서 뒤로** 놓인다. 그래서 헤더와 body 를 어느 순서로 불러도 서로 밀어내지 않는다. 둘이 만나면 `KIOTTY_BUFFER_FULL` 이다.
+- 송신 직전 `finalizeHeaders(s)` 가 상태줄과 라이브러리 헤더를 stack 의 작은 버퍼에 만들고, 그 길이만큼 `RESPONSE_PREFIX_BYTES` 에서 **오른쪽 정렬**로 복사한다. 그러면 `[_header_start, _header_end)` 가 빈 줄 `\r\n` 까지 포함한 연속된 헤더 블록이 된다. 송신은 이 블록 뒤에 body 를 이어 보낸다.
+
+```cpp
+static KiottyNetCode setHeader(HttpSession* s, const char* name, const char* value)
+{
+    if (s->_phase == HttpSession::SENDING) return KIOTTY_BUSY;
+    size_t n = strnlen(name, s->_server->_limits.response_bytes), v = strnlen(value, s->_server->_limits.response_bytes);
+    size_t need = n + 2 + v + 2;                                                 // "name: value\r\n"
+    if (need > bodyStart(s) - s->_header_end - 2) return KIOTTY_BUFFER_FULL;     // 마지막 "\r\n" 자리를 남긴다
+    char* at = s->_response_buffer + s->_header_end;
+    memcpy(at, name, n);  memcpy(at + n, ": ", 2);  memcpy(at + n + 2, value, v);  memcpy(at + n + 2 + v, "\r\n", 2);
+    s->_header_end += need;
+    if (s->_status == 0) s->_status = 200;                                       // setter 가 하나라도 불리면 기본 200
+    return KIOTTY_SUCCESS;
+}
+
+static KiottyNetCode setBody(HttpSession* s, KiottyNetSpan data, const char* content_type)
+{
+    if (s->_phase == HttpSession::SENDING) return KIOTTY_BUSY;
+    if (data.length > s->_server->_limits.response_bytes - s->_header_end - 2) return KIOTTY_BUFFER_FULL;
+    char* at = s->_response_buffer + s->_server->_limits.response_bytes - data.length;
+    memcpy(at, data.data, data.length);                                          // 이전 body 가 있었으면 덮어쓴다 (셋 중 하나만)
+    s->_body_kind = HttpSession::BODY_COPIED;  s->_body = { at, data.length };
+    copyContentType(s, content_type);                                            // NULL 이면 "application/octet-stream". 길이 초과는 KIOTTY_INVALID_ARGUMENT
+    if (s->_status == 0) s->_status = 200;
+    return KIOTTY_SUCCESS;
+}
+```
+
+- `bodyStart(s)` 는 `BODY_COPIED` 면 `_body.data - _response_buffer`, 아니면 `response_bytes` 다.
+- `setBodyRef` 는 복사 없이 `_body = data` 를 들고 `BODY_REF`. `setFile` 은 경로를 `_file_path` 에 복사하고 `stat` 으로 길이를 얻어 `_body.length` 에 둔다 (`BODY_FILE`). 파일이 없으면 `KIOTTY_NOT_FOUND`, `..` 가 있으면 `KIOTTY_INVALID_ARGUMENT`. 파일은 송신 시작 때 연다.
+- 공개 함수 `KiottyNet_setHttpStatus` 등은 handle 을 session 으로 바꾸고 (4.5) 이 static 함수를 부른다. `_status` 는 100..599 만 받는다.
+- 자동 응답 (404, 405, 413, 431, 501, 204 + Allow) 도 같은 setter 를 쓴다. 다른 길이 없다.
+- HEAD : 라우트는 GET 으로 실행되고 setter 도 다 동작한다. `finalizeHeaders` 가 `Content-Length` 를 `_body.length` 로 쓰되, 송신 (4.7) 이 body 조각을 내보내지 않는다.
+
+### 4.5 handle : HttpSession 을 int64 로
+
+`KiottyNetHttpResponseHandle` 과 `KiottyNetHttpWorkHandle` 은 같은 값이다. 둘 다 `{ generation = s->_generation, index = s->_index }` 를 `kiotty::net::PoolHandle` 로 묶은 것이고, 타입만 다르다. Work handle 을 따로 둔 이유는 사용자가 base 의 `KiottyNet_finishWorkWithWrite` 로 HTTP 프레이밍을 건너뛰지 못하게 하려는 것이다.
+
+```cpp
+static KiottyNetHttpResponseHandle responseHandle(const HttpSession* s) { return packHandle(s->_generation, s->_index); }
+
+static HttpSession* sessionOf(int64_t handle)                // setter / finish 의 첫 줄. 실패하면 NULL 이고 공개 함수는 KIOTTY_PEER_CLOSED 를 돌려준다
+{
+    PoolHandle   h      = unpackHandle(handle);
+    HttpServer*  server = ownerOf(h.index);                   // Connection handle 과 같은 방식. requirement 9절 미결 "pool handle 을 소유자로 되돌리기" 를 따른다
+    if (!server || slotOf(h.index) >= server->_config.max_clients) return nullptr;
+    HttpSession* s = &server->_sessions[slotOf(h.index)];
+    if (s->_generation != h.generation) return nullptr;       // 이전 요청 / 닫힌 연결의 handle
+    return s;
+}
+```
+
+- `_generation` 은 요청마다 (`beginRequest`), 연결이 닫힐 때 (`releaseSession`) 오른다. 그래서 keep-alive 로 같은 session 이 다음 요청을 받으면 이전 응답 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_PEER_CLOSED` 만 받는다.
+- 소유자 (HttpServer) 를 찾는 방법은 base 의 Connection handle 과 같은 방식을 쓴다 (전역 소유자 표 또는 index 상위 비트). 그 결정은 5절 미결이고, 이 모듈은 `ownerOf` / `slotOf` 두 함수 뒤에 숨긴다.
+- `_generation` 은 IO Thread 만 쓴다. worker 는 `sessionOf` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 session 에 아무 일도 하지 않으므로 (5절 Work 규칙) 값이 바뀌지 않고, Work 가 아닐 때 worker 가 handle 을 들고 있다면 그것은 사용자 규칙 위반이다. 그래도 읽기는 int32 하나라 찢어진 값은 없다.
+
+### 4.6 Work
+
+```cpp
+KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle handle)
+{
+    HttpSession* s = sessionOf(handle);
+    if (!s) return KIOTTY_PEER_CLOSED;
+    if (s->_phase != HttpSession::FILLING || !s->_matched_route) return KIOTTY_BUSY;   // onRequest 안에서만, 한 번만
+    if (!s->_matched_route->onWorkStarted) return KIOTTY_INVALID_ARGUMENT;
+    s->_work_requested = true;                                                   // 실제 startWork 는 onRequest 가 return 한 뒤 afterHandle 의 entry action 이 한다
+    return KIOTTY_SUCCESS;
+}
+
+static KiottyNetTransition onWorkStarted(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    HttpSession* s = static_cast<HttpSession*>(session);
+    s->_base_work = e.as.work_started.work;
+    const KiottyNetHttpRoute* r = s->_matched_route;
+    r->onWorkStarted(r->app_context, &s->_request, responseHandle(s), workHandle(s));   // 사용자가 handle 둘을 worker 로 넘긴다
+    return Next::moveToNextState(HttpState::Working);                            // entry action 없음 = Work 를 그대로 둔다 (2.4). finish 는 worker 의 몫
+}
+
+KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle handle)
+{
+    HttpSession* s = sessionOf(handle);
+    if (!s) return KIOTTY_PEER_CLOSED;
+    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_BUSY;
+    s->_work_finished = true;
+    s->_phase = HttpSession::SENDING;
+    finalizeHeaders(s);                                                          // 4.4. worker thread 에서 한다. IO Thread 는 이 session 을 안 본다
+    KiottyNetCode code = KiottyNet_finishWorkWithWrite(s->_base_work, nextChunk(s));   // 첫 조각. 나머지는 WRITTEN 이벤트가 Sending 상태에서 이어 간다
+    if (code != KIOTTY_SUCCESS) KiottyNet_finishWorkWithClose(s->_base_work, code);
+    return code;
+}
+
+KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle handle, KiottyNetCode reason)
+{
+    HttpSession* s = sessionOf(handle);
+    if (!s) return KIOTTY_PEER_CLOSED;
+    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_BUSY;
+    s->_work_finished = true;
+    return KiottyNet_finishWorkWithClose(s->_base_work, reason);
+}
+
+bool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle handle)
+{
+    HttpSession* s = sessionOf(handle);
+    return s && s->_phase == HttpSession::WORKING && KiottyNet_isWorkConnected(s->_base_work);
+}
+```
+
+- Work 중 worker 가 setter 를 부르는 것이 안전한 이유는 base 의 Work 규칙 그대로다. WORKING 동안 IO Thread 는 이 Connection 에 콜백을 내지 않고 write lane 도 건드리지 않는다. session 의 응답 필드는 write lane 과 같은 소유 규칙을 따른다. RUNNING 이면 IO Thread, WORKING 이면 worker, 동시에 둘인 순간은 없다.
+- 첫 조각이 `send_capacity` 를 넘는 일은 없다. `nextChunk` 가 `send_capacity` 로 자른다. 그래서 `finishWorkWithWrite` 가 `KIOTTY_BUFFER_FULL` 을 돌려주는 경우는 없고, 돌려주는 코드는 `KIOTTY_PEER_CLOSED` 다.
+- Work 중 peer 가 끊으면 base 가 slot 을 붙잡아 두고 finish 뒤 `onDisconnected(KIOTTY_PEER_CLOSED)` 를 낸다. 그때 `releaseSession` 이 돌아 generation 이 오른다. finish 전까지 session 은 살아 있으므로 worker 의 setter 는 안전하다.
+
+### 4.7 송신 : 응답 버퍼 → write lane 조각
+
+```cpp
+static KiottyNetTransition startSending(HttpSession* s)      // IO Thread 경로 (Work 없이 onRequest 가 return 한 경우, 자동 응답)
+{
+    s->_phase = HttpSession::SENDING;
+    finalizeHeaders(s);
+    return Next::moveToNextState(HttpState::Sending, KiottyNet_EntryAction::write(nextChunk(s)));
+}
+
+static KiottyNetSpan nextChunk(HttpSession* s)               // _sent 부터 최대 send_capacity 바이트. 헤더 블록 → body 순서
+{
+    size_t cap    = s->_server->_config.send_capacity;
+    size_t header = s->_header_end - s->_header_start;
+    if (s->_sent < header) { size_t n = min(cap, header - s->_sent); return { s->_response_buffer + s->_header_start + s->_sent, n }; }
+    if (s->_request.method == KIOTTY_HTTP_HEAD) return { nullptr, 0 };
+    size_t off = s->_sent - header;
+    switch (s->_body_kind) {
+        case HttpSession::BODY_COPIED:
+        case HttpSession::BODY_REF:  return { s->_body.data + off, min(cap, s->_body.length - off) };
+        case HttpSession::BODY_FILE: return readFileInto(s, s->_response_buffer + RESPONSE_PREFIX_BYTES, min(cap, s->_body.length - off));   // 헤더 블록은 이미 나갔으므로 그 자리를 파일 조각의 staging 으로 쓴다
+        default:                     return { nullptr, 0 };
+    }
+}
+
+static KiottyNetTransition onSent(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+{
+    HttpSession* s = static_cast<HttpSession*>(session);
+    s->_sent += e.as.written.length;
+    KiottyNetSpan next = nextChunk(s);
+    if (next.length) return Next::moveToNextState(HttpState::Sending, KiottyNet_EntryAction::write(next));
+    closeFile(s);
+    if (!s->_request.keep_alive) return Next::moveToNextState(HttpState::Closing, KiottyNet_EntryAction::close(KIOTTY_SUCCESS));
+    beginRequest(s);
+    return Next::moveToNextState(HttpState::ReadingRequestLine, KiottyNet_EntryAction::readUntil(CRLF, lineMax(s)).timeout(s->_server->_limits.keep_alive_timeout_ms));
+}
+```
+
+- 조각이 하나뿐이면 `write → WRITTEN → 다음 요청` 으로 끝난다. 큰 응답은 `Sending → WRITTEN → Sending` 을 돈다. 1.6 의 write lane 규칙 (한 번에 메시지 하나, onWritten 뒤 다음 write) 을 그대로 지킨다.
+- 파일은 `send_capacity` 만큼 읽어 보낸다. staging 은 응답 버퍼의 prefix + 헤더 영역을 재사용하므로 추가 메모리가 없다. `sendfile` / `TransmitFile` 은 Stage 를 거치지 않는 OS 경로라 base 의 drain 과 맞지 않으므로 v0 에서는 쓰지 않는다 (요구사항 9절의 "가능하면" 을 "v0 에서는 하지 않음" 으로 둔다).
+- `write` 의 data 는 `send_capacity` 이하이고 write lane 은 비어 있으므로 (이전 WRITTEN 뒤) `KIOTTY_BUFFER_FULL` 로 닫히는 일은 없다.
+
+### 4.8 run
+
+```cpp
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server)
+{
+    if (!server) return KIOTTY_INVALID_ARGUMENT;
+    server->_running = true;
+    KiottyNetStatefulAppContext stateful = { server, &HTTP_MACHINE, &acquireSession, &releaseSession };   // run 동안만 살아 있으면 된다 (2.1)
+    KiottyNetCode code = KiottyNet_runStatefulServer(server->_server, &stateful);
+    server->_running = false;
+    return code;
+}
+```
+
+`close` / `await` 는 base 로 그대로 넘긴다. `addHttpRoute` / `serveHttp*` 는 `_running` 이면 `KIOTTY_BUSY` 다. 표는 run 중에 IO Thread 가 읽기만 하고 등록 함수는 run 전에만 쓰므로 lock 이 없다.
+
+HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `createServer / runStatefulServer / closeServer / awaitServer / destroyServer`, entry action 다섯 가지, `finishWorkWith{Write, Close}`, `isWorkConnected` 뿐이다.
+
+---
 
 ## 5. 미결
 
-- 2.6 의 단일 C core 통합 시점.
-- `[state][event]` 2차원 index 표 (2.3 대안).
-- CONNECTED 이벤트를 `Machine::initial` 을 `Transition` 으로 바꿔 없앨지. 서버는 거의 항상 첫 read 만, 클라이언트는 첫 요청만 던진다.
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
-- gcc `-std=c++11` / `-std=c99` 검증.
+- WebSocket upgrade 뒤 같은 Connection 이 HTTP 표에서 WebSocket 표로 넘어가는 방법. 두 표를 한 표로 합치는지, Connection 마다 machine 포인터를 덮어쓸 수 있게 하는지.
+- HttpResponse / HttpWork handle 에서 HttpServer 를 찾는 `ownerOf(index)` (4.5). Connection handle 의 소유자 찾기와 같은 결정을 기다린다.
+- 정적 파일의 `sendfile` / `TransmitFile`. v0 는 응답 버퍼를 staging 으로 쓰는 `read + write` 조각 송신만 한다 (4.7). OS 경로를 쓰려면 drain 이 "파일 조각" 을 lane 의 한 종류로 알아야 한다.
