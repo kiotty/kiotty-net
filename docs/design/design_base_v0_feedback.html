@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v0 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --line: #d9dee3;
+    --code-bg: #f3f5f7;
+    --agree: #1a7f37;
+    --partial: #9a6700;
+    --concern: #cf222e;
+    --accent: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216;
+      --fg: #e6edf3;
+      --muted: #9aa4af;
+      --line: #2c333b;
+      --code-bg: #161b22;
+      --agree: #3fb950;
+      --partial: #d29922;
+      --concern: #f85149;
+      --accent: #58a6ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 960px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  blockquote { margin: 8px 0 12px; padding: 6px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v0 피드백 답변</h1>
+<p class="sub">2026-10-28. <code>docs/design/design_base_v0.md</code> 에 대한 15개 지적에 하나씩 답한다. 설계 문서 자체는 이 답변에서 <span class="tag ask">선택</span> 으로 표시한 것이 정해진 뒤에 한 번에 고친다.</p>
+
+<p class="legend">
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag concern">우려</span> 반영 전에 짚을 위험이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p1">ActiveSocket / PassiveSocket</a></li>
+  <li><a href="#p2">TlsSession 의 이름</a></li>
+  <li><a href="#p3">ReadRequest / FinishRequest 의 이름</a></li>
+  <li><a href="#p4">ConnectionHost 에서 IoLoop 빼기</a></li>
+  <li><a href="#p5">IoLoop 가 EventListener 와 ConnectionHost 를 가짐</a></li>
+  <li><a href="#p6">일방향 의존</a></li>
+  <li><a href="#p7">동기 connect</a></li>
+  <li><a href="#p8">submit 이 무엇인가</a></li>
+  <li><a href="#p9">applyFinish / completeWritten</a></li>
+  <li><a href="#p10">DoneRing</a></li>
+  <li><a href="#p11a">EventClient 용 loop 와 Server 용 loop</a></li>
+  <li><a href="#p11b">Server 가 ConnectionHost 를 상속하지 않음, await</a></li>
+  <li><a href="#p12">Client 도 같다</a></li>
+  <li><a href="#p13">OpenSSL 이 없을 때</a></li>
+  <li><a href="#p14">소유자의 메모리를 누가 드는가</a></li>
+  <li><a href="#p15">논의 사항 8개</a></li>
+  <li><a href="#result">바뀐 구조 요약</a></li>
+</ol>
+
+<h2 id="p1">1. Socket, ListenSocket → ActiveSocket, PassiveSocket <span class="tag agree">동의</span></h2>
+<p>reference 와 같은 이름이고 "연결된 쪽 / 기다리는 쪽" 이 이름에 드러난다. 그대로 바꾼다. <code>SocketHandle</code>, <code>INVALID_SOCKET_HANDLE</code> 도 reference 와 같다.</p>
+
+<h2 id="p2">2. TlsSession 의 이름 <span class="tag ask">선택</span></h2>
+<p>이 클래스가 하는 일은 "평문 바이트를 넣으면 암호문 바이트가 나오고, 암호문을 넣으면 평문이 나온다" 다. socket 도 연결도 모른다. 상태 (handshake 진행, 세션 키) 는 있지만 사용자에게 보이는 것은 변환뿐이다. 후보:</p>
+<table>
+  <tr><th>이름</th><th>어감</th><th>짝이 되는 메서드</th></tr>
+  <tr><td class="rec">TlsCodec</td><td>encode = encrypt, decode = decrypt. reference 의 <code>PacketCodec</code> 과 같은 어휘라 "바이트를 다른 모양으로 바꾸는 계층" 이 바로 읽힌다</td><td><code>encode(plain, cipher_out)</code>, <code>decode(cipher_in, plain_out)</code>, <code>handshake()</code></td></tr>
+  <tr><td>TlsFilter</td><td>Netty / ACE 의 filter. "바이트가 통과하면서 바뀐다"</td><td><code>filterOut</code>, <code>filterIn</code></td></tr>
+  <tr><td>TlsTranslator</td><td>말 그대로 번역 계층. 길다</td><td><code>translateOut</code>, <code>translateIn</code></td></tr>
+  <tr><td>TlsPipe</td><td>양쪽 BIO 를 잇는 관. Pipe 가 transport 이름 (<code>KIOTTY_PIPE</code>) 과 겹친다</td><td></td></tr>
+  <tr><td>TlsLayer</td><td>requirement 가 쓰는 말 ("선택 계층"). 다만 Layer 는 클래스 이름으로는 하는 일이 안 보인다</td><td></td></tr>
+</table>
+<p><b>추천: <code>TlsCodec</code>.</b> 같은 이유로 <code>TlsContext</code> 도 <code>KiottyNetContext</code> 와 Context 가 겹치므로 <b><code>TlsProfile</code></b> 로 바꾸는 것을 제안한다. SSL_CTX 가 담는 것이 "인증서 + 허용 버전 + cipher + 검증 방식" 이라 profile 이 맞다. <code>TlsCodec::open(TlsProfile&amp;, Pool&amp;, hostname)</code>.</p>
+
+<h2 id="p3">3. ReadRequest, FinishRequest 의 이름 <span class="tag ask">선택</span></h2>
+<p><b>ReadRequest</b> 는 "수신 Stage 가 이 조건이 되면 onRead 한 번" 이라는 <i>등록된 조건</i> 이다 (구현 가이드 1.3 도 "조건 등록" 이라고 부른다). 요청보다 조건에 가깝다.</p>
+<table>
+  <tr><th>이름</th><th>어감</th></tr>
+  <tr><td class="rec">ReadCondition</td><td>"exact 바이트가 모이면 / delimiter 가 나오면". 구현 가이드의 말과 같다. <code>_read_condition.kind == NONE</code> 이 "조건 없음" 으로 읽힌다</td></tr>
+  <tr><td>ReadTrigger</td><td>조건이 차면 onRead 가 발사된다는 뜻. 짧다</td></tr>
+  <tr><td>ReadWatch</td><td>Stage 를 지켜본다. 조금 약하다</td></tr>
+  <tr><td>ReadCriteria</td><td>복수형이라 어색하다</td></tr>
+</table>
+<p><b>FinishRequest</b> 는 worker 가 Work 를 끝내면서 IO Thread 에 남기는 "다음에 할 IO 하나" 다. 읽어라 / 써라 / 닫아라 중 하나이고, IO Thread 가 DONE → RUNNING 에서 그것을 적용한다.</p>
+<table>
+  <tr><th>이름</th><th>어감</th></tr>
+  <tr><td class="rec">WorkOutcome</td><td>Work 가 끝난 결과물. <code>finishWork(generation, WorkOutcome)</code> 이 "이 결과로 Work 를 끝낸다" 로 읽힌다. Work 와 짝이 되는 유일한 후보</td></tr>
+  <tr><td>NextIo</td><td>하는 일 그대로. 짧지만 Work 와의 관계가 이름에 없다</td></tr>
+  <tr><td>Resumption</td><td>연결을 다시 IO Thread 로 돌리는 방법. 지워진 resume 이 떠오른다</td></tr>
+  <tr><td>WorkVerdict</td><td>어감은 맞는데 흔치 않은 단어다</td></tr>
+</table>
+<p><b>추천: <code>ReadCondition</code> 과 <code>WorkOutcome</code>.</b> 같은 기준으로 <code>IoEvent</code> 는 그대로 두고 (event 는 "완료 통지" 의 OS 어휘), <code>IoCompletion</code> 도 그대로 둔다.</p>
+
+<h2 id="p4">4. ConnectionHost 에서 IoLoop 빼기 <span class="tag agree">동의</span></h2>
+<p>ConnectionHost 를 <b>Connection 의 저장소</b> 로만 줄인다. 남는 것은 셋이다.</p>
+<pre><code>class ConnectionHost
+{
+public:
+    ConnectionHost(size_t capacity, size_t recv_capacity, size_t send_capacity, size_t push_capacity, TlsProfile* tls, Pool* tls_pool);
+
+    bool        valid() const;
+    size_t      capacity() const;
+    Connection* at(size_t index);                              // loop 가 훑는다 (deadline, DONE, written)
+    Connection* acquire();                                     // 빈 slot. 없으면 nullptr
+    void        release(Connection&amp; connection);              // generation 을 올리고 slot 을 비운다
+    Connection* find(PoolHandle handle);                       // generation 이 맞는 살아 있는 연결
+
+    KiottyNetCode deliver(PoolHandle target, KiottyNetSpan data);   // IO Thread. index 0 이면 모든 연결의 push lane 에
+};</code></pre>
+<p>지워지는 것: EventListener, IoLoop, DoneRing, PushSlot, handler / app_context, run 상태, <code>process*</code> 다섯 개, <code>wake</code>, <code>enqueueDone</code>, 가상 함수 셋. <code>deliver</code> 가 "값을 밀어넣는 용도" 고, 다른 thread 에서 오는 notify 의 <i>대기</i> (PushSlot) 는 IO Thread 를 깨워야 하므로 5번의 IoLoop 로 간다.</p>
+
+<h2 id="p5">5. IoLoop 가 EventListener 와 ConnectionHost 를 가짐 <span class="tag agree">동의</span></h2>
+<p>IoLoop 가 "돌아가는 것" 전부의 주인이 된다. 다른 thread 에서 IO Thread 로 들어오는 세 길 (startWork, finishWork, notify / broadcast) 이 모두 깨우기가 필요하므로 전부 IoLoop 의 메서드다.</p>
+<pre><code>class IoLoop
+{
+public:
+    IoLoop(ConnectionHost&amp; host, Acceptor* acceptor);          // acceptor 는 11번. EventClient 는 nullptr
+
+    bool valid() const;
+
+    KiottyNetCode run(const KiottyNetConnectionHandler&amp; handler, KiottyNetAppContext app_context);   // stop 까지 blocking
+    void          stop();                                      // 아무 thread
+    bool          isIoThread() const;
+
+    void open(Connection&amp; connection, ActiveSocket&amp;&amp; socket);  // IO Thread (accept 완료) 또는 run 직전 (EventClient 의 동기 connect 뒤)
+
+    KiottyNetCode startWork (PoolHandle handle);               // 아무 thread. CAS 뒤 wake
+    KiottyNetCode finishWork(PoolHandle handle, const WorkOutcome&amp; outcome);
+    KiottyNetCode post(PoolHandle target, KiottyNetSpan data); // 아무 thread. IO Thread 면 host.deliver 바로, 아니면 slot 에 넣고 wake 뒤 대기
+
+private:
+    void runOnce();                                            // a ~ e
+
+    ConnectionHost&amp;                   _host;
+    Acceptor*                         _acceptor;
+    EventListener                     _listener;
+    Holder&lt;IoEvent&gt;*                  _events;                 // 연결당 receive / send 둘. host.capacity() × 2
+    PushSlot                          _slots[4];
+    const KiottyNetConnectionHandler* _handler;
+    KiottyNetAppContext               _app_context;
+    std::atomic&lt;bool&gt;                 _stopped;
+    std::thread::id                   _io_thread;
+};</code></pre>
+<p>Connection 은 EventListener 도 IoEvent 도 모르게 된다 (6번의 순서). 그래서 Connection 은 "받을 자리를 내주고, 보낼 구간을 내주고, 완료를 받아 상태를 바꾸는" 수동 객체가 되고, OS 에 거는 쪽은 IoLoop 다.</p>
+<pre><code>// Connection 이 IoLoop 에게 내주는 것 (IO Thread)
+void*   receiveSpace(size_t&amp; length);  →  Stage::Provider&amp; receiveProvider();      // 받을 자리 (output 인자 없이 Provider 를 준다)
+Segment sendSegment();                                                            // 보낼 구간. 구현 가이드의 pickSegment
+void    onReceived(SocketCode code, size_t length, const KiottyNetConnectionHandler&amp; handler);   // commit + pump
+void    onSent(SocketCode code, size_t length);                                   // 구현 가이드의 advance
+bool    hasSendPending() const;  bool hasReceivePending() const;  void markReceivePending(bool);  void markSendPending(bool);</code></pre>
+<p>handler 는 Connection 이 들지 않고 IoLoop 가 매 호출에 넘긴다. run 마다 바뀔 수 있는 값을 32 개 연결이 복사해 두지 않기 위해서다.</p>
+
+<h2 id="p6">6. 의존은 무조건 일방향 <span class="tag partial">부분 동의</span></h2>
+<p>방향은 그대로 가져간다. 두 군데만 다르게 그린다.</p>
+<ul>
+  <li><b>TLS 는 socket 을 모른다.</b> TlsCodec 은 Stage 와 Stage 사이의 바이트 변환이라 socket 아래가 아니라 옆이다. Connection 이 둘 다 쓴다. "connection ← tls ← socket" 으로 그리면 TlsCodec 이 socket 헤더를 포함해야 하는데 그럴 일이 없다.</li>
+  <li><b>EventListener 는 socket 을 안다.</b> <code>SocketHandle</code> 타입과 <code>PassiveSocket::accept</code> 를 쓴다 (AcceptEx 의 뒤처리, epoll 의 accept). 그래서 event_listener → socket 선이 하나 있다. 순환은 아니다.</li>
+</ul>
+<pre><code>context
+  └── server ─────────── ioloop ── connection_host ── connection ─┬── tls (codec, profile)
+      event_client ─────┘   │                                     └── socket (active, passive)
+      stream_client ────────┼───────────────────────────────────────┘
+                            ├── acceptor ── socket (passive)
+                            └── event_listener ── event
+                                      └──────────── socket (handle 타입, accept)
+core : stage, pool_handle, holder, result, clock, pool      (모두가 쓴다. 아무도 모르지 않는다)
+error: socket_code                                          (socket 이상 모두가 쓴다)</code></pre>
+<p>StreamClient 는 loop 가 없어서 connection 을 거치지 않고 socket + tls 를 바로 쓴다. 이것도 위에서 아래로만 간다.</p>
+
+<h2 id="p7">7. 동기 connect <span class="tag agree">동의</span></h2>
+<p>맞다. 비동기 connect 가 필요한 쪽은 "연결을 수십 개 동시에 거는 클라이언트" 인데 kiotty 의 클라이언트는 연결이 하나다. <code>run</code> 이 어차피 blocking 이므로 그 thread 가 connect 에서 기다려도 된다. 바뀌는 것:</p>
+<ul>
+  <li><code>ActiveSocket::connect(const KiottyNetEndpoint&amp;, uint32_t timeout_ms)</code> 하나. 안에서는 non-blocking + poll (15-5 번) 로 timeout 을 재지만 밖에서는 동기다. <code>finishConnect</code>, <code>EventListener::submitConnect</code>, <code>IoKind::CONNECT</code>, EventClient 의 <code>_connect_event</code> 와 <code>_trial</code> 이 지워진다.</li>
+  <li>재시도 (<code>max_trial</code>, <code>trial_interval_ms</code>) 는 <code>EventClient::run</code> 의 for 문이다. StreamClient 의 <code>connect</code> 도 같은 for 문이라 둘이 같은 자유 함수 <code>connectWithRetry(config)</code> 를 쓰면 된다.</li>
+  <li>하나 알아 둘 것: connect 중에 <code>close()</code> 가 오면 지금 시도의 timeout (기본 5 초) 까지는 기다린다. 시도 사이 interval 은 stop 플래그를 보고 바로 끊는다. 이 정도면 충분하다고 본다.</li>
+</ul>
+
+<h2 id="p8">8. submit 이 무엇인가 <span class="tag ask">선택</span></h2>
+<p>연결과는 무관하다. <b>"OS 에 비동기 IO 요청 하나를 걸어 두는 것"</b> 이다.</p>
+<ul>
+  <li><code>submitReceive(event, handle, buffer, length)</code> : "이 소켓에서 받는 대로 이 버퍼에 써 두고, 끝나면 완료로 알려 달라". IOCP 는 <code>WSARecv</code> + OVERLAPPED, io_uring 은 SQE 를 제출 (submit) 하는 것, epoll 은 "readable 이 오면 listener 가 대신 <code>recv</code> 해서 버퍼에 쓴다" 는 약속 (15-3 번의 proactor 흉내).</li>
+  <li><code>submitSend</code> : "이 구간을 보내고 끝나면 알려 달라".</li>
+  <li><code>submitAccept</code> : "다음 연결이 오면 받아 두고 알려 달라" (<code>AcceptEx</code> / listen fd readable).</li>
+</ul>
+<p>그러니까 "이거 받으라고 연결하는 것" 은 <code>attach</code> (소켓을 IOCP / epoll 에 등록) 이고, submit 은 등록된 소켓에 요청 하나를 거는 것이다. 이름 후보:</p>
+<table>
+  <tr><th>동사</th><th>출처</th><th>예</th></tr>
+  <tr><td class="rec">submit</td><td>io_uring (submission queue), 구현 가이드 1.3 의 "recv 를 다시 건다"</td><td><code>submitReceive</code>, 완료는 <code>IoCompletion</code></td></tr>
+  <tr><td>begin</td><td>.NET <code>BeginReceive</code> / <code>EndReceive</code>. "시작 → 완료" 짝이 분명하다</td><td><code>beginReceive</code>, <code>beginSend</code>, <code>beginAccept</code></td></tr>
+  <tr><td>post</td><td>IOCP 문서 (post an overlapped operation). notify 의 <code>post</code> 와 겹친다</td><td></td></tr>
+  <tr><td>arm</td><td>epoll 의 one-shot 재등록 (re-arm). reactor 어감이 강하다</td><td></td></tr>
+</table>
+<p><b>추천: submit 유지.</b> "걸어 둔다" 와 가장 가깝고 완료 (completion) 와 짝이 된다. 짝이 더 드러나는 쪽이 좋으면 begin.</p>
+
+<h2 id="p9">9. applyFinish, completeWritten <span class="tag ask">선택</span></h2>
+<p>둘 다 "언제 누가 왜" 가 이름에 없었다.</p>
+<table>
+  <tr><th>지금</th><th>하는 일</th><th>후보</th></tr>
+  <tr><td><code>applyFinish()</code></td><td>worker 가 남긴 WorkOutcome 을 IO Thread 가 적용해 DONE → RUNNING. 다음 read 를 걸거나 write lane 을 보내거나 닫는다</td><td class="rec"><code>resumeFromWork()</code></td></tr>
+  <tr><td></td><td></td><td><code>takeWorkOutcome()</code>, <code>returnFromWork()</code></td></tr>
+  <tr><td><code>completeWritten()</code></td><td>loop 끝 (e) 에서, 이번 바퀴에 다 나간 write 가 있으면 <code>onWritten</code> 을 내고 pump 한 번</td><td class="rec"><code>reportWritten()</code></td></tr>
+  <tr><td></td><td></td><td><code>flushWrittenEvent()</code>, <code>emitWritten()</code></td></tr>
+</table>
+<p><b>추천: <code>resumeFromWork</code>, <code>reportWritten</code>.</b> 같은 규칙으로 <code>onDeadline()</code> 은 <code>expireDeadline()</code> 으로, <code>beginDraining()</code> 은 <code>tryEnterWork()</code> 로 바꾸면 "loop 가 Connection 에 시키는 일" 네 개가 모두 동사 + 목적어가 된다.</p>
+
+<h2 id="p10">10. DoneRing <span class="tag partial">부분 동의</span></h2>
+<p><b>용도.</b> worker 가 아무 thread 에서 <code>finishWork</code> 를 부르면 그 연결은 DONE 이 된다. IO Thread 는 깨어난 뒤 "어느 연결이 DONE 인가" 를 알아야 한다. DoneRing 은 worker 가 연결 index 를 넣고 IO Thread 가 꺼내는 lock-free 큐라서, IO Thread 가 32 개를 훑지 않고 DONE 인 것만 바로 찾게 하려는 것이었다 (구현 가이드 1.5).</p>
+<p><b>그런데 필요 없다.</b> 15-6 번에서 deadline 을 매 바퀴 scan 하기로 했다. 같은 scan 에서 <code>_work_state == DONE</code> 도 보면 된다. 32 개 atomic load 는 ring 의 CAS 보다 싸다. 그래서 <b>DoneRing 을 지운다.</b> <code>finishWork</code> 는 CAS 로 DONE 을 만들고 <code>wake()</code> 만 한다. IoLoop 의 (b) 는 "깨어났으면 <code>host.at(i)</code> 를 훑어 DONE 인 것을 <code>resumeFromWork</code>" 가 된다. output 인자 문제도 같이 사라진다.</p>
+<p>혹시 남겨야 할 때의 모양만 적어 두면: <code>int32_t pop()</code> 이 비었을 때 -1 을 돌려주거나 <code>Result&lt;SocketCode, int32_t&gt;</code> 다. 하지만 지우는 쪽을 권한다.</p>
+
+<h2 id="p11a">11. EventClient 용 loop 와 Server 용 loop 를 따로 <span class="tag partial">부분 동의</span></h2>
+<p>둘이 다른 점을 세어 보면:</p>
+<table>
+  <tr><th></th><th>Server 의 loop</th><th>EventClient 의 loop</th></tr>
+  <tr><td>accept 완료 처리</td><td>있다</td><td>없다 (7번으로 connect 는 run 전에 동기로 끝난다)</td></tr>
+  <tr><td>recv / send 완료, pump, drain, deadline, DONE, written</td><td>같다</td><td>같다</td></tr>
+  <tr><td>push slot (b)</td><td>broadcast 와 notify 가 같은 <code>deliver</code></td><td>notify 뿐. <code>deliver(target)</code> 의 target 이 늘 그 하나</td></tr>
+  <tr><td>마지막 연결이 닫히면</td><td>계속 돈다</td><td>loop 를 끝낸다 (run 이 return)</td></tr>
+</table>
+<p>다른 것은 <b>accept 한 줄과 "마지막 연결이 닫히면 멈춤" 한 줄</b> 이다. loop 를 두 클래스로 나누면 공통 80 % 가 두 벌이 되므로 그쪽은 권하지 않는다. 대신 다른 두 줄을 밖으로 뺀다.</p>
+<ul>
+  <li><b>accept</b> 는 <code>io_loop/kiotty_acceptor.h</code> 의 작은 클래스 <code>Acceptor { PassiveSocket, Holder&lt;IoEvent&gt; }</code> 로 빼고 IoLoop 는 <code>Acceptor*</code> 를 받는다. nullptr 이면 ACCEPT 완료가 올 일이 없다. Server 만 Acceptor 를 만든다.</li>
+  <li><b>멈춤 조건</b> 은 IoLoop 생성 인자 <code>stop_when_empty</code> (bool) 하나다. EventClient 가 true 다.</li>
+</ul>
+<p>그러면 "EventClient 용 loop" 는 <code>IoLoop(host, nullptr, true)</code>, "Server 용 loop" 는 <code>IoLoop(host, &amp;acceptor, false)</code> 다. 객체는 둘이지만 클래스는 하나다. 그래도 두 클래스가 낫다고 보면 <code>ClientLoop</code> = 공통 본체, <code>ServerLoop</code> = <code>ClientLoop</code> + Acceptor 로 두는 상속이 차선이다.</p>
+
+<h2 id="p11b">11. Server 가 ConnectionHost 를 상속하지 않음, await 는 mutex + cv <span class="tag agree">동의</span></h2>
+<p>4, 5 번으로 상속할 ConnectionHost 가 이미 없다. Server 는 네 부품을 <b>값으로 가진</b> 조립 객체가 된다. <code>onOpenCompletion</code> 은 Acceptor 가 accept 완료를 IoLoop 안에서 처리하므로 없어진다.</p>
+<pre><code>class Server
+{
+public:
+    Server(const KiottyNetServerConfig&amp; config, const KiottyNetTlsServerConfig* tls, Pool&amp; tls_pool);
+
+    bool valid() const;
+
+    KiottyNetCode run(const KiottyNetConnectionHandler&amp; handler, KiottyNetAppContext app_context);
+    void          close();
+    KiottyNetCode await(uint64_t timeout_ms);
+    KiottyNetCode broadcast(KiottyNetSpan data);              // _loop.post({0, 0}, data)
+    IoLoop&amp;       loop();                                      // base.cpp 의 Connection / Work 함수가 쓴다
+
+private:
+    KiottyNetServerConfig   _config;
+    TlsProfile              _tls;
+    ConnectionHost          _host;
+    Acceptor                _acceptor;
+    IoLoop                  _loop;
+    std::mutex              _mutex;
+    std::condition_variable _cv;
+    KiottyNetCode           _code;                             // OPENING 동안은 KIOTTY_BUSY, 열리면 SUCCESS, run 이 끝나면 그 반환값
+};
+
+KiottyNetCode Server::run(handler, app_context)
+{
+    KiottyNetCode code = _acceptor.open(_config.endpoint, backlog);   // bind + listen. run 을 부른 thread 에서
+    { lock; _code = code; } _cv.notify_all();                 // await 중인 thread 를 깨운다
+    if (code != KIOTTY_SUCCESS) return code;
+    code = _loop.run(handler, app_context);                   // close 까지
+    { lock; _code = code; } _cv.notify_all();                 // run 이 끝난 뒤의 await 는 이 값을 본다
+    return code;
+}</code></pre>
+<p><code>await</code> 는 <code>_cv.wait_for(timeout, [] { return _code != KIOTTY_BUSY; })</code> 한 줄이고, 7절의 표 (돌고 있으면 SUCCESS, 끝났으면 run 의 값, 시간이 지나면 TIMEOUT) 가 그대로 나온다. "다시 run" 은 run 의 첫 줄에서 <code>_code = KIOTTY_BUSY</code> 로 되돌리면 된다.</p>
+
+<h2 id="p12">12. Client 도 같다 <span class="tag agree">동의</span></h2>
+<pre><code>class EventClient
+{
+public:
+    EventClient(const KiottyNetClientConfig&amp; config, const KiottyNetTlsClientConfig* tls, Pool&amp; tls_pool);
+
+    bool valid() const;
+
+    KiottyNetCode run(const KiottyNetConnectionHandler&amp; handler, KiottyNetAppContext app_context);
+    void          close();
+    KiottyNetCode await(uint64_t timeout_ms);
+    PoolHandle    connection() const;
+    KiottyNetCode notify(KiottyNetSpan data);                 // _loop.post(connection(), data)
+    IoLoop&amp;       loop();
+
+private:
+    KiottyNetClientConfig   _config;
+    TlsProfile              _tls;
+    ConnectionHost          _host;                             // capacity 1
+    IoLoop                  _loop;                             // acceptor nullptr, stop_when_empty true
+    std::mutex              _mutex;
+    std::condition_variable _cv;
+    KiottyNetCode           _code;
+};
+
+KiottyNetCode EventClient::run(handler, app_context)
+{
+    Result&lt;KiottyNetCode, ActiveSocket&gt; socket = connectWithRetry(_config, stop 플래그);   // 7번. 동기
+    ... _code 갱신, notify_all, 실패면 return
+    _loop.open(*_host.acquire(), std::move(socket.value()));  // onConnected 는 loop 안에서
+    return _loop.run(handler, app_context);
+}</code></pre>
+
+<h2 id="p13">13. OpenSSL 이 없을 때 빈 껍데기 <span class="tag concern">우려</span></h2>
+<p>빌드가 깨지지 않게 하는 것은 동의한다. 구조는 간단하다. <code>tls/backend/kiotty_openssl_tls.cpp</code> 와 <code>tls/backend/kiotty_stub_tls.cpp</code> 가 같은 <code>TlsProfile</code> / <code>TlsCodec</code> 선언을 구현하고 CMake 옵션 <code>KIOTTY_NET_WITH_OPENSSL</code> 이 하나를 고른다. OpenSSL 헤더는 전자만 포함한다.</p>
+<p>우려는 <b>stub 이 무엇을 하느냐</b> 다. "TLS 설정을 넘겼는데 평문으로 나간다" 는 cpp-developer 규칙의 "기본값이 안전해야 한다" 와 정면으로 부딪친다. 의료기기에서 wss:// 라고 믿고 띄운 서버가 사실 평문이면 그것이 가장 나쁜 실패다. 사용자는 로그를 보기 전까지 모른다.</p>
+<table>
+  <tr><th>stub 의 동작</th><th>장점</th><th>단점</th></tr>
+  <tr><td class="rec">A. 거절. <code>TlsProfile::open</code> 이 <code>KIOTTY_NOT_SUPPORTED</code> 를 돌려주고 <code>create*(…, tls != NULL)</code> 은 NULL</td><td>평문이 몰래 나가지 않는다. 코드 한 줄로 이유가 드러난다 (<code>KIOTTY_NOT_SUPPORTED</code> 를 KiottyNetCode 에 추가)</td><td>TLS 없이 빌드한 사용자가 TLS 설정을 넘기면 서버가 안 뜬다. 이것은 장점이기도 하다</td></tr>
+  <tr><td>B. 평문 통과. <code>encode</code> / <code>decode</code> 가 그대로 복사하고 <code>handshake</code> 는 바로 SUCCESS</td><td>TLS 유무와 무관하게 같은 코드가 돈다. 테스트가 편하다</td><td>위의 위험. 제품 빌드에서 OpenSSL 링크가 빠지는 실수가 조용히 통과한다</td></tr>
+  <tr><td>C. A 가 기본, B 는 <code>KIOTTY_NET_TLS_PASSTHROUGH</code> 를 정의한 테스트 빌드에서만</td><td>둘 다</td><td>옵션이 하나 는다</td></tr>
+</table>
+<p><b>추천: C.</b> 제안하신 "평문 제출" 은 테스트 빌드의 옵션으로 두고, 제품 빌드의 기본은 거절로 두고 싶다. B 로 가자고 하시면 그대로 하되, 그 경우 <code>KiottyNet_createServer</code> 가 TLS 설정을 받았는데 stub 인 것을 최소한 <code>KiottyNetConnectionInfo</code> 같은 값으로 알 수 있는 길을 하나 두자.</p>
+
+<h2 id="p14">14. 소유자 (Server, EventClient, StreamClient) 의 메모리 <span class="tag ask">선택</span></h2>
+<p>두 안을 나란히 놓으면:</p>
+<table>
+  <tr><th></th><th>A. raw pointer + release (지금 base.h)</th><th>B. Context 가 slot 을 들고 내준다</th></tr>
+  <tr><td>create</td><td><code>new (nothrow) Server</code> 를 돌려준다</td><td>Context 의 고정 slot (최대 N 개) 에 placement new. 가득 차면 NULL</td></tr>
+  <tr><td>destroy</td><td><code>delete</code>. 사용자가 잊으면 샌다</td><td>slot 을 비운다. 사용자가 잊어도 <code>releaseContext</code> 와 프로세스 종료가 부순다</td></tr>
+  <tr><td>C++ RAII</td><td><code>OwnedHandle</code> 이 destroy 를 부른다 (이미 있음)</td><td>같다. 안이 바뀔 뿐 base.h 의 모양은 그대로다</td></tr>
+  <tr><td>"런타임 할당 없음"</td><td>create 는 어차피 허용된 할당 시점이다</td><td>Context 가 생성 시점에 slot 을 다 잡는다. 더 엄격하다</td></tr>
+  <tr><td>Context destroy 와 run 중인 Server</td><td>사용자 책임</td><td>Context 소멸자가 각 소유자에 close 하고 run 의 return 을 기다린다. run 을 부른 thread 가 destroy 하면 assert</td></tr>
+  <tr><td>handle → 소유자 (15-1)</td><td>전역 표가 필요하다</td><td>Context 의 slot 번호가 곧 소유자 번호다. 전역에 남는 것은 "Context 포인터 배열" 뿐 (아래)</td></tr>
+</table>
+<p><b>추천: B.</b> 이유는 두 가지다. 첫째, 의료기기 쪽의 "잊어도 샌 채로 남지 않는다". 둘째, 15-1 의 소유자 표가 Context 의 slot 으로 흡수되어 전역 표가 작아진다. 세 소유자의 크기 차이는 <code>Holder&lt;Owner&gt;</code> 로 흡수한다 (reference 의 Holder 가 이것이다). <code>Connection[max_clients]</code> 는 소유자 안이 아니라 create 때 따로 잡는 큰 덩어리라 slot 크기에 들어가지 않는다.</p>
+<pre><code>class Owner                                                   // Server, EventClient, StreamClient 의 공통 base. 가상 소멸자와 close 만
+{
+public:
+    static const size_t HOLDER_SIZE  = 512;                   // 가장 큰 소유자. static_assert
+    static const size_t HOLDER_ALIGN = 16;
+    virtual ~Owner();
+    virtual void shutdown() = 0;                              // close + run 의 return 대기. Context 소멸자가 부른다
+};
+
+class Context
+{
+public:
+    static const size_t MAX_OWNERS = 16;
+
+    Context(size_t tls_pool_bytes);                           // 플랫폼 초기화, TLS pool (15-4), slot
+    ~Context();                                               // 남은 소유자 shutdown + 파괴
+
+    template &lt;typename T, typename... Args&gt; T* create(Args&amp;&amp;...);   // 빈 slot 에 Holder&lt;Owner&gt;::make&lt;T&gt;. 없으면 nullptr
+    void destroy(Owner* owner);
+    Owner* find(uint32_t slot, uint32_t generation);          // handle 의 index 에서 온 값
+
+private:
+    Holder&lt;Owner&gt; _owners[MAX_OWNERS];
+    uint32_t      _generations[MAX_OWNERS];
+    Pool          _tls_pool;
+    std::mutex    _mutex;
+};</code></pre>
+<p>남는 문제 하나: C 의 <code>KiottyNet_readConnection(handle)</code> 은 context 를 받지 않는다. 그래서 handle 에서 Context 까지 가는 전역 길이 하나는 있어야 한다. 가장 작은 모양은 <code>static Context* g_contexts[16]</code> 과 handle index 의 상위 4 비트다. 이것은 15-1 과 함께 다음에 정한다. (Context 를 프로세스에 하나로 제한하면 이 배열도 사라진다. 그 선택지도 그때 같이.)</p>
+
+<h2 id="p15">15. 논의 사항 8 개</h2>
+<table>
+  <tr><th>#</th><th>결정</th><th>답</th></tr>
+  <tr><td>1</td><td>handle 비트 배치, OwnerTable</td><td><span class="tag ask">선택</span> 넘긴다. 14 번의 B 를 고르면 OwnerTable 은 Context 의 slot 이 되고, 남는 것은 "Context 를 찾는 길" 하나다</td></tr>
+  <tr><td>2</td><td>KIOTTY_PIPE = Unix domain</td><td><span class="tag agree">동의</span> 반영한다. 알아 둘 것 셋: Windows 는 10 1803 이상 (<code>AF_UNIX</code> + <code>afunix.h</code>), 경로는 <code>sun_path</code> 108 바이트 미만 (<code>KIOTTY_MAX_HOST_LENGTH</code> 256 보다 짧으므로 initialize 에서 검사), 서버는 bind 전에 남은 socket 파일을 unlink 한다</td></tr>
+  <tr><td>3</td><td>proactor 흉내는 reference 대로</td><td><span class="tag agree">동의</span> reference 의 epoll listener 가 <code>IOReceiveRequest.buffer</code> 에 직접 recv 하는 방식을 그대로 옮긴다. 다른 점은 Connection 이 아니라 IoLoop 가 submit 한다는 것뿐</td></tr>
+  <tr><td>4</td><td>TLS 메모리는 Context 의 pool 에서</td><td><span class="tag partial">부분 동의</span> 아래</td></tr>
+  <tr><td>5</td><td>non-blocking + poll</td><td><span class="tag agree">동의</span> <code>ActiveSocket::connect(endpoint, timeout)</code>, StreamClient 의 read / write 가 모두 이 길이다. Windows 는 <code>WSAPoll</code></td></tr>
+  <tr><td>6</td><td>deadline scan</td><td><span class="tag agree">동의</span> 10 번대로 DONE 도 같은 scan 에서 본다</td></tr>
+  <tr><td>7</td><td>소유자 close 와 worker 의 Session</td><td>나중에. 한 줄로 요약하면: <code>server.close()</code> 가 Work 중인 연결의 Session 을 release 했는데 worker 가 아직 그 Session 에 쓰고 있을 수 있다는 것. 라이브러리가 막을 수 없어서 "사용 지침" 으로 두자는 것이 제안이었다</td></tr>
+  <tr><td>8</td><td>IoEvent 크기</td><td><span class="tag agree">동의</span> 확인됨</td></tr>
+</table>
+
+<h3>15-4. TLS pool 에 대한 보충</h3>
+<p>OpenSSL 이 메모리를 잡는 길은 <code>CRYPTO_set_mem_functions(malloc, realloc, free)</code> 하나이고 <b>프로세스 전역</b> 이다. "TlsProfile 을 초기화할 때 pool 을 받는다" 로는 OpenSSL 의 내부 할당 (handshake 중의 버퍼, 인증서 파싱) 을 그 pool 로 보낼 수 없다. 그래서 두 층으로 나눈다.</p>
+<ul>
+  <li><b>OpenSSL 내부 할당</b>: 첫 Context 가 <code>CRYPTO_set_mem_functions</code> 로 전역 <code>Pool</code> 을 꽂는다. Pool 은 reference 의 <code>BlockPool</code> (크기 등급별 고정 블록, 가득 차면 heap fallback 과 카운터) 을 <code>core/kiotty_pool.h</code> 로 옮긴다. fallback 카운터가 0 인지가 "런타임 할당 없음" 의 검증 수단이 된다.</li>
+  <li><b>우리가 잡는 것</b> (SSL 객체 자체, <code>_cipher_recv</code> / <code>_cipher_send</code> Stage): Connection 생성자에서 <code>TlsCodec::open(profile, pool)</code> 까지 해 두고 연결이 닫히면 <code>SSL_clear</code> 로 재사용한다. 이것이 <code>TlsCodec::open</code> 이 pool 을 받는 이유다. 둘 다 같은 Pool 이다.</li>
+</ul>
+<h3>15-4-2. pool 이 필요한 곳</h3>
+<table>
+  <tr><th>곳</th><th>답</th></tr>
+  <tr><td>ConnectionHost 의 Connection acquire / release</td><td>pool 클래스 불필요. create 때 <code>Connection[capacity]</code> 를 한 번 잡고 (크기가 커도 한 덩어리다) <code>acquire</code> 는 빈 slot 찾기다. 32 개 선형 탐색</td></tr>
+  <tr><td>EventClient, StreamClient, Server 를 내주는 pool</td><td>14 번 B. Context 의 <code>Holder&lt;Owner&gt;[MAX_OWNERS]</code></td></tr>
+  <tr><td>TLS</td><td>위. <code>core/kiotty_pool.h</code> 의 Pool 하나를 Context 가 들고 OpenSSL 과 TlsCodec 이 같이 쓴다. 크기는 <code>KiottyNet_initializeContext</code> 의 인자로 받거나 (base.h 변경) 고정 기본값 (예: max 32 연결 × 64 KiB) 으로 시작한다 — <span class="tag ask">선택</span></td></tr>
+</table>
+
+<h2 id="result">바뀐 구조 요약</h2>
+<p>위 답변을 모두 반영하면 설계 문서 4절의 클래스 목록은 이렇게 된다. 선택이 걸린 이름은 추천안으로 적었다.</p>
+<table>
+  <tr><th>폴더</th><th>클래스 / 함수</th><th>지금과 다른 점</th></tr>
+  <tr><td>core</td><td>Stage, PoolHandle, Holder, Result, Clock, <b>Pool</b></td><td>Pool 추가 (reference BlockPool)</td></tr>
+  <tr><td>error</td><td>SocketCode</td><td>그대로</td></tr>
+  <tr><td>socket</td><td><b>ActiveSocket</b>, <b>PassiveSocket</b></td><td>이름. <code>connect(endpoint, timeout)</code> 동기, <code>finishConnect</code> 삭제</td></tr>
+  <tr><td>event</td><td>IoEvent, IoCompletion, EventListener</td><td><code>submitConnect</code> 와 <code>IoKind::CONNECT</code> 삭제</td></tr>
+  <tr><td>tls</td><td><b>TlsProfile</b>, <b>TlsCodec</b></td><td>이름. <code>open</code> 이 Pool 을 받는다. backend 둘 (openssl, stub)</td></tr>
+  <tr><td>connection</td><td><b>ReadCondition</b>, WriteLane, PushLane, <b>WorkOutcome</b>, Connection, ConnectionHost</td><td>Connection 은 host / listener / event 를 모른다. ConnectionHost 는 slot + find + deliver 뿐</td></tr>
+  <tr><td>io_loop</td><td>IoLoop, <b>Acceptor</b>, PushSlot</td><td>IoLoop 가 listener, events, slots, handler, startWork / finishWork / post 를 가진다. DoneRing 삭제</td></tr>
+  <tr><td>server</td><td>Server</td><td>상속 없음. 부품 넷 + mutex / cv / code</td></tr>
+  <tr><td>client</td><td>EventClient, StreamClient, <code>connectWithRetry</code></td><td>동기 connect. StreamClient 는 socket + tls 직접</td></tr>
+  <tr><td>context</td><td>Context, <b>Owner</b></td><td>Context 가 소유자 slot 과 TLS Pool 을 든다. OwnerTable 은 15-1 과 함께</td></tr>
+  <tr><td>config</td><td>initialize* / configure* 21 개</td><td>그대로</td></tr>
+</table>
+
+<h3>골라 주실 것</h3>
+<ol>
+  <li>2 번 이름: <code>TlsCodec</code> / <code>TlsProfile</code> (추천) 또는 다른 후보</li>
+  <li>3 번 이름: <code>ReadCondition</code> / <code>WorkOutcome</code> (추천) 또는 다른 후보</li>
+  <li>8 번 동사: <code>submit</code> 유지 (추천) 또는 <code>begin</code></li>
+  <li>9 번 이름: <code>resumeFromWork</code> / <code>reportWritten</code> (추천) 또는 다른 후보</li>
+  <li>11 번 loop: 한 클래스 + <code>Acceptor</code> + <code>stop_when_empty</code> (추천) 또는 <code>ClientLoop</code> / <code>ServerLoop</code> 두 클래스</li>
+  <li>13 번 stub: C (거절이 기본, 평문 통과는 테스트 옵션. 추천) 또는 B (항상 평문 통과)</li>
+  <li>14 번: B (Context 의 slot. 추천) 또는 A (raw pointer)</li>
+  <li>15-4 TLS Pool 크기: <code>KiottyNet_initializeContext</code> 의 인자로 받을지, 고정 기본값으로 시작할지</li>
+</ol>
+<p>정해 주시면 <code>design_base_v0.md</code> 를 한 번에 고치고, 15-1 (handle 비트 배치와 Context 찾기) 을 그 다음 주제로 올린다.</p>
+
+</body>
+</html>

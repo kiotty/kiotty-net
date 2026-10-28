@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v2 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --line: #d9dee3;
+    --code-bg: #f3f5f7;
+    --agree: #1a7f37;
+    --partial: #9a6700;
+    --concern: #cf222e;
+    --accent: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216;
+      --fg: #e6edf3;
+      --muted: #9aa4af;
+      --line: #2c333b;
+      --code-bg: #161b22;
+      --agree: #3fb950;
+      --partial: #d29922;
+      --concern: #f85149;
+      --accent: #58a6ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 960px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v2 피드백 답변</h1>
+<p class="sub">2026-10-28. <code>design_base_v1_feedback.html</code> 에 대한 11개 답변에 대한 답이다. 0절은 v1 에서 끝난 것과 정정, 1절부터가 이번 주제다. 7절 (loop) 은 1 ~ 6 이 정해진 뒤 다시 쓰기로 하고 여기서는 "한 바퀴가 따를 규칙" 만 적었다.</p>
+
+<p class="legend">
+  <span class="tag done">확정</span> 끝났다
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag concern">우려</span> 반영 전에 짚을 위험이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">v1 에서 확정된 것과 정정</a></li>
+  <li><a href="#p1">TLS hook 의 자리 (1.4)</a></li>
+  <li><a href="#p2">timeout 은 action 의 필드 (2.1, 7)</a></li>
+  <li><a href="#p3">제출은 IO Thread 만, 다른 thread 는 wake 만 (2.2)</a></li>
+  <li><a href="#p4">create 가 Result 를 돌려준다 (4)</a></li>
+  <li><a href="#p5">콜백 이름 (5)</a></li>
+  <li><a href="#p6">hold 와 Work (8)</a></li>
+  <li><a href="#p7">한 바퀴가 따를 규칙 (11)</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. v1 에서 확정된 것과 정정 <span class="tag done">확정</span></h2>
+<table>
+  <tr><th>v1 번호</th><th>결정</th></tr>
+  <tr><td>2</td><td>IoAction 하나 (kind + timeout_ms + union). ReadRequest / FinishRequest 삭제. accept / connect 는 OS 층이라 섞지 않는다. <code>finishWork(handle, IoAction)</code> 하나</td></tr>
+  <tr><td>3</td><td>Acceptor 그대로 (PassiveSocket + 걸린 accept 하나 + IOCP 의 미리 만든 소켓)</td></tr>
+  <tr><td>4</td><td><code>notify</code> / <code>broadcast</code>. "index 0 = 모두" 약속 없음</td></tr>
+  <tr><td>6</td><td>콜백이 action 을 return 한다. action 생성 함수는 handle 을 받지 않는다. <code>onWorkStarted</code> 는 void. <code>setConnectionTimeout</code> 삭제 (2절)</td></tr>
+  <tr><td>6.2-5 (9)</td><td><code>onError(app_context, code, message)</code> 의 message 는 <b>static literal 만</b>. 라이브러리 안의 호출처는 전부 문자열 상수를 넘기고, 사용자는 저장하지 않고 바로 읽는다</td></tr>
+  <tr><td>6.2-6 (10)</td><td><code>typedef int64_t KiottyNetConnectionHost</code> 없음</td></tr>
+  <tr><td>7</td><td><code>IoCompletion</code> 은 <code>slot</code> 을 싣는다. <code>CONNECT</code> 없음, <code>WAKE</code> 있음</td></tr>
+</table>
+<p><b>정정 (6).</b> v1 의 "잃는 것" 표에 "write 뒤 read 를 한 콜백에서 못 하게 된다" 고 썼는데 틀렸다. 원래 설계에서도 한 콜백에서 write 와 read 를 같이 걸지 않았고, "답장을 보내면서 다음 요청도 기다린다" 는 <b>notify 로 보내고 READ 를 return</b> 하는 것이다. write lane 은 "write → onWritten" 교대 하나뿐이다. 그러니 return-action 모델이 잃는 것은 C++ 편의 메서드의 모양 하나뿐이다.</p>
+<p>아직 답이 없는 것: v1 의 2.4 (submit 셋 또는 하나), 8 (SearchView 대신 Span), 6.2-4 (hold 의 이름), 15-1, 15-4.</p>
+
+<h2 id="p1">1. TLS hook 의 자리 (1.4) <span class="tag partial">부분 동의</span></h2>
+<p>제안: Stage 가 <code>void* cipher_context</code> 와 <code>encode</code> / <code>decode</code> 함수를 받고, context 가 있으면 알아서 암호화한다. <b>목표에 동의한다.</b> 목표는 "Connection 이 TLS 인지 아닌지를 모른다" 이고, 그것이 v1 의 B 보다 낫다. 다만 hook 을 Stage 안에 두면 세 가지가 걸린다.</p>
+<ol>
+  <li><b>TLS 는 바이트 → 바이트 변환이 아니다.</b> cipher 바이트 100 을 넣으면 평문 0 (레코드가 아직 안 찼다) 이 나올 수도, 평문 80 이 나올 수도 있다. 그래서 cipher 버퍼와 plain 버퍼가 따로 있어야 하고, hook 을 가진 Stage 는 안에 Stage 를 하나 더 가진 "두 버퍼짜리" 가 된다.</li>
+  <li><b>handshake 는 받는 쪽에서 보내는 쪽으로 넘어간다.</b> recv Stage 의 decode 가 handshake 바이트를 소화하면 그 답 (ServerHello 등) 은 send 쪽으로 나가야 한다. recv Stage 와 send Stage 가 같은 context 를 공유하고 둘 사이에 길이 있어야 한다. Stage 둘이 서로를 알게 된다.</li>
+  <li><b>core 의 Stage 가 TLS 를 알게 된다.</b> Stage 는 push ring, HTTP 응답 버퍼, StreamClient 에도 쓰이는데 그 모두가 cipher 포인터 셋을 들게 된다.</li>
+</ol>
+<p>그래서 hook 을 Stage 가 아니라 <b>Connection 의 "받는 길 / 보내는 길" 에</b> 둔다. 제안하신 <code>cipher_context + encode + decode</code> 를 인터페이스 하나로 묶고, 평문은 아무것도 안 하는 구현을 꽂는다. 그러면 Connection 에 <code>if (tls)</code> 가 <b>한 줄도 없다</b>.</p>
+<pre><code>class Codec                                     // connection/kiotty_codec.h. Connection 의 받는 길과 보내는 길
+{
+public:
+    static const size_t HOLDER_SIZE  = 256;     // TlsCodec 이 가장 크다 (SSL*, BIO 둘, cipher Stage 둘의 머리)
+    static const size_t HOLDER_ALIGN = 16;
+
+    virtual ~Codec();
+    virtual Stage::Provider&amp; receiveProvider(Stage&amp; plain) = 0;        // socket 이 바이트를 놓을 자리
+    virtual KiottyNetCode    decode(Stage&amp; plain) = 0;                   // 받은 것을 plain 으로. handshake 중이면 plain 은 안 늘고 output 만 생길 수 있다
+    virtual Segment          sendSegment(Segment plain) = 0;            // 보낼 구간. handshake output 이 있으면 그것이 먼저
+    virtual void             onSent(size_t length) = 0;
+    virtual bool             established() const = 0;                   // onHandshake 를 낼 수 있나
+};
+
+class PlainCodec : public Codec                 // receiveProvider 는 plain.provider(), decode 는 SUCCESS, sendSegment 는 그대로, established 는 true
+class TlsCodec   : public Codec                 // cipher Stage 둘 + SSL. open(profile, pool, hostname, cipher_capacity)
+
+class Connection
+{
+    Holder&lt;Codec&gt; _codec;                       // 생성 시 profile 유무로 하나를 make 한다. 그 뒤 Connection 은 TLS 를 모른다
+};</code></pre>
+<table>
+  <tr><th>Connection 의 길</th><th>코드</th><th>평문</th><th>TLS</th></tr>
+  <tr><td>받을 자리</td><td><code>_codec-&gt;receiveProvider(_recv_stage)</code></td><td>plain Stage 의 provider</td><td>cipher Stage 의 provider</td></tr>
+  <tr><td>receive 완료</td><td><code>_codec-&gt;decode(_recv_stage)</code> 뒤 <code>pump</code></td><td>아무것도 안 함</td><td>rbio ← cipher, SSL_read → plain, handshake 진행</td></tr>
+  <tr><td>보낼 구간</td><td><code>_codec-&gt;sendSegment(pickLane())</code></td><td>lane 의 구간 그대로</td><td>handshake output 또는 lane 구간을 encode 한 cipher 구간</td></tr>
+  <tr><td>onHandshake 시점</td><td><code>!_ready &amp;&amp; _codec-&gt;established()</code></td><td>open 직후 바로</td><td>handshake 가 끝난 receive 완료에서</td></tr>
+</table>
+<p>가상 함수 다섯 개가 연결당 IO 한 번에 한 번씩 불린다. reference 의 <code>Holder&lt;Base&gt;</code> 가 바로 이 용도다. "void* + 함수 포인터 셋" 과 같은 것을 C++ 로 쓴 것이고, 다른 점은 context 와 함수가 흩어지지 않는다는 것뿐이다. stub 빌드에서는 <code>TlsCodec</code> 이 없고 <code>TlsProfile::open</code> 이 <code>KIOTTY_TLS_NOT_SUPPORTED</code> 를 돌려주므로 Connection 은 늘 PlainCodec 을 받는다.</p>
+
+<h2 id="p2">2. timeout 은 action 의 필드 (2.1, 7) <span class="tag agree">동의</span></h2>
+<p>맞다. action 이 timeout 을 가지면 <b>timeout 을 거는 별도 인터페이스가 없다</b>. <code>KiottyNet_setConnectionTimeout</code> 은 지운다. 모든 action 생성 함수가 <code>timeout_ms</code> 를 받고 0 은 "없음" 이다. 의미는 "이 action 이 시작한 기다림의 한도" 하나다.</p>
+<table>
+  <tr><th>action</th><th>timeout_ms 가 재는 것</th><th>지나면</th></tr>
+  <tr><td>READ, READ_UNTIL</td><td>조건이 찰 때까지</td><td>onTimeout. 그 return 이 다음 action</td></tr>
+  <tr><td>WRITE</td><td>onWritten 까지</td><td>onTimeout. 느린 peer 를 끊을지 사용자가 정한다</td></tr>
+  <tr><td>HOLD</td><td>아무 일도 없이 기다리는 한도 (push 나 timeout 만 기다린다)</td><td>onTimeout</td></tr>
+  <tr><td>START_WORK</td><td>없음 (0 만 허용). 다음 action 은 worker 의 finishWork 가 가져오고 그것이 자기 timeout 을 가진다</td><td>—</td></tr>
+  <tr><td>CLOSE</td><td>없음</td><td>—</td></tr>
+</table>
+<p>HOLD 에 timeout 이 있으므로 "timeout 만 기다리는" 경우도 <code>KiottyNet_holdConnection(timeout_ms)</code> 하나로 된다. 7번의 혼란은 여기서 끝난다: <b>setTimeout 은 없다.</b></p>
+
+<h2 id="p3">3. 제출은 IO Thread 만, 다른 thread 는 wake 만 (2.2) <span class="tag partial">부분 동의</span></h2>
+<p>고민의 뿌리는 "finishWork 와 notify 는 다른 thread 인데, 거기서 EventListener 에 제출하려면 Connection 이 EventListener 를 알아야 한다" 이다. 답은 <b>다른 thread 는 제출하지 않는다</b> 이다. 다른 thread 가 하는 일은 "할 것을 Connection 에 적어 두고 IO Thread 를 깨우는 것" 뿐이고, 제출은 깨어난 IO Thread 가 평소와 같은 길로 한다. 그러면 Connection 은 EventListener 를 영영 모른다.</p>
+
+<h3>3.1 왜 IOCP 에서도 다른 thread 가 WSASend 하면 안 되는가</h3>
+<ul>
+  <li><b>thread 가 끝나면 그 thread 가 건 overlapped IO 는 취소된다.</b> worker 가 <code>WSASend</code> 를 걸고 return 한 뒤 그 thread 가 종료되면 (thread pool 이 줄어들 때) 보내던 것이 <code>ERROR_OPERATION_ABORTED</code> 로 끝난다. IOCP 에 붙은 소켓도 같다.</li>
+  <li><b>lane 과 Stage 는 thread-safe 가 아니다.</b> worker 가 write lane 에 쓰는 동안 IO Thread 가 같은 lane 을 drain 하면 안 된다. 구현 가이드 1.5 가 WORKING 동안 IO Thread 가 write lane 을 안 만지기로 한 이유가 이것이다. 그 약속은 "제출은 한 thread" 일 때만 지킬 수 있다.</li>
+  <li><b>onWritten 은 어차피 IO Thread 가 낸다.</b> 완료는 IOCP 큐로 오므로 worker 가 걸어도 콜백은 IO Thread 다. 걸기만 다른 thread 에서 하면 얻는 것이 없다.</li>
+</ul>
+<p>그래서 IOCP 도 epoll 과 같은 길을 간다. backend 분기가 없다.</p>
+
+<h3>3.2 epoll 에서 "감시해 달라고 부탁" 은 한 번뿐이다</h3>
+<p>epoll 의 등록 (<code>epoll_ctl ADD</code>) 은 연결이 열릴 때 <b>IoLoop 가</b> 한 번 한다 (<code>_listener.attach(socket.handle(), slot)</code>). IoLoop 는 listener 와 host 를 둘 다 들고 있으므로 여기서 Connection 이 listener 를 알 필요가 없다. 그 뒤의 receive 는 늘 걸려 있고 (readable 이 오면 listener 가 recv 해서 provider 에 쓴다), send 는 IO Thread 가 <code>submitSend</code> 할 때 바로 <code>send</code> 해 보고 <code>EAGAIN</code> 이면 <code>EPOLLOUT</code> 을 켠다. 전부 IO Thread 다.</p>
+
+<h3>3.3 세 길이 같은 모양이 된다</h3>
+<table>
+  <tr><th>다른 thread 의 호출</th><th>Connection 에 적는 것</th><th>깨우기</th><th>IO Thread 가 하는 것</th></tr>
+  <tr><td>콜백의 return (IO Thread 자신)</td><td>—</td><td>—</td><td><code>apply(connection, action)</code></td></tr>
+  <tr><td><code>finishWork(work, action)</code></td><td><code>_work_outcome = action</code> 뒤 CAS WORKING → DONE</td><td><code>_listener.wake()</code></td><td>scan 에서 DONE 을 보면 <code>apply(connection, takeWorkOutcome())</code>. <b>콜백의 return 과 같은 함수다</b></td></tr>
+  <tr><td><code>notify(connection, data)</code>, <code>broadcast(data)</code></td><td>PushSlot 에 (target, data)</td><td><code>_listener.wake()</code></td><td>WAKE 완료에서 slot 을 비워 push lane 에 복사하고 호출자를 풀어 준다</td></tr>
+  <tr><td><code>close()</code> (소유자)</td><td><code>_stopped = true</code></td><td><code>_listener.wake()</code></td><td>loop 를 끝낸다</td></tr>
+</table>
+<p>finishWork 는 "<b>미뤄진 return</b>" 이다. worker 가 return 할 action 을 Connection 에 맡겨 두면 IO Thread 가 대신 return 한 것처럼 적용한다. 그래서 EventListener 에 다른 thread 가 들어갈 길은 <code>wake()</code> 하나다 (PostQueuedCompletionStatus / eventfd / kqueue EVFILT_USER / io_uring msg ring). 이것이 v0 의 5번에서 startWork / finishWork / notify 를 IoLoop 의 메서드로 둔 이유였는데, 그때는 "왜 다른 thread 가 직접 제출하면 안 되는가" 를 적지 않았다.</p>
+
+<h3>3.4 주입은 필요 없다</h3>
+<p>"Connection 을 만들 때 submit 인터페이스를 주입" 은 위 표에서 필요한 곳이 없다. 다른 thread 는 Connection 의 atomic 둘 (<code>_work_state</code>, <code>_work_outcome</code>) 과 IoLoop 의 PushSlot 에만 쓴다. 제출하는 코드는 IoLoop 안의 두 줄 (<code>submitReceive</code>, <code>submitSend</code>) 과 Acceptor 의 한 줄뿐이다. 의존은 <code>ioloop → event_listener</code>, <code>ioloop → connection</code> 로 그대로고 역방향 선이 없다.</p>
+
+<h2 id="p4">4. create 가 Result 를 돌려준다 <span class="tag agree">동의</span></h2>
+<p>create 시점에 아는 것이 낫다. C 에서 struct 반환은 값이므로 할당이 없다.</p>
+<pre><code>typedef struct KiottyNetServerResult
+{
+    KiottyNetCode         code;                 // SUCCESS 가 아니면 handle 은 NULL. TLS stub 이면 KIOTTY_TLS_NOT_SUPPORTED, slot 이 없으면 KIOTTY_TABLE_FULL
+    KiottyNetServerHandle handle;
+} KiottyNetServerResult;
+
+KIOTTY_NET_API KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context, const KiottyNetServerConfig* config, const KiottyNetTlsServerConfig* tls);</code></pre>
+<p>EventClient, StreamClient 도 같은 모양의 struct 를 각각 가진다 (타입이 달라 서로 섞이지 않는다). C++ 의 <code>KiottyNet_Server</code> 생성자는 code 를 <code>_code</code> 에 보관하고 <code>valid()</code> 와 <code>code()</code> 를 둘 다 둔다. 같은 이유로 <code>KiottyNet_createContext</code> 도 <code>KiottyNetContextResult</code> 로 바꾸면 "왜 NULL 인가" 가 모든 create 에서 사라진다.</p>
+
+<h2 id="p5">5. 콜백 이름 (5) <span class="tag partial">부분 동의</span></h2>
+<p>"accept 는 서버만 하는 일이니 양쪽에 다 오는 콜백은 <code>onConnected</code>" 에 동의한다. 전송 계층이 이어진 시점이고 서버와 클라이언트가 같은 뜻이다. 그 다음 콜백 (첫 action 을 return 하는 것) 을 <code>onHandshake</code> 로 하자는 데는 하나 걸린다. 평문 연결에는 handshake 가 없어서 <code>onHandshake</code> 가 "아무 일도 없이" 바로 온다.</p>
+<table>
+  <tr><th>시점</th><th>이름</th><th>return</th><th>서버</th><th>클라이언트</th></tr>
+  <tr><td>전송 계층 연결 (accept / connect 직후, handshake 전)</td><td class="rec"><code>onConnected</code></td><td><code>KiottyNetConnectionDecision</code> (accept / ignore + context)</td><td>info 로 거른다</td><td>context 만 준다</td></tr>
+  <tr><td>데이터를 주고받을 수 있게 됨 (handshake 뒤. 평문은 바로)</td><td><code>onHandshake</code> (제안) 또는 <code>onReady</code> (추천)</td><td>첫 action</td><td>같다</td><td>같다</td></tr>
+</table>
+<p><b>추천: <code>onReady</code>.</b> "handshake 가 끝났다" 는 TLS 의 사정이고 사용자에게 보이는 사실은 "이제 read / write 를 걸 수 있다" 다. <code>onHandshake</code> 로 가도 문제는 없다 (<span class="tag ask">선택</span>). struct 와 함수는 <code>KiottyNetConnectionDecision</code>, <code>KiottyNet_acceptConnection(context)</code>, <code>KiottyNet_ignoreConnection()</code> 그대로다.</p>
+
+<h2 id="p6">6. hold 와 Work (8) <span class="tag concern">우려</span></h2>
+<p>"<code>hold</code> 가 있고 다른 thread 가 IoCommand 를 제출할 수 있으면 Work 가 필요 없다" 는 절반이 맞다. 3절대로 다른 thread 는 제출하지 않고 적어 두기만 하므로, Work 가 하는 일을 다시 세어 보면 Work 는 <b>hold + 소유권 표시</b> 다.</p>
+<table>
+  <tr><th>Work 가 주는 것</th><th>hold 만으로는</th></tr>
+  <tr><td>WORKING 동안 IO Thread 가 그 연결의 <b>콜백을 하나도 내지 않는다</b> (onTimeout, onWritten, onDisconnected 까지). Session 을 worker 가 혼자 쓴다</td><td>hold 중에도 peer 가 끊으면 onDisconnected 가 나간다. worker 가 Session 을 쓰는 중에 onDisconnected 가 그 Session 을 release 하면 use-after-release 다 (v0 15-7 의 문제가 이것이다)</td></tr>
+  <tr><td>write lane 을 worker 가 <b>직접</b> 쓴다 (finishWithWrite 는 복사 없이 lane 에 들어간다). IO Thread 는 안 만진다</td><td>다른 thread 는 write lane 을 만질 수 없다. notify (push lane, 복사) 만 된다. 큰 응답은 push_capacity 에 묶인다</td></tr>
+  <tr><td>finishWork 는 <b>한 번</b>, generation 이 맞을 때만 받는다. 늦게 온 worker 의 결과가 재사용된 연결에 들어가지 않는다</td><td>"다른 thread 가 아무 때나 action 을 적는다" 를 허용하면 그 action 이 IO Thread 의 pump 와 경쟁한다. CAS 상태가 결국 필요하다 = Work</td></tr>
+</table>
+<p>그래서 Work 는 남긴다. 대신 <b>return-action 모델이 Work 를 한 단계 줄여 준다</b>. DRAINING 이 필요했던 이유는 "startWork 가 불릴 때 write lane 에 보내는 중인 메시지가 있을 수 있다" 였다. 콜백이 action 을 하나만 return 하면 WRITE 를 return 한 뒤 다음 콜백은 onWritten (또는 onTimeout, onDisconnected) 이고, onRead 는 READ 를 return 한 뒤에만 온다. 즉 START_WORK 가 return 되는 시점에 write lane 은 <b>항상 비어 있다</b>. 단 하나의 예외는 "WRITE 의 timeout 이 지나 onTimeout 이 START_WORK 를 return" 인데, 이것은 onTimeout 이 WRITE 중이면 START_WORK 를 거부 (<code>KIOTTY_BUSY</code> 로 close) 하면 된다.</p>
+<pre><code>v0 : RUNNING ──startWork──▶ DRAINING ──(write lane 비면, 다음 바퀴)──▶ WORKING ──finishWork──▶ DONE ──(scan 에서 apply)──▶ RUNNING
+v2 : RUNNING ──START_WORK return──▶ WORKING (onWorkStarted 는 apply 안에서 바로) ──finishWork──▶ DONE ──(scan 에서 apply)──▶ RUNNING</code></pre>
+<p>지워지는 것: <code>DRAINING</code>, <code>tryStartWork</code>, <code>_saved_read</code> / <code>_saved_deadline</code> (START_WORK 가 return 된 콜백의 read 조건은 이미 소진됐다), scan 의 한 줄. 그리고 <code>KiottyNet_startWork</code> 는 "아무 thread 에서 부르는 함수" 가 아니라 다른 action 과 같은 <b>return 값</b> 이 된다 (v1 6.2 의 목록에 이미 그렇게 썼다). Work 를 <code>std::move</code> 로 다른 thread 에 넘기고 거기서 finishWork 하는 모양은 그대로다.</p>
+<p>남는 논의 하나 (<span class="tag ask">선택</span>): finishWithWrite 가 write lane 에 직접 쓰는 특권을 유지할지, 아니면 Work 중의 쓰기도 모두 notify (push lane) 로 통일하고 finishWork 는 READ / HOLD / CLOSE 만 받을지. 후자는 lane 규칙이 "write lane 은 IO Thread 만" 으로 단순해지지만, 큰 응답 (HTTP body) 이 push_capacity 에 묶인다. <b>전자 (유지) 를 추천</b> 한다.</p>
+
+<h2 id="p7">7. 한 바퀴가 따를 규칙 (11) <span class="tag agree">동의</span></h2>
+<p>v1 의 <code>runOnce</code> 가 case by case 로 보인 이유는 Connection 의 hook 중 어떤 것은 action 을 돌려주고 (onReceived) 어떤 것은 안 돌려줘서 (onSent, tryStartWork) 호출 모양이 셋이었기 때문이다. 1 ~ 6 이 정해진 뒤 다시 쓰되, 그때 지킬 규칙을 먼저 적어 둔다. 코드는 설계 문서에서.</p>
+<ol>
+  <li><b>Connection 의 모든 hook 은 <code>IoAction</code> 을 돌려준다.</b> 콜백이 안 나간 hook 은 NONE 을 돌려준다. 그래서 loop 의 모든 줄이 <code>apply(connection, connection.hook(...))</code> 한 모양이다.</li>
+  <li><b>action 이 Connection 에 들어가는 길은 <code>apply</code> 하나다.</b> 콜백의 return, finishWork 의 outcome, onTimeout 의 return 이 전부 같은 함수를 지난다. apply 는 재귀 없이 loop 다 (READ 가 바로 충족되어 onRead 가 또 action 을 내는 경우).</li>
+  <li><b>한 바퀴는 세 단계다.</b> (a) wait, (b) 완료마다 hook 하나, (c) 연결마다 scan 하나 (DONE, deadline, written). 단계 안에서 분기는 completion.kind 와 scan 의 세 조건뿐이다.</li>
+  <li><b>EventListener 에 들어가는 호출은 IoLoop 의 세 줄이다.</b> <code>submitReceive</code> (receive 가 안 걸려 있고 provider 에 자리가 있으면), <code>submitSend</code> (send 가 안 걸려 있고 sendSegment 가 비어 있지 않으면), <code>wake</code> (다른 thread). 셋 다 Connection 의 상태를 읽고 IoLoop 가 결정한다.</li>
+  <li><b>다른 thread 는 적고 깨운다.</b> 3절.</li>
+</ol>
+<p>이 규칙으로 쓰면 (b) 는 kind 별 한 줄, (c) 는 조건 별 한 줄, apply 는 kind 별 한 줄이 되고 그 밖의 줄이 없어야 한다. 그렇게 안 되는 자리가 나오면 그것이 설계가 덜 된 곳이다.</p>
+
+<h2 id="choices">골라 주실 것</h2>
+<ol>
+  <li>1절 Codec 인터페이스 (Holder&lt;Codec&gt;, PlainCodec / TlsCodec): 이대로 또는 Stage 에 hook</li>
+  <li>5절 두 번째 콜백 이름: <code>onReady</code> (추천) 또는 <code>onHandshake</code></li>
+  <li>6절 finishWithWrite 의 write lane 직접 쓰기: 유지 (추천) 또는 notify 로 통일</li>
+  <li>v1 에서 남은 것: submit 셋 또는 하나, Span, hold 의 이름 (<code>holdConnection</code>), 15-1, 15-4</li>
+</ol>
+<p>정해 주시면 <code>design_base_v0.md</code> 를 v1 으로 고친다. 그때 7절의 규칙대로 loop 와 Connection 의 hook 표를 다시 쓴다.</p>
+
+</body>
+</html>
