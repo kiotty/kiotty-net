@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v4 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 960px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  h4 { font-size: 14px; margin: 16px 0 4px; color: var(--muted); }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v4 피드백 답변</h1>
+<p class="sub">2026-10-29. <code>design_base_v3_user_feedback.md</code> 에 대한 답이다. 가장 큰 지적은 "IoAction 은 submit 하기 위해 만든 것인데 다른 목적으로 쓰이고 있다" 이고, 그 전제를 받아들이면 handshake (2.2), notify (6), loop 의 phase 가 전부 다시 놓인다. 그래서 1절에서 전제를 먼저 고치고, 2 ~ 4절이 그 위에서 각 주제에 답하고, 5절이 다시 짠 IoLoop 다.</p>
+
+<p class="legend">
+  <span class="tag done">확정</span> 끝났다
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag concern">우려</span> 반영 전에 짚을 위험이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">v3 에서 확정된 것</a></li>
+  <li><a href="#p1">IoAction 은 submit 의 단위다 (전반 1 ~ 5)</a></li>
+  <li><a href="#p2">handshake 다시 : onHandshake 가 SEND / RECEIVE 를 돌려준다 (2.2)</a></li>
+  <li><a href="#p3">TLS 오류를 세밀하게 (2.2)</a></li>
+  <li><a href="#p4">notify / broadcast : NotificationContext (6)</a></li>
+  <li><a href="#p5">StreamClient 의 TLS (2.5)</a></li>
+  <li><a href="#p6">IoLoop 다시 : COLLECT → DISPATCH → SUBMIT → SETTLE</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. v3 에서 확정된 것 <span class="tag done">확정</span></h2>
+<table>
+  <tr><th>v3 번호</th><th>결정</th></tr>
+  <tr><td>1.1</td><td>B. <code>KIOTTY_NET_USE_TLS</code> 는 tls/ 의 backend .cpp 선택에만. Connection 은 <code>_tls.active()</code> 로 분기</td></tr>
+  <tr><td>1.2</td><td>스킵. 코드가 나오면 그때 본다. 5절의 코드에 그 네 줄이 자리를 바꿔 들어 있다</td></tr>
+  <tr><td>2.1</td><td>TLS 1.2 / 1.3 의 메시지 상태는 OpenSSL 이 든다. 우리는 <code>SSL_do_handshake</code> 의 답만 본다</td></tr>
+  <tr><td>2.3</td><td>handshake 완료의 식별은 Connection 의 phase. phase 는 <b>HANDSHAKING → READY → CLOSING</b> 셋. 평문은 READY 에서 시작한다. slot 이 비었는지는 phase 가 아니라 ConnectionHost 가 든다 (<code>occupied(slot)</code>)</td></tr>
+  <tr><td>2.2 셋째</td><td>IoCompletion 을 받아 처리하는 함수는 전부 <code>on*</code>. <code>stepHandshake</code> → <code>onHandshake</code>. 5절의 hook 표가 그 규칙으로 되어 있다</td></tr>
+  <tr><td>3</td><td>WorkContext (start / finish / onFinished). 이번에 이의가 없어 그대로</td></tr>
+</table>
+
+<h2 id="p1">1. IoAction 은 submit 의 단위다 <span class="tag agree">동의</span></h2>
+<p>v3 의 IoAction 은 "콜백이 돌려준 뜻" 이었고, OS 에 무엇을 걸지는 SUBMIT 이 Connection 상태를 읽어 따로 정했다. 그래서 두 가지 길이 생겼다 (action 과 상태). 지적대로 <b>IoAction 하나가 submit 까지 가고, 그 결과가 IoCompletion 으로 돌아오는</b> 한 길로 고친다. 콜백의 return 은 그 action 의 "handler 가 준 절반" 이고, dispatch 가 "listener 에 줄 절반" 을 채운다.</p>
+
+<div class="flow">   IoCompletion ──▶ on* hook ──▶ IoAction (handler 절반) ──▶ resolve (listener 절반 채움) ──▶ submit ──▶ OS ──▶ IoCompletion
+                                                                                                   ▲
+                                                                                                   └── 다음 바퀴</div>
+
+<h3>1.1 IoAction</h3>
+<pre><code>enum class IoActionKind : uint8_t { NONE, HOLD, READ, READ_UNTIL, WRITE, START_WORK, CLOSE };
+enum class IoPurpose    : uint8_t { USER, HANDSHAKE, NOTIFY, CONTROL };     // 완료를 누구에게 돌려주나. CONTROL 은 TLS 의 KeyUpdate 답장 (2.1)
+
+struct IoAction
+{
+    IoActionKind kind;
+    IoPurpose    purpose;
+    uint32_t     timeout_ms;                                                // 0 이면 deadline 없음
+
+    union                                                                   // handler 가 준 절반. KiottyNetConnectionAction 과 같은 모양
+    {
+        struct { size_t exact; }                                      read;
+        struct { char delimiter[4]; uint8_t length; size_t max; }     read_until;
+        struct { KiottyNetSpan data; }                                write;   // 사용자 메모리. resolve 가 Stage 로 복사한 뒤에는 보지 않는다
+        struct { KiottyNetCode reason; }                              close;
+    } as;
+
+    void*  io_buffer;                                                       // listener 에 줄 절반. resolve 가 채운다
+    size_t io_length;                                                       //   READ  : 받을 자리 (Stage::Provider::prepare 의 포인터와 writable)
+                                                                            //   WRITE : 보낼 구간 (Stage 안의 포인터와 길이). Segment 타입은 없다
+    static IoAction from(const KiottyNetConnectionAction&amp; action);         // base.cpp 의 번역. purpose = USER, io_* = 0
+};</code></pre>
+<ul>
+  <li><b>Segment 는 없다.</b> 보낼 구간은 <code>io_buffer / io_length</code> 다. <code>KiottyNetSpan</code> 을 안 쓴 이유는 그 struct 의 <code>data</code> 가 <code>const</code> 라 READ 의 받을 자리에 못 쓰기 때문이다. 필드 둘로 둔다.</li>
+  <li><b>listener 가 보는 것은 <code>kind</code>, <code>io_buffer</code>, <code>io_length</code> 셋이다.</b> <code>EventListener::submit(Holder&lt;IoEvent&gt;&amp;, SocketHandle, const IoAction&amp;)</code> 하나로 줄어든다 (v1 2.4 의 "셋 또는 하나" 가 여기서 하나로 답이 난다). READ / READ_UNTIL 은 receive, WRITE 는 send, 나머지 kind 는 listener 에 가지 않는다.</li>
+  <li><b>IoEvent 가 action 을 기억한다.</b> submit 할 때 <code>kind</code> 와 <code>purpose</code> 를 event 에 적어 두고, 완료가 그것을 싣고 돌아온다. 그래서 IoCompletion 에 <code>purpose</code> 가 있다.</li>
+</ul>
+
+<h3>1.2 IoCompletion : OS 가 만드는 넷 + IoLoop 가 만드는 둘</h3>
+<p>"completion 을 받아 처리하는 것은 모두 on*" 으로 가면, v3 의 SCAN 이 보던 세 가지 (deadline, Work 끝, written) 도 completion 이어야 한다. written 은 SEND 완료가 그 자리에서 처리하면 되므로 (1.4) 사라지고, 나머지 둘은 IoLoop 가 만드는 completion 이 된다.</p>
+<pre><code>enum class IoKind : uint8_t { WAKE, ACCEPT, RECEIVE, SEND,        // EventListener::wait 가 돌려준다
+                              TIMEOUT, WORK_DONE };                // IoLoop::collect 가 만든다 (5절 Phase 1)
+
+struct IoCompletion
+{
+    IoKind     kind;
+    IoPurpose  purpose;                         // RECEIVE / SEND. 걸었던 action 의 것
+    int32_t    slot;                            // ACCEPT / WAKE 는 -1
+    SocketCode code;
+    size_t     length;
+};</code></pre>
+<p>이렇게 하면 dispatch 의 input 은 <b>언제나 IoCompletion</b> 이고, 시계와 다른 thread 의 CAS 는 completion 을 만드는 쪽 (collect) 에만 보인다.</p>
+
+<h3>1.3 recv 는 늘 걸려 있지 않다</h3>
+<p>전제를 바꾸면 따라오는 것이다. 구현 가이드 1.3 은 "IO Thread 는 read 요청이 있든 없든 계속 recv" 였는데, action 이 submit 의 단위면 <b>READ action 이 있을 때만 recv 가 걸린다</b>. 얻는 것과 잃는 것:</p>
+<table>
+  <tr><th>얻는 것</th><th>잃는 것</th></tr>
+  <tr><td>Work 중과 HOLD 중에 Stage 가 차는 일이 없다. 흐름 제어가 kernel 버퍼로 내려간다 (peer 가 보내도 우리가 안 읽으면 TCP 창이 닫힌다)</td><td>HOLD 와 Work 중에는 peer 의 FIN 을 모른다. 다음 READ 를 걸어야 안다. <code>isWorkConnected</code> 는 "마지막으로 본 상태" 다</td></tr>
+  <tr><td>submit 이 action 의 kind 만 본다. "받을 자리가 있으면" 같은 상태 판단이 없다</td><td>TLS 의 KeyUpdate / NewSessionTicket 도 다음 READ 때 들어온다. 문제는 없다. OpenSSL 이 그때 소화한다</td></tr>
+</table>
+<p>잃는 것 하나가 걸리면 길이 있다. IOCP 는 길이 0 인 WSARecv 가 "읽을 것이 생기면 알려 주되 버퍼는 안 쓴다" 이고 epoll 은 <code>EPOLLRDHUP</code> 이다. HOLD 를 "capacity 0 인 READ" 로 submit 하면 HOLD 중에도 끊김을 안다. backend 가 조금 더 커지므로 지금은 넣지 않고 <span class="tag ask">선택</span> 으로 둔다.</p>
+
+<h3>1.4 IoEvent 는 연결당 둘</h3>
+<table>
+  <tr><th>event</th><th>싣는 action</th><th>동시에 걸릴 수 있나</th></tr>
+  <tr><td><code>_io_event</code></td><td>READ / READ_UNTIL / WRITE (purpose USER, HANDSHAKE, CONTROL)</td><td>하나만. 모델이 read ↔ write 교대라서 둘이 같이 걸릴 일이 없다</td></tr>
+  <tr><td><code>_notify_event</code></td><td>WRITE (purpose NOTIFY)</td><td><code>_io_event</code> 와 같이 걸린다. notify 는 read / write 와 무관하게 온다</td></tr>
+</table>
+<p>같은 socket 에 send 둘이 걸리는 것 (사용자 write 와 notify) 은 stream socket 에서 <b>건 순서대로 나간다</b>. IOCP 는 overlapped WSASend 를 건 순서로 보내고, epoll 흉내는 listener 가 순서대로 <code>send</code> 한다. TLS 에서 이 순서가 중요하다 (4.2).</p>
+<p>onWritten 이 SEND 완료 자리에서 바로 나가도 되는 이유도 여기 있다. 구현 가이드 1.6 이 onWritten 을 loop 끝으로 미룬 것은 epoll 에서 <code>write()</code> 안의 <code>send()</code> 가 바로 성공해 콜백이 콜백 안에서 나오는 재진입 때문이었다. 이제 send 는 SUBMIT phase 에서만 걸리고 그 결과는 다음 바퀴의 completion 이다. 재진입이 구조적으로 없으므로 <code>onSent(USER)</code> 가 다 보냈으면 그 자리에서 <code>onWritten</code> 을 낸다.</p>
+
+<h3>1.5 START_WORK 와 CLOSE 도 submit 에 간다</h3>
+<p>"submit 은 listener 와 연관된 일을 하는데 START_WORK 도 거기서" 라는 지적을 이렇게 받았다. kind 일곱 개 모두 submit 의 switch 에 한 줄씩 있다. 콜백은 dispatch 에서 끝내고, submit 은 listener 와 socket 만 만진다.</p>
+<table>
+  <tr><th>kind</th><th>dispatch (resolve) 가 하는 것</th><th>submit 이 하는 것</th></tr>
+  <tr><td>NONE / HOLD</td><td>deadline 을 건다 (timeout_ms)</td><td>없음. 걸 것이 없다</td></tr>
+  <tr><td>READ / READ_UNTIL</td><td>조건 등록. Stage 에 이미 차 있으면 onRead 를 바로 내고 그 return 으로 다시 (pump). 안 찼으면 받을 자리를 <code>io_*</code> 에 채운다</td><td><code>listener.submit</code> (receive)</td></tr>
+  <tr><td>WRITE</td><td>사용자 span 을 송신 Stage 에 복사 (TLS 면 encode 까지). <code>io_*</code> 에 보낼 구간</td><td><code>listener.submit</code> (send)</td></tr>
+  <tr><td>START_WORK</td><td><code>_work.start</code>, <b>onWorkStarted</b></td><td>없음. Work 중엔 socket 에 아무것도 걸지 않는다 (reactor 라면 여기서 관심을 끄는 자리)</td></tr>
+  <tr><td>CLOSE</td><td><code>socket.shutdown</code> (FIN), <b>onDisconnected</b></td><td><code>listener.detach</code>, <code>socket.close</code>, phase = CLOSING</td></tr>
+</table>
+
+<h2 id="p2">2. handshake 다시 : onHandshake 가 SEND / RECEIVE 를 돌려준다 <span class="tag agree">동의</span></h2>
+<p>맞다. v3 의 "MORE 면 HOLD" 는 "recv 는 늘 걸려 있고 cipherSend 는 SUBMIT 이 알아서 보낸다" 는 전제 위에서만 말이 됐다. 1.3 으로 그 전제가 없어졌으니 handshake 도 <b>무엇을 걸어야 하는지를 action 으로 말해야</b> 한다. 보낼 것이 있으면 WRITE, 받아야 하면 READ 다. HOLD 는 handshake 에서 사라진다.</p>
+
+<h3>2.1 TlsPipe::handshake 의 답은 넷</h3>
+<p>"더 보내야 할 때도 있고 더 받아야 할 때도 있다" 를 답에 그대로 드러낸다. 보낼 것이 있으면 그것이 먼저다. <code>SSL_do_handshake</code> 가 WANT_READ 를 돌려줘도 wbio 에 보낼 것이 쌓여 있으면 그것을 보내야 peer 가 답을 준다.</p>
+<pre><code>enum class TlsStep : uint8_t { SEND, RECEIVE, DONE, FAILED };
+
+TlsStep TlsPipe::handshake()                    // cipherReceive → rbio, SSL_do_handshake, wbio → cipherSend
+{
+    int result = SSL_do_handshake(_ssl);
+    moveWbioToCipherSend();
+    if (cipherSend().consumer().readable() &gt; 0) return TlsStep::SEND;     // 보낼 것이 있으면 먼저 보낸다. DONE 직후의 NewSessionTicket 도 여기 걸린다
+    if (result == 1)                             return TlsStep::DONE;
+    int error = SSL_get_error(_ssl, result);
+    if (error == SSL_ERROR_WANT_READ)            return TlsStep::RECEIVE;
+    recordError(error);                                                    // 3절. code 와 static message 를 _last_* 에
+    return TlsStep::FAILED;
+}</code></pre>
+<p>이 함수는 <b>몇 번을 불러도 안전하다</b>. 끝난 뒤 다시 부르면 1 이 돌아오고 (DONE), 보낼 것이 있으면 SEND 다. 그래서 Connection 은 HANDSHAKING 동안 들어오는 모든 completion (RECEIVE 든 SEND 든) 에 같은 함수 하나를 부른다.</p>
+
+<h3>2.2 Connection::onHandshake</h3>
+<pre><code>IoAction Connection::onHandshake(const Handler&amp; handler)           // HANDSHAKING 의 모든 completion 뒤, 그리고 open 직후 한 번
+{
+    switch (_tls.handshake())
+    {
+    case TlsStep::SEND:    return IoAction::write(_tls.cipherSend(), IoPurpose::HANDSHAKE, _handshake_timeout_ms);   // io_* = cipherSend 의 읽을 구간
+    case TlsStep::RECEIVE: return IoAction::read (_tls.cipherReceive(), IoPurpose::HANDSHAKE, _handshake_timeout_ms); // io_* = cipherReceive 의 빈 자리. exact 0 = 오는 만큼
+    case TlsStep::DONE:    _phase = Phase::READY;
+                           return handler.onReady(_context, handle());                                                // 첫 사용자 action
+    case TlsStep::FAILED:  handler.onError(_app_context, handle(), _tls.lastCode(), _tls.lastMessage());               // 3절
+                           return IoAction::close(_tls.lastCode());
+    }
+}</code></pre>
+<table>
+  <tr><th>시점</th><th>TLS 서버</th><th>TLS 클라이언트</th></tr>
+  <tr><td>open 직후 <code>onOpened</code></td><td>onHandshake → RECEIVE (ClientHello 를 기다린다) → <b>READ(HANDSHAKE)</b></td><td>onHandshake → ClientHello 가 cipherSend 에 → SEND → <b>WRITE(HANDSHAKE)</b></td></tr>
+  <tr><td>RECEIVE 완료 (HANDSHAKE)</td><td colspan="2">cipherReceive.commit → onHandshake → SEND 면 WRITE, RECEIVE 면 READ, DONE 이면 onReady 의 action, FAILED 면 onError + CLOSE</td></tr>
+  <tr><td>SEND 완료 (HANDSHAKE)</td><td colspan="2">cipherSend.consume → onHandshake (같은 함수). 1.3 서버는 client Finished 뒤 DONE 이 되면서 NewSessionTicket 이 cipherSend 에 남으므로 SEND 한 번 더, 그 완료에서 DONE → onReady</td></tr>
+  <tr><td>TIMEOUT 완료</td><td colspan="2">onTimeout hook 이 HANDSHAKING 이면 onError(KIOTTY_TLS_HANDSHAKE_TIMEOUT) + CLOSE</td></tr>
+</table>
+<p>HOLD 가 없어지면서 v3 2.2 의 "handshake 전용 deadline 변수가 없다" 는 그대로다. READ / WRITE 의 <code>timeout_ms</code> 가 그 자리다.</p>
+
+<h3>2.3 READY 에서 받는 길</h3>
+<p>1.2 의 네 줄이 자리를 바꿔 들어가는 곳이다. READ action 의 받을 자리는 <code>receiveStage()</code> 가 고르고 (TLS 면 cipherReceive), 완료 뒤 평문을 만드는 것은 <code>onReceived</code> 가 한다.</p>
+<pre><code>IoAction Connection::onReceived(IoPurpose purpose, SocketCode code, size_t length, const Handler&amp; handler)
+{
+    _io_pending = false;
+    if (_phase == Phase::CLOSING) return IoAction::none();
+    if (code != SocketCode::SUCCESS || length == 0) return onPeerGone(code);
+    receiveStage().provider().commit(length);                               // 평문: _receive_stage, TLS: _tls.cipherReceive()
+
+    if (purpose == IoPurpose::HANDSHAKE) return onHandshake(handler);       // 2.2. phase 가 HANDSHAKING 인 동안만 이 purpose 가 온다
+
+    if (_tls.active())
+    {
+        KiottyNetCode decoded = _tls.decode(_receive_stage);                // cipher → plain. 레코드가 덜 찼으면 0 바이트
+        if (decoded != KIOTTY_SUCCESS) { handler.onError(_app_context, handle(), decoded, _tls.lastMessage()); return IoAction::close(decoded); }
+        if (_tls.cipherSend().consumer().readable() &gt; 0)                    // KeyUpdate 답장 (v3 2.1). 먼저 보내고 READ 로 돌아온다
+            return IoAction::write(_tls.cipherSend(), IoPurpose::CONTROL, 0);
+    }
+    return _read;                                                           // 등록된 READ 조건을 다시 돌려준다. resolve 가 pump 해서 찼으면 onRead, 아니면 다시 받는다
+}</code></pre>
+<p><code>_read</code> 는 "등록된 조건" 이고 <code>_pending</code> 은 "다음에 submit 할 action" 이다. 조건은 여러 번의 receive 에 걸쳐 살아 있고, pending 은 바퀴마다 새로 정해진다. 둘을 따로 두는 이유가 CONTROL 이다. KeyUpdate 답장을 보내는 동안에도 사용자의 READ 조건은 남아 있어야 한다.</p>
+
+<h2 id="p3">3. TLS 오류를 세밀하게 <span class="tag agree">동의</span></h2>
+<p>"어디서 났는지" 는 code 가, "왜" 는 message 가 말하게 한다. message 는 v1 의 규칙 (static literal) 을 지키면서도 OpenSSL 의 이유 문자열을 그대로 쓸 수 있다. <code>ERR_reason_error_string</code> 과 <code>X509_verify_cert_error_string</code> 은 둘 다 OpenSSL 안의 <b>static 문자열 포인터</b> 를 돌려주므로 버퍼가 필요 없다.</p>
+<table>
+  <tr><th>어디서</th><th>code (KiottyNetCode 에 추가)</th><th>message</th><th>나가는 콜백</th></tr>
+  <tr><td>Profile open : 인증서 / key 파일 없음</td><td><code>KIOTTY_TLS_CERTIFICATE_NOT_FOUND</code></td><td><code>"tls: certificate or key file not found"</code></td><td>create 의 Result.code</td></tr>
+  <tr><td>Profile open : 인증서와 key 불일치, 파싱 실패</td><td><code>KIOTTY_TLS_CERTIFICATE_INVALID</code></td><td><code>ERR_reason_error_string</code> ("key values mismatch" 등)</td><td>create 의 Result.code. message 는 로그로만 (콜백이 없는 시점)</td></tr>
+  <tr><td>handshake : peer 인증서 검증 실패</td><td><code>KIOTTY_TLS_VERIFY_FAILED</code></td><td><code>X509_verify_cert_error_string(SSL_get_verify_result)</code> ("certificate has expired", "self signed certificate", "unable to get local issuer certificate")</td><td>onError → onDisconnected(code)</td></tr>
+  <tr><td>handshake : hostname 불일치 (클라이언트)</td><td><code>KIOTTY_TLS_HOSTNAME_MISMATCH</code></td><td>같은 함수 ("hostname mismatch")</td><td>onError → onDisconnected</td></tr>
+  <tr><td>handshake : 버전 / cipher 불일치, peer 의 alert</td><td><code>KIOTTY_TLS_HANDSHAKE_FAILED</code></td><td><code>ERR_reason_error_string</code> ("no shared cipher", "unsupported protocol", "tlsv1 alert unknown ca", "wrong version number" = 평문 peer)</td><td>onError → onDisconnected</td></tr>
+  <tr><td>handshake : 시간 초과</td><td><code>KIOTTY_TLS_HANDSHAKE_TIMEOUT</code></td><td><code>"tls: handshake timeout"</code></td><td>onError → onDisconnected</td></tr>
+  <tr><td>handshake : peer 가 끊음</td><td><code>KIOTTY_PEER_CLOSED</code></td><td>—</td><td>onDisconnected 만. 평소의 끊김과 같다</td></tr>
+  <tr><td>READY : 복호화 실패 (MAC, 잘못된 레코드)</td><td><code>KIOTTY_TLS_RECORD_ERROR</code></td><td><code>ERR_reason_error_string</code> ("decryption failed or bad record mac")</td><td>onError → onDisconnected</td></tr>
+  <tr><td>READY : peer 의 close_notify</td><td><code>KIOTTY_PEER_CLOSED</code></td><td>—</td><td>onDisconnected 만</td></tr>
+  <tr><td>stub 빌드에 TLS 설정</td><td><code>KIOTTY_TLS_NOT_SUPPORTED</code></td><td>—</td><td>create 의 Result.code</td></tr>
+</table>
+<ul>
+  <li><b>onError 에 handle 을 더한다</b> (<span class="tag ask">선택</span>). 지금은 <code>onError(app_context, code, message)</code> 라 어느 연결인지 모른다. <code>onError(app_context, connection, code, message)</code> 로 바꾸고 연결이 없는 오류 (accept 실패) 는 0 을 넘기면, 사용자가 <code>getConnectionInfo(connection)</code> 로 peer 주소까지 안다.</li>
+  <li><b>TlsPipe 가 마지막 오류를 든다.</b> <code>lastCode()</code>, <code>lastMessage()</code>. <code>recordError</code> 가 <code>SSL_get_error</code> 와 <code>SSL_get_verify_result</code> 를 보고 위 표의 code 를 고른다. 분류는 tls/ 안에만 있다.</li>
+  <li><b>서버 / 클라이언트 어느 쪽인지</b> 는 handler 를 등록한 쪽이 이미 안다. message 에 넣지 않는다.</li>
+</ul>
+
+<h2 id="p4">4. notify / broadcast : NotificationContext <span class="tag partial">부분 동의</span></h2>
+<p>구조에 동의한다. PushSlot (4 칸, 호출자 대기) 을 지우고 호출자가 <b>직접</b> 연결의 Notification Stage 에 쓴다. 바꾸고 싶은 것은 둘이다. 암호화를 lock 안에서 하지 않는 것 (4.2) 과 <code>instant</code> (4.4).</p>
+
+<h3>4.1 구조</h3>
+<pre><code>struct NotificationContext                       // host 에 하나. 모든 연결의 Notification Stage 를 한 mutex 가 지킨다
+{
+    std::mutex     mutex;
+    EventListener* listener;                     // wake 하기 위해. IO Thread 바깥에서 부르는 것은 wake 하나뿐이다
+    bool           isIoThread() const;
+};
+
+class Connection
+{
+    NotificationContext&amp; _notification;          // host 의 것
+    Stage                _notification_stage;    // push_capacity. [u32 길이][바이트] 가 아니라 바이트 그대로. 경계가 필요 없다 (4.3)
+    size_t               _notify_in_flight;      // 지금 걸린 WRITE(NOTIFY) 가 보내는 길이. 0 이면 안 걸림
+
+public:
+    KiottyNetCode notify(KiottyNetSpan data);    // 아무 thread
+};
+
+KiottyNetCode Connection::notify(KiottyNetSpan data)
+{
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(_notification.mutex);
+        if (!alive())                                                   return KIOTTY_PEER_CLOSED;
+        if (_notification_stage.provider().writable() &lt; data.length)    return KIOTTY_BUFFER_FULL;
+        memcpy(_notification_stage.provider().prepare(data.length), data.data, data.length);
+        _notification_stage.provider().commit(data.length);             // 평문 그대로. TLS 라도 여기서 암호화하지 않는다 (4.2)
+    }
+    if (!_notification.isIoThread()) _notification.listener-&gt;wake();   // IO Thread 안이면 이 바퀴의 SUBMIT 이 본다
+    return KIOTTY_SUCCESS;
+}
+
+KiottyNetCode ConnectionHost::broadcast(KiottyNetSpan data)             // Server.notify
+{
+    std::lock_guard&lt;std::mutex&gt; lock(_notification.mutex);
+    for (Connection&amp; c : alive connections) if (c.notificationWritable() &lt; data.length) return KIOTTY_BUFFER_FULL;   // 하나라도 모자라면 아무 데도 안 쓴다
+    for (Connection&amp; c : alive connections) c.appendNotification(data);                                                // 검사 없이 복사
+    if (!_notification.isIoThread()) _notification.listener-&gt;wake();
+    return KIOTTY_SUCCESS;
+}</code></pre>
+<p>broadcast 의 "하나라도 모자라면 전부 거절" 에 동의한다. v2 의 "가득 찬 연결은 건너뛴다" 보다 계약이 분명하다. 호출자는 SUCCESS 면 모두에게 들어갔음을, BUFFER_FULL 이면 아무에게도 안 들어갔음을 안다.</p>
+
+<h3>4.2 암호화는 IO Thread 가 submit 할 때</h3>
+<p>"TLS 일 경우 lock 안에서 암호문으로 변환" 은 두 가지에 걸린다.</p>
+<ol>
+  <li><b><code>SSL*</code> 은 thread-safe 가 아니다.</b> notify 가 다른 thread 에서 <code>SSL_write</code> 를 부르면, IO Thread 의 <code>decode</code> / <code>encode</code> 전부가 같은 mutex 를 잡아야 한다. 받는 길의 모든 바이트가 notify 의 lock 을 지나게 된다.</li>
+  <li><b>TLS 레코드는 순서가 있다.</b> 레코드마다 sequence number 가 들어가고 peer 는 그 순서로 MAC 을 검사한다. thread A 가 notify 를 <code>SSL_write</code> 해서 레코드 N 을 만들고, IO Thread 가 사용자 write 를 <code>SSL_write</code> 해서 N+1 을 만든 뒤 N+1 을 먼저 submit 하면 peer 는 bad record mac 으로 끊는다. 암호화 순서와 submit 순서가 같아야 하고, 그것은 한 thread 에서만 보장된다.</li>
+</ol>
+<p>그래서 notify 는 <b>평문을 Stage 에 넣고 깨우기만</b> 한다. 암호화는 SUBMIT 이 그 연결의 notify 를 걸 때 IO Thread 가 한다. 평문 연결은 Stage 의 구간을 그대로 submit 한다. TLS 연결은 <code>_tls.cipherNotify()</code> 로 encode 한 뒤 그 구간을 submit 한다. 사용자 write 의 cipherSend 와 다른 Stage 를 쓰는 이유는 둘이 동시에 걸려 있기 때문이다 (1.4). 메모리는 TLS 연결당 cipher Stage 셋 (receive 는 레코드 하나 16 KiB + 헤더, send 와 notify 는 각각 <code>send_capacity</code> / <code>push_capacity</code> + 레코드 오버헤드) 이다.</p>
+<p>이 규칙이면 1.4 의 "같은 socket 의 send 둘은 건 순서로 나간다" 와 합쳐져 TLS 순서가 지켜진다: <code>SSL_write</code> 는 IO Thread 의 SUBMIT 안에서만, submit 한 순서대로 불린다.</p>
+
+<h3>4.3 Stage 하나로 메시지 경계 없이</h3>
+<p>Notification Stage 에 <code>[u32 길이]</code> 헤더를 두지 않는다. notify 는 "바이트를 순서대로 보낸다" 이고 완료 콜백이 없으므로 경계가 필요 없다. 걸린 WRITE(NOTIFY) 가 보내는 구간은 Stage 의 <code>[begin, begin + in_flight)</code> 이고, 그 사이 들어온 notify 는 뒤에 붙는다. 완료가 오면 lock 안에서 <code>consumer.commit(in_flight)</code> 하고, 남은 것이 있으면 SUBMIT 이 다음 구간을 건다.</p>
+<p class="note"><b>compact 규칙 하나.</b> Stage 의 compact 는 포인터를 옮기므로 걸린 send 가 있는 동안 하면 안 된다. Notification Stage 의 compact 는 lock 안에서, <code>_notify_in_flight == 0</code> 일 때만 한다. 그 자리는 SEND(NOTIFY) 완료 처리 끝이다.</p>
+
+<h3>4.4 instant <span class="tag concern">우려</span></h3>
+<p>"다른 Connection 을 지연시키더라도 동기로 보낸다" 는 지연 전송이 안 되는 곳을 위한 것으로 읽었다. 걸리는 것:</p>
+<ul>
+  <li><b>순서.</b> 그 socket 에 overlapped send 가 걸려 있는 상태에서 다른 thread 가 동기 <code>send</code> 를 하면 둘의 바이트 순서가 보장되지 않는다. TLS 면 4.2 의 2 번이 그대로 터진다.</li>
+  <li><b>지연의 실체.</b> notify 가 wake 하면 IO Thread 는 지금 바퀴를 마치고 (남은 completion 의 콜백) 바로 SUBMIT 으로 간다. 추가 지연은 "지금 돌고 있는 사용자 콜백 하나" 다. 콜백이 짧다는 모델의 전제 (긴 일은 Work) 가 지켜지면 수십 µs 다.</li>
+  <li><b>IO Thread 안에서 부른 notify 는</b> 이미 같은 바퀴의 SUBMIT 에 걸린다. instant 와 차이가 없다.</li>
+</ul>
+<p>추천: 지금은 넣지 않는다. 지연이 측정으로 문제가 되면 그때 "IO Thread 가 아니면 wake 뒤 submit 완료까지 기다린다" (동기 송신이 아니라 동기 <b>제출</b>) 로 넣는 것이 순서를 깨지 않는 모양이다 (<span class="tag ask">선택</span>).</p>
+
+<h2 id="p5">5. StreamClient 의 TLS <span class="tag agree">동의</span></h2>
+<p>TlsProfile 과 TlsPipe 로 충분하다. StreamClient 는 loop 가 없으므로 Connection 의 onHandshake 가 completion 마다 한 걸음 가는 것을 <code>while</code> 로 돈다. <code>TlsPipe::handshake</code> 의 답 넷이 그대로 분기다.</p>
+<pre><code>KiottyNetCode StreamClient::connect()
+{
+    Result&lt;KiottyNetCode, ActiveSocket&gt; connected = connectWithRetry(_config, _stop);
+    if (!connected) return connected.code();
+    _socket = std::move(connected.value());
+    if (!_profile) return KIOTTY_SUCCESS;
+
+    KiottyNetCode opened = _tls.open(*_profile, _config.endpoint.host);
+    if (opened != KIOTTY_SUCCESS) return opened;
+    for (;;)
+    {
+        switch (_tls.handshake())
+        {
+        case TlsStep::SEND:    { KiottyNetCode code = sendAll(_tls.cipherSend(), _config.connect_timeout_ms);        if (code != KIOTTY_SUCCESS) return code; break; }
+        case TlsStep::RECEIVE: { KiottyNetCode code = receiveSome(_tls.cipherReceive(), _config.connect_timeout_ms); if (code != KIOTTY_SUCCESS) return code; break; }
+        case TlsStep::DONE:    return KIOTTY_SUCCESS;
+        case TlsStep::FAILED:  return _tls.lastCode();                     // 3절의 code. lastMessage 는 로그로
+        }
+    }
+}
+
+KiottyNetResult StreamClient::read(void* buffer, size_t length, uint32_t timeout_ms)
+{
+    while (_receive_stage.consumer().readable() == 0)                      // 평문이 남아 있으면 그것부터
+    {
+        Stage&amp; target = _tls.active() ? _tls.cipherReceive() : _receive_stage;
+        KiottyNetCode code = receiveSome(target, timeout_ms);              // poll 한 번 + recv 한 번
+        if (code != KIOTTY_SUCCESS) return failure(code);
+        if (_tls.active()) { code = _tls.decode(_receive_stage); if (code != KIOTTY_SUCCESS) return failure(code); }   // 0 바이트면 다시 돈다
+    }
+    return copyOut(buffer, length);
+}
+
+KiottyNetResult StreamClient::write(KiottyNetSpan data, uint32_t timeout_ms)
+{
+    if (!_tls.active()) return sendAll(data, timeout_ms);
+    _tls.encode(data);                                                     // send_capacity 단위로 나눠 encode + sendAll 을 반복한다
+    return sendAll(_tls.cipherSend(), timeout_ms);
+}</code></pre>
+<p>Connection 과 다른 점은 <code>sendAll</code> / <code>receiveSome</code> 이 동기 (non-blocking + poll, v0 15-5) 라는 것뿐이다. <code>decode</code> 가 0 바이트를 돌려줄 수 있다는 것 (레코드가 덜 찼다, NewSessionTicket 을 소화했다) 을 while 이 받는다. <code>sendAll</code> 이 cipherSend 를 다 비우고 돌아오므로 StreamClient 에는 cipherNotify 가 없다. TlsPipe 생성자가 notify 용 capacity 0 을 받는다.</p>
+
+<h2 id="p6">6. IoLoop 다시 : COLLECT → DISPATCH → SUBMIT → SETTLE</h2>
+<p>v3 의 여섯 phase 가 넷이 된다. SCAN 은 COLLECT 로 들어가고 (completion 을 만드는 쪽), APPLY 는 DISPATCH 의 마지막 작은 동작 <code>resolve</code> 가 된다 (action 의 listener 절반을 채우는 쪽). 큰 동작 넷의 input 과 output 은 서로 다른 타입이라 phase 끼리 섞일 수 없다.</p>
+
+<div class="flow">   ┌───────────┐  IoCompletion[]  ┌────────────┐  Connection::_pending  ┌──────────┐  OS 요청  ┌──────────┐
+   │ 1 COLLECT │─────────────────▶│ 2 DISPATCH │───────────────────────▶│ 3 SUBMIT │─────────▶│ 4 SETTLE │
+   └───────────┘                  └────────────┘       (IoAction)       └──────────┘          └──────────┘
+   OS 완료 + deadline + Work 끝     completion → on* → IoAction            pending → listener      slot 반납
+                                   → resolve (listener 절반)            notification → listener  stop_when_empty
+
+   EventListener 를 부르는 phase : 1 (wait), 3 (attach / submit / detach)
+   handler 콜백이 나가는 phase   : 2 만
+   다른 thread 가 쓰는 것        : WorkContext (CAS), Notification Stage (mutex), wake</div>
+
+<pre><code>void IoLoop::runOnce()
+{
+    Span&lt;const IoCompletion&gt; completions = collect();                       // 1
+    for (const IoCompletion&amp; completion : completions) dispatch(completion); // 2
+    submit();                                                               // 3
+    settle();                                                               // 4
+}</code></pre>
+
+<table>
+  <tr><th>Phase</th><th>input</th><th>output</th><th>작은 동작</th></tr>
+  <tr><td>1 COLLECT</td><td>가장 가까운 deadline, 연결들의 deadline / Work 상태</td><td><code>Span&lt;IoCompletion&gt;</code> (OS 것 + IoLoop 것)</td><td>1a wait, 1b TIMEOUT 만들기, 1c WORK_DONE 만들기</td></tr>
+  <tr><td>2 DISPATCH</td><td>IoCompletion 하나</td><td>그 연결의 <code>_pending</code> (IoAction, listener 절반까지 채워진 것)</td><td>2a ~ 2f kind 별 hook 하나, 2g resolve</td></tr>
+  <tr><td>3 SUBMIT</td><td>연결마다 <code>_pending</code> 과 Notification Stage</td><td>listener 에 걸린 요청, 닫힌 socket</td><td>3a attach, 3b pending 제출, 3c notification 제출, 3d accept</td></tr>
+  <tr><td>4 SETTLE</td><td>host</td><td>slot 반납, <code>_stopped</code></td><td>—</td></tr>
+</table>
+
+<h3>Phase 1. COLLECT : 세 출처 → IoCompletion 하나의 배열</h3>
+<pre><code>Span&lt;const IoCompletion&gt; IoLoop::collect()
+{
+    size_t count = _listener.wait(nearestDeadline(monotonicMs()), _completions, OS_CAPACITY);   // 1a. TIMEOUT 이면 0. WAKE 도 여기 섞여 온다
+    uint64_t now = monotonicMs();
+    for (size_t i = 0; i &lt; _host.capacity(); ++i)
+    {
+        Connection&amp; c = _host.at(i);
+        if (!c.alive()) continue;
+        if (c.expireDeadline(now)) _completions[count++] = IoCompletion{ IoKind::TIMEOUT,   IoPurpose::USER, (int32_t)i, SocketCode::SUCCESS, 0 };   // 1b. deadline 을 0 으로 돌리며 true
+        if (c.workFinished())      _completions[count++] = IoCompletion{ IoKind::WORK_DONE, IoPurpose::USER, (int32_t)i, SocketCode::SUCCESS, 0 };   // 1c. _work 가 DONE
+    }
+    return Span&lt;const IoCompletion&gt;(_completions, count);                   // 배열은 IoLoop 의 것. OS_CAPACITY + 2 × capacity
+}</code></pre>
+<p>시계와 다른 thread 의 CAS 를 보는 자리는 이 함수가 유일하다. 뒤의 phase 는 completion 의 kind 만 본다.</p>
+
+<h3>Phase 2. DISPATCH : completion → hook → action → resolve</h3>
+<pre><code>void IoLoop::dispatch(const IoCompletion&amp; completion)
+{
+    if (completion.kind == IoKind::WAKE)   return;                           // 2a. 깨우기만. notify 는 3c 가, close 는 run 의 while 이 본다
+    if (completion.kind == IoKind::ACCEPT) { admit(); return; }              // 2b
+
+    Connection&amp; c = _host.at(completion.slot);
+    IoAction action;
+    switch (completion.kind)
+    {
+    case IoKind::RECEIVE:   action = c.onReceived(completion.purpose, completion.code, completion.length, handler()); break;   // 2c. 2.3 절
+    case IoKind::SEND:      action = completion.purpose == IoPurpose::NOTIFY
+                                   ? c.onNotified(completion.code, completion.length)                                        // 2d. NONE. _pending 을 건드리지 않는다
+                                   : c.onSent(completion.purpose, completion.code, completion.length, handler());   break;
+    case IoKind::TIMEOUT:   action = c.onTimeout(handler());                                                        break;   // 2e
+    case IoKind::WORK_DONE: action = c.onWorkFinished();                                                            break;   // 2f
+    }
+    resolve(c, action);                                                      // 2g
+}</code></pre>
+
+<h4>2b. admit : ACCEPT → Connection 하나</h4>
+<pre><code>void IoLoop::admit()
+{
+    Result&lt;SocketCode, ActiveSocket&gt; accepted = _acceptor-&gt;accept();
+    if (!accepted) { handler().onError(_app_context, 0, toNetCode(accepted.code()), "accept failed"); return; }
+
+    Connection&amp; c = *_host.acquire();                                        // accept 는 빈 slot 이 있을 때만 걸었다 (3d)
+    KiottyNetConnectionDecision decision = handler().onConnected(_app_context, c.handle(), accepted.value().peer());
+    if (!decision.accepted) { accepted.value().close(); _host.release(c); return; }
+
+    c.open(std::move(accepted.value()), decision.connection_context, _tls_profile);   // phase = TLS ? HANDSHAKING : READY. attach 는 3a 가
+    resolve(c, c.onOpened(handler()));                                       // 평문: onReady 의 action. TLS: onHandshake 의 READ / WRITE (HANDSHAKE)
+}</code></pre>
+<p>EventClient 는 동기 connect 뒤 run 안에서 같은 네 줄을 한 번 한다 (<code>admit(ActiveSocket&amp;&amp;)</code> 로 두고 같이 쓴다).</p>
+
+<h4>2c ~ 2f. hook 넷</h4>
+<p><code>onReceived</code> 는 2.3 절에 있다. 나머지 셋:</p>
+<pre><code>IoAction Connection::onSent(IoPurpose purpose, SocketCode code, size_t length, const Handler&amp; handler)
+{
+    _io_pending = false;
+    if (_phase == Phase::CLOSING) return IoAction::none();
+    if (code != SocketCode::SUCCESS) return onPeerGone(code);
+    sendStage(purpose).consumer().commit(length);                            // HANDSHAKE / CONTROL / TLS 의 USER : cipherSend. 평문 USER : _send_stage
+    switch (purpose)
+    {
+    case IoPurpose::HANDSHAKE: return onHandshake(handler);                  // 2.2 절. 같은 함수가 다음 걸음을 정한다
+    case IoPurpose::CONTROL:   return _read;                                 // KeyUpdate 답장이 나갔다. 사용자의 READ 조건으로 돌아간다 (io 없음 → resolve 가 pump)
+    case IoPurpose::USER:      if (hasMoreToSend()) return nextWriteChunk(); // 송신 Stage 에 남은 것 (TLS 는 encode 더). io 채운 WRITE(USER)
+                               return handler.onWritten(_context, handle(), _write_length);   // 1.4. 이 자리에서 바로
+    }
+}
+
+IoAction Connection::onTimeout(const Handler&amp; handler)                       // 2e
+{
+    if (_phase == Phase::HANDSHAKING) { handler.onError(_app_context, handle(), KIOTTY_TLS_HANDSHAKE_TIMEOUT, "tls: handshake timeout"); return IoAction::close(KIOTTY_TLS_HANDSHAKE_TIMEOUT); }
+    return handler.onTimeout(_context, handle());
+}
+
+IoAction Connection::onWorkFinished()                                         // 2f
+{
+    IoAction outcome = _work.onFinished();                                   // DONE → IDLE
+    return _peer_closed.load() ? IoAction::close(KIOTTY_PEER_CLOSED) : outcome;
+}
+
+IoAction Connection::onPeerGone(SocketCode code)                             // RECEIVE 의 0 바이트 / 오류, SEND 의 오류
+{
+    if (_work.working()) { _peer_closed.store(true); return IoAction::none(); }   // Work 중엔 기록만
+    return IoAction::close(code == SocketCode::CLOSED ? KIOTTY_PEER_CLOSED : KIOTTY_SOCKET_ERROR);
+}</code></pre>
+
+<h4>2g. resolve : handler 절반 → listener 절반</h4>
+<p>규칙 하나로 돈다. <b>READ / WRITE 는 <code>io_buffer</code> 가 채워져 있으면 끝난 action</b> 이다 (onHandshake 의 READ / WRITE, pump 가 돌려준 READ, write 가 돌려준 WRITE). 비어 있으면 handler 가 준 것이므로 Connection 이 채운다. 채우는 중에 콜백이 또 action 을 내면 (READ 가 바로 충족돼 onRead) 그것을 같은 loop 의 다음 회차로 돈다. 재귀가 아니다.</p>
+<pre><code>void IoLoop::resolve(Connection&amp; c, IoAction action)
+{
+    for (;;)
+    {
+        switch (action.kind)
+        {
+        case IoActionKind::NONE:        return;                                                      // _pending 그대로 (NOTIFY 완료, CLOSING 의 늦은 완료, Work 중 끊김)
+        case IoActionKind::HOLD:        c.hold(action.timeout_ms);                      c.setPending(action); return;   // deadline 만
+        case IoActionKind::START_WORK:  c.startWork();                                                                   // _work.start(generation)
+                                        handler().onWorkStarted(c.context(), c.workHandle()); c.setPending(action); return;
+        case IoActionKind::CLOSE:       c.shutdown();                                                                    // FIN. socket.close 는 3b 가
+                                        handler().onDisconnected(_app_context, c.context(), c.handle(), action.as.close.reason);
+                                        c.setPending(action); return;
+        case IoActionKind::READ:
+        case IoActionKind::READ_UNTIL:  if (action.io_buffer) { c.setPending(action); return; }     // 끝난 action
+                                        c.setRead(action);                                           // 조건 등록 + deadline. exact &gt; capacity 면 CLOSE 가 돌아온다
+                                        action = c.pump(handler());                                  // 찼으면 onRead 의 return (io 없음 → 다음 회차). 안 찼으면 io 채운 READ
+                                        continue;
+        case IoActionKind::WRITE:       if (action.io_buffer) { c.setPending(action); return; }     // 끝난 action
+                                        action = c.write(action);                                    // 사용자 span → 송신 Stage (+encode) → io 채운 WRITE. BUSY / BUFFER_FULL 이면 CLOSE
+                                        continue;
+        }
+    }
+}
+
+IoAction Connection::pump(const Handler&amp; handler)                            // _read 조건을 _receive_stage 에 대 본다
+{
+    if (_read.kind == IoActionKind::NONE) return IoAction::none();
+    KiottyNetSpan data;
+    if (satisfied(_read, _receive_stage, data))                              // EXACT : readable ≥ exact. UNTIL : delimiter 가 _scanned 뒤에 있다 (없고 max 넘으면 CLOSE)
+    {
+        _read = IoAction::none();                                            // 조건 소진. onRead 가 다음 조건을 return 한다
+        IoAction next = handler.onRead(_context, handle(), data);
+        _receive_stage.consumer().commit(data.length);                       // 콜백이 돌아온 뒤 소비. data 는 콜백 동안만 유효하다
+        return next;
+    }
+    IoAction armed   = _read;                                                // 안 찼다. 받을 자리를 채워 돌려준다
+    armed.io_length  = receiveStage().provider().writable();                 // 평문 : _receive_stage, TLS : cipherReceive
+    armed.io_buffer  = receiveStage().provider().prepare(armed.io_length);
+    return armed;
+}</code></pre>
+
+<h3>Phase 3. SUBMIT : pending → listener</h3>
+<pre><code>void IoLoop::submit()
+{
+    for (size_t i = 0; i &lt; _host.capacity(); ++i)
+    {
+        if (!_host.occupied(i)) continue;
+        Connection&amp; c = _host.at(i);
+        if (c.phase() == Phase::CLOSING) continue;                           // 닫는 중. SETTLE 이 본다
+        if (!c.attached()) { _listener.attach(c.socket(), (int32_t)i); c.markAttached(); }           // 3a. 열린 뒤 첫 바퀴 한 번
+
+        if (!c.ioPending())                                                                          // 3b. pending action 하나
+        {
+            const IoAction&amp; action = c.pending();
+            switch (action.kind)
+            {
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:        break;                                                   // 걸 것 없음. deadline 은 COLLECT 가 본다
+            case IoActionKind::READ:
+            case IoActionKind::READ_UNTIL:
+            case IoActionKind::WRITE:       _listener.submit(c.ioEvent(), c.socket(), action); c.markIoPending(); break;   // receive 또는 send. 즉시 실패는 다음 wait 의 오류 완료로
+            case IoActionKind::START_WORK:  break;                                                   // Work 중엔 socket 에 아무것도 걸지 않는다
+            case IoActionKind::CLOSE:       _listener.detach(c.socket()); c.closeSocket(); break;   // phase = CLOSING
+            }
+        }
+
+        IoAction notification = c.takeNotification();                                                // 3c. lock 안에서 Stage 의 구간을 WRITE(NOTIFY) 로. TLS 면 여기서 encode. 없거나 걸려 있으면 NONE
+        if (notification.kind == IoActionKind::WRITE) _listener.submit(c.notifyEvent(), c.socket(), notification);
+    }
+    if (_acceptor &amp;&amp; !_acceptor-&gt;pending() &amp;&amp; _host.hasFreeSlot()) _acceptor-&gt;submit(_listener);     // 3d
+}
+
+IoAction Connection::takeNotification()                                      // IO Thread. 4절
+{
+    std::lock_guard&lt;std::mutex&gt; lock(_notification.mutex);
+    if (_notify_pending) return IoAction::none();
+    Stage&amp; out = _tls.active() ? _tls.encodeNotification(_notification_stage) : _notification_stage;   // TLS : 평문 → cipherNotify 로 옮기고 cipherNotify 를 돌려준다
+    size_t length = out.consumer().readable();
+    if (length == 0) return IoAction::none();
+    _notify_pending = true;
+    return IoAction::write(out.consumer().prepare(length), length, IoPurpose::NOTIFY);
+}</code></pre>
+<p>3b 의 switch 는 kind 일곱 개가 한 줄씩이다. 상태를 읽어 판단하는 줄이 없다. "받을 자리가 있으면", "보낼 것이 있으면" 이 모두 action 을 만든 쪽 (resolve) 의 일이 됐기 때문이다. 3c 만 Stage 를 본다. notify 는 action 을 거치지 않고 다른 thread 가 Stage 에 쓰기 때문이다.</p>
+
+<h3>Phase 4. SETTLE</h3>
+<pre><code>void IoLoop::settle()
+{
+    for (size_t i = 0; i &lt; _host.capacity(); ++i)
+    {
+        Connection&amp; c = _host.at(i);
+        if (_host.occupied(i) &amp;&amp; c.phase() == Phase::CLOSING &amp;&amp; !c.ioPending() &amp;&amp; !c.notifyPending())
+            _host.release(c);                                                // 늦은 완료가 다 돌아온 뒤 slot 반납 (IOCP 의 ERROR_OPERATION_ABORTED)
+    }
+    if (_stop_when_empty &amp;&amp; _host.empty()) _stopped = true;
+}</code></pre>
+
+<h3>다른 thread 가 쓰는 것 셋</h3>
+<table>
+  <tr><th>호출</th><th>쓰는 것</th><th>깨우기</th><th>IO Thread 가 보는 자리</th></tr>
+  <tr><td><code>finishWork(work, action)</code></td><td>WRITE 면 <code>_send_stage</code> 에 복사 → <code>_work.finish(gen, action)</code> (release CAS)</td><td><code>wake()</code></td><td>1c 가 WORK_DONE 을 만들고 2f 가 outcome 을 resolve</td></tr>
+  <tr><td><code>notify</code> / <code>broadcast</code></td><td>lock 안에서 Notification Stage 에 평문 복사</td><td>IO Thread 가 아니면 <code>wake()</code></td><td>3c</td></tr>
+  <tr><td>소유자 <code>close()</code></td><td><code>_stopped = true</code></td><td><code>wake()</code></td><td>run 의 while</td></tr>
+</table>
+
+<h3>TLS 서버 연결 하나의 일곱 바퀴 (요청 하나, 응답 하나, 중간에 다른 thread 의 notify)</h3>
+<table>
+  <tr><th>바퀴</th><th>1 COLLECT</th><th>2 DISPATCH → _pending</th><th>3 SUBMIT</th></tr>
+  <tr><td>1</td><td>ACCEPT</td><td>admit → onConnected → open → onOpened → onHandshake → RECEIVE → <b>READ(HANDSHAKE)</b></td><td>3a attach, 3b receive, 3d accept 다시</td></tr>
+  <tr><td>2</td><td>RECEIVE (HS, ClientHello)</td><td>onReceived → onHandshake → SEND (ServerHello..Finished) → <b>WRITE(HANDSHAKE)</b></td><td>3b send</td></tr>
+  <tr><td>3</td><td>SEND (HS)</td><td>onSent → onHandshake → RECEIVE → <b>READ(HANDSHAKE)</b></td><td>3b receive</td></tr>
+  <tr><td>4</td><td>RECEIVE (HS, Finished)</td><td>onHandshake → DONE → READY → <b>onReady</b> → READ(4, 1000) → resolve: setRead, pump 안 찼음 → <b>READ(USER, io)</b></td><td>3b receive. (1.3 이면 DONE 앞에 SEND 한 바퀴가 더 있다)</td></tr>
+  <tr><td>5</td><td>RECEIVE (USER, 요청)</td><td>onReceived → decode → <code>_read</code> → resolve: pump 찼음 → <b>onRead</b> → WRITE(응답) → write: 복사 + encode → <b>WRITE(USER, io)</b></td><td>3b send</td></tr>
+  <tr><td>6</td><td>WAKE (다른 thread 가 notify 를 Stage 에 넣고 깨움)</td><td>없음</td><td>3b write 가 걸려 있어 건너뜀. 3c takeNotification → encode → send (notify event)</td></tr>
+  <tr><td>7</td><td>SEND (USER), SEND (NOTIFY)</td><td>onSent(USER) → <b>onWritten</b> → READ(4, 1000) → pump → <b>READ(USER, io)</b>. onNotified → NONE</td><td>3b receive. 3c 비었음</td></tr>
+</table>
+
+<h3>Connection 의 hook 표 (전부 on*, 전부 IoAction 을 돌려준다)</h3>
+<table>
+  <tr><th>hook</th><th>부르는 자리</th><th>안에서 나가는 콜백</th><th>return</th></tr>
+  <tr><td><code>onOpened(handler)</code></td><td>2b</td><td>onReady (평문)</td><td>첫 사용자 action / READ·WRITE(HANDSHAKE)</td></tr>
+  <tr><td><code>onHandshake(handler)</code></td><td>onOpened, onReceived(HS), onSent(HS)</td><td>onReady (DONE), onError (FAILED)</td><td>READ·WRITE(HANDSHAKE) / onReady 의 return / CLOSE</td></tr>
+  <tr><td><code>onReceived(purpose, code, length, handler)</code></td><td>2c</td><td>onHandshake 의 것, onError (decode 실패)</td><td>onHandshake 의 return / WRITE(CONTROL) / <code>_read</code> / CLOSE / NONE</td></tr>
+  <tr><td><code>onSent(purpose, code, length, handler)</code></td><td>2d</td><td>onHandshake 의 것, onWritten</td><td>onHandshake 의 return / <code>_read</code> / WRITE(USER) 다음 조각 / onWritten 의 return / NONE</td></tr>
+  <tr><td><code>onNotified(code, length)</code></td><td>2d</td><td>없음</td><td>NONE / CLOSE (오류)</td></tr>
+  <tr><td><code>onTimeout(handler)</code></td><td>2e</td><td>onTimeout (READY), onError (HANDSHAKING)</td><td>onTimeout 의 return / CLOSE</td></tr>
+  <tr><td><code>onWorkFinished()</code></td><td>2f</td><td>없음</td><td>worker 의 outcome / CLOSE(PEER_CLOSED)</td></tr>
+  <tr><td><code>pump(handler)</code>, <code>write(action)</code></td><td>2g resolve</td><td>onRead (pump)</td><td>io 채운 READ / WRITE, 또는 콜백의 return, 또는 CLOSE</td></tr>
+</table>
+
+<h2 id="choices">골라 주실 것</h2>
+<ol>
+  <li>1.3 HOLD / Work 중의 끊김 감지: 지금은 포기 (추천) 또는 HOLD 를 capacity 0 인 READ 로 submit (IOCP 0 바이트 WSARecv, epoll EPOLLRDHUP)</li>
+  <li>3절 <code>onError</code> 에 connection handle 추가: 추가 (추천) 또는 그대로</li>
+  <li>4.2 TLS notify 의 암호화 자리: IO Thread 의 SUBMIT (추천) 또는 notify 의 lock 안 (SSL 에 mutex 가 필요해진다)</li>
+  <li>4.4 <code>instant</code>: 지금은 넣지 않음 (추천), 동기 제출 (wake 뒤 submit 까지 대기), 또는 동기 송신</li>
+  <li>1.1 <code>EventListener::submit(event, socket, IoAction)</code> 하나: v1 2.4 의 답으로 이대로 (추천) 또는 셋 유지</li>
+  <li>남은 것: Span (collect 가 돌려주는 타입으로 쓰고 있다. 이대로면 확정), 15-1 (handle 비트와 Context 찾기), 15-4 (TLS Pool 크기)</li>
+</ol>
+<p>정해 주시면 <code>design_base_v0.md</code> 를 v1 으로 고친다. 6절이 IoLoop 절, 1절이 IoAction / IoCompletion 절, 2 ~ 4절이 Connection 과 tls 절이 된다.</p>
+
+</body>
+</html>
