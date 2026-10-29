@@ -237,6 +237,15 @@ Result<KiottyNetCode, ActiveSocket> connectWithRetry(const KiottyNetClientConfig
 // max_trial 번, connect_timeout_ms 씩, 사이에 trial_interval_ms (stop 을 본다). 성공하면 no_delay 적용
 ```
 
+사이클 3a 에서 정한 세부:
+
+- `SocketCode` 는 SUCCESS, WOULD_BLOCK, PENDING, CLOSED, CANCELLED, TIMEOUT, REFUSED, RESET, UNREACHABLE, ADDRESS_IN_USE, INVALID_ARGUMENT, OUT_OF_RESOURCE, NOT_SUPPORTED, UNKNOWN. OS 코드는 backend 의 표 하나 (`socketErrorTable()`) 로만 바꾼다. 표에 없으면 UNKNOWN. `toNetCode` 는 SUCCESS → SUCCESS, CLOSED → PEER_CLOSED, CANCELLED → CLOSED, TIMEOUT → TIMEOUT, 나머지 → SOCKET_ERROR.
+- `PassiveSocket::port()` 를 더했다 (port 0 bind 뒤의 실제 포트).
+- `connect` 의 timeout 0 은 한도 없음. 대기는 POSIX 가 poll, Windows 는 select (WSAPoll 이 실패한 connect 를 알리지 않는 버그 때문).
+- TCP listening 소켓은 POSIX 에서 SO_REUSEADDR, Windows 에서 SO_EXCLUSIVEADDRUSE. 둘 다 같은 포트의 두 번째 listen 은 ADDRESS_IN_USE.
+- SIGPIPE 는 Linux 는 MSG_NOSIGNAL, Apple 은 SO_NOSIGPIPE 로 소켓마다 막는다. 프로세스 signal 은 건드리지 않는다.
+- `connectWithRetry` 의 `max_trial == 0` 은 1 로 본다. interval 은 10 ms 씩 쪼개 stop 을 본다. 실패 코드는 마지막 시도의 `toNetCode`.
+
 ## 7. event
 
 proactor 흉내. submit 에 payload 를 주면 IOCP 는 kernel 이, epoll 은 readable 뒤 listener 가 거기에 쓴다. epoll 은 `EPOLLONESHOT` 이라 걸린 요청이 곧 관심이다. 레벨 트리거 + 영구 등록은 쓰지 않는다.

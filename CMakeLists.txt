@@ -22,12 +22,28 @@ target_compile_options(kiotty_net_warnings INTERFACE
     $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX;/permissive->
 )
 
-add_library(kiotty_net STATIC
+set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_pool.cpp
     src/implementation/core/kiotty_stage.cpp
+    src/implementation/base/error/kiotty_socket_error.cpp
+    src/implementation/base/socket/kiotty_socket.cpp
 )
+
+if(WIN32)
+    list(APPEND KIOTTY_NET_SOURCES
+        src/implementation/base/error/backend/kiotty_windows_error.cpp
+        src/implementation/base/socket/backend/kiotty_windows_socket.cpp
+    )
+else()
+    list(APPEND KIOTTY_NET_SOURCES
+        src/implementation/base/error/backend/kiotty_posix_error.cpp
+        src/implementation/base/socket/backend/kiotty_posix_socket.cpp
+    )
+endif()
+
+add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
 
 target_include_directories(kiotty_net
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include

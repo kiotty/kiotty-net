@@ -27,8 +27,8 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF
       - name: build
         run: cmake --build build --config Debug --parallel
-      - name: unit tests
-        run: ctest --test-dir build -C Debug --output-on-failure -L unit
+      - name: unit and integration tests
+        run: ctest --test-dir build -C Debug --output-on-failure -L "unit|integration"
 
   sanitizers:
     name: clang ${{ matrix.sanitizer }}
@@ -46,8 +46,8 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF "-DKIOTTY_NET_SANITIZER=${{ matrix.sanitizer }}"
       - name: build
         run: cmake --build build --parallel
-      - name: unit tests
-        run: ctest --test-dir build --output-on-failure -L unit
+      - name: unit and integration tests
+        run: ctest --test-dir build --output-on-failure -L "unit|integration"
 
   cross-build:
     name: ${{ matrix.name }} (build only)
