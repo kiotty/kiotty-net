@@ -811,7 +811,7 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 규칙
 
 - 라이브러리가 기억하는 것은 둘이다. **state** 는 연결마다 하나이고 Connection 안에 있다. **machine** (표 + 초기 상태) 은 run 마다 하나이고 `KiottyNetStatefulAppContext` 안에 있다. Session 에 state 멤버를 두지 않는다.
-- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, c)` 가 연결마다 하나를 돌려주고, `releaseConnectionContext(app_context, session, c)` 가 돌려받는다. create 가 NULL 을 돌려주면 그 연결은 `close(KIOTTY_SESSION_EXHAUSTED)` 다. create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
+- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, info)` 가 5절의 onConnected 자리에서 연결마다 하나를 돌려주고 (handle 은 아직 없다), `releaseConnectionContext(app_context, session, c)` 가 돌려받는다. create 가 NULL 을 돌려주면 그 연결은 받지 않는다 (`ignoreConnection`. CONNECTED 도 release 도 오지 않는다). create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
 - transition action 은 app_context 를 받지 않는다. action 이 앱 객체에 닿아야 하면 create 가 Session 에 그 포인터를 넣어 둔다.
 - `Event` 는 IO Thread 가 알려주는 "무슨 일이 일어났는가", entry action (`KiottyNetConnectionAction`) 은 표가 돌려주는 "다음 상태에 들어가면서 해 달라" 다. 한 Transition 은 entry action 하나만 가진다.
 - Transition 은 언제나 다음 상태를 정한다. 상태를 그대로 두는 Transition 은 없다. ANY 행도 갈 곳을 안다 (오류면 오류 상태, 닫히면 닫힌 상태). 다른 일 없이 머물려면 자기 상태로 move 하고 entry action 은 `KiottyNet_holdCommunication(0)` 이다.
@@ -866,7 +866,7 @@ typedef struct KiottyNetStateMachine {
 typedef struct KiottyNetStatefulAppContext {
     KiottyNetAppContext          app_context;              /* create / release 가 받는다 */
     const KiottyNetStateMachine* machine;
-    KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionHandle c);                                 /* 연결마다 Session 하나. NULL 이면 KIOTTY_SESSION_EXHAUSTED 로 닫는다 */
+    KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);                               /* 연결마다 Session 하나. NULL 이면 받지 않는다 (ignore) */
     void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle c);              /* CLOSED 행 뒤에 */
 } KiottyNetStatefulAppContext;
 ```
@@ -898,7 +898,7 @@ static const KiottyNetRule HTTP_RULES[] = {
 static const KiottyNetStateMachine HTTP_MACHINE = { HTTP_RULES, KIOTTY_RULE_COUNT(HTTP_RULES), HTTP_IDLE };
 
 static HttpSession sessions[32];                                   /* Session 저장소는 사용자 것. 크기와 재사용 규칙도 사용자가 정한다 */
-static KiottyNetConnectionContext acquire_session(KiottyNetAppContext app, KiottyNetConnectionHandle c);
+static KiottyNetConnectionContext acquire_session(KiottyNetAppContext app, KiottyNetConnectionInfo info);
 static void                       release_session(KiottyNetAppContext app, KiottyNetConnectionContext session, KiottyNetConnectionHandle c);
 
 HttpApp                     app = { ... };

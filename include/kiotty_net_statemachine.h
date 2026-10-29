@@ -78,7 +78,7 @@ typedef struct KiottyNetStatefulAppContext
 {
     KiottyNetAppContext          app_context;
     const KiottyNetStateMachine* machine;
-    KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionHandle connection);
+    KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);
     void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);
 } KiottyNetStatefulAppContext;
 

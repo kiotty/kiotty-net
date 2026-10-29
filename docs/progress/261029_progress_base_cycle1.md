@@ -39,7 +39,7 @@
 
 ## 미결
 
-- `KiottyNetStatefulAppContext::createConnectionContext(app, connection)` 는 handle 을 받는데, onConnected 에는 이제 handle 이 없다. stateful 계층을 짤 때 `(app, info)` 로 바꿀지, onReady 에서 만들지 정해야 한다. base 범위 밖이라 그대로 두었다.
+- (해결) `KiottyNetStatefulAppContext::createConnectionContext` 는 `(app, info)` 를 받는다. onConnected 자리에서 불리고 NULL 이면 ignore 다.
 - requirement 의 9 ~ 11절 (HTTP, WebSocket) 은 아직 옛 Work 모델이다 (기존 미결 그대로).
 
 ## 다음 할 일
