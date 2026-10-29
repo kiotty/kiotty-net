@@ -439,39 +439,41 @@ Connection 하나는 고정 크기 버퍼 셋을 가진다. 모두 라이브러�
 `Stage` 는 수신 Stage 의 구현이다. push lane 도 같은 클래스로 만든다.
 
 ```cpp
-namespace kiotty { namespace net {
+namespace kiotty {
 
 class Stage
 {
 public:
-    Stage(size_t capacity);
+    explicit Stage(size_t capacity);          // 0 이면 잡지 않는다. 할당 실패면 valid() == false
     ~Stage();
 
-    class Provider {                          // 쓰는 쪽 (recv 완료, write 요청)
+    class Provider {                          // 쓰는 쪽 (recv 완료, write 요청). Stage 를 가리키는 값
         size_t writable() const;              // 현재 쓸 수 있는 길이
-        void*  prepare(size_t requested);     // requested 만큼 쓸 수 있으면 버퍼, 아니면 nullptr
-        void   commit(size_t written);        // 실제 쓴 길이
+        char*  prepare(size_t requested);     // requested 만큼 쓸 수 있으면 버퍼, 아니면 nullptr
+        void   commit(size_t written);        // 실제 쓴 길이. writable 을 넘기면 debug assert, release clamp
     };
 
     class Consumer {                          // 읽는 쪽 (onRead 전달, send 제출)
         size_t readable() const;              // 현재 읽을 수 있는 길이
-        void*  prepare(size_t requested);     // requested 만큼 읽을 수 있으면 버퍼, 아니면 nullptr. commit 전까지는 peek
-        void   commit(size_t consumed);       // 실제 소비한 길이
+        char*  peek();                        // 읽을 자리. commit 전까지는 같은 자리
+        void   commit(size_t consumed);       // 실제 소비한 길이. readable 을 넘기면 debug assert, release clamp
     };
 
-    Provider& provider();
-    Consumer& consumer();
-    size_t    capacity() const;
-    void      compact();                      // 남은 데이터를 버퍼 앞으로 memmove 해서 provider 공간 확보
+    bool     valid() const;
+    Provider provider();
+    Consumer consumer();
+    size_t   capacity() const;
+    void     compact();                       // 남은 데이터를 버퍼 앞으로 memmove 해서 provider 공간 확보. 걸린 IO 가 없을 때만
 
 private:
     char*  _buffer;
     size_t _capacity;
     size_t _begin_pos;                        // 데이터가 시작하는 index
     size_t _end_pos;                          // 데이터가 끝나는 index
+    bool   _valid;
 };
 
-} }
+}
 ```
 
 ### 5. Connection

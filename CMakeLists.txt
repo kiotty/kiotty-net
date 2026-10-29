@@ -24,6 +24,9 @@ target_compile_options(kiotty_net_warnings INTERFACE
 
 add_library(kiotty_net STATIC
     src/kiotty_net_statemachine.cpp
+    src/implementation/core/kiotty_clock.cpp
+    src/implementation/core/kiotty_pool.cpp
+    src/implementation/core/kiotty_stage.cpp
 )
 
 target_include_directories(kiotty_net

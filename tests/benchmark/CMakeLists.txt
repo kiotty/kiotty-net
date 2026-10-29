@@ -13,7 +13,7 @@ set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(benchmark)
 
 add_executable(kiotty_net_benchmarks
-    kiotty_bench_smoke.cpp
+    kiotty_bench_core.cpp
 )
 target_include_directories(kiotty_net_benchmarks PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

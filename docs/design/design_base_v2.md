@@ -162,6 +162,10 @@ public:
 uint64_t monotonicMs();                         // deadline 의 유일한 시계
 ```
 
+- 오용 계약 (테스트 v0 14절 3, 사이클 2 에서 확정): `Stage` 의 Provider / Consumer `commit` 이 writable / readable 을 넘기면 debug 는 `assert`, release 는 그 값으로 clamp. `Pool::release` / `reallocate` 에 Pool 이 준 적 없는 포인터가 오면 debug 는 `assert`, release 는 무시 (`reallocate` 는 nullptr). 테스트는 `EXPECT_DEBUG_DEATH`.
+- Pool 의 등급은 64, 128, 256, 512, 1024, 4096, 16384, 65536 바이트 여덟이고 `bytes / 8` 씩 나눠 가진다. 맞는 등급이 가득 차면 다음 등급으로 가지 않고 heap fallback. fallback 블록은 앞에 16 바이트 header (magic + 크기) 를 둔다. 남의 포인터 판별과 `reallocate` 의 옛 크기가 이것으로 된다. `allocate(0)` 은 1 바이트로 본다. 모든 블록은 16 정렬.
+- PoolHandle 의 index 는 `makeIndex(OwnerIndex, slot)` 로 만들고 `ownerOf(index)` / `slotOf(index)` 로 푼다. `OwnerIndex { context_slot, owner_slot, owner_generation }`.
+
 ## 5. IoAction, IoPayload, IoCompletion
 
 dispatch (completion → action) → resolve (action → payload) → submit (action + payload → listener) → OS → completion (걸었던 action 을 싣고).
