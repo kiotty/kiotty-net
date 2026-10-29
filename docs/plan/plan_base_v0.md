@@ -43,8 +43,8 @@ requirement 2 ~ 3 번의 타겟을 "지금 테스트를 돌릴 수 있는 곳" �
 |---|---|
 | `CMakeLists.txt` (root) | 타깃 `kiotty_net` (static). 옵션 `KIOTTY_NET_USE_TLS` (기본 ON, 사이클 4 전까지는 stub 만 있으므로 OFF 로 두고 CI 도 OFF), `KIOTTY_NET_BUILD_TESTS` (기본 OFF), `KIOTTY_NET_BUILD_BENCHMARKS` (기본 OFF), `KIOTTY_NET_TESTING` (테스트 훅 매크로). 소스는 나열, glob 없음. backend 소스는 `if(WIN32) / elseif(LINUX) / elseif(APPLE)` 로 하나만 |
 | `tests/CMakeLists.txt`, `tests/unit/CMakeLists.txt` | 참고 프로젝트 조각 그대로: FetchContent googletest v1.15.2, `gtest_force_shared_crt ON`, `INSTALL_GTEST OFF`, `cxx_std_14`, `gtest_discover_tests`. 라벨 `unit` |
-| `tests/integration/CMakeLists.txt` | 같은 모양, 라벨 `integration`. 사이클 3 까지는 소스 없이 타깃만 |
-| `tests/benchmark/CMakeLists.txt` | FetchContent google/benchmark v1.9.1, ctest 에 넣지 않음. 사이클 2 까지는 비어 있음 |
+| `tests/integration/CMakeLists.txt` | 같은 모양, 라벨 `integration`. 사이클 3 까지는 smoke 하나만 (add_executable 은 소스가 있어야 한다) |
+| `tests/benchmark/CMakeLists.txt` | FetchContent google/benchmark v1.9.1, ctest 에 넣지 않음. 사이클 2 까지는 smoke 하나 |
 | `tests/unit/kiotty_test_smoke.cpp` | `TEST(Build, GoogleTestLinksAndRuns)` 하나. 매트릭스 전부에서 초록인지 보는 용도 |
 | `.github/workflows/ci.yml` | 아래 |
 | `.gitignore` | `build/`, `out/`, `.vs/` |
