@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v5 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 980px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  h4 { font-size: 14px; margin: 16px 0 4px; color: var(--muted); }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v5 피드백 답변</h1>
+<p class="sub">2026-10-29. <code>design_base_v4_feedback.html</code> 에 대한 12개 답변에 대한 답이다. 가장 큰 지적은 10번 ("proactor 인데 왜 상태를 계속 검사하나") 과 9번 (dispatch / resolve / submit 의 역할) 이다. 둘을 받아들이면 v4 의 <code>_pending</code>, <code>_io_pending</code>, <code>markAttached</code>, <code>setRead</code> 가 전부 사라지고, 한 completion 이 dispatch → resolve → submit 을 <b>한 줄로 지나간다</b>. 그래서 1절에서 그 구조를 먼저 고치고 (5, 9, 10, 11, 12), 2절이 "이벤트 관심을 끄는 일" (2, 12), 3절이 Connection 의 상태와 onReceived (4), 4절이 실시간 push (7, 8) 다.</p>
+
+<p class="legend">
+  <span class="tag done">확정</span> 끝났다
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag concern">우려</span> 반영 전에 짚을 위험이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">v4 에서 확정된 것 (1, 3, 6)</a></li>
+  <li><a href="#p1">dispatch → resolve → submit : 한 completion 이 한 줄로 (5, 9, 10, 11)</a></li>
+  <li><a href="#p2">관심을 끄는 일은 없다 : attach, submit, cancel, detach (2, 12)</a></li>
+  <li><a href="#p3">Connection 의 상태 여섯 개와 onReceived (4, 10)</a></li>
+  <li><a href="#p4">실시간 push : 왜 40 ms 로 묶이는가 (7, 8)</a></li>
+  <li><a href="#p5">다시 짠 한 바퀴</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. v4 에서 확정된 것 <span class="tag done">확정</span></h2>
+<table>
+  <tr><th>v4 번호</th><th>결정</th></tr>
+  <tr><td>1.4 (1)</td><td>연결의 IoEvent 둘은 <code>_stream_event</code> (사용자 read ↔ write 교대, handshake, control. 한 번에 하나) 와 <code>_notify_event</code> (다른 thread 의 notify. 앞의 것과 같이 걸린다). "stream" 이 "순서가 있는 한 줄" 을, "notify" 가 "아무 때나 옆에서" 를 말한다</td></tr>
+  <tr><td>2 (3)</td><td>handshake 는 <code>TlsPipe::handshake()</code> 의 답 넷 (SEND / RECEIVE / DONE / FAILED) 을 <code>onHandshake</code> 가 READ / WRITE (purpose HANDSHAKE) 로 바꾼다. HANDSHAKING 의 모든 completion 이 같은 함수 하나를 부른다</td></tr>
+  <tr><td>3 (6)</td><td><code>onError(app_context, connection, code, message)</code>. 연결이 생기기 전의 오류 (accept 실패, profile open) 는 connection 0. message 는 static literal</td></tr>
+  <tr><td>1.1</td><td><code>EventListener::submit</code> 은 하나. 인자 모양은 1절에서 (action + payload)</td></tr>
+  <tr><td>4.1 ~ 4.3</td><td>NotificationContext (host 의 mutex 하나), Notification Stage 는 경계 없는 바이트, 암호화는 IO Thread 가 submit 직전에, broadcast 는 하나라도 모자라면 전부 거절</td></tr>
+</table>
+<p>아직 답이 없는 것: v4 의 1.3 (HOLD / Work 중 끊김 감지), 4.4 (instant. 이번 4절에서 다시 다룬다), Span, 15-1, 15-4.</p>
+
+<h2 id="p1">1. dispatch → resolve → submit : 한 completion 이 한 줄로 (5, 9, 10, 11) <span class="tag agree">동의</span></h2>
+<p>10번이 맞다. v4 가 상태를 계속 검사한 이유는 <b>DISPATCH 와 SUBMIT 을 다른 phase 로 떼어 놓아서</b> 다. 떼어 놓으니 둘 사이에 action 을 보관할 자리 (<code>_pending</code>), "이미 걸렸나" 를 기억할 자리 (<code>_io_pending</code>), "이미 등록했나" 를 기억할 자리 (<code>markAttached</code>) 가 생겼다. completion 하나를 받으면 그 자리에서 dispatch → resolve → submit 을 끝내면 그 셋이 전부 없어진다. proactor 는 원래 그렇게 돈다: <b>completion 하나 → 다음 요청 하나.</b></p>
+
+<div class="flow">   IoCompletion ──▶ dispatch ──▶ IoAction ──▶ resolve ──▶ IoPayload ──▶ submit ──▶ OS ──▶ IoCompletion
+   (OS 가 준 것)    Stage 갱신     (뜻)         Stage 를      (자리)        listener 에
+                   + handler                   보고 계산                    action + payload
+                   (pump 반복)</div>
+
+<h3>1.1 세 동작의 타입 (9)</h3>
+<p>제안하신 역할 분담 그대로다. 셋이 서로 다른 타입을 주고받으므로 섞일 수 없다.</p>
+<table>
+  <tr><th>동작</th><th>input</th><th>output</th><th>하는 일</th><th>handler 콜백</th><th>listener</th></tr>
+  <tr><td class="rec">dispatch</td><td>Connection, IoCompletion</td><td>IoAction</td><td>① completion 으로 수신 / 송신 Stage 를 갱신 (commit / consume, TLS 면 decode). ② handler 를 부르고, 돌아온 action 이 READ 인데 Stage 에 이미 차 있으면 다시 handler (pump). ③ 더 할 수 없는 action 하나가 남으면 그것이 output</td><td>여기만</td><td>안 부른다</td></tr>
+  <tr><td class="rec">resolve</td><td>Connection, IoAction</td><td>IoPayload</td><td>action 의 kind 와 purpose 를 보고 어느 Stage 의 어느 자리인지 계산. READ 는 받을 자리 (provider.prepare), WRITE 는 보낼 구간 (consumer 의 readable). TLS 면 cipher Stage</td><td>없음</td><td>안 부른다</td></tr>
+  <tr><td class="rec">submit</td><td>IoEvent, socket, IoAction, IoPayload</td><td>—</td><td>kind 별 한 줄. event 에 action 을 적어 두고 OS 에 건다</td><td>없음</td><td>여기만</td></tr>
+</table>
+
+<h3>1.2 IoAction 과 IoPayload 를 나눈다 (5)</h3>
+<p>맞다. v4 는 "사용자의 뜻" 과 "실제 버퍼" 를 한 struct 에 넣고 <code>io_buffer</code> 가 비었는지로 둘을 구분했다. 그것이 또 하나의 상태 검사였다. 나눈다.</p>
+<pre><code>enum class IoActionKind : uint8_t { NONE, HOLD, READ, READ_UNTIL, WRITE, START_WORK, CLOSE, ACCEPT };   // ACCEPT 는 1.4
+enum class IoPurpose    : uint8_t { USER, HANDSHAKE, CONTROL, NOTIFY };
+
+struct IoAction                                 // 뜻. handler 가 준 것 + Connection 이 덧붙인 purpose. KiottyNetConnectionAction 과 같은 모양 + purpose
+{
+    IoActionKind kind;
+    IoPurpose    purpose;
+    uint32_t     timeout_ms;
+    union
+    {
+        struct { size_t exact; }                                      read;
+        struct { char delimiter[4]; uint8_t length; size_t max; }     read_until;
+        struct { KiottyNetSpan data; }                                write;       // 사용자 메모리. dispatch 가 Stage 로 복사한 뒤에는 보지 않는다
+        struct { KiottyNetCode reason; }                              close;
+    } as;
+};
+
+struct IoPayload                                // 자리. resolve 가 만든다. listener 는 이것만 OS 에 넘긴다
+{
+    void*  buffer;
+    size_t length;
+};
+
+void EventListener::submit(Holder&lt;IoEvent&gt;&amp; event, SocketHandle socket, const IoAction&amp; action, IoPayload payload);
+//   READ / READ_UNTIL → receive(payload),  WRITE → send(payload),  ACCEPT → accept(payload = IOCP 의 주소 버퍼),  그 밖의 kind 는 오지 않는다
+//   event 가 action 을 기억한다. 완료가 그 action 을 싣고 돌아온다 (1.3)</code></pre>
+<p>Segment 는 없다 (v3 의 뜻 그대로). <code>KiottyNetSpan</code> 을 안 쓰는 이유도 그대로다 (<code>const</code> 라 받을 자리에 못 쓴다).</p>
+
+<h3>1.3 completion 이 action 을 싣고 돌아온다</h3>
+<p>event 가 "무슨 action 으로 걸렸나" 를 들고 있으면 completion 이 그것을 돌려줄 수 있다. 그러면 <b>Connection 이 "지금 걸린 read 조건" 을 따로 기억할 필요가 없다</b> (v4 의 <code>_read</code>). 조건은 action 안에 있고, 완료가 그 action 을 가져온다. READ_UNTIL 의 진행 위치 (<code>_scanned</code>) 도 action 안에 두면 Connection 에서 사라진다.</p>
+<pre><code>struct IoCompletion
+{
+    IoKind     kind;                            // ACCEPT, RECEIVE, SEND, WAKE (OS)  +  TIMEOUT, WORK_DONE (IoLoop 가 만든다)
+    int32_t    slot;                            // ACCEPT / WAKE 는 -1
+    SocketCode code;                            // SUCCESS, CLOSED (0 바이트), CANCELLED (2절), 그 밖의 오류
+    size_t     length;
+    IoAction   action;                          // RECEIVE / SEND / ACCEPT : 걸었던 action 그대로. TIMEOUT / WORK_DONE / WAKE : NONE
+};</code></pre>
+<p>dispatch 는 <code>completion.action.purpose</code> 로 switch 한다 (3절). "이 completion 이 무엇에 대한 답인가" 를 Connection 의 상태가 아니라 completion 이 말한다.</p>
+
+<h3>1.4 ACCEPT 도 action 이다 (11)</h3>
+<p>맞다. Acceptor 가 혼자 특별 취급을 받은 이유는 ACCEPT 가 action 이 아니어서 같은 pipeline 을 못 탔기 때문이다. kind 에 ACCEPT 를 넣으면 Acceptor 는 "slot 이 -1 인 연결" 처럼 같은 세 동작을 지난다.</p>
+<table>
+  <tr><th></th><th>dispatch</th><th>resolve</th><th>submit</th></tr>
+  <tr><td>ACCEPT 완료</td><td><code>admit()</code>: <code>acceptor.accept()</code> → <code>host.acquire()</code> → onConnected → open + attach → <code>onOpened</code> 의 action 을 그 연결에 대해 resolve / submit. 그 다음 Acceptor 의 action: <code>host.hasFreeSlot() ? ACCEPT : NONE</code></td><td>IOCP: 미리 만든 소켓 + 주소 버퍼. epoll: 빈 payload</td><td><code>_listener.submit(acceptor.event(), acceptor.socket(), action, payload)</code></td></tr>
+</table>
+<p>남는 특별 취급 하나: slot 이 꽉 차서 NONE 을 냈다가 나중에 slot 이 비면 누가 다시 ACCEPT 를 거는가. 그것은 slot 을 비우는 자리 (CLOSE 의 마지막, 5절 settle) 에서 "Acceptor 의 event 가 비어 있으면 ACCEPT" 한 줄이다. 상태 검사가 하나 남지만 Connection 이 아니라 <b>IoEvent 의 것</b> 이고 (2.1), Acceptor 에만 있다. 이것보다 줄이려면 "꽉 차도 accept 하고 바로 닫기" (v0) 로 돌아가야 하는데 v1 6.1 에서 backlog 에 두기로 했으므로 한 줄을 받아들인다.</p>
+<p>공개 <code>KiottyNetConnectionAction</code> 에는 ACCEPT 가 없다. 사용자가 return 할 수 없는 kind 는 <code>IoAction::from()</code> 이 만들 수 없다.</p>
+
+<h2 id="p2">2. 관심을 끄는 일은 없다 : attach, submit, cancel, detach (2, 12) <span class="tag partial">부분 동의</span></h2>
+<p>질문: "proactor 는 받으려면 매번 다시 걸어야 하고 reactor 는 안 받으려면 명시적으로 끊어야 하는데, 왜 START_WORK 의 submit 이 아무것도 안 하나." 답은 <b>우리 흉내에서는 "관심" 이 곧 "걸려 있는 요청" 이라서</b> 다. 요청이 없으면 관심도 없다. 다만 하나 빠진 것이 있었다. 요청이 걸려 있는 채로 START_WORK 가 오는 경우다 (2.2).</p>
+
+<h3>2.1 epoll 흉내의 규칙 하나 : one-shot</h3>
+<p>epoll backend 는 fd 를 <code>EPOLLONESHOT</code> 으로 다룬다. <code>submit(READ)</code> 가 <code>epoll_ctl(MOD, EPOLLIN | EPOLLONESHOT)</code> 이고, readable 이 한 번 오면 kernel 이 관심을 스스로 끈다. listener 는 그때 <code>recv</code> 해서 payload 에 쓰고 completion 을 만든다. 다음 <code>submit</code> 이 와야 다시 켜진다. 그래서:</p>
+<table>
+  <tr><th></th><th>IOCP</th><th>epoll (one-shot)</th><th>결과</th></tr>
+  <tr><td>요청을 건다</td><td><code>WSARecv</code> (overlapped)</td><td><code>epoll_ctl MOD EPOLLIN|ONESHOT</code></td><td>관심 켜짐</td></tr>
+  <tr><td>완료가 온다</td><td>GQCS 가 돌려준다. 요청은 끝났다</td><td>readable → listener 가 recv → 요청은 끝났다. kernel 이 관심을 끈다</td><td>관심 꺼짐. <b>아무도 끄지 않아도</b></td></tr>
+  <tr><td>안 걸면</td><td>아무것도 안 온다</td><td>아무것도 안 온다 (레벨 트리거였다면 여기서 돌았을 것이다)</td><td>START_WORK 의 submit 에 할 일이 없는 이유</td></tr>
+</table>
+<p>reactor 의 "명시적으로 끊어야 한다" 는 레벨 트리거 + 영구 등록일 때의 일이다. 우리는 그 모드를 쓰지 않는다. 그래서 "안 받고 싶으면 안 건다" 가 양쪽에서 같다. IoEvent 가 <code>armed()</code> 하나를 든다 (submit 이 true, wait 가 completion 을 꺼낼 때 false). Connection 의 <code>_io_pending</code> 은 이것으로 대체된다 (3절).</p>
+
+<h3>2.2 빠진 것 : 걸려 있는 채로 다른 action 이 올 때 → cancel</h3>
+<p>completion 을 받아 dispatch 한 뒤 submit 하면 그 event 는 비어 있다. 그런데 <b>TIMEOUT</b> 과 <b>WORK_DONE</b> 은 OS completion 이 아니라 IoLoop 가 만든 것이라, 그 시점에 <code>_stream_event</code> 에 READ 가 걸려 있을 수 있다. 거기서 handler 가 START_WORK / CLOSE / HOLD / WRITE 를 return 하면 걸린 READ 를 <b>끊어야</b> 한다. 이것이 질문하신 "명시적으로 끊는" 자리이고 v4 에 없었다.</p>
+<pre><code>SocketCode EventListener::cancel(Holder&lt;IoEvent&gt;&amp; event);   // IOCP: CancelIoEx → ERROR_OPERATION_ABORTED 완료가 온다
+                                                            // epoll: epoll_ctl MOD 0 + event 에 cancelled 표시 → listener 가 다음 wait 에서 CANCELLED 완료를 만든다</code></pre>
+<p>양쪽 모두 <b>completion 하나 (code CANCELLED) 가 돌아온다</b>. dispatch 는 CANCELLED 를 "아무것도 안 하고 NONE" 으로 처리한다. 그래서 cancel 뒤에도 "event 는 completion 으로만 비워진다" 는 규칙이 지켜지고, settle 의 slot 반납 조건 (두 event 가 다 비었다) 도 그대로다.</p>
+<table>
+  <tr><th>completion</th><th>그때 <code>_stream_event</code></th><th>handler 가 return 한 것</th><th>submit 이 하는 것</th></tr>
+  <tr><td>RECEIVE / SEND</td><td>비어 있다 (방금 그 완료다)</td><td>무엇이든</td><td>READ / WRITE 면 건다. 나머지는 없음</td></tr>
+  <tr><td>TIMEOUT, WORK_DONE</td><td>걸려 있을 수 있다</td><td>READ / READ_UNTIL</td><td>걸려 있으면 그대로 둔다 (같은 수신). 비어 있으면 건다</td></tr>
+  <tr><td></td><td></td><td>WRITE, START_WORK, CLOSE, HOLD</td><td>걸려 있으면 <b>cancel</b>. WRITE 는 CANCELLED 완료가 온 뒤 건다 (한 event 에 하나)</td></tr>
+</table>
+<p>WORK_DONE 에 READ 가 걸려 있을 수 있나: Work 중에는 걸지 않으므로 (1.3 의 "recv 는 늘 걸려 있지 않다") 없다. 그래서 cancel 이 실제로 일어나는 자리는 <b>TIMEOUT 뒤의 START_WORK / CLOSE / HOLD / WRITE</b> 넷이다.</p>
+
+<h3>2.3 네 동작의 시점 (12)</h3>
+<table>
+  <tr><th>listener 호출</th><th>언제</th><th>몇 번</th><th>IOCP</th><th>epoll</th></tr>
+  <tr><td><code>attach(socket, slot)</code></td><td><code>admit</code> 안, <code>open</code> 직후. 첫 submit 전</td><td>연결당 한 번</td><td><code>CreateIoCompletionPort</code></td><td><code>epoll_ctl ADD</code> (관심 0)</td></tr>
+  <tr><td><code>submit(event, socket, action, payload)</code></td><td>completion 마다 dispatch → resolve 뒤</td><td>action 마다</td><td><code>WSARecv</code> / <code>WSASend</code> / <code>AcceptEx</code></td><td><code>MOD IN|ONESHOT</code> / 바로 send 해 보고 남으면 <code>MOD OUT|ONESHOT</code> / <code>MOD IN|ONESHOT</code></td></tr>
+  <tr><td><code>cancel(event)</code></td><td>2.2 의 넷</td><td>드물게</td><td><code>CancelIoEx</code></td><td><code>MOD 0</code> + CANCELLED 완료</td></tr>
+  <tr><td><code>detach(socket)</code></td><td>CLOSE 의 submit. <code>socket.close()</code> 직전</td><td>연결당 한 번</td><td>없음 (closesocket 이 끝낸다. 걸린 요청은 ABORTED 완료로)</td><td><code>epoll_ctl DEL</code></td></tr>
+</table>
+<p>START_WORK 에 detach 가 없는 이유: detach 는 "이 소켓을 영원히 잊는다" 이고 Work 가 끝나면 다시 READ 를 걸어야 한다. attach 는 한 번이므로 detach 도 한 번, 닫을 때다. Work 중 "안 받는다" 는 2.1 대로 "안 건다" 로 된다.</p>
+
+<h2 id="p3">3. Connection 의 상태 여섯 개와 onReceived (4, 10) <span class="tag agree">동의</span></h2>
+<p>1절과 2절을 반영하면 Connection 이 드는 상태는 이것이 전부다. v4 에서 지워진 것: <code>_pending</code>, <code>_io_pending</code>, <code>_notify_pending</code>, <code>_attached</code>, <code>_read</code>, <code>_scanned</code>, <code>_write_length</code>.</p>
+<table>
+  <tr><th>상태</th><th>타입</th><th>역할</th><th>바뀌는 자리</th><th>읽는 자리</th></tr>
+  <tr><td><code>_phase</code></td><td>HANDSHAKING / READY / CLOSING</td><td>completion 을 누가 처리하는지 (onHandshake 인지 사용자 길인지), 늦은 완료를 버릴지</td><td>open (TLS 면 HANDSHAKING, 아니면 READY), onHandshake DONE (READY), CLOSE 의 submit (CLOSING)</td><td>dispatch 첫 줄</td></tr>
+  <tr><td><code>_deadline</code></td><td>uint64_t ms. 0 이면 없음</td><td>TIMEOUT completion 을 만들 시각</td><td>resolve 가 action 의 timeout_ms 로 건다. 완료가 오면 0</td><td>collect</td></tr>
+  <tr><td><code>_work</code></td><td>WorkContext (atomic 상태 + outcome + generation)</td><td>worker 와의 CAS 경계</td><td>START_WORK (IDLE → WORKING), finishWork (→ DONE), WORK_DONE dispatch (→ IDLE)</td><td>collect, dispatch</td></tr>
+  <tr><td><code>_peer_closed</code></td><td>atomic bool</td><td>Work 중에 들어온 끊김을 WORK_DONE 까지 보관</td><td>onPeerGone (Work 중)</td><td>WORK_DONE dispatch</td></tr>
+  <tr><td><code>_stream_event</code>, <code>_notify_event</code></td><td>Holder&lt;IoEvent&gt;. 안에 <code>armed()</code> 와 걸린 action</td><td>걸린 요청 하나씩</td><td>submit (armed), wait (disarmed)</td><td>2.2 의 cancel 판단, settle 의 slot 반납</td></tr>
+  <tr><td><code>_receive_stage</code>, <code>_send_stage</code>, <code>_notification_stage</code>, <code>_tls</code> (cipher Stage 셋)</td><td>Stage, TlsPipe</td><td>바이트</td><td>dispatch (갱신), resolve (자리)</td><td></td></tr>
+</table>
+
+<h3>3.1 onReceived : IoCompletion 이 첫 인자, purpose 로 switch</h3>
+<p>규칙 셋을 그대로 적용했다. <code>on*</code> 은 첫 인자가 <code>const IoCompletion&amp;</code>, Phase 로 먼저 자르고, purpose 로 switch, TLS 분기는 그 안의 한 줄.</p>
+<pre><code>IoAction Connection::onReceived(const IoCompletion&amp; completion, const Handler&amp; handler)
+{
+    if (_phase == Phase::CLOSING)                       return IoAction::none();           // 늦은 완료. settle 이 event 가 비었는지만 본다
+    if (completion.code == SocketCode::CANCELLED)       return IoAction::none();           // 2.2. 끊은 쪽이 이미 다음 action 을 냈다
+    if (completion.code != SocketCode::SUCCESS)         return onPeerGone(completion.code);  // CLOSED (0 바이트) 포함
+
+    switch (completion.action.purpose)                                                        // 어느 Stage 에 들어왔나
+    {
+    case IoPurpose::HANDSHAKE:                                                                // _phase == HANDSHAKING 일 때만 이 purpose 가 온다
+        _tls.cipherReceive().provider().commit(completion.length);
+        return onHandshake(handler);                                                          // SEND / RECEIVE / DONE(onReady) / FAILED(onError + CLOSE)
+
+    case IoPurpose::USER:                                                                     // _phase == READY
+        if (_tls.active())
+        {
+            _tls.cipherReceive().provider().commit(completion.length);
+            KiottyNetCode decoded = _tls.decode(_receive_stage);                             // cipher → plain. 레코드가 덜 찼으면 0 바이트
+            if (decoded != KIOTTY_SUCCESS) { handler.onError(_app_context, handle(), decoded, _tls.lastMessage()); return IoAction::close(decoded); }
+            if (_tls.hasControlOutput())  return IoAction::write(IoPurpose::CONTROL);         // KeyUpdate 답장. 보낸 뒤 completion.action (READ) 으로 돌아온다
+        }
+        else
+        {
+            _receive_stage.provider().commit(completion.length);
+        }
+        return pump(completion.action, handler);                                              // 걸었던 READ 조건을 Stage 에 대 본다. 찼으면 onRead 의 return, 안 찼으면 같은 READ
+
+    case IoPurpose::CONTROL:
+    case IoPurpose::NOTIFY:
+        return IoAction::none();                                                              // RECEIVE 에는 오지 않는 purpose. 방어
+    }
+}</code></pre>
+<table>
+  <tr><th>Phase</th><th>RECEIVE 완료</th><th>SEND 완료</th><th>TIMEOUT</th><th>WORK_DONE</th></tr>
+  <tr><td>HANDSHAKING</td><td>cipherReceive.commit → onHandshake</td><td>cipherSend.consume → onHandshake</td><td>onError(HANDSHAKE_TIMEOUT) → CLOSE</td><td>오지 않는다</td></tr>
+  <tr><td>READY</td><td>purpose 로 switch (위)</td><td>purpose 로 switch: USER → 남은 조각 또는 onWritten / CONTROL → 걸었던 READ 로 복귀 / NOTIFY → notification Stage consume, NONE</td><td>onTimeout 의 return (2.2 의 cancel 가능)</td><td>outcome 또는 CLOSE(PEER_CLOSED)</td></tr>
+  <tr><td>CLOSING</td><td>NONE</td><td>NONE</td><td>오지 않는다 (deadline 0)</td><td>오지 않는다</td></tr>
+</table>
+<p>pump 가 <code>completion.action</code> 을 받는 것이 1.3 의 결과다. "지금 걸린 read 조건" 은 완료가 가져왔다. 찼으면 onRead 를 내고 그 return 을 돌려주고, 안 찼으면 <b>같은 action 을 그대로 돌려준다</b> (READ_UNTIL 의 진행 위치만 올려서). resolve 가 다음 받을 자리를 계산하고 submit 이 다시 건다.</p>
+
+<h2 id="p4">4. 실시간 push : 왜 40 ms 로 묶이는가 (7, 8) <span class="tag concern">우려</span></h2>
+<p>7번을 다시 읽으면 걱정은 "IO Thread 가 Notification Stage 가 찰 때까지 모았다가 보내서, 20 ms 마다 받아야 할 클라이언트가 한 번을 못 받고 다음에 둘을 받는다" 이고, 8번이 그 실측이다 (SecuritSocket 에서 동기 write 로 풀었다). 둘로 나눠 답한다. 하나는 "이 설계는 모으지 않는다", 다른 하나는 "40 ms 는 context switch 가 아닐 가능성이 크다".</p>
+
+<h3>4.1 이 설계는 모으지 않는다</h3>
+<ul>
+  <li>notify 가 Stage 에 넣고 <code>wake()</code> 하면 IO Thread 는 <b>지금 바퀴를 마치고 바로</b> 그 연결의 WRITE(NOTIFY) 를 submit 한다. "찰 때까지" 기다리는 코드는 없다. 기다리는 유일한 경우는 <b>앞의 notify send 가 아직 안 끝났을 때</b> 이고 (한 event 에 하나), 그 완료가 오면 그 사이 쌓인 것을 한 번에 건다. 그것은 "모으기" 가 아니라 "따라잡기" 다. 두 번째 메시지는 어차피 그 시점이 자기 차례다.</li>
+  <li>IO Thread 를 깨우는 비용은 idle 한 thread 를 깨우는 비용이다. <code>PostQueuedCompletionStatus</code> → <code>GetQueuedCompletionStatus</code> 복귀, <code>eventfd</code> write → <code>epoll_wait</code> 복귀. 수십 µs 다. 20 ms 의 1 / 500 이다.</li>
+  <li>그 수십 µs 가 수 ms 가 되는 조건은 하나다: IO Thread 가 <b>사용자 콜백 안에서</b> 오래 머무를 때. "콜백은 짧고 긴 일은 Work" 가 이 모델의 전제이고, push 의 실시간성은 그 전제에 달려 있다.</li>
+</ul>
+
+<h3>4.2 40 ms 는 Nagle + delayed ACK 의 숫자다</h3>
+<p>"20 ms 간격 같은 길이의 buffer 가 2 ~ 3 개 묶여 40 ms 간격으로" 는 TCP 의 고전 증상과 숫자가 같다. Nagle (앞 조각의 ACK 가 오기 전에는 작은 조각을 보내지 않는다) 과 수신측 delayed ACK (Linux 40 ms, Windows 200 ms 를 두 세그먼트마다) 가 맞물리면 작은 메시지가 <b>정확히 40 ms 단위로 묶여</b> 나간다. 송신 thread 가 동기 write 를 해도 이 묶임은 그대로다. 동기 write 가 SecuritSocket 에서 효과가 있었다면, 그 서버가 <code>TCP_NODELAY</code> 를 켰거나 메시지가 MSS 보다 컸을 가능성이 있다.</p>
+<table>
+  <tr><th>원인 후보</th><th>증상</th><th>확인</th><th>대책</th></tr>
+  <tr><td class="rec">Nagle + delayed ACK</td><td>정확히 40 ms (Linux) / 200 ms (Windows) 단위. 메시지가 작을 때만</td><td>Wireshark 로 세그먼트 간격. 수신측 ACK 지연</td><td><code>TCP_NODELAY</code>. 이 라이브러리는 <b>기본으로 켠다</b> (config 에 끄는 옵션만). push 모델은 작은 메시지가 기본이다</td></tr>
+  <tr><td>송신 thread 가 블록</td><td>불규칙. 다른 연결의 느린 peer 와 상관</td><td>send 호출 시간 측정</td><td>이 설계에서는 없다. send 는 overlapped / non-blocking 이고 느린 peer 는 자기 Stage 만 채운다</td></tr>
+  <tr><td>IO Thread 가 콜백에 묶임</td><td>불규칙. 그 콜백의 길이만큼</td><td>콜백 시간 측정</td><td>Work 로 뺀다. 4.1 의 전제</td></tr>
+  <tr><td>wake 지연</td><td>수십 µs. 보이지 않는다</td><td>—</td><td>—</td></tr>
+</table>
+
+<h3>4.3 그래도 "보내는 쪽이 직접" 이 필요하면</h3>
+<p>SecuritSocket 의 모양 (producer thread 가 active client 들에 동기 write) 을 그대로 두는 것은 v4 4.4 의 이유로 안 된다: 걸려 있는 overlapped send 와 순서가 섞이고, TLS 면 레코드 순서가 깨져 peer 가 끊는다. 대신 <b>thread hop 자체를 없애는</b> 길이 하나 있다. 데이터를 만드는 주기를 IO Thread 안에 두는 것이다.</p>
+<pre><code>// Server 에 주기 콜백 하나. IoLoop 의 deadline 하나가 더 늘 뿐이다 (연결의 deadline 과 같은 collect 가 본다)
+KIOTTY_NET_API KiottyNetCode KiottyNet_setServerTick(KiottyNetServerHandle server, uint32_t interval_ms);
+
+void (*onTick)(KiottyNetAppContext app_context);        // IO Thread. 안에서 KiottyNet_broadcastServer / notifyConnection 을 부른다
+                                                        // IO Thread 안이므로 lock 뒤 바로 같은 바퀴의 submit 이다. wake 도 context switch 도 없다</code></pre>
+<p>producer thread 는 최신 샘플을 double buffer 에 두고, <code>onTick</code> 이 20 ms 마다 그것을 broadcast 한다. 송신 시점의 jitter 는 IoLoop 의 deadline 정밀도 (ms) 다. 이것이 "active client 들에 동기 write" 와 같은 시간표를 thread 하나로 만든다. <span class="tag ask">선택</span>: 지금 넣을지, 4.2 를 측정한 뒤 넣을지. <b>추천: TCP_NODELAY 기본 + onTick 은 설계 문서에 자리만 잡아 두고, 실측에서 wake 지연이 보이면 넣는다.</b></p>
+<p>그래서 "지금 서버가 SecuritSocket 의 broadcast 서버를 대체할 수 있는가" 에 대한 답: <b>20 ms 주기는 할 수 있다.</b> 조건은 TCP_NODELAY 와 짧은 콜백이다. 그 둘이 지켜지면 wake 경로의 지연은 주기의 1 % 아래다.</p>
+
+<h2 id="p5">5. 다시 짠 한 바퀴</h2>
+<p>1 ~ 3 절을 반영하면 phase 는 셋이고 (collect, completion 마다 한 줄, settle), 상태를 읽어 판단하는 줄은 <code>armed()</code> 세 번 (2.2 의 cancel, settle 의 반납, Acceptor 의 재무장) 뿐이다.</p>
+<pre><code>void IoLoop::runOnce()
+{
+    Span&lt;const IoCompletion&gt; completions = collect();                                    // OS 완료 + TIMEOUT + WORK_DONE. 바뀐 것 없다 (v4 Phase 1)
+    for (const IoCompletion&amp; completion : completions) step(completion);                // completion 하나 → dispatch → resolve → submit
+    flushNotifications();                                                                // notify event 가 비어 있고 Stage 에 바이트가 있는 연결 → WRITE(NOTIFY) 한 줄
+    settle();                                                                            // CLOSING 이고 두 event 가 비면 slot 반납. Acceptor 재무장. stop_when_empty
+}
+
+void IoLoop::step(const IoCompletion&amp; completion)
+{
+    if (completion.kind == IoKind::WAKE)   return;                                      // 깨우기만. flushNotifications 와 run 의 while 이 본다
+    if (completion.kind == IoKind::ACCEPT) { admit(); arm(_acceptor, _host.hasFreeSlot() ? IoAction::accept() : IoAction::none()); return; }
+
+    Connection&amp; c = _host.at(completion.slot);
+    IoAction action = dispatch(c, completion);                                           // 3절의 on* 중 kind 에 맞는 하나. handler 는 여기서만
+    if (c.streamEvent().armed() &amp;&amp; needsCancel(action))                                  // 2.2. TIMEOUT 뒤의 START_WORK / CLOSE / HOLD / WRITE
+    {
+        _listener.cancel(c.streamEvent());                                               // CANCELLED 완료가 돌아온 뒤 WRITE 는 그때 건다 (dispatch 가 action 을 들고 있다)
+        return;
+    }
+    arm(c, action);
+}
+
+void IoLoop::arm(Connection&amp; c, IoAction action)                                         // resolve → submit. Acceptor 도 같은 함수 (overload)
+{
+    switch (action.kind)
+    {
+    case IoActionKind::NONE:
+    case IoActionKind::HOLD:        c.setDeadline(action.timeout_ms);                                              return;
+    case IoActionKind::START_WORK:  c.startWork(); handler().onWorkStarted(c.context(), c.workHandle());            return;
+    case IoActionKind::CLOSE:       handler().onDisconnected(_app_context, c.context(), c.handle(), action.as.close.reason);
+                                    _listener.detach(c.socket()); c.closeSocket();                                  return;   // phase = CLOSING
+    case IoActionKind::READ:
+    case IoActionKind::READ_UNTIL:
+    case IoActionKind::WRITE:       c.setDeadline(action.timeout_ms);
+                                    _listener.submit(c.eventFor(action.purpose), c.socket(), action, c.resolve(action));   return;
+    }
+}
+
+IoAction Connection::dispatch(const IoCompletion&amp; completion, const Handler&amp; handler)   // kind 별 on* 하나. 전부 (completion, handler) 를 받는다
+{
+    switch (completion.kind)
+    {
+    case IoKind::RECEIVE:   return onReceived(completion, handler);                     // 3.1
+    case IoKind::SEND:      return onSent(completion, handler);
+    case IoKind::TIMEOUT:   return onTimeout(completion, handler);
+    case IoKind::WORK_DONE: return onWorkFinished(completion, handler);
+    }
+}
+
+IoPayload Connection::resolve(const IoAction&amp; action)                                     // 뜻 → 자리. 콜백 없음, listener 없음
+{
+    switch (action.kind)
+    {
+    case IoActionKind::READ:
+    case IoActionKind::READ_UNTIL: { Stage&amp; in  = receiveStage(action.purpose);           // HANDSHAKE / TLS USER : cipherReceive, 평문 USER : _receive_stage
+                                     size_t n   = in.provider().writable();
+                                     return IoPayload{ in.provider().prepare(n), n }; }
+    case IoActionKind::WRITE:      { Stage&amp; out = sendStage(action.purpose);              // HANDSHAKE / CONTROL / TLS USER : cipherSend, NOTIFY : cipherNotify 또는 _notification_stage, 평문 USER : _send_stage
+                                     size_t n   = out.consumer().readable();
+                                     return IoPayload{ out.consumer().peek(), n }; }
+    }
+}</code></pre>
+<p>dispatch 의 WRITE(USER) 가 사용자 span 을 <code>_send_stage</code> 에 복사하고 (TLS 면 encode 까지) 돌아오므로 resolve 는 Stage 만 본다. dispatch 의 READ 가 pump 로 "이미 찼으면 onRead" 를 끝내고 돌아오므로 resolve 는 "받을 자리" 만 본다. <b>resolve 에 분기가 kind 둘, purpose 가 고르는 Stage 하나</b> 뿐인 것이 9번의 역할 분담이 맞았다는 증거다.</p>
+
+<h3>TLS 서버 연결 하나의 여섯 바퀴 (요청 하나, 응답 하나, 중간에 notify)</h3>
+<table>
+  <tr><th>바퀴</th><th>completion</th><th>dispatch → action</th><th>resolve → payload</th><th>submit</th></tr>
+  <tr><td>1</td><td>ACCEPT</td><td>admit: onConnected → open (HANDSHAKING) → attach → onOpened → onHandshake → RECEIVE → <b>READ(HANDSHAKE)</b>. Acceptor: ACCEPT</td><td>cipherReceive 의 빈 자리</td><td>receive (stream), accept (acceptor)</td></tr>
+  <tr><td>2</td><td>RECEIVE (HS)</td><td>onReceived → onHandshake → SEND → <b>WRITE(HANDSHAKE)</b></td><td>cipherSend 의 구간</td><td>send</td></tr>
+  <tr><td>3</td><td>SEND (HS)</td><td>onSent → onHandshake → RECEIVE → <b>READ(HANDSHAKE)</b></td><td>cipherReceive</td><td>receive</td></tr>
+  <tr><td>4</td><td>RECEIVE (HS)</td><td>onHandshake → DONE → READY → <b>onReady</b> → READ(4) → pump 안 찼음 → <b>READ(USER)</b></td><td>cipherReceive</td><td>receive</td></tr>
+  <tr><td>5</td><td>RECEIVE (USER)</td><td>onReceived → decode → pump 찼음 → <b>onRead</b> → WRITE(응답) → 복사 + encode → <b>WRITE(USER)</b></td><td>cipherSend</td><td>send (stream)</td></tr>
+  <tr><td>5'</td><td>WAKE (다른 thread 의 notify)</td><td>—</td><td>flushNotifications: encode → cipherNotify</td><td>send (notify event). stream 과 같이 걸린다</td></tr>
+  <tr><td>6</td><td>SEND (USER), SEND (NOTIFY)</td><td>onSent(USER) → <b>onWritten</b> → READ(4) → pump → <b>READ(USER)</b>. onSent(NOTIFY) → NONE</td><td>cipherReceive</td><td>receive</td></tr>
+</table>
+
+<h2 id="choices">골라 주실 것</h2>
+<ol>
+  <li>1.3 completion 이 action 을 <b>값으로</b> 싣는다 (추천. ~48 바이트 복사) 또는 event 안의 action 을 포인터로 가리킨다</li>
+  <li>2.2 <code>cancel</code> 을 넣는다 (추천) 또는 TIMEOUT 뒤의 START_WORK / CLOSE 는 걸린 READ 의 완료를 기다렸다가 적용한다 (cancel 없음. 늦어진다)</li>
+  <li>4.2 <code>TCP_NODELAY</code> 를 기본으로 켠다 (추천) 또는 config 옵션으로 끈 채 시작</li>
+  <li>4.3 <code>onTick</code>: 설계 문서에 자리만 (추천) 또는 지금 넣는다</li>
+  <li>남은 것: v4 1.3 (HOLD 중 끊김 감지), Span, 15-1, 15-4</li>
+</ol>
+<p>정해 주시면 <code>design_base_v0.md</code> 를 v1 으로 고친다. 5절이 IoLoop 절, 1절이 IoAction / IoPayload / IoCompletion 절, 2절이 EventListener 절, 3절이 Connection 절이 된다.</p>
+
+</body>
+</html>
