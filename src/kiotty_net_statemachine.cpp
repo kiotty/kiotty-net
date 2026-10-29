@@ -39,10 +39,11 @@ KiottyNetEntryAction KiottyNet_makeStartWorkEntryAction(void)
     return entry_action;
 }
 
-KiottyNetEntryAction KiottyNet_makeCloseEntryAction(void)
+KiottyNetEntryAction KiottyNet_makeCloseEntryAction(KiottyNetCode reason)
 {
     KiottyNetEntryAction entry_action = KiottyNet_makeNoEntryAction();
     entry_action.type = KIOTTY_ENTRY_ACTION_CLOSE;
+    entry_action.as.close.reason = reason;
     return entry_action;
 }
 
@@ -58,9 +59,4 @@ KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetEntryAction
     transition.next = next;
     transition.entry_action = entry_action;
     return transition;
-}
-
-KiottyNetTransition KiottyNet_stayInCurrentState(KiottyNetEntryAction entry_action)
-{
-    return KiottyNet_moveToNextState(KIOTTY_SAME_STATE, entry_action);
 }
