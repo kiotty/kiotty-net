@@ -2,12 +2,15 @@
 
 #include "kiotty_net_statemachine.h"
 
-static void MakeReadEntryAction(benchmark::State& state)
+static void MoveToNextState(benchmark::State& state)
 {
+    KiottyNetConnectionAction action = {};
+    action.type = KIOTTY_ACTION_READ;
+    action.as.read.exact = 4;
     for (auto _ : state)
     {
-        KiottyNetEntryAction action = KiottyNet_makeReadEntryAction(4);
-        benchmark::DoNotOptimize(action);
+        KiottyNetTransition transition = KiottyNet_moveToNextState(1, action);
+        benchmark::DoNotOptimize(transition);
     }
 }
-BENCHMARK(MakeReadEntryAction);
+BENCHMARK(MoveToNextState);

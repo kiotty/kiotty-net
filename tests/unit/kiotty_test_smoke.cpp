@@ -9,7 +9,11 @@ TEST(Build, GoogleTestLinksAndRuns)
 
 TEST(Build, LibraryLinksAndStatemachineHelperFillsTheStruct)
 {
-    KiottyNetEntryAction action = KiottyNet_makeReadEntryAction(4);
-    EXPECT_EQ(action.type, KIOTTY_ENTRY_ACTION_READ);
-    EXPECT_EQ(action.as.read.exact, static_cast<size_t>(4));
+    KiottyNetConnectionAction action = {};
+    action.type = KIOTTY_ACTION_READ;
+    action.as.read.exact = 4;
+    KiottyNetTransition transition = KiottyNet_moveToNextState(2, action);
+    EXPECT_EQ(transition.next, 2);
+    EXPECT_EQ(transition.entry_action.type, KIOTTY_ACTION_READ);
+    EXPECT_EQ(transition.entry_action.as.read.exact, static_cast<size_t>(4));
 }

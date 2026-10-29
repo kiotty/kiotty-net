@@ -44,46 +44,10 @@ typedef struct KiottyNetConnectionEvent
     } as;
 } KiottyNetConnectionEvent;
 
-typedef enum KiottyNetEntryActionType
-{
-    KIOTTY_ENTRY_ACTION_NONE,
-    KIOTTY_ENTRY_ACTION_READ,
-    KIOTTY_ENTRY_ACTION_READ_UNTIL,
-    KIOTTY_ENTRY_ACTION_WRITE,
-    KIOTTY_ENTRY_ACTION_START_WORK,
-    KIOTTY_ENTRY_ACTION_CLOSE
-} KiottyNetEntryActionType;
-
-typedef struct KiottyNetEntryAction
-{
-    KiottyNetEntryActionType type;
-    uint32_t                 timeout_ms;
-    union
-    {
-        struct
-        {
-            size_t exact;
-        } read;
-        struct
-        {
-            KiottyNetSpan delimiter;
-            size_t        max;
-        } read_until;
-        struct
-        {
-            KiottyNetSpan data;
-        } write;
-        struct
-        {
-            KiottyNetCode reason;
-        } close;
-    } as;
-} KiottyNetEntryAction;
-
 typedef struct KiottyNetTransition
 {
-    int32_t              next;
-    KiottyNetEntryAction entry_action;
+    int32_t                   next;
+    KiottyNetConnectionAction entry_action;
 } KiottyNetTransition;
 
 typedef KiottyNetTransition (*KiottyNetTransitionAction)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event);
@@ -108,14 +72,7 @@ typedef struct KiottyNetStateMachine
 #define KIOTTY_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { 0 }, 0 }
 #define KIOTTY_RULE_COUNT(table)                               (sizeof(table) / sizeof((table)[0]))
 
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeNoEntryAction(void);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeReadEntryAction(size_t exact);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeReadUntilEntryAction(KiottyNetSpan delimiter, size_t max);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeWriteEntryAction(KiottyNetSpan data);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeStartWorkEntryAction(void);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_makeCloseEntryAction(KiottyNetCode reason);
-KIOTTY_NET_API KiottyNetEntryAction KiottyNet_setEntryActionTimeout(KiottyNetEntryAction entry_action, uint32_t ms);
-KIOTTY_NET_API KiottyNetTransition  KiottyNet_moveToNextState(int32_t next, KiottyNetEntryAction entry_action);
+KIOTTY_NET_API KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetConnectionAction entry_action);
 
 typedef struct KiottyNetStatefulAppContext
 {
@@ -226,31 +183,10 @@ namespace kiotty
     }
 }
 
-class KiottyNet_EntryAction
-{
-public:
-    KiottyNet_EntryAction();
-
-    static KiottyNet_EntryAction read(size_t exact);
-    static KiottyNet_EntryAction readUntil(KiottyNetSpan delimiter, size_t max);
-    static KiottyNet_EntryAction write(KiottyNetSpan data);
-    static KiottyNet_EntryAction startWork();
-    static KiottyNet_EntryAction close(KiottyNetCode reason = KIOTTY_SUCCESS);
-
-    KiottyNet_EntryAction& timeout(uint32_t ms);
-
-    operator KiottyNetEntryAction() const;
-
-private:
-    explicit KiottyNet_EntryAction(KiottyNetEntryAction raw);
-
-    KiottyNetEntryAction _raw;
-};
-
 template <typename State>
 struct KiottyNet_Transition
 {
-    static KiottyNetTransition moveToNextState(State next, KiottyNetEntryAction entry_action = KiottyNetEntryAction());
+    static KiottyNetTransition moveToNextState(State next, KiottyNetConnectionAction entry_action);
 };
 
 template <typename State>
@@ -382,54 +318,8 @@ namespace kiotty
     }
 }
 
-inline KiottyNet_EntryAction::KiottyNet_EntryAction()
-    : _raw(KiottyNet_makeNoEntryAction())
-{
-}
-
-inline KiottyNet_EntryAction::KiottyNet_EntryAction(KiottyNetEntryAction raw)
-    : _raw(raw)
-{
-}
-
-inline KiottyNet_EntryAction KiottyNet_EntryAction::read(size_t exact)
-{
-    return KiottyNet_EntryAction(KiottyNet_makeReadEntryAction(exact));
-}
-
-inline KiottyNet_EntryAction KiottyNet_EntryAction::readUntil(KiottyNetSpan delimiter, size_t max)
-{
-    return KiottyNet_EntryAction(KiottyNet_makeReadUntilEntryAction(delimiter, max));
-}
-
-inline KiottyNet_EntryAction KiottyNet_EntryAction::write(KiottyNetSpan data)
-{
-    return KiottyNet_EntryAction(KiottyNet_makeWriteEntryAction(data));
-}
-
-inline KiottyNet_EntryAction KiottyNet_EntryAction::startWork()
-{
-    return KiottyNet_EntryAction(KiottyNet_makeStartWorkEntryAction());
-}
-
-inline KiottyNet_EntryAction KiottyNet_EntryAction::close(KiottyNetCode reason)
-{
-    return KiottyNet_EntryAction(KiottyNet_makeCloseEntryAction(reason));
-}
-
-inline KiottyNet_EntryAction& KiottyNet_EntryAction::timeout(uint32_t ms)
-{
-    _raw = KiottyNet_setEntryActionTimeout(_raw, ms);
-    return *this;
-}
-
-inline KiottyNet_EntryAction::operator KiottyNetEntryAction() const
-{
-    return _raw;
-}
-
 template <typename State>
-inline KiottyNetTransition KiottyNet_Transition<State>::moveToNextState(State next, KiottyNetEntryAction entry_action)
+inline KiottyNetTransition KiottyNet_Transition<State>::moveToNextState(State next, KiottyNetConnectionAction entry_action)
 {
     return KiottyNet_moveToNextState(static_cast<int32_t>(next), entry_action);
 }
