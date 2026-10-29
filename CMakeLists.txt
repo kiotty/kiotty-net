@@ -29,12 +29,17 @@ set(KIOTTY_NET_SOURCES
     src/implementation/core/kiotty_stage.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
     src/implementation/base/socket/kiotty_socket.cpp
+    src/implementation/base/event/kiotty_io_action.cpp
 )
 
+set(KIOTTY_NET_HAS_EVENT_BACKEND OFF)
+
 if(WIN32)
+    set(KIOTTY_NET_HAS_EVENT_BACKEND ON)
     list(APPEND KIOTTY_NET_SOURCES
         src/implementation/base/error/backend/kiotty_windows_error.cpp
         src/implementation/base/socket/backend/kiotty_windows_socket.cpp
+        src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
     )
 else()
     list(APPEND KIOTTY_NET_SOURCES
@@ -68,7 +73,7 @@ else()
 endif()
 
 if(WIN32)
-    target_link_libraries(kiotty_net PUBLIC ws2_32)
+    target_link_libraries(kiotty_net PUBLIC ws2_32 ntdll)
 endif()
 
 find_package(Threads REQUIRED)

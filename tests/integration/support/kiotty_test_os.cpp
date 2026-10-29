@@ -41,6 +41,12 @@ namespace kiotty_test
         return ready > 0;
     }
 
+    bool setSendBuffer(intptr_t handle, int bytes)
+    {
+        RawSocket socket = toRaw(handle);
+        return ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) == 0;
+    }
+
     bool noDelayOf(intptr_t handle)
     {
         RawSocket socket = toRaw(handle);

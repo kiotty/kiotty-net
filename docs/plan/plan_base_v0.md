@@ -14,7 +14,7 @@
 규칙
 
 - 사이클 하나는 설계의 한 덩어리와 그 덩어리의 테스트 전부다. 테스트 없는 구현도, 구현 없는 테스트도 사이클이 아니다.
-- 로컬 테스트는 둘이다. Windows (VS 18 Insiders 의 MSVC, CMake 4.3.1 과 Ninja 는 `Common7/IDE/CommonExtensions/Microsoft/CMake/` 아래, IOCP) 와 WSL Ubuntu 24.04 (cmake 3.28, gcc 13, clang 18, ninja, epoll). 저장소는 WSL 에서 `/mnt/d/repo/kiotty-net` 이다. 둘 다 초록이어야 push 한다. CI 는 그 둘이 못 보는 것 (macOS, sanitizer, 다른 gcc) 을 본다.
+- 로컬 테스트는 둘이다. Windows (VS 18 Insiders 의 MSVC, CMake 4.3.1 과 Ninja 는 `Common7/IDE/CommonExtensions/Microsoft/CMake/` 아래, IOCP) 와 WSL Ubuntu 24.04 (cmake 3.28, gcc 13, clang 18, ninja, epoll). 저장소는 WSL 에서 `/mnt/c/repository/private/kiotty-net` 이다. 둘 다 초록이어야 push 한다. CI 는 그 둘이 못 보는 것 (macOS, sanitizer, 다른 gcc) 을 본다.
 - commit 은 사이클당 하나를 목표로 한다. CI 빨강을 고치는 commit 은 `fix(ci):` 로 따로 쌓고 squash 하지 않는다 (무엇이 플랫폼에서 깨졌는지가 기록이다).
 - commit 메시지는 `<단계> <무엇>` 한 줄 + 본문에 통과한 테스트 수와 CI job. 끝에 `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - 사이클이 끝나면 `docs/progress/` 에 날짜 파일로 결정 / 미결 / 다음 할 일을 적는다.

@@ -29,6 +29,7 @@ namespace kiotty_test
         bool sendAll(const void* data, size_t length);
         bool recvExactly(void* data, size_t length, uint32_t timeout_ms);
         bool shutdownWrite();
+        bool reset();
         void close();
 
     private:

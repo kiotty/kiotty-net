@@ -25,6 +25,7 @@ namespace kiotty
             INVALID_ARGUMENT,
             OUT_OF_RESOURCE,
             NOT_SUPPORTED,
+            BUSY,
             UNKNOWN
         };
 

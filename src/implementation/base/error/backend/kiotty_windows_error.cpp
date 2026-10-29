@@ -42,6 +42,7 @@ namespace kiotty
                 { WSAEINVAL, SocketCode::INVALID_ARGUMENT },
                 { WSAEFAULT, SocketCode::INVALID_ARGUMENT },
                 { WSAEBADF, SocketCode::INVALID_ARGUMENT },
+                { WSA_INVALID_HANDLE, SocketCode::INVALID_ARGUMENT },
                 { WSAENOTSOCK, SocketCode::INVALID_ARGUMENT },
                 { WSAENAMETOOLONG, SocketCode::INVALID_ARGUMENT },
                 { WSAEISCONN, SocketCode::INVALID_ARGUMENT },

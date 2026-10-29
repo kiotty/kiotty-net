@@ -39,12 +39,13 @@ TEST(SocketError, EveryOsCodeTheBackendProducesMapsToASocketCode)
     EXPECT_EQ(kiotty::net::toSocketCode(0x7FFF1234), SocketCode::UNKNOWN);
 }
 
-TEST(SocketError, ToNetCodeMapsClosedToPeerClosedAndTheRestToSocketError)
+TEST(SocketError, ToNetCodeMapsClosedToPeerClosedBusyToBusyAndTheRestToSocketError)
 {
     EXPECT_EQ(kiotty::net::toNetCode(SocketCode::SUCCESS), KIOTTY_SUCCESS);
     EXPECT_EQ(kiotty::net::toNetCode(SocketCode::CLOSED), KIOTTY_PEER_CLOSED);
     EXPECT_EQ(kiotty::net::toNetCode(SocketCode::CANCELLED), KIOTTY_CLOSED);
     EXPECT_EQ(kiotty::net::toNetCode(SocketCode::TIMEOUT), KIOTTY_TIMEOUT);
+    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::BUSY), KIOTTY_BUSY);
     SocketCode rest[] =
     {
         SocketCode::WOULD_BLOCK,

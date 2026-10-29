@@ -33,6 +33,8 @@ namespace kiotty
                 return KIOTTY_CLOSED;
             case SocketCode::TIMEOUT:
                 return KIOTTY_TIMEOUT;
+            case SocketCode::BUSY:
+                return KIOTTY_BUSY;
             default:
                 return KIOTTY_SOCKET_ERROR;
             }

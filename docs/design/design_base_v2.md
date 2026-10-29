@@ -256,22 +256,32 @@ struct IoEvent                                  // 걸린 요청 하나. HOLDER_
     bool            pending() const;            // submit 이 true, 완료를 꺼낼 때 false. listener 만 바꾼다
     const IoAction& action() const;
 };
+struct AcceptBuffer { SocketHandle socket; char addresses[2 * ADDRESS_LENGTH]; };   // ADDRESS_LENGTH = sizeof(sockaddr_storage) + 16
 class EventListener                             // STORAGE_SIZE 256, ALIGN 16
 {
 public:
     SocketCode open(size_t completion_capacity);
     void       close();
-    SocketCode attach(SocketHandle socket, int32_t slot);        // 연결당 한 번. IOCP: CreateIoCompletionPort. epoll: ADD (관심 0)
-    SocketCode submit(Holder<IoEvent>& event, SocketHandle socket, const IoAction& action, IoPayload payload);
+    Result<SocketCode, Holder<IoEvent>> attach(SocketHandle socket, int32_t slot);   // event 하나당 한 번. Connection 은 둘, Acceptor 는 하나
+    SocketCode submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload);   // socket 과 slot 은 event 가 안다
     //   READ / READ_UNTIL → WSARecv | MOD EPOLLIN|ONESHOT 뒤 recv → payload
     //   WRITE             → WSASend | 바로 send, 남으면 MOD EPOLLOUT|ONESHOT
-    //   ACCEPT            → AcceptEx | MOD EPOLLIN|ONESHOT
-    //   즉시 실패는 자기 완료 배열에 오류 완료로
-    void       detach(SocketHandle socket, int32_t slot);        // socket.close 직전. 걸린 요청은 CANCELLED 완료로 (epoll 은 listener 가 만든다)
-    Span<const IoCompletion> wait(uint32_t timeout_ms);          // 꺼낼 때 pending 을 내린다
+    //   ACCEPT            → AcceptEx (payload 는 AcceptBuffer) | MOD EPOLLIN|ONESHOT
+    //   즉시 실패는 오류 완료로 (IOCP 는 PostQueuedCompletionStatus 로 같은 port 에)
+    void       detach(Holder<IoEvent>& event);                    // socket.close 직전. 걸린 요청은 CANCELLED 완료로 (IOCP 는 CancelIoEx, epoll 은 listener 가 만든다)
+    Span<const IoCompletion> wait(uint32_t timeout_ms);          // 꺼낼 때 pending 을 내린다. WAIT_FOREVER = 0xFFFFFFFF
     SocketCode               wake();                             // 아무 thread. { WAKE } 하나
 };
 ```
+
+사이클 3b 에서 정한 세부 (테스트 v0 14절 5 의 확정):
+
+- IoEvent 는 attach 가 만들어 돌려준다. attach 하지 않은 socket 으로 submit 하는 길이 타입으로 없다. event 는 자기 socket, slot, listener (와 그 open generation) 를 기억한다.
+- 오용은 코드로 거부하고 event 는 그대로 둔다: 빈 Holder, detach 된 event, 다른 listener 의 event → INVALID_ARGUMENT. pending 인 event → `SocketCode::BUSY` (새로 넣음, `toNetCode` 는 KIOTTY_BUSY). kind 가 READ / READ_UNTIL / WRITE / ACCEPT 가 아님 → INVALID_ARGUMENT. READ / WRITE 의 payload 가 nullptr 이거나 길이 0, ACCEPT 의 payload 가 AcceptBuffer 가 아님 → INVALID_ARGUMENT. close 뒤의 attach / submit / wake 는 CLOSED, wait 는 바로 빈 Span.
+- IOCP 는 socket 하나를 port 에 한 번만 붙일 수 있다. 같은 socket 의 두 번째 attach 는 CreateIoCompletionPort 의 ERROR_INVALID_PARAMETER 를 "이미 붙음" 으로 받는다. 다른 port 에 붙은 socket 과 구분할 수 없지만 socket 은 Owner 하나의 listener 에만 붙으므로 생기지 않는다. 완료 key 는 쓰지 않고 slot 은 event 에서 읽는다. 완료 상태는 OVERLAPPED.Internal (NTSTATUS) → RtlNtStatusToDosError → socketErrorTable (ntdll 링크).
+- epoll (3c) 은 event 마다 dup 한 fd 를 따로 ADD 한다. 그래서 stream 과 notify 가 서로를 가리키지 않고 move 해도 안전하다.
+- pending 인 IoEvent 는 move 하지 않는다 (debug assert). slot 재사용 때의 move 는 settle 이 두 event 가 비었음을 본 뒤다.
+- wait 의 timeout 은 steady_clock 으로 끝까지 채운다 (OS 대기가 일찍 깨도 남은 시간만큼 다시 기다린다).
 
 ## 8. tls
 
@@ -323,6 +333,8 @@ public:
     virtual int32_t          slot() const = 0;                       // Acceptor 는 -1
     virtual Holder<IoEvent>& eventFor(const IoAction& action) = 0;   // Connection : NOTIFY 면 _notify_event, 아니면 _stream_event
     virtual IoPayload        resolve(const IoAction& action) = 0;    // Connection : Stage 의 자리. Acceptor : AcceptEx 버퍼 또는 빈 payload
+    virtual SocketCode       attach(EventListener& listener) = 0;    // Connection : event 둘 (_stream_event, _notify_event), Acceptor : 하나
+    virtual void             detach(EventListener& listener) = 0;    // 자기 event 전부를 listener.detach
     virtual void             close() = 0;
 };
 ```
@@ -367,6 +379,8 @@ public:
     int32_t          slot() const override;
     Holder<IoEvent>& eventFor(const IoAction& action) override;
     IoPayload        resolve(const IoAction& action) override;
+    SocketCode       attach(EventListener& listener) override;
+    void             detach(EventListener& listener) override;
     void             close() override;          // shutdown + socket.close
 
     IoAction onOpened(const Handler& handler);                                   // open 직후. 평문 : onReady. TLS : onHandshake
@@ -880,13 +894,14 @@ public:
     SocketHandle     socket() const override;
     int32_t          slot() const override;
     Holder<IoEvent>& eventFor(const IoAction&) override;
-    IoPayload        resolve(const IoAction&) override;   // IOCP : 미리 만든 소켓 + 주소 버퍼 2 × (sizeof(sockaddr_storage) + 16). epoll : { nullptr, 0 }
+    IoPayload        resolve(const IoAction&) override;   // { &_buffer, sizeof(AcceptBuffer) }. IOCP 는 _buffer.socket 에 미리 만든 소켓, epoll 은 무시
+    SocketCode       attach(EventListener& listener) override;
+    void             detach(EventListener& listener) override;
     void             close() override;
 private:
     PassiveSocket   _socket;
     Holder<IoEvent> _event;
-    SocketHandle    _next;                      // IOCP 전용
-    char            _addresses[ADDRESS_BUFFER];
+    AcceptBuffer    _buffer;                    // socket 은 IOCP 전용
     bool            _no_delay;
 };
 ```
@@ -1051,7 +1066,7 @@ void IoLoop::admit(ActiveSocket&& socket, const char* hostname)
     }
     Connection& c = *_host.acquire();           // accept 는 full 이 아닐 때만 걸었다
     c.open(std::move(socket), decision.connection_context, _app_context, _profile, hostname);
-    _listener.attach(c.socket(), c.slot());
+    c.attach(_listener);                        // 실패 처리 (onError + CLOSE) 는 사이클 6 에서 정한다
     IoAction first = c.onOpened(*_handler);
     submit(c, first);
 }
@@ -1065,14 +1080,14 @@ void IoLoop::submit(IoSource& source, const IoAction& action)
     case IoActionKind::START_WORK:
         return;
     case IoActionKind::CLOSE:
-        _listener.detach(source.socket(), source.slot());
+        source.detach(_listener);
         source.close();
         return;
     case IoActionKind::READ:
     case IoActionKind::READ_UNTIL:
     case IoActionKind::WRITE:
     case IoActionKind::ACCEPT:
-        _listener.submit(source.eventFor(action), source.socket(), action, source.resolve(action));
+        _listener.submit(source.eventFor(action), action, source.resolve(action));
         return;
     }
 }
@@ -1145,7 +1160,7 @@ HANDSHAKING 의 TIMEOUT 은 onError(TLS_HANDSHAKE_TIMEOUT) → CLOSE. Work 중�
 CLOSE 의 공통 순서 (handler return, onPeerGone, handshake 실패, worker outcome, Owner close 모두):
 
 1. `apply(CLOSE)` : `_deadline = 0`, `_phase = CLOSING`, `onDisconnected` (accept 된 연결은 반드시 한 번)
-2. `submit(CLOSE)` : `listener.detach`, `source.close()` (shutdown + closesocket)
+2. `submit(CLOSE)` : `source.detach(listener)`, `source.close()` (shutdown + closesocket)
 3. 걸려 있던 요청마다 CANCELLED 완료 (IOCP 는 OS 가, epoll 은 detach 가) → onReceived / onSent 가 CLOSING 을 보고 NONE
 4. `settle` : 두 event 가 비면 `host.release` → IDLE. slot 재사용 전에 늦은 완료가 다 돌아오므로 completion 에 generation 을 싣지 않는다
 

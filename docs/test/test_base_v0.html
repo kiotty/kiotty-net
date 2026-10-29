@@ -240,7 +240,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>IoAction</td><td>FromWriteCarriesNoPointerToUserData</td><td><span class="tag ok">정상</span></td><td>WRITE 의 as 에 span 이 없다. 완료가 사용자 메모리를 가리키지 않는다는 보장</td></tr>
   <tr><td>IoAction</td><td>FromReadUntilCopiesDelimiterOfOneToFourBytesAndZeroScanned</td><td><span class="tag ok">정상</span></td><td>길이 1 ~ 4, scanned 0</td></tr>
   <tr><td>IoAction</td><td>SizeOfStaysUnderSixtyFourBytes</td><td><span class="tag edge">엣지</span></td><td>completion 이 값으로 싣는 비용 상한. static_assert 로도</td></tr>
-  <tr><td>IoEvent</td><td>FreshEventIsNotPending</td><td><span class="tag ok">정상</span></td><td>makeIoEvent 직후</td></tr>
+  <tr><td>IoEvent</td><td>EventFromAttachIsNotPending</td><td><span class="tag ok">정상</span></td><td>attach 가 돌려준 직후. 사이클 3b 에서 makeIoEvent 를 없애고 attach 가 만든다 (integration)</td></tr>
   <tr><td>EventListener</td><td>SubmitReadThenPeerSendCompletesWithLengthAndTheSameAction</td><td><span class="tag ok">정상</span></td><td>RECEIVE, length == 보낸 길이, payload 에 바이트, completion.action 이 걸었던 것과 같음 (kind, purpose, timeout, exact)</td></tr>
   <tr><td>EventListener</td><td>SubmitWriteCompletesWithFullLengthAndPeerReceivesBytes</td><td><span class="tag ok">정상</span></td><td>4 KiB 하나</td></tr>
   <tr><td>EventListener</td><td>PendingIsTrueAfterSubmitAndFalseAfterWaitReturnsIt</td><td><span class="tag ok">정상</span></td><td>pending 의 두 전환. wait 가 돌려준 뒤에만 내려간다</td></tr>
@@ -258,7 +258,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EventListener</td><td>AcceptSubmitCompletesWhenAClientConnects</td><td><span class="tag ok">정상</span></td><td>Acceptor 와 함께. ACCEPT, slot -1</td></tr>
   <tr><td>EventListener</td><td>ImmediateFailureIsDeliveredAsAnErrorCompletionNotAReturnCode</td><td><span class="tag edge">엣지</span></td><td>이미 닫힌 소켓에 submit → submit 은 SUCCESS 류, 다음 wait 에 오류 완료 하나. "요청은 completion 으로만 비워진다"</td></tr>
   <tr><td>EventListener</td><td>SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy</td><td><span class="tag misuse">오용</span></td><td>같은 event 에 두 번. 두 번째는 BUSY 이고 첫 요청은 그대로</td></tr>
-  <tr><td>EventListener</td><td>SubmitOnUnattachedSocketIsRejected</td><td><span class="tag misuse">오용</span></td><td>attach 없이 submit → 오류 코드 (또는 오류 완료). 둘 중 하나로 확정</td></tr>
+  <tr><td>EventListener</td><td>SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>attach 없는 submit 은 타입으로 막혔다 (event 는 attach 만 만든다). 빈 Holder, detach 된 event, 다른 listener 의 event 는 INVALID_ARGUMENT. 사이클 3b 에서 AttachOnInvalidSocketIsRejected 도 더했다</td></tr>
   <tr><td>EventListener</td><td>SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>"그 밖의 kind 는 오지 않는다" 를 debug assert 가 아니라 코드로도 막는지 확정</td></tr>
   <tr><td>EventListener</td><td>WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextWait</td><td><span class="tag edge">엣지</span></td><td>capacity 4 에 완료 6 → 4, 2. 유실 없음</td></tr>
   <tr><td>EventListener</td><td>CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused</td><td><span class="tag misuse">오용</span></td><td>shutdown 경로의 안전</td></tr>
@@ -534,7 +534,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <li><b>READ exact 0, WRITE 0 바이트, delimiter 길이 0 / 5 초과.</b> 전부 <code>onError(INVALID_ARGUMENT)</code> 뒤 CLOSE 를 전제했다. WRITE 0 을 "바로 onWritten(0)" 로 둘 수도 있다.</li>
   <li><b>Stage::commit 이 writable 을 넘길 때, Pool::release 에 남의 포인터.</b> debug assert + release clamp / 무시 를 전제했다.</li>
   <li><b>빈 host 의 broadcast, close 뒤 run, connect 전의 StreamClient read.</b> 각각 SUCCESS, CLOSED, PEER_CLOSED 를 전제했다.</li>
-  <li><b>EventListener 의 오용 셋</b> (pending 인 event 에 submit, attach 없는 submit, NONE kind submit) 을 코드로 막을지 debug assert 로 막을지.</li>
+  <li><b>EventListener 의 오용 셋</b> (pending 인 event 에 submit, attach 없는 submit, NONE kind submit) 을 코드로 막을지 debug assert 로 막을지. <b>확정 (사이클 3b)</b>: 셋 다 코드로 막는다. pending → BUSY, kind → INVALID_ARGUMENT, attach 없는 submit 은 attach 가 IoEvent 를 돌려주는 모양으로 바꿔 없앴다. 설계 v2 7절.</li>
   <li><b>테스트 훅</b> <code>KIOTTY_NET_TESTING</code> 아래의 <code>TlsEngine::debugKeyUpdate / debugShutdown</code> 둘을 허용하는지.</li>
   <li><b>성능 기준치</b> 12절의 숫자는 추정이다. 첫 측정값으로 바꾼다.</li>
 </ol>

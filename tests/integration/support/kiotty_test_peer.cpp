@@ -176,6 +176,17 @@ namespace kiotty_test
 #endif
     }
 
+    bool LoopbackPeer::reset()
+    {
+        linger hard_close;
+        hard_close.l_onoff = 1;
+        hard_close.l_linger = 0;
+        int set = ::setsockopt(_connection, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&hard_close), sizeof(hard_close));
+        closeRaw(_connection);
+        _connection = INVALID_RAW_SOCKET;
+        return set == 0;
+    }
+
     void LoopbackPeer::close()
     {
         closeRaw(_connection);
