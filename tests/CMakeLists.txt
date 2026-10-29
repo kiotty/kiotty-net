@@ -14,6 +14,13 @@ FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)
 
+add_library(kiotty_net_test_warnings INTERFACE)
+target_compile_options(kiotty_net_test_warnings INTERFACE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c++17-attribute-extensions>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX;/permissive->
+)
+
 function(kiotty_net_add_test_target target label)
     add_executable(${target} ${ARGN})
     target_include_directories(${target} PRIVATE
@@ -22,10 +29,7 @@ function(kiotty_net_add_test_target target label)
     )
     target_compile_features(${target} PRIVATE cxx_std_14)
     target_compile_definitions(${target} PRIVATE KIOTTY_NET_TESTING=1)
-    target_compile_options(${target} PRIVATE
-        $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c++17-attribute-extensions>
-    )
-    target_link_libraries(${target} PRIVATE kiotty_net kiotty_net_warnings GTest::gtest_main)
+    target_link_libraries(${target} PRIVATE kiotty_net kiotty_net_test_warnings GTest::gtest_main)
     gtest_discover_tests(${target}
         PROPERTIES LABELS ${label}
         DISCOVERY_MODE PRE_TEST
