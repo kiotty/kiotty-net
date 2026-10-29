@@ -22,6 +22,9 @@ function(kiotty_net_add_test_target target label)
     )
     target_compile_features(${target} PRIVATE cxx_std_14)
     target_compile_definitions(${target} PRIVATE KIOTTY_NET_TESTING=1)
+    target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c++17-attribute-extensions>
+    )
     target_link_libraries(${target} PRIVATE kiotty_net kiotty_net_warnings GTest::gtest_main)
     gtest_discover_tests(${target}
         PROPERTIES LABELS ${label}
