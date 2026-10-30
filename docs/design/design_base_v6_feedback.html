@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v6 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 980px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v6 피드백 답변</h1>
+<p class="sub">2026-10-30. <code>design_base_v2.md</code> 와 사이클 3b 피드백 (<code>261029_progress_base_cycle3b_feedback.md</code>) 위에서 받은 일곱 개 제안에 대한 답이다. 이 문서의 결론이 <code>design_base_v3.md</code> 의 재료가 된다. 가장 큰 것은 4번 (Work 안의 동기 read / write / 파일 전송) 이다. 전제는 맞지만 v2 의 <b>Work 중에도 notify 가 나간다</b> 는 규칙과 정면으로 부딪히므로, 그 규칙을 바꿔야 성립한다. 5번과 7번은 같은 답을 공유한다: 송신 lane 은 하나이고, NOTIFY 는 그 lane 의 용도 (purpose) 일 뿐이다.</p>
+
+<p class="legend">
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag concern">우려</span> 반영 전에 짚을 위험이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">한 줄 요약</a></li>
+  <li><a href="#p1">action 함수의 이름 (1)</a></li>
+  <li><a href="#p2">handle 은 하나, Work 는 상태 (2)</a></li>
+  <li><a href="#p3">onError 는 ConnectionInfo 만 (3)</a></li>
+  <li><a href="#p4">Work 안의 동기 IO 와 파일 전송 (4)</a></li>
+  <li><a href="#p5">IoEvent 는 둘이다 : read 와 write (5)</a></li>
+  <li><a href="#p7">notify 는 별도 submit 이 아니라 write lane 의 용도 (7)</a></li>
+  <li><a href="#p6">max_clients 기본값 (6)</a></li>
+  <li><a href="#v3">v3 에 들어갈 변경 목록</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. 한 줄 요약</h2>
+<table>
+  <tr><th>#</th><th>제안</th><th>답</th><th>한 줄</th></tr>
+  <tr><td>1</td><td>action 함수를 <code>trigger*</code> 로</td><td><span class="tag agree">동의</span></td><td>"return 이 다음 동작을 만든다" 를 이름에 담는 데 찬성. 후보 셋 중 하나만 고르면 된다 (1절)</td></tr>
+  <tr><td>2</td><td>ConnectionHandle 삭제, WorkHandle 을 ConnectionHandle 로</td><td><span class="tag partial">부분 동의</span></td><td>타입은 하나로 합친다. 다만 콜백에서 handle 을 완전히 없애면 다른 thread 의 <code>notifyConnection</code> 이 불가능해진다. Work 는 handle 의 종류가 아니라 연결의 <b>상태</b> 다 (2절)</td></tr>
+  <tr><td>3</td><td>onError 에 ConnectionInfo 만</td><td><span class="tag agree">동의</span></td><td>onError 는 알림이고 뒤따르는 onDisconnected 가 context 를 준다. 연결 없는 오류는 소유자의 endpoint 를 채운다 (3절)</td></tr>
+  <tr><td>4</td><td>Work 안에서 동기 read / write / writeFile</td><td><span class="tag partial">부분 동의</span> <span class="tag concern">우려</span></td><td>전제 ("Work 중 다른 작업 없음") 는 맞고 구현도 된다. 그러나 v2 의 "Work 중에도 notify 가 나간다" 와 "Owner close 는 Work 중인 연결도 바로 닫는다" 두 규칙을 바꿔야 한다. TLS 는 zero-copy 가 아니다 (4절)</td></tr>
+  <tr><td>5</td><td>IoEvent 를 READ / WRITE / NOTIFY 셋으로</td><td><span class="tag concern">우려</span></td><td><b>둘이 맞다</b> (read, write). NOTIFY 전용 event 를 두면 3b 에서 찾은 "송신 두 개가 섞이는" 버그가 그대로 돌아온다 (5절)</td></tr>
+  <tr><td>6</td><td>max_clients 32 는 작다</td><td><span class="tag agree">동의</span></td><td>기본 128. 상한 1024 를 config 검사로. TLS Pool 크기를 Context 인자로 (6절)</td></tr>
+  <tr><td>7</td><td><code>IoNotification</code> 을 따로 submit</td><td><span class="tag partial">부분 동의</span></td><td>"notify 흐름을 한 덩어리로" 는 맞다. 그러나 listener 에 두 번째 submit 경로를 두면 5번과 같은 이유로 틀어진다. 대신 Connection 안에 <code>WriteLane</code> 하나를 두어 send / notify Stage 와 암호문을 그 안에 가둔다 (7절)</td></tr>
+</table>
+
+<h2 id="p1">1. action 함수의 이름 (1) <span class="tag agree">동의</span> <span class="tag ask">선택</span></h2>
+<p>지적이 맞다. <code>KiottyNet_readConnection(1024, 5000)</code> 은 "지금 1024 바이트를 읽는다" 로 읽힌다. 실제로는 "return 한 뒤 IO Thread 가 1024 바이트가 찰 때까지 받아서 다음 onRead 를 부른다" 는 <b>값</b> 이다. 함수가 하는 일은 struct 하나를 채우는 것뿐이다. 이름에 "다음에 일어날 일" 이 들어가야 한다.</p>
+<p>그리고 이 이름 변경은 2절과 맞물린다. 현재의 <code>readConnection</code> / <code>writeConnection</code> 이라는 이름이 비어야, Work 안에서 <b>실제로 읽고 쓰는</b> 동기 함수가 그 이름을 가져갈 수 있다.</p>
+<table>
+  <tr><th>후보</th><th>HOLD</th><th>READ</th><th>READ_UNTIL</th><th>WRITE</th><th>START_WORK</th><th>CLOSE</th><th>읽히는 느낌</th></tr>
+  <tr><td class="rec">trigger*</td><td><code>triggerHold</code></td><td><code>triggerRead</code></td><td><code>triggerReadUntil</code></td><td><code>triggerWrite</code></td><td><code>triggerWork</code></td><td><code>triggerClose</code></td><td>"유발한다". 제안하신 것. 동사라서 "지금 한다" 로 읽힐 여지가 조금 남지만 <code>read</code> 보다는 훨씬 낫다</td></tr>
+  <tr><td>then*</td><td><code>thenHold</code></td><td><code>thenRead</code></td><td><code>thenReadUntil</code></td><td><code>thenWrite</code></td><td><code>thenWork</code></td><td><code>thenClose</code></td><td>"그 다음에". <code>return KiottyNet_thenRead(1024, 5000);</code> 가 문장처럼 읽힌다. promise 의 then 과 같은 뜻</td></tr>
+  <tr><td>next*</td><td><code>nextHold</code></td><td><code>nextRead</code></td><td><code>nextReadUntil</code></td><td><code>nextWrite</code></td><td><code>nextWork</code></td><td><code>nextClose</code></td><td>"다음은". 명사형이라 "지금 한다" 오해가 가장 적다. 다만 <code>nextClose</code> 가 조금 어색하다</td></tr>
+</table>
+<p>셋 다 쓸 수 있다. 하나만 고르면 된다. 저는 <code>trigger*</code> 를 받아들이되, 오해가 가장 적은 것은 <code>then*</code> 이라고 본다. 어느 쪽이든 아래는 같다.</p>
+<ul>
+  <li><code>holdCommunication</code> 은 <code>*Hold</code> 로, <code>startWork</code> 는 <code>*Work</code> 로, <code>closeConnection</code> 은 <code>*Close</code> 로 통일한다. 접두어 하나로 여섯 개가 한 묶음임이 보인다.</li>
+  <li>enum <code>KIOTTY_ACTION_*</code> 와 struct <code>KiottyNetConnectionAction</code> 은 그대로다. statemachine.h 의 entry action 도 같은 struct 를 쓰므로 영향이 없다.</li>
+  <li>C++ 래퍼의 <code>KiottyNet_Work::finish(action)</code> 도 그대로다.</li>
+</ul>
+
+<h2 id="p2">2. handle 은 하나, Work 는 상태 (2) <span class="tag partial">부분 동의</span></h2>
+<p>"Work 와 Connection 의 handle 을 따로 두지 않는다" 에 동의한다. 구현 가이드 1.5 에도 "WorkHandle 은 그 연결의 handle 과 같은 값이다. 타입만 다르다" 라고 적혀 있다. 같은 값에 타입을 둘 두는 것은 결국 "이 함수는 Work 중에만 부를 수 있다" 를 타입으로 말하려던 것이다. 그런데 그 보장은 컴파일 때 못 지킨다. Work 가 finish 된 뒤의 handle 로 부르는 것을 타입이 막지 못하기 때문에, 어차피 runtime 검사 (<code>KIOTTY_BUSY</code> / <code>PEER_CLOSED</code>) 가 필요하다. runtime 검사가 있다면 타입 둘은 중복이다.</p>
+
+<h3>2.1 그러나 콜백에서 handle 을 전부 없앨 수는 없다</h3>
+<p>제안은 "onReady / onRead / onWritten / onTimeout 은 동기 read / write 를 못 하니 handle 인자가 필요 없다" 인데, handle 로 할 수 있는 일이 동기 IO 만이 아니다. v2 14절: "콜백 안에서 handle 로 할 수 있는 것은 <code>getConnectionInfo</code> 와 <code>notifyConnection</code> 둘". 더 중요한 것은 <b>콜백 밖</b> 이다. 채팅 서버처럼 "HOLD 로 쉬고 있는 연결 X 에 다른 thread 가 push" 하려면 앱이 X 의 handle 을 어딘가에 들고 있어야 하고, 그 handle 을 받을 자리는 콜백뿐이다. Work 를 시작해야만 handle 을 얻는다면 push 하려고 매번 Work 를 열어야 한다. 그건 배보다 배꼽이다.</p>
+<p>그래서 모양은 이렇게 된다. handle 은 하나의 타입, 모든 콜백에 그대로 있고, 함수마다 "어느 상태에서 부를 수 있나" 가 정해진다.</p>
+<pre><code>typedef int64_t KiottyNetConnectionHandle;                 /* KiottyNetWorkHandle 은 없다 */
+
+typedef struct KiottyNetConnectionHandler
+{
+    KiottyNetConnectionDecision (*onConnected)   (KiottyNetAppContext app, KiottyNetConnectionInfo info);
+    KiottyNetConnectionAction   (*onReady)       (KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection);
+    KiottyNetConnectionAction   (*onRead)        (KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection, KiottyNetSpan data);
+    KiottyNetConnectionAction   (*onWritten)     (KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection, size_t length);
+    KiottyNetConnectionAction   (*onTimeout)     (KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection);
+    void                        (*onWorkStarted) (KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection);   /* 이 순간부터 finishWork 까지 연결은 worker 의 것 */
+    void                        (*onDisconnected)(KiottyNetAppContext app, KiottyNetConnectionContext ctx, KiottyNetConnectionHandle connection, KiottyNetCode reason);
+    void                        (*onError)       (KiottyNetAppContext app, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);   /* 3절 */
+} KiottyNetConnectionHandler;</code></pre>
+<table>
+  <tr><th>함수</th><th>부르는 thread</th><th>허용 상태</th><th>아니면</th></tr>
+  <tr><td><code>KiottyNet_getConnectionInfo(h)</code></td><td>아무 thread</td><td>모두</td><td>닫혔으면 빈 info</td></tr>
+  <tr><td><code>KiottyNet_notifyConnection(h, data)</code></td><td>아무 thread</td><td>모두. WORKING 이면 쌓아 두고 finishWork 뒤에 나간다 (4.3)</td><td>PEER_CLOSED / BUFFER_FULL</td></tr>
+  <tr><td><code>KiottyNet_isConnected(h)</code></td><td>아무 thread</td><td>모두. <code>isWorkConnected</code> 의 새 이름</td><td>false</td></tr>
+  <tr><td><code>KiottyNet_readConnection(h, buf, len, timeout_ms)</code></td><td>Work 를 받은 thread</td><td>WORKING 만</td><td><code>KIOTTY_BUSY</code> (IO Thread 가 연결을 쥐고 있다)</td></tr>
+  <tr><td><code>KiottyNet_writeConnection(h, data, timeout_ms)</code></td><td>Work 를 받은 thread</td><td>WORKING 만</td><td><code>KIOTTY_BUSY</code></td></tr>
+  <tr><td><code>KiottyNet_writeConnectionFile(h, path, offset, length, timeout_ms)</code></td><td>Work 를 받은 thread</td><td>WORKING 만</td><td><code>KIOTTY_BUSY</code></td></tr>
+  <tr><td><code>KiottyNet_finishWork(h, action)</code></td><td>Work 를 받은 thread</td><td>WORKING 만. 한 번</td><td><code>KIOTTY_BUSY</code>, 닫혔으면 PEER_CLOSED</td></tr>
+</table>
+<p>제안의 <code>KiottyNet_accessConnection(work)</code> 와 <code>KiottyNet_abortWork(work)</code> 는 필요 없어진다. 전자는 handle 이 하나라서, 후자는 <code>finishWork(h, *Close(reason))</code> 가 그 일이기 때문이다. 끝내는 길은 하나여야 한다.</p>
+<p>C++ 의 <code>KiottyNet_Work</code> (finish 의무를 소유하는 move-only 래퍼) 는 그대로 둔다. 감싸는 값이 <code>KiottyNetConnectionHandle</code> 로 바뀔 뿐이다. 소멸자가 finish 하지 않은 Work 를 닫는 규칙 (requirement 108줄) 도 그대로다.</p>
+
+<h3>2.2 handle 을 onReady 에만 줄 수도 있다</h3>
+<p>"콜백 인자를 줄이자" 는 뜻을 살리려면 handle 을 <code>onReady</code> (처음), <code>onWorkStarted</code>, <code>onDisconnected</code> 에만 주고 onRead / onWritten / onTimeout 에서는 빼는 길도 있다. 앱은 onReady 에서 handle 을 connection_context 에 넣어 두면 된다. 다만 "어떤 콜백은 handle 이 있고 어떤 것은 없다" 는 규칙을 외워야 하고, 콜백 안에서 <code>notifyConnection</code> 을 부를 때 매번 context 에서 꺼내야 한다. 저는 모든 콜백에 그대로 두는 쪽을 권한다 (choices 2).</p>
+
+<h2 id="p3">3. onError 는 ConnectionInfo 만 (3) <span class="tag agree">동의</span></h2>
+<p>동의한다. onError 는 "어디서 무엇이" 를 알리는 것이고, 연결에서 난 오류는 바로 뒤에 <code>onDisconnected(app, ctx, connection, reason)</code> 이 handle 과 context 를 함께 준다 (v2 8절 표). onError 에서 handle 로 할 일이 없다.</p>
+<pre><code>void (*onError)(KiottyNetAppContext app, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);</code></pre>
+<table>
+  <tr><th>오류 자리</th><th>info 에 들어가는 것</th></tr>
+  <tr><td>연결의 handshake 실패, RECORD_ERROR, onTimeout 의 BUSY 거부</td><td>peer (지금의 <code>connection.info()</code>)</td></tr>
+  <tr><td>Server 의 accept 실패</td><td>listening endpoint. hostname 은 config 의 주소 (빈 문자열이면 <code>"0.0.0.0"</code>), port 는 실제 listening 포트 (<code>PassiveSocket::port()</code>)</td></tr>
+  <tr><td>EventClient 의 connect 실패</td><td>config 의 target endpoint</td></tr>
+  <tr><td>TlsProfile open 실패</td><td>onError 로 오지 않는다. create 의 code 다 (v2 8절). 변화 없음</td></tr>
+</table>
+<p>한 가지만 더: <code>KiottyNetConnectionInfo</code> 는 <code>char[KIOTTY_MAX_HOST_LENGTH] + int32</code> 라 값으로 넘기면 복사가 크다. 하지만 <code>onConnected</code> 가 이미 값으로 받고 있고 onError 는 드문 길이다. 일관성을 위해 값으로 둔다.</p>
+
+<h2 id="p4">4. Work 안의 동기 IO 와 파일 전송 (4) <span class="tag partial">부분 동의</span> <span class="tag concern">우려</span></h2>
+
+<h3>4.1 전제 검증 : "Work 중에는 다른 작업이 없다" 가 v2 에서 성립하나</h3>
+<p>제안의 전제는 "action 은 transaction 이라 동시에 둘일 수 없다. Work 가 시작해서 finishWork 로 반납할 때까지 다른 작업은 수행되지 않는다" 다. action 에 대해서는 맞다. 그러나 v2 에는 action 이 아닌 길이 하나 있다. <b>notify 다.</b></p>
+<div class="warn">
+<p>v2 9.6 / 10절: Work 중에도 IO Thread 는 <code>broadcast()</code> 에서 <code>onNotified()</code> 를 부르고 <code>WRITE(NOTIFY)</code> 를 socket 에 건다. requirement 435줄도 "push lane 은 Work 상태와 무관하게 Work 중인 연결에도 들어간다" 라고 적고 있다. 그리고 v2 는 Work 중 peer 끊김을 그 notify 송신의 실패로만 알아챈다 (<code>onPeerGone</code> 의 주석 "notify 완료로만 올 수 있다").</p>
+<p>worker 가 같은 socket 에 동기 <code>send</code> 를 하면 IO Thread 의 notify 송신과 <b>두 개의 송신이 한 socket 에 동시에</b> 걸린다. 3b 에서 찾은 "메시지 경계가 섞이는" 문제가 그대로다. TLS 면 더 나쁘다. worker 가 encode 하는 동안 IO Thread 도 notify 를 encode 하므로 <code>SSL*</code> 을 두 thread 가 만진다. OpenSSL 의 SSL 객체는 read 와 write 조차 다른 thread 에서 동시에 할 수 없다.</p>
+</div>
+<p>lock 으로 풀 수 있나? 평문이라면 "write lane 소유 token" (FREE / IO_THREAD / WORKER 의 atomic) 으로 번갈아 쓸 수 있다. 그러나 TLS 에서는 worker 의 동기 <b>read</b> (decode) 와 IO Thread 의 notify <b>write</b> (encode) 가 같은 <code>SSL*</code> 이라 token 하나로는 안 되고, IO Thread 가 notify 를 보내려면 worker 의 read 까지 멈춰야 한다. 그러면 Work 의 동기 read 에 IO Thread 가 끼어드는 셈이고 "Work 중 다른 작업 없음" 이 깨진다.</p>
+<p>결론: 제안을 받아들이려면 전제를 <b>구조로 참이 되게</b> 만들어야 한다. 즉 <b>WORKING 인 동안 IO Thread 는 그 연결의 socket 과 SSL 을 전혀 건드리지 않는다.</b> notify 는 Stage 에 쌓이기만 하고 finishWork 뒤 첫 바퀴에 나간다. 이것은 requirement 435줄과 v2 9.6 / 10절의 변경이다. 받아들이시면 v3 에 그렇게 적는다. worker 가 Work 중에 push 할 것이 있으면 <code>writeConnection</code> 으로 직접 보내면 되므로 잃는 것은 "다른 thread 의 broadcast 가 Work 중인 연결에 즉시 도착" 하나다.</p>
+
+<h3>4.2 두 번째 전제 : socket 이 worker 손에 있는 동안 닫히면 안 된다</h3>
+<p>v2 9.5: "Owner 의 close 는 WORKING 인 연결도 바로 닫고 generation 을 올린다." worker 가 그 socket 으로 동기 <code>recv</code> 중이면 use-after-close 다. POSIX 는 fd 번호가 바로 재사용되므로 <b>다른 파일에 쓰는 사고</b> 가 된다. 의료기기 소프트웨어 수준에서는 허용할 수 없다.</p>
+<p>바꿀 규칙: WORKING 인 연결에 대한 close (Owner close, IoLoop shutdown) 는 <code>shutdown(SD_BOTH)</code> 만 한다. <code>shutdown</code> 은 다른 thread 가 쓰고 있어도 안전하고, worker 가 기다리는 <code>poll</code> 을 바로 깨워 read 는 0 (CLOSED), write 는 오류를 돌려준다. worker 는 그것을 보고 <code>finishWork</code> 한다. 실제 <code>closesocket</code> 은 <code>WORK_DONE</code> 뒤 settle 에서만 한다. <code>IoLoop::shutdown</code> 의 "host 가 빌 때까지 runOnce" 가 이것을 자연스럽게 기다린다. worker 가 IO 없이 계산만 오래 하면 그만큼 shutdown 이 늦어지는데, 그것은 Work 의 본질이고 <code>isConnected</code> 로 확인하라는 지금 규칙과 같다.</p>
+
+<h3>4.3 Work 의 생애 (v3)</h3>
+<div class="flow">RUNNING ──START_WORK──▶ DRAINING ──(write event 가 비면, 다음 바퀴)──▶ WORKING ──finishWork──▶ DONE ──(WORK_DONE, IO Thread)──▶ RUNNING
+                        read / write event 모두 pending 아님            IO Thread 는 socket / SSL 을 만지지 않는다        notify Stage 를 먼저 비우고
+                        deadline 0                                      notify 는 Stage 에 쌓이기만                       outcome 적용
+                                                                        close 요청은 shutdown 만</div>
+<ul>
+  <li><b>DRAINING</b>: START_WORK 가 return 되는 자리 (onRead / onWritten / onReady) 에는 read event 가 걸려 있지 않다 (completion 을 소비한 뒤다). onTimeout 에서의 START_WORK 는 v2 11절대로 BUSY 다. 그러나 <b>write event 는 notify 로 걸려 있을 수 있다.</b> 그래서 구현 가이드 1.5 의 DRAINING 을 되살린다. write event 의 완료가 돌아오면 다음 바퀴 collect 가 WORKING 으로 올리고 <code>onWorkStarted</code> 를 낸다. 이 때 socket 에 걸린 overlapped 요청은 0 개다. IOCP 에서 동기 <code>recv</code> 와 overlapped <code>WSARecv</code> 를 섞지 않기 위한 조건이기도 하다.</li>
+  <li><b>WORKING</b>: collect 는 이 연결의 deadline 을 보지 않고, broadcast 는 <code>onNotified</code> 를 건너뛰고, 어떤 submit 도 하지 않는다. 연결 객체에서 worker 가 만지는 것은 socket, TlsEngine, <code>_plain.receive</code> (이미 받아 둔 바이트가 있으면 먼저 소비), send Stage 다. IO Thread 가 만지는 것은 notify Stage (lock 안) 와 <code>_phase</code> (shutdown 요청) 뿐이다.</li>
+  <li><b>peer 끊김</b>: worker 의 동기 read 가 0 을 받거나 write 가 RESET 을 받으면 그 결과로 안다. IO 없이 오래 계산하는 worker 를 위한 <code>KiottyNet_isConnected(h)</code> 는 non-blocking <code>recv(MSG_PEEK)</code> 한 번으로 구현한다 (0 이면 끊김, WOULD_BLOCK 이면 살아 있음). WORKING 이 아닐 때는 <code>alive()</code> 를 돌려준다. 그래서 v2 의 <code>_peer_closed</code> 와 onPeerGone 의 Work 분기가 <b>없어진다</b>.</li>
+  <li><b>DONE → RUNNING</b>: <code>onWorkFinished</code> 는 먼저 notify Stage 에 쌓인 것을 write lane 으로 내보내고 (7절의 pick), 그 다음 outcome 을 적용한다. outcome 이 WRITE 면 worker 가 이미 평문을 send Stage 에 넣어 두었다 (v2 와 같다).</li>
+</ul>
+
+<h3>4.4 동기 함수의 구현 : StreamClient 가 이미 가지고 있다</h3>
+<p>v2 12절의 <code>StreamClient</code> 는 non-blocking socket + poll 반복 (<code>sendAll</code> / <code>receiveSome</code>) + TlsEngine 으로 동기 read / write 를 한다. Work 의 동기 함수는 <b>같은 코드</b> 다. 대상이 StreamClient 의 socket 이 아니라 Connection 의 socket 일 뿐이다. 그래서 둘을 하나의 클래스로 뽑는다.</p>
+<pre><code>class SyncChannel                               // base/connection/kiotty_sync_channel.h. StreamClient 와 Connection(WORKING) 이 같이 쓴다
+{
+public:
+    SyncChannel(ActiveSocket&amp; socket, TlsEngine&amp; tls, Stage&amp; receive, Stage&amp; send);
+    KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);      // receive Stage 에 남은 것 먼저. 비면 poll + recv (+ decode) 반복
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);              // 평문 sendAll. TLS 는 send_capacity 씩 encode → sendAll
+    KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);   // 4.5
+    bool            connected() const;                                           // recv(MSG_PEEK)
+};</code></pre>
+<ul>
+  <li>Connection 은 WORKING 일 때만 <code>SyncChannel</code> 을 만들어 (멤버로 값 하나) 쓴다. 생성에 할당은 없다. 네 참조만 든다.</li>
+  <li>timeout_ms 는 필수다. 제안의 서명에는 없었지만, 끊긴 peer 에게 쓰는 worker 가 영원히 멈추면 worker pool 이 하나씩 죽는다. StreamClient 와 같은 모양 (<code>timeout_ms</code>, 0 은 한도 없음) 으로 둔다.</li>
+  <li>Windows: 소켓이 IOCP 에 붙어 있어도 <code>lpOverlapped == NULL</code> 인 <code>send</code> / <code>recv</code> 는 동기로 동작하고 completion packet 을 만들지 않는다 (Winsock 이 내부 event 의 하위 비트로 port 전달을 막는다). 단, 그 socket 에 overlapped 요청이 걸려 있지 않아야 한다. 4.3 의 DRAINING 이 이것을 보장한다.</li>
+  <li><code>KiottyNetResult.bytes</code> 는 <code>int32_t</code> 다. read / write 한 번의 길이로는 충분하다 (send_capacity 단위). 파일은 2 GiB 를 넘을 수 있으므로 writeFile 은 code 만 돌려주고, 길이는 호출자가 이미 안다 (HTTP 의 Content-Length).</li>
+</ul>
+
+<h3>4.5 파일 전송 : zero-copy 는 평문에서만</h3>
+<table>
+  <tr><th>플랫폼</th><th>평문 (zero-copy)</th><th>TLS</th><th>비고</th></tr>
+  <tr><td>Linux</td><td><code>sendfile(sock, fd, &amp;offset, n)</code>. non-blocking socket 이면 일부만 보내고 EAGAIN → poll(POLLOUT) → 이어서</td><td>read(fd) → encode → sendAll 반복</td><td>io_uring 에는 sendfile 이 없다 (splice 만). 동기가 맞다</td></tr>
+  <tr><td>macOS / BSD</td><td><code>sendfile(fd, sock, offset, &amp;len, ...)</code>. 같은 모양</td><td>같다</td><td></td></tr>
+  <tr><td>Windows</td><td><code>TransmitFile(sock, hFile, ..., NULL)</code> 동기 호출. 또는 ReadFile → send</td><td>ReadFile → encode → sendAll</td><td>Workstation 판 Windows 는 동시 TransmitFile 을 2 개로 제한하고 나머지를 줄 세운다. worker 가 여럿이면 ReadFile + send 가 더 예측 가능하다. 둘 중 하나를 backend 에서 고른다 (choices 4)</td></tr>
+</table>
+<ul>
+  <li>TLS 는 OpenSSL 이 사용자 공간에서 암호화하므로 zero-copy 가 아니다 (kTLS 는 대상 플랫폼에서 가정하지 않는다). 그래도 worker 가 <code>send_capacity</code> 크기의 조각으로 읽고 → encode → 보내기를 반복하면 추가 할당 없이 간다. 이것이 "동기 함수가 맞다" 는 제안의 두 번째 근거이기도 하다. 비동기로 하려면 조각마다 completion 을 거쳐야 하고 그 사이 Stage 를 들고 있어야 한다.</li>
+  <li>인자는 path + offset + length 로 한다. fd / HANDLE 을 받으면 Windows 와 POSIX 에서 타입이 다르고, 열기 / 닫기 책임이 갈린다. 라이브러리가 열고 닫는다. 파일이 없으면 <code>KIOTTY_INVALID_ARGUMENT</code>, 중간에 끊기면 <code>PEER_CLOSED</code> / <code>SOCKET_ERROR</code>, 시간이 지나면 <code>TIMEOUT</code>. 보낸 길이는 돌려주지 않는다 (실패하면 연결을 닫는 것이 맞고, 이어 보내기는 HTTP Range 의 영역이다).</li>
+  <li>HTTP 의 <code>setHttpFile</code> 은 이 함수 위에 놓인다. <code>finishHttpWorkWithResponse</code> 가 header 를 <code>writeConnection</code> 으로, body 를 <code>writeConnectionFile</code> 로 보낸 뒤 <code>finishWork(*Read(...))</code> 한다. HTTP 설계에서 다룬다.</li>
+</ul>
+
+<h3>4.6 이 제안이 없애는 것과 더하는 것</h3>
+<table>
+  <tr><th></th><th>없어진다</th><th>더해진다</th></tr>
+  <tr><td>Connection 상태</td><td><code>_peer_closed</code>, onPeerGone 의 Work 분기, onWorkFinished 의 PEER_CLOSED 분기</td><td>Work 상태에 DRAINING, <code>SyncChannel</code> 값 하나</td></tr>
+  <tr><td>규칙</td><td>"Work 중에도 notify 가 나간다", "Owner close 는 WORKING 도 바로 닫는다"</td><td>"WORKING 중 IO Thread 는 socket / SSL 을 만지지 않는다", "WORKING 의 close 는 shutdown 만, closesocket 은 WORK_DONE 뒤"</td></tr>
+  <tr><td>공개 API</td><td><code>KiottyNetWorkHandle</code>, <code>isWorkConnected</code></td><td><code>readConnection</code> / <code>writeConnection</code> / <code>writeConnectionFile</code> (동기), <code>isConnected</code></td></tr>
+  <tr><td>StreamClient</td><td><code>sendAll</code> / <code>receiveSome</code> 가 StreamClient 전용이던 것</td><td><code>SyncChannel</code> 공유</td></tr>
+  <tr><td>문서</td><td></td><td>requirement 85, 435줄과 user_guide_http 1.5 의 수정</td></tr>
+</table>
+<p class="note">worker space 의 메모리를 복사 없이 바로 보낸다는 장점은 그대로다. 평문이면 사용자 버퍼에서 <code>send</code> 로 직접 나간다. TLS 면 encode 가 한 번 거치지만 그것은 어느 설계에서도 피할 수 없다.</p>
+
+<h2 id="p5">5. IoEvent 는 둘이다 : read 와 write (5) <span class="tag concern">우려</span></h2>
+<p>인용하신 코드 (한 socket 에 <code>WSARecv</code> 하나와 <code>WSASend</code> 둘을 각자의 OVERLAPPED 로 동시에) 는 <b>동작한다.</b> 3b 의 <code>TwoSendsSubmittedInOrderArriveAtPeerInThatOrder</code> 가 그것을 확인했다. 그러나 "동작한다" 와 "써도 된다" 는 다르다. 3b 피드백 질문 2 가 찾은 것이 바로 그 차이다.</p>
+<div class="flow">   USER 메시지 [AAAAAAAA] 를 send 1 로, NOTIFY [NN] 을 send 2 로 동시에 걸었을 때
+
+   IOCP (대개)        peer 가 받는 것 : AAAAAAAA NN           ← 잘 드러나지 않는다
+   epoll (흔히)       send 1 이 AAAA 만 나가고 EAGAIN
+                      그 사이 send 2 가 NN 을 보냄
+                      peer 가 받는 것 : AAAA NN AAAA          ← TLS 레코드 / WebSocket frame 이 깨진다</div>
+<p>그래서 3b 의 결론은 "같은 socket 에 <b>동시에 걸리는 write 는 항상 1 개</b>" 였고, 그 결론이 event 를 <code>_read_event</code> + <code>_write_event</code> 로 나누게 했다. NOTIFY 전용 event 를 셋째로 두면 write 가 다시 둘이 되어 같은 버그가 돌아온다.</p>
+
+<h3>5.1 "READ 와 WRITE 는 절대 동시에 안 벌어진다" 는 v2 의 stream event 이야기다</h3>
+<p>헷갈림의 뿌리가 여기다. v2 의 <code>_stream_event</code> 는 "사용자 read <b>또는</b> write 중 하나" 를 걸었고, 그래서 "read 와 write 는 동시에 없다" 가 참처럼 보였다. 그러나 v2 에서도 이미 동시에 걸리는 조합이 있었다.</p>
+<table>
+  <tr><th>동시에 걸리는 조합</th><th>v2</th><th>v3</th><th>허용?</th></tr>
+  <tr><td>read (USER) + write (NOTIFY)</td><td>_stream_event + _notify_event</td><td>_read_event + _write_event</td><td>된다. 방향이 다르다</td></tr>
+  <tr><td>HOLD (아무것도 없음) + write (NOTIFY)</td><td>_notify_event 만</td><td>_write_event 만</td><td>된다</td></tr>
+  <tr><td>write (USER) + write (NOTIFY)</td><td>_stream_event + _notify_event. <b>섞인다</b></td><td>write lane 하나에 번갈아. 동시에 없다</td><td>안 된다. 메시지 경계</td></tr>
+  <tr><td>read + read</td><td>없다</td><td>없다</td><td>필요 없다. 받는 쪽은 한 Stage 다</td></tr>
+</table>
+<p>즉 겹쳐도 되는 것은 <b>방향이 다른 둘</b> 뿐이고, 그래서 event 의 수는 방향의 수와 같다. 둘이다. "READ / WRITE 는 동시에 벌어지지 않고 NOTIFY 는 따로" 가 아니라 "<b>READ 와 WRITE 는 동시에 벌어질 수 있고, 모든 송신 (USER / HANDSHAKE / CONTROL / NOTIFY) 은 WRITE 하나를 나눠 쓴다</b>" 가 정확한 문장이다.</p>
+
+<h3>5.2 3b 피드백 문서가 헷갈리게 한 자리</h3>
+<p>그 문서는 "event 를 둘 두는 생각 자체는 맞지만 나누는 기준을 용도 (stream / notify) 에서 방향 (read / write) 으로" 라고 적고, 바로 아래 "이어진 질문" 에서 "notify Stage 와 Tx Stage 는 따로 둬도 되나 → 된다" 라고 답했다. <b>Stage 가 둘</b> 인 것과 <b>event 가 둘</b> 인 것이 같은 단락에 있어 "notify 도 자기 event 를 갖는다" 로 읽힌 것 같다. 정리하면:</p>
+<ul>
+  <li>평문 Stage: 셋 (receive, send, notify). 쓰는 thread 와 lock 규칙이 달라서 따로 둔다.</li>
+  <li>암호문 Stage: 둘 (cipher receive, cipher tx). 송신 암호문은 하나다. 암호화 순서 = 송신 순서를 구조로 지키기 위해서다.</li>
+  <li>IoEvent: 둘 (read, write). 방향의 수다.</li>
+  <li>IoPurpose: 넷 (USER, HANDSHAKE, CONTROL, NOTIFY). 완료가 돌아왔을 때 어느 Stage 를 consume 할지 말해 주는 꼬리표다. event 의 수와 무관하다.</li>
+</ul>
+<p>v3 에서는 3b 피드백의 질문 2 를 이 네 줄로 바꿔 적고 혼동을 없앤다.</p>
+
+<h2 id="p7">7. notify 는 별도 submit 이 아니라 write lane 의 용도 (7) <span class="tag partial">부분 동의</span></h2>
+<p>"notify 의 흐름 (쌓기 → 깨우기 → 보내기 → 비우기) 을 한 덩어리로 보이게 하자" 는 데 동의한다. v2 는 그것이 <code>notify</code> (9.6), <code>onNotified</code> (9.6), <code>broadcast</code> (10절), <code>onSent</code> 의 NOTIFY case (9.4), <code>consumeNotification</code> (9.4) 다섯 자리에 흩어져 있다.</p>
+<p>그러나 listener 에 <code>submit(event, IoNotification)</code> 을 따로 두는 것은 5번과 같은 이유로 반대한다.</p>
+<ul>
+  <li>그 submit 이 <code>_write_event</code> 를 쓰면 USER write 와 겹치지 않도록 "지금 write lane 이 비었나" 를 누군가 봐야 한다. 그 판단은 Connection 의 것이고, 결국 지금의 <code>onNotified</code> 와 같은 일이다. 이름만 바뀐다.</li>
+  <li>그 submit 이 자기 event 를 쓰면 write 가 둘이 되어 섞인다 (5절).</li>
+  <li>listener 는 바이트와 방향만 알아야 한다 (v2 원칙 3, 의존은 아래로만). <code>IoNotification</code> 과 <code>IoKind::NOTIFIED</code> 를 알면 listener 가 Connection 의 Stage 종류를 아는 셈이다. epoll / kqueue / io_uring backend 넷에 그 분기가 복제된다.</li>
+</ul>
+
+<h3>7.1 대신 : Connection 안의 WriteLane</h3>
+<p>흩어진 다섯 자리를 Connection 안의 클래스 하나로 모은다. listener 는 그대로다. 3b 피드백 "이어진 질문" 의 "write lane 이 다음에 보낼 평문 Stage 를 고르는 순간에 암호화" 를 그대로 코드 모양으로 옮긴 것이다.</p>
+<pre><code>class WriteLane                                 // base/connection/kiotty_write_lane.h. socket 하나의 송신 전부
+{
+public:
+    WriteLane(Stage&amp; send, Stage&amp; notify, TlsEngine&amp; tls, NotificationContext&amp; notification);
+
+    IoAction  pick();                           // 걸린 것이 없을 때. notify 에 바이트가 있으면 WRITE(NOTIFY), 아니면 send 에 있으면 WRITE(send 의 purpose), 아니면 NONE
+                                                // TLS 면 고른 평문을 이 자리에서 encode → cipher tx. 암호화 순서 = 송신 순서
+    IoPayload resolve(const IoAction&amp; action);  // cipher tx 또는 고른 평문 Stage 의 readable 전체
+    void      onSent(const IoCompletion&amp; completion);   // purpose 로 어느 평문 Stage 를 consume 할지. NOTIFY 는 lock 안에서. compact
+    bool      hasUserWrite() const;             // onWritten 을 낼 차례인가 (send Stage 의 USER 메시지가 다 나갔다)
+
+    KiottyNetCode stage(IoPurpose purpose, KiottyNetSpan plain);   // USER / HANDSHAKE / CONTROL 의 평문을 send 에. 넘치면 BUFFER_FULL
+    KiottyNetCode notify(KiottyNetSpan plain);                     // 아무 thread. lock. 넘치면 BUFFER_FULL
+};</code></pre>
+<div class="flow">   IO Thread 한 바퀴 (v3)
+
+   collect ──▶ broadcast ──▶ step ──▶ settle
+                 │                │
+                 │                └─ dispatch: onReceived / onSent / onTimeout / onWorkFinished
+                 │                     onSent ─▶ lane.onSent(completion) ─▶ USER 가 끝났으면 handler.onWritten ─▶ adopt
+                 │                                                        ─▶ 아니면 lane.pick() (다음 메시지)
+                 └─ 연결마다: write event 가 비어 있고 WORKING 이 아니면 lane.pick() → submit     ← v2 의 onNotified 자리</div>
+<ul>
+  <li><code>IoKind::NOTIFIED</code> 는 필요 없다. SEND 완료의 <code>action.purpose == NOTIFY</code> 가 그 역할이다. IoKind 는 그대로 여섯이다.</li>
+  <li><code>pick</code> 의 우선순위는 "notify 먼저" 로 한다 (v2 의 "broadcast 우선"). USER WRITE 의 timeout 은 notify 뒤에서 기다리는 시간을 포함한다. notify 는 push_capacity 로 묶여 있으므로 그 시간은 한 Stage 분량으로 유계다. 번갈아 보내는 것은 공정하지만 상태 (마지막에 누구를 보냈나) 가 하나 더 생겨서 택하지 않는다.</li>
+  <li>v2 9.2 의 <code>_resume_read</code>, <code>_write_length</code>, <code>_notify_plain_length</code> 는 WriteLane 안으로 들어간다. Connection 의 표가 그만큼 짧아진다.</li>
+  <li>WORKING 중에는 <code>pick</code> 을 부르지 않는다 (4.3). notify 는 <code>lane.notify</code> 로 쌓이기만 한다. WORK_DONE 의 첫 일이 <code>pick</code> 이다.</li>
+  <li>제안의 "notifying stage 꽉 차면 BUFFER_FULL" 은 지금과 같다. "broadcast 는 하나라도 모자라면 아무 데도 안 쓴다" 도 그대로다.</li>
+</ul>
+
+<h2 id="p6">6. max_clients 기본값 (6) <span class="tag agree">동의</span></h2>
+<p>3b 피드백 질문 3 의 "1 (기본값 상향) + 2 (쉬는 연결 정책)" 를 받아 아래로 확정하자고 제안한다.</p>
+<table>
+  <tr><th>항목</th><th>결정 제안</th><th>근거</th></tr>
+  <tr><td><code>max_clients</code> 기본값</td><td class="rec">128</td><td>v2 16절 수치로 평문 약 1.5 MiB, TLS 약 5.4 MiB + SSL. 일반 PC / 모바일에서 문제 없는 크기. 브라우저 host 당 6 연결 × 창 몇 개를 넉넉히 받는다</td></tr>
+  <tr><td><code>max_clients</code> 상한</td><td class="rec">1024 (config 검사, 넘으면 INVALID_ARGUMENT)</td><td>handle 의 slot 은 16 bit 지만 collect / broadcast / settle 이 매 바퀴 slot 전부를 돈다. 1024 까지는 그 비용이 보이지 않는다. 그 위는 3b 의 3번 (ring + heap) 을 넣은 뒤 올린다</td></tr>
+  <tr><td>requirement 29, 243줄</td><td class="rec">"최대 128 Client (설정으로 1024 까지)" 로 수정</td><td></td></tr>
+  <tr><td>TLS Pool</td><td class="rec"><code>KiottyNet_initializeContext</code> 는 그대로 두고 <code>KiottyNet_initializeContextWithTlsPool(size_t bytes)</code> 를 더한다. 기본은 128 × 64 KiB = 8 MiB</td><td>Context 는 Server 보다 먼저 생기므로 max_clients 를 모른다. 소유자마다 Pool 을 두면 OpenSSL 의 process-global allocator 를 thread-local 로 라우팅해야 하고, 4번으로 worker 도 SSL 을 만지게 되어 더 어렵다. 인자로 받는 것이 가장 단순하다. 모자라면 지금처럼 heap fallback + <code>fallbackCount</code></td></tr>
+  <tr><td>가득 찼을 때</td><td class="rec">base 는 지금처럼 accept 를 멈춘다 (backlog 가 받는다). "가장 오래 쉰 연결을 닫기" 는 base 에 넣지 않는다</td><td>어느 연결이 "쉬는" 것인지는 프로토콜이 안다 (HTTP keep-alive, WebSocket ping). base 가 끊으면 HOLD 로 기다리는 정당한 연결을 끊을 수 있다. HTTP 설계의 keep-alive timeout (기본값 있음) 과 "가득 차면 keep-alive 연결부터 닫기" 로 넣는다</td></tr>
+  <tr><td>HOLD timeout 기본값</td><td class="rec">두지 않는다. handler 가 준 timeout_ms 그대로 (0 은 없음)</td><td>같은 이유. base 는 정책을 갖지 않는다</td></tr>
+</table>
+<p>128 로 올리면 바뀌는 수치: IoLoop 의 completion 배열 (listener capacity + 2 × 128), Connection 배열의 placement new 128 회, v2 16절 표. 코드 모양은 바뀌지 않는다.</p>
+
+<h2 id="v3">8. v3 에 들어갈 변경 목록</h2>
+<table>
+  <tr><th>v2 절</th><th>바뀌는 것</th><th>출처</th></tr>
+  <tr><td>3 base.h</td><td>action 함수 여섯의 이름. <code>KiottyNetWorkHandle</code> 삭제. onWorkStarted 가 <code>KiottyNetConnectionHandle</code>. onError 가 <code>KiottyNetConnectionInfo</code>. 동기 <code>readConnection</code> / <code>writeConnection</code> / <code>writeConnectionFile</code> / <code>isConnected</code>. <code>initializeContextWithTlsPool</code></td><td>1, 2, 3, 4, 6</td></tr>
+  <tr><td>5 IoAction</td><td>그대로. IoKind 그대로 (NOTIFIED 없음)</td><td>7</td></tr>
+  <tr><td>7 event</td><td>"WRITE 완료의 length 는 payload 전체" 계약 한 줄 (3b 결정)</td><td>3b</td></tr>
+  <tr><td>9.1 IoSource</td><td><code>eventFor</code> 가 방향으로 고른다 (READ 계열 → read event, WRITE → write event)</td><td>5</td></tr>
+  <tr><td>9.2 상태 표</td><td><code>_stream_event</code> / <code>_notify_event</code> → <code>_read_event</code> / <code>_write_event</code>. <code>_peer_closed</code>, <code>_resume_read</code>, <code>_write_length</code>, <code>_notify_plain_length</code> 삭제 (WriteLane 안으로). <code>WriteLane _lane</code>, <code>SyncChannel</code> 추가. Work 상태에 DRAINING</td><td>4, 5, 7</td></tr>
+  <tr><td>9.4 dispatch</td><td>onSent 가 <code>_lane.onSent</code> + <code>pick</code>. onPeerGone 의 Work 분기 삭제. onWorkFinished 가 <code>pick</code> 먼저. 암호화는 <code>pick</code> 에서만 (stageWrite / onNotified 의 encode 삭제)</td><td>4, 7</td></tr>
+  <tr><td>9.5 WorkContext</td><td>IDLE → DRAINING → WORKING → DONE. "Owner close 는 WORKING 도 바로 닫는다" → "shutdown 만, closesocket 은 WORK_DONE 뒤"</td><td>4</td></tr>
+  <tr><td>9.6 notify</td><td>onNotified 와 consumeNotification 을 WriteLane 으로. WORKING 중에는 쌓기만</td><td>4, 7</td></tr>
+  <tr><td>10 io_loop</td><td>broadcast 가 "write event 비었고 WORKING 아니면 pick". collect 가 DRAINING → WORKING 전이와 onWorkStarted</td><td>4, 7</td></tr>
+  <tr><td>11 TIMEOUT</td><td>BUSY 규칙을 "read event 가 걸려 있을 때의 WRITE / START_WORK" 로. HOLD 중 (아무것도 안 걸림) 의 WRITE 는 허용</td><td>5</td></tr>
+  <tr><td>12 StreamClient</td><td><code>sendAll</code> / <code>receiveSome</code> → <code>SyncChannel</code></td><td>4</td></tr>
+  <tr><td>13 context</td><td>TLS Pool 크기 인자. 기본 8 MiB</td><td>6</td></tr>
+  <tr><td>14 thread 규칙</td><td>Connection 행에 "WORKING 중 socket / TlsEngine 은 worker 의 것. IO Thread 는 <code>_lane.notify</code> 와 <code>_phase</code> 만"</td><td>4</td></tr>
+  <tr><td>16 메모리</td><td>128 기준으로 다시 계산</td><td>6</td></tr>
+  <tr><td>requirement</td><td>29, 85, 243, 435 줄. user_guide_http 1.5 (Work 중 notify)</td><td>4, 6</td></tr>
+  <tr><td>3b 코드</td><td>event listener 테스트 셋을 read / write 모양으로 (3b 결정 그대로). listener 구현은 그대로</td><td>5</td></tr>
+</table>
+
+<h2 id="choices">9. 골라 주실 것 <span class="tag ask">선택</span></h2>
+<ol>
+  <li><b>action 함수 접두어</b>: <code>trigger*</code> / <code>then*</code> / <code>next*</code>. 제안은 trigger, 제 추천은 then (1절).</li>
+  <li><b>콜백의 handle 인자</b>: (a) 모든 콜백에 그대로 (추천) / (b) onReady, onWorkStarted, onDisconnected 에만 (2.2).</li>
+  <li><b>Work 중 notify</b>: "쌓기만 하고 finishWork 뒤에 나간다" 를 받아들이는가. 받아들이지 않으면 4번 전체가 성립하지 않으므로 사실상 4번의 가부다. requirement 435줄이 바뀐다 (4.1).</li>
+  <li><b>Windows 의 writeFile 평문 경로</b>: TransmitFile 동기 호출 / ReadFile + send 반복. worker 가 셋 이상이면 후자를 추천 (4.5).</li>
+  <li><b>max_clients 기본 128, 상한 1024, TLS Pool 8 MiB 인자</b>: 이 수치로 확정하는가 (6절).</li>
+</ol>
+<p>이 다섯이 정해지면 <code>design_base_v3.md</code> 를 v2 와 같은 형식 (인터페이스 + 한 바퀴의 순서) 으로 쓴다. 8절의 표가 그 목차다.</p>
+
+</body>
+</html>

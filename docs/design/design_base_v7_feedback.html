@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v7 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 980px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .rule { border-left: 3px solid var(--agree); padding: 4px 12px; margin: 8px 0; font-weight: 600; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v7 피드백 답변</h1>
+<p class="sub">2026-10-30. <code>design_base_v6_feedback.html</code> 에 대한 답에 대한 답이다. 확정된 것은 <code>then*</code>, onError 의 ConnectionInfo, "Work 중에는 worker 만 보낸다" 셋이다. 이 문서의 중심은 5번 질문 ("notify 와 write 가 어떻게 모여서 나가고 완료 뒤에 어떻게 치우나") 이다. 그 답을 위해 v6 의 <code>WriteLane</code> 을 <b>버린다.</b> 새 개념 대신 규칙 하나로 간다: <b>보낼 것은 전부 Stage 하나 (<code>tx</code>) 에 들어가고, 한 번의 WRITE 는 그 순간 tx 에 있는 것 전부다.</b> 그러면 v2 의 Stage 와 <code>_write_length</code> 만으로 네 경우가 전부 그려진다 (4절).</p>
+
+<p class="legend">
+  <span class="tag done">확정</span> 끝났다
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 반영하되 바꿀 점이 있다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">확정된 것 (1, 3, 4)</a></li>
+  <li><a href="#p1">Stream : Work 동안 쥐는 동기 통로 (2, 6)</a></li>
+  <li><a href="#p2">송신은 tx 하나 (5)</a></li>
+  <li><a href="#p3">복사는 몇 번인가, libuv 는 어떻게 하나 (5)</a></li>
+  <li><a href="#p4">네 가지 경우의 flow (5)</a></li>
+  <li><a href="#p5">START_WORK 가 write 와 겹칠 때 : DRAINING 이 필요한 유일한 자리 (4)</a></li>
+  <li><a href="#p6">Connection 이 드는 것 (v3)</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. 확정된 것 (1, 3, 4) <span class="tag done">확정</span></h2>
+<table>
+  <tr><th>#</th><th>결정</th></tr>
+  <tr><td>1</td><td>action 함수는 <code>then*</code> : <code>KiottyNet_thenHold</code>, <code>thenRead</code>, <code>thenReadUntil</code>, <code>thenWrite</code>, <code>thenWork</code>, <code>thenClose</code>. <code>return KiottyNet_thenRead(1024, 5000);</code></td></tr>
+  <tr><td>3</td><td><code>onError(app, KiottyNetConnectionInfo info, code, message)</code>. 연결 없는 오류는 소유자의 endpoint</td></tr>
+  <tr><td>4</td><td>Work 중에 socket 에 바이트를 넣는 것은 <b>worker 하나</b> 다. 다른 thread 의 notify / broadcast 는 notify Stage 에 쌓이고 Work 가 끝난 뒤 첫 바퀴에 나간다. worker 가 Work 중에 push 할 것이 있으면 자기 Stream 으로 쓴다. requirement 435줄은 이렇게 바뀐다. (제가 읽은 뜻이 이것이다. 다르면 알려 달라)</td></tr>
+  <tr><td>4.2</td><td>WORKING 인 연결의 close 는 <code>shutdown</code> 만. <code>closesocket</code> 은 WORK_DONE 뒤</td></tr>
+</table>
+<p>v6 의 6번 (max_clients 128 / 1024 / TLS Pool 8 MiB) 은 답이 없었다. choices 에 다시 둔다.</p>
+
+<h2 id="p1">1. Stream : Work 동안 쥐는 동기 통로 (2, 6) <span class="tag agree">동의</span></h2>
+<p>맞다. <code>KiottyNet_readConnection(handle, ...)</code> 이 onRead 에서 받은 handle 로 불리면 "되는 줄 알고" 부른다. runtime 에서 BUSY 를 돌려주더라도 API 가 그 실수를 유도하면 안 된다. <b>동기 IO 는 다른 타입으로 분리한다.</b> 그러면 v6 의 "handle 은 하나" 는 이렇게 다듬어진다: 비동기 쪽 handle 은 <code>KiottyNetConnectionHandle</code> 하나 (notify, getInfo), 동기 쪽은 <code>KiottyNetConnectionStream</code> 하나 (read, write, writeFile). 둘은 할 수 있는 일이 겹치지 않는다. 그래서 타입이 둘이어도 "같은 값에 타입 둘" 이 아니다.</p>
+
+<h3>1.1 누가 만드나</h3>
+<p>"Connection 에서 만드는데 IO Thread 에서는 생성 불가" 보다 한 단계 더 단순하게 할 수 있다. <b>라이브러리가 만들어서 onWorkStarted 로 준다.</b> 사용자는 만들지 않는다. 그러면 open 함수도, "지금 만들 수 있나" 검사도 없다. Stream 이 손에 있다는 것이 곧 "지금 이 연결은 네 것" 이라는 뜻이다.</p>
+<pre><code>typedef int64_t KiottyNetConnectionHandle;      /* 비동기. 모든 콜백에. notify / getInfo 만 */
+typedef int64_t KiottyNetConnectionStream;      /* 동기. onWorkStarted 가 준다. finish 까지 유효 */
+
+void (*onWorkStarted)(KiottyNetConnectionContext ctx, KiottyNetConnectionStream stream);
+
+KiottyNetResult KiottyNet_readConnectionStream     (KiottyNetConnectionStream stream, void* buffer, size_t length, uint32_t timeout_ms);
+KiottyNetResult KiottyNet_writeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetSpan data, uint32_t timeout_ms);
+KiottyNetCode   KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream stream, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);
+bool            KiottyNet_isConnectionStreamOpen   (KiottyNetConnectionStream stream);     /* recv(MSG_PEEK). v2 의 isWorkConnected */
+KiottyNetCode   KiottyNet_closeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetConnectionAction then);   /* v2 의 finishWork. 한 번. thenWork 는 INVALID_ARGUMENT */</code></pre>
+<table>
+  <tr><th>오용</th><th>결과</th></tr>
+  <tr><td>IO Thread 에서 read / write (onWorkStarted 안에서 바로 쓰는 경우)</td><td><code>KIOTTY_BUSY</code>. <code>NotificationContext::isIoThread()</code> 가 이미 있다. 이것이 "IO Thread 에서는 못 쓴다" 의 구현이다</td></tr>
+  <tr><td>close 한 뒤의 Stream 으로 read / write</td><td><code>KIOTTY_BUSY</code> (WORKING 이 아니다)</td></tr>
+  <tr><td>연결이 닫힌 뒤 (Owner close, generation 불일치)</td><td><code>KIOTTY_PEER_CLOSED</code></td></tr>
+  <tr><td>Stream 이 아닌 값 (0, Connection handle 을 잘못 넘김)</td><td>handle 안의 타입 비트 하나로 구분한다. <code>KIOTTY_INVALID_ARGUMENT</code></td></tr>
+</table>
+<ul>
+  <li>C++ 은 <code>KiottyNet_ConnectionStream</code> 이 close 의무를 소유한다 (v2 의 <code>KiottyNet_Work</code> 그대로, 이름만). 소멸자가 close 하지 않은 Stream 을 <code>thenClose(KIOTTY_SUCCESS)</code> 로 닫는다.</li>
+  <li>내부 클래스 이름도 <code>ConnectionStream</code> 이다 (v6 의 SyncChannel). StreamClient 와 Connection 이 같이 쓴다. 참조 넷 (socket, tls, receive Stage, tx Stage) 만 든다.</li>
+  <li><code>writeConnectionStream</code> 의 평문 경로는 사용자 버퍼에서 바로 <code>send</code> 다. 복사 0. TLS 는 <code>send_capacity</code> 씩 encode → tx → send.</li>
+  <li>"Work" 라는 말은 action (<code>thenWork</code>) 과 콜백 (<code>onWorkStarted</code>) 에 남고, 그 동안 쥐는 객체가 Stream 이다. 전부 Stream 으로 바꾸는 것 (<code>thenStream</code>, <code>onStreamOpened</code>) 도 가능하다 (choices 1).</li>
+</ul>
+
+<h2 id="p2">2. 송신은 tx 하나 (5) <span class="tag agree">동의</span></h2>
+<p>"notification 과 write 는 모아서 나가는 게 맞다" 가 결론이고, 거기서 한 걸음 더 간다. v6 은 평문 Stage 둘 (send, notify) 과 암호문 Stage 하나를 두고 "고르는 순간에 encode" 라고 했다. 그 "고르기" 가 WriteLane 이 되어 머리를 복잡하게 했다. <b>고르지 않으면 고르는 것이 없다.</b></p>
+<div class="rule">보낼 것은 들어오는 즉시 tx 에 들어간다 (평문이면 복사, TLS 면 encode). 한 번의 WRITE 는 그 순간 tx 에 있는 바이트 전부다. WRITE 는 그것을 다 보내야 완료된다 (3b 계약). 완료가 오면 tx 를 그만큼 비운다.</div>
+<table>
+  <tr><th>Stage</th><th>누가 쓰나</th><th>누가 읽나</th><th>들어가는 것</th></tr>
+  <tr><td><code>receive</code></td><td>IO Thread (완료 commit, TLS 면 decode 의 출력)</td><td>onRead 의 span, Stream 의 read</td><td>peer 가 보낸 평문</td></tr>
+  <tr><td><code>tx</code></td><td>IO Thread 만</td><td>socket (WRITE 의 payload)</td><td>USER 메시지, handshake, control, 그리고 notify Stage 에서 옮겨 온 notify. <b>평문 모드면 평문, TLS 모드면 전부 암호문</b></td></tr>
+  <tr><td><code>notify</code></td><td>아무 thread (mutex)</td><td>IO Thread (tx 로 옮길 때)</td><td>notify / broadcast 의 평문. 다른 thread 가 encode 할 수 없고 (SSL 은 IO Thread 만), tx 에 섣불리 끼면 순서가 깨지므로 대기실이 필요하다. 이것이 notify Stage 가 따로 있는 유일한 이유다</td></tr>
+</table>
+<p>v2 와 비교하면 TLS 의 Stage 가 여섯 (plain receive / send / notify + cipher receive / send / notify) 에서 넷 (receive, tx, notify + cipher receive) 로 준다. cipher receive 는 decode 의 입력이라 TlsEngine 안에 그대로 둔다. "암호화 순서 = 송신 순서" 는 규칙으로 지키는 것이 아니라 <b>tx 가 하나라서 저절로</b> 지켜진다.</p>
+
+<h3>2.1 notify 는 언제 tx 로 옮기나</h3>
+<p>write event 가 비어 있을 때만. 그 자리는 두 곳이다 (IoLoop 의 <code>broadcast</code> 가 slot 마다 한 번, 그리고 SEND 완료 직후). 옮기는 순간 notify Stage 에서는 바로 consume 한다. tx 에 복사되었으니 notify Stage 의 할 일은 끝이다. <b>그래서 완료 때 notify 쪽에서 치울 것이 없다.</b> 이것이 질문 4 ("Notification 자원은 어떻게 정리하지") 의 답이다.</p>
+<p>옮기지 않는 때: HANDSHAKING (평문으로 나가 버린다), WORKING (worker 의 것), write event 가 pending (지금 커널이 tx 앞부분을 읽고 있다. 뒤에 붙이는 것은 되지만 굳이 지금 옮길 이유가 없다. 다음 완료 때 옮긴다).</p>
+
+<h3>2.2 완료 때 무엇을 아나 : <code>_write_length</code> 하나</h3>
+<p>tx 안에 USER 메시지와 notify 가 섞여 있어도 완료 때 구분할 것은 하나다. <b>"이 WRITE 에 사용자의 메시지가 들어 있었나, 몇 바이트였나"</b> — onWritten 을 부르기 위해서다. notify 는 이미 정리되었고 handshake / control 은 완료 뒤 할 일이 Phase 로 정해진다. 그래서 v2 9.2 의 <code>_write_length</code> 가 그대로 그 일을 한다. 둘로 나눌 뿐이다.</p>
+<pre><code>size_t _user_staged;     // tx 에 들어갔지만 아직 submit 되지 않은 사용자 메시지의 평문 길이. adopt(thenWrite) 가 채운다
+size_t _user_sending;    // 지금 걸린 WRITE 에 실린 사용자 메시지의 평문 길이. submit 때 _user_staged 를 옮겨 받고 _user_staged = 0. 0 이면 onWritten 없음</code></pre>
+<p>왜 둘인가: notify 가 나가는 중에 onRead 가 thenWrite 를 돌려주면 그 메시지는 tx 뒤에 붙지만 지금 걸린 WRITE 에는 들어 있지 않다 (4.3 의 경우). 그 WRITE 의 완료에서 onWritten 을 부르면 안 된다. 그래서 "tx 에 있다" 와 "지금 나가고 있다" 를 나눈다.</p>
+<p>IoAction 의 <code>purpose</code> 는 이제 쓸 자리가 없다. WRITE 의 완료는 <code>_user_sending</code> 과 Phase 로, READ 의 Stage 는 <code>_tls.active()</code> 로 정해진다. <b>IoPurpose 를 지운다</b> (choices 2). IoAction 이 작아진다.</p>
+
+<h3>2.3 dispatch 와 resolve 는 그대로다</h3>
+<p>"dispatch 와 resolve 를 reduce 해서 합쳐진 WRITE 요청을 만드는 작업이 필요하다" — 그 작업이 <code>resolve(WRITE)</code> 다. 새 단계가 아니다. v2 의 resolve(WRITE) 는 "send Stage 의 readable 전체" 였고, v3 의 resolve(WRITE) 는 "notify 를 tx 로 옮긴 뒤 tx 의 readable 전체" 다. 한 줄이 늘었다. IoSubmission 은 이름의 문제다. listener 가 받는 (action, payload) 를 struct 하나로 묶어 그렇게 부르든 둘로 넘기든 뜻은 같다. 유지해도 좋다.</p>
+<pre><code>IoPayload Connection::resolve(const IoAction&amp; action)
+{
+    if (action.kind == IoActionKind::WRITE)
+    {
+        moveNotifyIntoTx();                                 // READY 일 때만. lock 안에서 notify → tx (복사 또는 encode), notify consume
+        _user_sending = _user_staged;
+        _user_staged = 0;
+        size_t ready = _tx.consumer().readable();
+        return IoPayload{ _tx.consumer().peek(), ready };
+    }
+    Stage&amp; in = _tls.active() ? _tls.cipherReceive() : _receive;
+    size_t room = in.provider().writable();
+    return IoPayload{ in.provider().prepare(room), room };
+}</code></pre>
+
+<h2 id="p3">3. 복사는 몇 번인가, libuv 는 어떻게 하나 (5)</h2>
+<table>
+  <tr><th>경로</th><th>v2</th><th>v3</th><th>libuv (Unix)</th><th>node (libuv + OpenSSL)</th></tr>
+  <tr><td>USER write, 평문</td><td>1 (span → send)</td><td><b>1</b> (span → tx)</td><td>0. 사용자 버퍼를 콜백까지 살려 두어야 한다</td><td>—</td></tr>
+  <tr><td>USER write, TLS</td><td>2 (span → plain send → encode → cipher send)</td><td><b>encode 1</b> (span → encode → tx). 평문 복사 없음</td><td>—</td><td>encode 1 + BIO pair 복사 1</td></tr>
+  <tr><td>notify, 평문</td><td>1 (span → notify)</td><td>2 (span → notify → tx)</td><td>—</td><td>—</td></tr>
+  <tr><td>notify, TLS</td><td>1 + encode (span → plain notify → encode → cipher notify)</td><td><b>1 + encode</b> (span → notify → encode → tx). 같다</td><td>—</td><td>—</td></tr>
+  <tr><td>receive</td><td>0 (Stage 를 span 으로 보여 준다)</td><td>0</td><td>0 (alloc_cb 의 버퍼를 그대로)</td><td>decode 1</td></tr>
+  <tr><td>Stream write, 평문</td><td>—</td><td><b>0</b> (사용자 버퍼 → send)</td><td>—</td><td>—</td></tr>
+</table>
+<ul>
+  <li>늘어나는 것은 <b>평문 notify 한 번</b> 뿐이다. notify 는 push_capacity 로 묶인 작은 바이트고 뜨거운 길이 아니다. 대신 평문과 TLS 가 같은 그림이 되고 WSASend / writev 의 scatter 버퍼가 필요 없다 (listener 는 그대로다). 줄어드는 것은 TLS USER write 의 평문 복사 한 번이다.</li>
+  <li>libuv 의 0 복사는 공짜가 아니다. <code>uv_write</code> 는 사용자 버퍼의 포인터만 큐에 넣고 (<code>uv_write_t</code> 연결 리스트), 콜백이 올 때까지 사용자가 버퍼를 살려 두어야 한다. 우리는 "return 하면 끝" 을 택했다 (v2 5절 "IoAction 은 사용자 메모리를 가리키지 않는다"). 의료기기 소프트웨어에서 dangling 을 사용자에게 맡기는 것보다 복사 한 번이 낫다. 큰 것은 Stream 의 writeFile 로 0 복사다.</li>
+  <li><b>libuv 도 lane 은 하나다.</b> Unix 에서 <code>uv_write</code> 는 큐의 머리 요청만 <code>writev</code> 하고, 일부만 나가면 그 요청의 offset 을 전진시켜 다음 POLLOUT 에 이어 보낸다. 머리가 끝나기 전에 다음 요청을 시작하지 않는다. 우리가 5번에서 도달한 결론과 같다. Windows 에서는 libuv 가 <code>WSASend</code> 를 요청마다 바로 걸지만, Windows 는 한 socket 의 overlapped send 를 커널 (AFD) 이 건 순서대로 줄 세우므로 섞이지 않는다. epoll 에서만 사용자 공간이 줄을 세워야 한다. "IOCP 는 되는데 epoll 은 안 된다" 가 바로 그것이다.</li>
+</ul>
+
+<h2 id="p4">4. 네 가지 경우의 flow (5)</h2>
+<p>기호: <code>tx[..]</code> 는 tx 의 내용 (앞이 먼저 나간다), <code>W</code> 는 write event 의 pending 여부, <code>us</code> 는 <code>_user_sending</code>, <code>st</code> 는 <code>_user_staged</code>. 연결은 READY 이고 사용자 action 은 READ(USER) 가 걸려 있다 (read event pending). TLS 면 "복사" 를 "encode" 로 읽으면 된다. 그 밖에 다른 점은 없다.</p>
+
+<h3>4.1 notify 만</h3>
+<div class="flow">thread X        notifyConnection(h, "NN")
+                  lock ─ notify.append("NN") ─ unlock ─ queued = true ─ listener.wake()
+
+IO Thread       collect     : { WAKE }                                            tx[]        W=0  us=0 st=0
+  바퀴 1        broadcast   : slot i: W=0, READY, not WORKING → resolve(WRITE)
+                              moveNotifyIntoTx: notify "NN" → tx, notify.consume(2)   tx[NN]
+                              us = st = 0
+                              payload = tx.peek, 2 → listener.submit(write_event)      W=1
+                step        : WAKE → 아무것도
+                settle
+
+IO Thread       collect     : { SEND slot i, length 2 }
+  바퀴 2        step        : onSent: tx.consume(2)                                  tx[]        W=0
+                              us == 0 → 콜백 없음
+                              다음 WRITE 가 있나: notify 비었음, tx 비었음 → NONE
+                settle</div>
+<p>치울 것: notify Stage 는 바퀴 1 의 resolve 에서 이미 비웠다. tx 는 완료의 length 만큼 비운다. 끝.</p>
+
+<h3>4.2 write 만</h3>
+<div class="flow">IO Thread       collect     : { RECEIVE slot i }                                  tx[]        W=0  us=0 st=0
+                step        : onReceived → pump → handler.onRead(...) → return thenWrite("AAAA", 5000)
+                              adopt(WRITE): "AAAA" → tx (복사), st = 4             tx[AAAA]             st=4
+                                            W == 0 → return WRITE
+                              apply(WRITE): deadline = now + 5000
+                              submit(WRITE): resolve → moveNotifyIntoTx (없음), us = 4, st = 0
+                                             payload = tx.peek, 4 → listener.submit    W=1  us=4 st=0
+
+IO Thread       collect     : { SEND slot i, length 4 }
+                step        : onSent: tx.consume(4)                                  tx[]        W=0
+                              us == 4 → handler.onWritten(ctx, h, 4) → return thenRead(1024, 0)
+                              us = 0
+                              adopt(READ) → pump → READ 를 read event 에 submit
+                settle</div>
+<p>v2 와 같다. "남은 조각을 다시 건다" 는 길이 없다. 3b 계약으로 WRITE 는 payload 전부를 보내야 완료되기 때문이다.</p>
+
+<h3>4.3 notify 가 나가는 중에 write 가 들어온다</h3>
+<div class="flow">t0              (4.1 의 바퀴 1 끝)                                                   tx[NN]      W=1  us=0 st=0
+
+IO Thread       collect     : { RECEIVE slot i }
+  바퀴 2        step        : onRead → return thenWrite("AAAA", 5000)
+                              adopt(WRITE): "AAAA" → tx 뒤에 붙인다, st = 4          tx[NN|AAAA] W=1  us=0 st=4
+                                            W == 1 → return NONE          ◀── 지금은 걸지 않는다. 커널이 tx[NN] 을 읽는 중
+                              apply(NONE): deadline 은 adopt 에서 이미 5000 뒤로     (WRITE 의 timeout 은 여기서부터 센다)
+                settle
+
+IO Thread       collect     : { SEND slot i, length 2 }
+  바퀴 3        step        : onSent: tx.consume(2)                                  tx[AAAA]    W=0  us=0 st=4
+                              us == 0 → 콜백 없음
+                              다음 WRITE: tx 에 있다 → resolve: moveNotifyIntoTx (없음), us = 4, st = 0
+                                         payload = tx.peek, 4 → submit                        W=1  us=4 st=0
+
+IO Thread       collect     : { SEND slot i, length 4 }
+  바퀴 4        step        : onSent: tx.consume(4) → us == 4 → onWritten(4)         tx[]        W=0  us=0</div>
+<p>peer 가 받는 것: <code>NN AAAA</code>. 메시지 둘이 각자 통째로. 바퀴 2 에서 <code>adopt</code> 가 <code>W</code> 를 보는 한 줄이 v6 WriteLane 의 전부다. <code>pending()</code> 을 읽는 것이라 v2 원칙 2 안에 있다.</p>
+
+<h3>4.4 둘이 함께 나간다, 그리고 완료 뒤의 정리</h3>
+<div class="flow">t0              (4.3 의 바퀴 2 끝. notify 나가는 중, AAAA 가 뒤에 붙어 있다)        tx[NN|AAAA] W=1  us=0 st=4
+thread Y        notifyConnection(h, "MM") → notify.append("MM"), wake()           notify[MM]
+
+IO Thread       collect     : { SEND slot i, length 2 }, { WAKE }
+  바퀴 3        step(SEND)  : onSent: tx.consume(2)                                  tx[AAAA]    W=0  us=0 st=4
+                              us == 0 → 콜백 없음
+                              다음 WRITE: resolve: moveNotifyIntoTx: "MM" → tx, notify.consume(2)   tx[AAAA|MM]  notify[]
+                                                   us = 4, st = 0
+                                         payload = tx.peek, 6 → submit  (한 번의 WSASend / writev)   W=1  us=4 st=0
+                step(WAKE)  : 아무것도
+                broadcast 는 이 바퀴 앞에서 이미 지나갔고 W=1 이었으므로 건너뛰었다. 괜찮다. 위에서 실렸다
+
+IO Thread       collect     : { SEND slot i, length 6 }
+  바퀴 4        step        : onSent: tx.consume(6)                                  tx[]        W=0
+                              us == 4 → onWritten(ctx, h, 4)           ◀── 6 이 아니라 4. notify 바이트는 사용자 메시지가 아니다
+                              us = 0
+                              다음 WRITE: notify 비었음, tx 비었음 → NONE (onWritten 의 return 이 다음 action)</div>
+<table>
+  <tr><th>자원</th><th>언제 치우나</th><th>무엇으로 아나</th></tr>
+  <tr><td>notify Stage 의 "MM"</td><td>tx 로 옮기는 순간 (바퀴 3 의 resolve). 완료를 기다리지 않는다</td><td>옮긴 길이. lock 안에서 consume</td></tr>
+  <tr><td>tx 의 "AAAA MM"</td><td>SEND 완료 (바퀴 4). <code>consume(completion.length)</code></td><td>completion.length. 3b 계약으로 payload 전부</td></tr>
+  <tr><td>사용자에게 알릴 것 (onWritten)</td><td>같은 완료</td><td><code>_user_sending == 4</code></td></tr>
+  <tr><td>thread Y 에게 알릴 것</td><td>없다. notify 는 완료 콜백이 없다 (requirement 435)</td><td>—</td></tr>
+</table>
+<p>TLS 면 바퀴 3 의 tx 는 <code>[레코드(AAAA) | 레코드(MM)]</code> 이고 완료 length 는 암호문 길이다. <code>_user_sending</code> 은 평문 4 를 따로 들고 있으므로 onWritten 은 여전히 4 다. 레코드 둘이 한 WSASend 로 나가는 것은 TLS 에서 정상이다.</p>
+
+<h2 id="p5">5. START_WORK 가 write 와 겹칠 때 : DRAINING 이 필요한 유일한 자리 (4) <span class="tag partial">부분 동의</span></h2>
+<p>"notification 용 event 를 따로 떼어 내면 DRAINING 은 신경 쓸 필요가 없는데" — 5번에서 그 길이 막혔으므로 (notify 도 같은 lane), 남는 질문은 "그래도 DRAINING 이 정말 필요한가" 다. 답: <b>한 경우에만 필요하고, 그 경우는 피할 수 없다. 그러나 상태 enum 이나 바퀴마다의 검사가 아니라 bool 하나다.</b></p>
+<p>그 경우: notify 가 나가는 중 (W=1) 에 onRead 가 <code>thenWork</code> 를 돌려준다. 이 순간 커널이 tx 앞부분을 읽고 있다. worker 에게 지금 Stream 을 주면 worker 의 <code>send</code> 가 그 뒤에 끼어든다 (epoll 은 섞이고, IOCP 는 overlapped 와 동기 send 를 섞는 것이다). 걸린 send 를 취소하는 것은 메시지를 반 토막 내는 일이라 더 나쁘다 (v2 원칙 4 "cancel 은 없다"). 그러니 <b>그 send 가 끝나기를 기다리는 것</b> 외에 길이 없다. 그것을 무엇이라 부르든.</p>
+<div class="flow">W == 0 일 때 (대부분)   adopt(START_WORK): W == 0 → WORKING, onWorkStarted(ctx, stream)   같은 step 안에서. 기다림 없음
+
+W == 1 일 때            adopt(START_WORK): W == 1 → _work_requested = true, return NONE
+                        ... SEND 완료 ...
+                        onSent: tx.consume ; us == 0 (사용자 메시지는 없다. 사용자는 READ 중이었다)
+                                _work_requested → WORKING, onWorkStarted(ctx, stream)    ◀── 다음 WRITE 를 걸지 않는다. tx 는 비어 있다</div>
+<ul>
+  <li>START_WORK 가 return 되는 자리에서 <b>read event 는 늘 비어 있다</b>: onRead 는 RECEIVE 완료를 소비한 뒤이고, onReady 는 아직 아무것도 안 걸었고, onWritten 때는 사용자 READ 가 없고 (사용자 action 은 한 번에 하나), onTimeout 에 read 가 걸려 있으면 v2 11절대로 BUSY 다. 그래서 기다릴 것은 write event 하나다.</li>
+  <li>tx 에 사용자 메시지가 staged 된 채 START_WORK 가 올 수는 없다 (thenWrite 뒤에는 onWritten 이 와야 다음 action 을 낸다). handshake / control 바이트는 READY 에서 control 답장이 나가는 중일 수 있는데, 그것도 W=1 에 포함되어 같은 길로 기다린다.</li>
+  <li>WorkContext 에 DRAINING 상태를 두는 것과 <code>_work_requested</code> bool 하나는 같은 것이다. 구현 가이드 1.5 처럼 WorkContext 의 State 에 넣는 쪽이 한 곳에 모여 읽기 쉽다. 이름은 중요하지 않다. 중요한 것은 "바퀴마다 모든 slot 을 보며 DRAINING 인가 묻지 않는다" 는 것이다. 전이는 SEND 완료 한 자리에서만 일어난다.</li>
+  <li>Work 중 notify: notify Stage 에 쌓인다. 옮기는 자리 (resolve, broadcast) 가 WORKING 을 건너뛰므로 저절로 그렇다. WORK_DONE 의 첫 일이 그 바퀴의 broadcast 에서 옮겨지는 것이다. 특별한 코드가 없다.</li>
+</ul>
+
+<h2 id="p6">6. Connection 이 드는 것 (v3)</h2>
+<p>v2 9.2 의 표를 다시 쓴다. 줄어든 것이 보이도록 v2 와 나란히 둔다.</p>
+<table>
+  <tr><th>v2</th><th>v3</th><th>왜</th></tr>
+  <tr><td><code>_stream_event</code>, <code>_notify_event</code></td><td><code>_read_event</code>, <code>_write_event</code></td><td>방향으로 나눈다 (v6 5절)</td></tr>
+  <tr><td><code>_plain</code> StageSet { receive, send, notify } + <code>_tls.cipher()</code> { receive, send, notify }</td><td><code>_receive</code>, <code>_tx</code>, <code>_notify</code> + <code>_tls.cipherReceive()</code></td><td>송신은 tx 하나 (2절)</td></tr>
+  <tr><td><code>_resume_read</code></td><td>없음</td><td>control 답장이 나가는 중에도 READ 는 read event 에 바로 걸 수 있다. 미룰 것이 없다</td></tr>
+  <tr><td><code>_write_length</code>, <code>_notify_plain_length</code></td><td><code>_user_staged</code>, <code>_user_sending</code></td><td>2.2. notify 의 평문 길이는 옮길 때 바로 consume 하므로 들 필요가 없다</td></tr>
+  <tr><td><code>_peer_closed</code></td><td>없음</td><td>Work 중 IO Thread 는 socket 을 보지 않는다. worker 의 Stream 이 끊김을 직접 본다</td></tr>
+  <tr><td><code>_work</code> WorkContext { IDLE, WORKING, DONE }</td><td>{ IDLE, REQUESTED, WORKING, DONE }</td><td>5절. REQUESTED 가 DRAINING 이다</td></tr>
+  <tr><td>—</td><td><code>_stream</code> ConnectionStream (참조 넷)</td><td>1절. WORKING 일 때만 쓴다</td></tr>
+  <tr><td><code>_phase</code>, <code>_deadline</code>, <code>_socket</code>, <code>_slot</code>, <code>_generation</code>, <code>_context</code>, <code>_info</code>, <code>_state</code>, <code>_handshake_timeout_ms</code>, <code>_app_context</code></td><td>그대로</td><td></td></tr>
+</table>
+<p>IoAction 에서 <code>purpose</code> 가 빠지고, IoKind 는 그대로 여섯, listener 는 3b 코드 그대로다 (WRITE 완료 = payload 전부 계약 한 줄만).</p>
+<p>onSent 는 이렇게 짧아진다.</p>
+<pre><code>IoAction Connection::onSent(const IoCompletion&amp; completion, const Handler&amp; handler)
+{
+    if (_phase == Phase::CLOSING)
+    {
+        return IoAction::none();
+    }
+    if (completion.code != SocketCode::SUCCESS)
+    {
+        return onPeerGone(completion.code);
+    }
+    _tx.consumer().commit(completion.length);
+    if (_phase == Phase::HANDSHAKING)
+    {
+        return onHandshake(handler);
+    }
+    if (_work.requested())
+    {
+        return IoAction::startWork();                       // apply 가 WORKING 으로 올리고 onWorkStarted
+    }
+    if (_user_sending > 0)
+    {
+        size_t written = _user_sending;
+        _user_sending = 0;
+        KiottyNetConnectionAction returned = handler.onWritten(_context, handle(), written);
+        return adopt(returned, handler);                    // WRITE 면 tx 에 붙이고 W 를 본다. 아니면 그 action
+    }
+    return nextWrite();                                     // tx 또는 notify 에 남은 것이 있으면 WRITE, 없으면 NONE
+}</code></pre>
+<p class="note"><code>nextWrite()</code> 는 "tx 에 바이트가 있거나 notify Stage 에 바이트가 있으면 <code>IoAction::write()</code>, 아니면 none" 한 줄이다. broadcast 가 slot 마다 부르는 것도 이것이다 (v2 의 <code>onNotified</code> 자리). adopt(WRITE) 뒤에 onWritten 의 return 이 READ 이면 그 READ 는 read event 로 가고, tx 에 남은 notify 는 다음 broadcast 가 건다. 두 lane 이 독립이라 둘 다 같은 step 에서 submit 해도 된다. IoLoop::step 이 "action 하나만 submit" 이던 v2 10절은 "read lane 의 action 하나 + write lane 의 nextWrite" 로 넓어진다. 그것이 v3 10절의 유일한 변화다.</p>
+
+<h2 id="choices">7. 골라 주실 것 <span class="tag ask">선택</span></h2>
+<ol>
+  <li><b>Work / Stream 이름</b>: (a) action 과 콜백은 Work (<code>thenWork</code>, <code>onWorkStarted</code>), 객체는 Stream (<code>KiottyNetConnectionStream</code>, <code>closeConnectionStream</code>) — 추천. HTTP 가이드의 Work 용어가 그대로 산다. (b) 전부 Stream (<code>thenStream</code>, <code>onStreamOpened</code>, <code>KIOTTY_ACTION_OPEN_STREAM</code>).</li>
+  <li><b>IoPurpose 삭제</b>: 2.2 대로 지우는가. 3b 코드에서 <code>IoAction::read(purpose, ...)</code> / <code>write(purpose, ...)</code> 의 인자가 빠진다. 추천: 지운다.</li>
+  <li><b>DRAINING 의 자리</b>: WorkContext 의 State 에 REQUESTED 로 (추천) / Connection 의 bool 로. 동작은 같다.</li>
+  <li><b>max_clients 128, 상한 1024, TLS Pool 8 MiB 인자</b> (v6 6절): 이 수치로 확정하는가.</li>
+</ol>
+<p>이 넷이 정해지면 <code>design_base_v3.md</code> 를 쓴다. 3절의 Stage 셋, 4절의 flow 넷, 6절의 표가 v3 의 9절 (connection) 이 되고, 나머지 절은 v6 8절의 변경 목록을 따른다.</p>
+
+</body>
+</html>
