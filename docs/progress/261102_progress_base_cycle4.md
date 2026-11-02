@@ -89,3 +89,14 @@ push 뒤 CI (새 tls 축) 확인 → R4.
 - trust store 계측
 - Linux 엄격 build 옵션
 - 정적 Pool 이 바닥날 때의 handshake 실패 테스트
+
+## 추가 (같은 날) : 위치 정정과 미결 논의
+
+- `core` 가 아무것에도 의존하지 않도록 범용 Pool 세 가지 (`kiotty_pool.h/.cpp`, `kiotty_static_pool.h`, `kiotty_pool_layout.h`) 를 `base/pool` 에서 `core/` 로 되돌렸다. `base/pool/` 에는 kiotty-net 의 크기를 아는 `kiotty_memory_limits.h`, `kiotty_memory_layout.h` 만 남았다 (commit `77032ec`, CI 11 job 통과).
+- 아래는 코드를 바꾸지 않은 논의다. 설계 v4 19.8 에 정리했고 결정은 아직이다.
+  - Windows 의 커밋 기준 도구에는 기본값 (Owner 16 × 연결 128) 이 약 463 MB 로 보인다. 기본 상한을 줄일지, Owner 마다 commit 할지.
+  - static Context (kiotty 사본마다 하나). 가면 `MAX_TLS_CONTEXTS`, handle 의 context 번호, R4 의 이유가 달라진다.
+  - Owner 자원: stack 에 두는 안은 권하지 않는다. `create*` 때 한 번 malloc 하고 Context 가 추적 / 해제하는 안은 가능하고, 이때 TLS 는 정적 TLS Pool 로 남고 별도 상한이 필요하다.
+  - libuv 와 다른 서버 / 임베디드 스택 (nginx, HAProxy, DPDK, lwIP, Zephyr, AUTOSAR) 은 어떻게 하는지 비교. libuv 는 사용자가 큰 메모리를 주고 내부는 malloc 이며 전역 hook 하나뿐이다.
+  - MISRA C++:2023 (C++11 로 둔다). 규칙을 어기는 자리를 allocator 세 파일, Context 의 malloc, backend 로 모은다. C++11 에서 할당 코드를 맞추는 방법 넷 (index free list, 포인터 정수 변환 제거, `unsigned char*`, 객체는 타입 있는 배열).
+- 다음 할 일: 위 결정 → allocator 정리와 static Context 또는 Owner malloc 중 정해진 쪽 → R4.

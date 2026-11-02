@@ -1269,3 +1269,59 @@ typedef PoolLayout<BlockClass<32, tlsBlocks(5096, 381, 149)>, /* ... 20 등급 .
 - trust store (OS 저장소, CA 수백 개) 를 쓰는 profile 의 계측.
 - Linux 의 엄격한 build 를 위한 미리 건드리기 / `mlock` 옵션.
 - Pool 이 바닥났을 때 handshake 가 깨끗하게 실패하는지 보는 테스트 (정적 TLS Pool 이 작은 build 가 따로 필요하다).
+
+### 19.8 논의 중인 것 (2026-11-02, 미결)
+
+19.1 ~ 19.7 은 코드가 된 결정이다. 아래는 그 뒤에 논의했지만 아직 정하지 않은 것이다. 정해지면 19.1 ~ 19.5 를 고친다.
+
+**a. Windows 에서 보이는 메모리 양**
+
+- 잡아 둔 크기와 쓴 크기는 도구마다 다르게 보인다.
+  - 작업 관리자의 기본 "메모리" 열, Linux `RES`, Android PSS, macOS footprint 는 쓴 page 만 센다.
+  - Windows 의 "커밋 크기", Process Explorer 의 Private Bytes 는 잡은 크기 전체를 센다. Linux `VIRT` 도 그렇다.
+  - Visual Studio 진단 도구의 그래프는 확인하지 못했다 (private bytes 쪽으로 추정).
+- 기본 상한 (Owner 16 × 연결 128, Stage 16 KiB) 은 Context Pool 161 MB + 정적 TLS Pool 302 MB 라서 커밋 기준 도구에는 약 463 MB 로 보인다. EventClient 하나만 만들어도 마찬가지다.
+- 선택지:
+  1. 기본 상한을 줄인다 (예: Owner 4 × 연결 32). user guide 에 "어떤 숫자를 봐야 하는지" 와 상한 변수를 적는다.
+  2. Windows 에서 `initializeContext` 는 주소만 예약하고 (`MEM_RESERVE`), Owner 를 만들 때 그 몫만 commit 한다. 메모리가 보장되는 시점이 `create*` 로 옮겨 간다. 정적 TLS Pool (.bss) 은 이 방식을 쓸 수 없다.
+
+**b. static Context**
+
+- 함수 안의 static Context 는 kiotty 사본마다 하나다. application 전체에 하나가 아니다. 같은 DLL 을 같은 경로로 여러 번 load 하면 사본은 하나지만, kiotty 를 정적 링크한 DLL 이 둘이거나 같은 DLL 이 다른 경로로 두 번 load 되면 사본이 둘이다. 사본마다 OpenSSL 과 정적 TLS Pool 도 따로 가지므로 서로 섞이지는 않는다.
+- Context 가 하나면 `new Context`, `malloc` 이 없어지고 (MISRA 의 동적 메모리 deviation 이 하나 준다), 메모리 보장 시점이 process load 가 되며, `KIOTTY_OUT_OF_MEMORY` 는 나지 않는다 (모자라면 process 가 뜨지 않는다).
+- 만들려면 상수 초기화되는 값 (POD, `atomic_flag`) 만 두고 생성자 / 파괴자를 없앤다. `initializeContext` 는 상태를 CAS 로 "사용 중" 으로 바꾸고 (이미 사용 중이면 `KIOTTY_BUSY`), `releaseContext` 는 Owner 가 모두 닫혔는지 보고 상태를 되돌린다. `std::mutex` 는 일부 MSVC 에서 상수 초기화가 보장되지 않아 `atomic_flag` 로 잠근다.
+- 따라오는 변화: `KIOTTY_NET_MAX_TLS_CONTEXTS` 불필요, handle 의 context 번호 4 bit 쓸 데 없음, R4 (handle 함수가 Context 를 첫 인자로) 의 이유가 약해진다 (Context 를 받는 모양을 두면 나중에 여럿이 되어도 API 가 같다), 테스트의 "Context 둘 격리" 가 "두 번째 initialize 는 BUSY" 로 바뀐다.
+
+**c. Owner 의 자원을 어디에 두나 (검토만 했다)**
+
+| 방법 | 판단 |
+|---|---|
+| Owner 자원을 stack 에 | 권하지 않는다. Server 하나 (연결 128, Stage 16 KiB, TLS) 가 약 10 MB 라 stack (Windows 1 MB, Linux 8 MB, macOS 비주 thread 512 KB, RTOS 수 KB) 에 안 들어가고, overflow 는 실패 코드 없이 죽는다. `create → run → close → await` 가 다른 호출이라 handle 이 함수 밖으로 나가므로 IO thread 가 끝난 frame 을 쓴다. OpenSSL 메모리는 어차피 stack 에 못 둔다. 사용자가 저장 공간을 주는 변형 (libuv 식) 은 크기, 수명 실수를 전부 사용자에게 맡기므로 "사용자를 믿지 않는다" 와 맞지 않는다 |
+| Owner 를 만들 때 한 번 malloc, Context 가 추적 / 해제 | 가능하다. `create*` 가 config 로 정확한 크기를 계산해 한 번 잡고 Connection 배열, Stage, cipher Stage 를 그 안에서 나눈다. run 중 할당 없음. Context 의 Owner slot 표가 포인터와 크기를 들고 `releaseContext` 가 마지막에 해제한다. 예약이 최악이 아니라 실제 Owner 만큼이 되어 (a) 의 문제가 사라진다. 조건: ① `releaseContext` 는 남은 Owner 를 shutdown 하고 thread 가 끝나기를 기다린 뒤 해제 (use-after-free 방지) ② 단편화: slot 이 블록을 `releaseContext` 까지 쥐고 크기가 맞으면 재사용 ③ TLS 는 들어오지 못한다 (OpenSSL 은 handshake 중에 할당하고 hook 이 Owner 를 모른다. thread_local 로 Pool 을 가리키는 구조는 종료 crash 를 냈다). 정적 TLS Pool 은 남고 크기는 별도 상한 `KIOTTY_NET_MAX_TLS_CONNECTIONS` 로 정한다 |
+
+MISRA C++:2023 의 동적 메모리 규칙은 advisory 로 알고 있고 (JSF AV C++ Rule 206 은 초기화 뒤 금지), 프로젝트가 "초기화 때만" 으로 다시 분류하는 일이 흔하다. 인허가 문서에 인용하기 전에 2023 원문으로 확인한다.
+
+**d. 다른 시스템의 사례 (근거로 쓸 수 있다)**
+
+- libuv: handle / request 와 수신 버퍼 (`alloc_cb`) 는 사용자가 준다. 내부 할당은 malloc 이고 바꾸는 hook (`uv_replace_allocator`) 은 process 전역 하나다. 실행 중에도 malloc 이 일어나고 상한 / 실행 전 실패 장치가 없다. 메모리가 모자라면 `UV_ENOMEM` 이고 책임은 사용자에게 있다.
+- 서버: nginx 는 `worker_connections` 만큼 connection 배열을 미리 잡고 요청마다 arena 를 쓴다 (블록은 malloc). HAProxy 는 `maxconn`, 객체 pool, `-m` 상한. DPDK 는 `rte_mempool` 로 고정 블록을 hugepage 에 시작할 때 잡는다 (kiotty 의 Pool 과 가장 가깝다). Redis 는 `maxclients`, `maxmemory` 상한.
+- 임베디드: lwIP (`lwipopts.h` 의 `MEMP_NUM_*`, `PBUF_POOL_SIZE`), Zephyr (`CONFIG_NET_MAX_CONN`, `NET_BUF_POOL_DEFINE`), FreeRTOS+TCP (버퍼 수, 정적 배열), AUTOSAR TcpIp / SoAd (설정 도구가 정적 테이블 생성 — 우리 번역기와 같은 구조).
+- 규칙: NASA / JPL Power of 10 의 3번 (초기화 뒤 동적 할당 금지), JSF AV C++ Rule 206, MISRA C:2012 Rule 21.3, IEC 62304 (직접 금지하지 않고 위험 분석에서 메모리 고갈을 다루게 한다).
+
+**e. MISRA C++ 준수 (방침 논의)**
+
+- 기준 후보는 MISRA C++:2023 (C++17 기준, 현행). 언어는 C++11 로 둔다고 정했다. 2023 판이 권하는 C++17 기능은 쓰지 못한다. C API 헤더에는 MISRA C:2012 가 함께 적용된다.
+- 규칙을 어기는 자리를 몇 곳으로 모은다: `core/` 의 allocator 세 파일, `Context` 의 `malloc` / `new`, `backend/` 의 OS / OpenSSL 호출. 각각 deviation 으로 기록하고, OpenSSL 은 준수 범위 밖의 외부 코드 (SOUP) 로 둔다. 테스트, benchmark, 계측 도구는 범위에서 뺀다.
+- 절차: Guideline Enforcement Plan, Re-categorization Plan, deviation 기록, Guideline Compliance Summary (MISRA Compliance:2020), CI 의 정적 분석 job. MISRA C++:2023 을 제대로 검사하는 도구는 상용이 대부분 (Helix QAC, C++test, LDRA, Polyspace, PC-lint Plus, Cppcheck Premium, SonarQube 일부). clang-tidy 와 cppcheck 는 보조로만 쓴다.
+- C++11 에서 할당 코드를 규칙에 맞추는 방법 (아직 고치지 않았다):
+  1. free list 를 블록 안의 `memcpy` 대신 별도 index 배열 (`uint32_t next[BLOCK_COUNT]`) 에 둔다. 원시 메모리에 값을 쓰지 않고, 놓는 순간 그 page 를 건드리지 않는다. 블록마다 4 B 가 더 든다 (.bss 라 lazy).
+  2. 포인터를 정수로 바꾸지 않는다. arena 범위는 `std::less<const unsigned char*>` 로 비교하고 index 는 같은 배열 안의 포인터 뺄셈으로 구한다.
+  3. `allocate` 가 `void*` 대신 `unsigned char*` 를 돌려준다 (Stage 의 `static_cast<char*>(void*)` 가 사라진다).
+  4. Pool 에는 byte 버퍼만 넣고 Connection / Owner 같은 객체는 타입이 있는 배열로 둔다 (Pool 블록 위의 placement new 를 쓰지 않는다). `core/kiotty_holder.h` 의 aligned storage + placement new 도 같은 기준으로 다시 본다.
+
+**정해야 하는 것**
+
+1. 기본 상한을 줄일지 (a-1), Windows commit 을 Owner 단위로 나눌지 (a-2).
+2. static Context 로 갈지 (b), 가면 R4 를 그대로 할지.
+3. 위 (c) 의 "Owner 를 만들 때 malloc" 으로 갈지. 가면 TLS 상한 `KIOTTY_NET_MAX_TLS_CONNECTIONS` 를 따로 둔다.
+4. MISRA 기준 (C++:2023), 정적 분석 도구, 지금 코드를 손으로 훑어 deviation 후보 목록을 먼저 만들지.
