@@ -586,6 +586,18 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>StreamClient</td><td>DisconnectDuringAPendingReadOnAnotherThreadMakesItReturnClosed</td><td><span class="tag edge">엣지</span></td><td>"한 번에 한 thread" 규약 밖이지만 crash 는 안 돼야 한다. 결과 코드 확정</td></tr>
 </table>
 
+<h3>11.1 push 의 주기와 지연 (no_delay)</h3>
+<p>push 경로 셋 (Server 의 <code>notifyConnection</code>, Server 의 <code>broadcastServer</code>, EventClient 의 <code>notifyEventClient</code>) 이 10 ms 간격의 작은 메시지를 모으거나 미루지 않고 바로 내보내는지 본다. 파라미터 군은 <code>PushCadence</code> = { 위 셋 } × transport { TCP (<code>no_delay</code> true, 기본), PIPE } 이다. 사이클 7 은 내부 클래스로, 사이클 8 은 C API 로 같은 케이스를 돈다.</p>
+<p>재는 법. 보내는 쪽은 IO Thread 가 아닌 thread 하나가 64 바이트 메시지 200 개를 절대 시각 <code>start + i × 10 ms</code> 에 보낸다. Windows 의 기본 timer 해상도 (15.6 ms) 를 피하려고 <code>sleep_until(deadline - 2 ms)</code> 뒤 남은 시간은 spin 한다. 호출 직전의 <code>steady_clock</code> 을 <code>t_send[i]</code> 로 적고, 메시지 안에 i 를 넣는다. 받는 쪽은 테스트 thread 의 blocking <code>LoopbackPeer</code> (EventClient 의 경우 상대는 LoopbackPeer 서버) 가 64 바이트씩 <code>recvExactly</code> 하고, 돌아온 직후의 <code>steady_clock</code> 을 <code>t_recv[i]</code> 로 적는다. 같은 프로세스라 시계가 하나다. 첫 10 개는 warm-up 으로 버린다.</p>
+<table>
+  <tr><th>모듈</th><th>테스트</th><th>분류</th><th>확인하는 것</th></tr>
+  <tr><td>PushCadence</td><td>MessagesSentEveryTenMillisecondsArriveEveryTenMilliseconds</td><td><span class="tag ok">정상</span></td><td>도착 간격 <code>Δrecv[i] = t_recv[i] - t_recv[i-1]</code> 의 평균이 10 ms ± 0.5 ms. 보낸 간격과의 차 <code>|Δrecv[i] - Δsend[i]|</code> 의 p99 가 1 ms 이하. 메시지 순서와 i 가 그대로. 둘이 한 recv 에 붙어 오거나 (Nagle, 지연 ACK) 한 바퀴 늦게 나가면 Δrecv 가 0 과 20 ms 로 갈라져 여기서 잡힌다</td></tr>
+  <tr><td>PushCadence</td><td>LatencyFromCallToPeerReceiveStaysBelowHumanPerception</td><td><span class="tag ok">정상</span></td><td><code>t_recv[i] - t_send[i]</code> 의 p99. TCP loopback 은 1 ms 이하. PIPE 는 200 µs 이하 (Unix domain 은 TCP 스택을 거치지 않는다. 숫자는 초기 추정이고 첫 측정으로 낮춘다). 최대값은 판정하지 않고 출력만 한다 (CI runner 의 선점)</td></tr>
+  <tr><td>PushCadence</td><td>CadenceHoldsWhileTheSameConnectionIsWritingUserData</td><td><span class="tag edge">엣지</span></td><td>상대가 1 MiB 를 thenWrite 로 받는 중에도 push 는 그 WRITE 하나가 끝난 뒤 바로 나간다. 지연 p99 는 그 WRITE 하나의 송신 시간 이하이고 push 사이의 순서는 그대로 (설계 v4 9.6 : write lane 하나, notify 가 send 보다 먼저)</td></tr>
+  <tr><td>PushCadence</td><td>BroadcastToThirtyTwoClientsKeepsTheCadenceForEveryClient</td><td><span class="tag ok">정상</span></td><td>broadcast 만. 32 클라이언트 각각의 도착 간격이 위의 첫 케이스를 만족하고, 같은 i 의 클라이언트 사이 도착 차 p99 가 1 ms 이하 (TCP)</td></tr>
+</table>
+<p>실제 망의 지연은 이 테스트의 범위 밖이다. loopback 과 Unix domain 에서 라이브러리가 더하는 지연만 본다. 두 번 연속 플래키면 plan 의 리스크 표 규칙대로 그 테스트를 고치는 commit 이 먼저다.</p>
+
 <h2 id="s12">12. 케이스 : 성능과 기준치</h2>
 <p>Google Benchmark 로 수치를 낸다. 숫자는 첫 구현에서 측정한 값을 기준치로 적고 (아래는 초기 추정), CI 는 기준치 대비 20 % 이상 나빠지면 실패한다. 측정 환경은 loopback 하나, 클라이언트 thread 는 benchmark 가 띄운다. "극단" 은 사용자의 두 질문 그대로다: read 를 엄청나게 많이, write 를 엄청나게 많이.</p>
 <table>
@@ -598,7 +610,8 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>WriteHeavyStream</td><td>서버가 32 클라이언트에 각각 64 MiB 를 WRITE(4 KiB) → onWritten → WRITE</td><td>MB/s 합</td><td>&gt; 1.5 GB/s</td><td>부분 완료 처리, compact</td></tr>
   <tr><td>WriteHeavyLargeMessage</td><td>send_capacity 1 MiB, 메시지 1 MiB 를 반복 (극단)</td><td>MB/s</td><td>&gt; 2 GB/s</td><td>큰 WSASend 의 부분 완료 재제출</td></tr>
   <tr><td>BroadcastFanOut</td><td>32 클라이언트, 다른 thread 가 100 B 를 10 k 번 broadcast</td><td>호출 → 마지막 클라이언트 수신 지연 p99, 호출 thread 의 block 시간</td><td>p99 &lt; 2 ms, 호출 &lt; 20 µs</td><td>broadcast 가 바퀴를 놓치면 wait 한 번 (수 ms) 이 더해진다</td></tr>
-  <tr><td>NotifyLatencyFromOtherThread</td><td>HOLD 중 연결 1, 다른 thread 의 notify 10 k 번</td><td>notify 호출 → peer 수신 p99</td><td>&lt; 200 µs</td><td>wake 경로, queued 플래그</td></tr>
+  <tr><td>NotifyLatencyFromOtherThread</td><td>HOLD 중 연결 1, 다른 thread 의 notify 10 k 번</td><td>notify 호출 → peer 수신 p99</td><td>&lt; 200 µs</td><td>wake 경로</td></tr>
+  <tr><td>PushCadence10ms</td><td>11.1 의 측정을 TCP / PIPE 각각 1000 개로</td><td>도착 간격의 표준편차, 지연 p50 / p99 / max</td><td>TCP p99 &lt; 1 ms, PIPE p99 &lt; 200 µs, 간격 표준편차 &lt; 0.5 ms</td><td>no_delay 누락, wake 누락으로 다음 timeout 까지 밀림, broadcast 가 연결마다 따로 깨움</td></tr>
   <tr><td>NotifyFromHandlerLatency</td><td>onRead 안에서 notify + HOLD(0)</td><td>onRead 진입 → peer 수신</td><td>&lt; 150 µs (다음 바퀴 첫머리)</td><td>collect 가 queued 를 무시하고 기다리면 timeout 만큼 늦는다</td></tr>
   <tr><td>ConnectionChurn</td><td>10 k 번 connect → 1 echo → close</td><td>초당 연결, 끝난 뒤 메모리 / fallbackCount</td><td>&gt; 5 k conn/s, fallbackCount 0, RSS 증가 0</td><td>slot 반납 지연, SSL_clear 미사용, 누수</td></tr>
   <tr><td>TlsEchoOverhead</td><td>EchoRoundtrip1KiB 의 TLS 판</td><td>평문 대비 비율</td><td>p50 &lt; 평문 × 3</td><td>레코드마다 과한 복사, memory BIO 왕복</td></tr>

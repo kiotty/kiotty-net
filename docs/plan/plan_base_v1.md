@@ -61,7 +61,7 @@ v0 의 번호를 이어 간다. 3c 가 다음이다. 새로 끼는 사이클은 
 | 구현 | `tls/kiotty_tls_profile.h`, `kiotty_tls_engine.h`, `backend/kiotty_stub_tls.cpp` 먼저, 그 다음 `backend/kiotty_openssl_tls.cpp`. v4 8절: cipher Stage 둘 (`cipherReceive`, `cipherSend`), `TlsEngine(pool, receive_capacity, send_capacity)`, `handshake()` 의 SEND 우선 규칙, `decode(plain)` 은 "cipherReceive 를 SSL 에 넣고 plain 이 찰 때까지 SSL_read, 끝에 cipherReceive compact, 꺼낸 길이를 Result 로", `encode(plain)` 은 실패하지 않는다 (SSL_OP_NO_RENEGOTIATION, debug assert). lastCode / lastMessage 의 오류 분류는 v2 8.1 그대로. `KIOTTY_NET_TESTING` 아래 `debugKeyUpdate()` / `debugShutdown()`. CMake: `KIOTTY_NET_USE_TLS` ON 이면 `find_package(OpenSSL 3)`. 테스트 인증서 `tests/certs/generate.sh` 와 PEM 다섯 벌 |
 |---|---|
 | 테스트 | 테스트 v0 8절 (TlsProfile 6, TlsEngine 23) 을 `TlsPump` (소켓 없이 두 engine 을 맞대는 더블) 로. 더하는 것: `DecodeDrainsPlaintextLeftInSslAcrossCalls` (16 KiB 레코드, 4 KiB plain 으로 네 번 꺼낸다), `DecodeCompactsCipherReceive`, `EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain`. stub 빌드는 `StubBuildReturnsNotSupportedForBothOpens` 만 돌고 나머지 `GTEST_SKIP` |
-| CI | 매트릭스에 `tls: [ON, OFF]` 축. OpenSSL 설치는 v0 6절 그대로 (첫 push 에서 확인) |
+| CI | 매트릭스에 `tls: [ON, OFF]` 축. OpenSSL 은 `openssl-cmake` (FetchContent, v1.1.0) 의 prebuilt static 라이브러리로 받는다 (`KIOTTY_NET_OPENSSL_PREBUILT` ON). prebuilt 는 Windows x64 MSVC (Debug + Release), Linux x64, Android arm64 / x86_64 뿐이라 macOS / iOS job 은 TLS OFF 로 두거나 `KIOTTY_NET_OPENSSL_PREBUILT=OFF` (소스 빌드, 10 ~ 30 분) 로 돈다. 첫 push 에서 runner 마다 확인 |
 | 완료 | 8 job + sanitizers 초록. TLS ON 에서 `fallbackCount` 0 |
 | commit | `tls: TlsProfile and TlsEngine over OpenSSL memory BIO with two cipher stages, stub backend, test certificates` |
 

@@ -47,4 +47,15 @@
 
 ## 다음 할 일
 
-R3 마무리 → 사이클 4 (tls, stub 먼저). 시작 전에 WSL 에 `libssl-dev` 를 설치해야 한다.
+R3 마무리 (commit `4f621a5`) → 사이클 4 (tls, stub 먼저).
+
+## 추가 (같은 날)
+
+- 테스트 계획 11.1 "push 의 주기와 지연" 을 더했다. 파라미터 군 `PushCadence` 는 Server notifyConnection, Server broadcast, EventClient notify 셋 × TCP (no_delay) / PIPE 이고, 케이스는 넷이다.
+  - 10 ms 간격으로 보내면 10 ms 간격으로 도착한다.
+  - 지연 p99 는 TCP 1 ms 이하, PIPE 200 µs 이하.
+  - 사용자 WRITE 중에도 주기를 지킨다.
+  - broadcast 32 클라이언트.
+- 12절 벤치마크 `PushCadence10ms` 를 더했다.
+- OpenSSL 은 시스템 설치 대신 `openssl-cmake` v1.1.0 의 prebuilt static 라이브러리를 FetchContent 로 받는다. option 은 `KIOTTY_NET_USE_TLS` (OpenSSL 사용 여부, OFF 면 stub) 와 `KIOTTY_NET_OPENSSL_PREBUILT` (OFF 면 소스 빌드). WSL 의 `libssl-dev` 는 필요 없다.
+- 로컬 TLS ON 빌드: MSVC Debug (windows-x64-msvc-debug) 127/127, WSL gcc / clang (linux-x64-release) 128/128. 아직 OpenSSL 을 부르는 코드가 없어서 링크 검증은 사이클 4 에서 끝난다.

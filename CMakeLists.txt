@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(kiotty_net LANGUAGES C CXX)
 
-option(KIOTTY_NET_USE_TLS "Build the OpenSSL TLS backend (OFF builds the stub)" ON)
+option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF builds the stub backend without OpenSSL" ON)
+option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)
 option(KIOTTY_NET_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
 set(KIOTTY_NET_SANITIZER "" CACHE STRING "Sanitizer for every target: address, thread, undefined or a comma list")
@@ -71,7 +72,14 @@ target_compile_features(kiotty_net PUBLIC c_std_99)
 target_link_libraries(kiotty_net PRIVATE kiotty_net_warnings)
 
 if(KIOTTY_NET_USE_TLS)
-    find_package(OpenSSL 3 REQUIRED)
+    include(FetchContent)
+    FetchContent_Declare(
+        openssl-cmake
+        GIT_REPOSITORY https://github.com/bn3monkey/openssl-cmake.git
+        GIT_TAG        v1.1.0
+    )
+    set(OPENSSL_CMAKE_USE_PREBUILT ${KIOTTY_NET_OPENSSL_PREBUILT} CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(openssl-cmake)
     target_link_libraries(kiotty_net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(kiotty_net PRIVATE KIOTTY_NET_USE_TLS=1)
 else()
