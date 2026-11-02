@@ -47,6 +47,16 @@ namespace kiotty_test
         return ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) == 0;
     }
 
+    bool shutdownBoth(intptr_t handle)
+    {
+        RawSocket socket = toRaw(handle);
+#if defined(_WIN32)
+        return ::shutdown(socket, SD_BOTH) == 0;
+#else
+        return ::shutdown(socket, SHUT_RDWR) == 0;
+#endif
+    }
+
     bool noDelayOf(intptr_t handle)
     {
         RawSocket socket = toRaw(handle);

@@ -447,7 +447,7 @@ TEST_F(EventListener, AcceptSubmitCompletesWhenAClientConnects)
 TEST_F(EventListener, ImmediateFailureIsDeliveredAsAnErrorCompletionNotAReturnCode)
 {
     char buffer[16];
-    link.socket.close();
+    ASSERT_TRUE(kiotty_test::shutdownBoth(link.socket.handle()));
     ASSERT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
     std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
     ASSERT_EQ(completions.size(), 1u);

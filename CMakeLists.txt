@@ -46,6 +46,12 @@ else()
         src/implementation/base/error/backend/kiotty_posix_error.cpp
         src/implementation/base/socket/backend/kiotty_posix_socket.cpp
     )
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
+        set(KIOTTY_NET_HAS_EVENT_BACKEND ON)
+        list(APPEND KIOTTY_NET_SOURCES
+            src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
+        )
+    endif()
 endif()
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})

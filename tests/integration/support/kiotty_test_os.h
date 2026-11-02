@@ -39,6 +39,7 @@ namespace kiotty_test
     bool      waitReadable(RawSocket socket, uint32_t timeout_ms);
     bool      noDelayOf(intptr_t handle);
     bool      setSendBuffer(intptr_t handle, int bytes);
+    bool      shutdownBoth(intptr_t handle);
     bool      removeFile(const char* path);
     bool      createFile(const char* path);
 }

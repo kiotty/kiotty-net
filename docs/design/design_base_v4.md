@@ -193,6 +193,14 @@ v2 7절 그대로 (attach / submit / detach / wait / wake, 3b 의 세부). 더�
 
 - **WRITE 완료의 length 는 payload 전체다.** IOCP 는 overlapped WSASend 가 그렇게 완료한다. epoll 은 listener 가 send 하고 남으면 `EPOLLOUT | EPOLLONESHOT` 으로 다시 걸어 끝까지 보낸 뒤에 완료 하나를 만든다. 일부만 보낸 완료는 없다. 그래서 Connection 에 "남은 조각을 다시 건다" 는 길이 없다.
 
+epoll backend (사이클 3c) 의 세부:
+
+- event 마다 `F_DUPFD_CLOEXEC` 로 복제한 fd 를 쓰고 `EPOLLONESHOT` 으로 건다. event 는 Holder 안에서 옮겨질 수 있으므로 `data.ptr` 은 attach 가 아니라 submit 때마다 다시 넣는다 (처음은 ADD, 그 뒤 MOD). 걸린 동안 event 는 옮기지 않는다 (debug assert).
+- READ / READ_UNTIL 은 readable 통지 뒤 한 번 recv 한다. WRITE 는 submit 에서 바로 send 하고, 남으면 `EPOLLOUT` 으로 이어 보내 전부 보낸 뒤에만 완료 하나를 만든다. ACCEPT 는 listening fd 가 readable 이면 길이 0 의 완료다 (payload 는 보지 않는다. accept 는 Acceptor 가 `PassiveSocket::accept` 로).
+- submit 에서 바로 끝난 WRITE, 즉시 실패 (epoll_ctl 실패, send 오류), detach 의 CANCELLED 는 listener 의 ready 목록 (event 를 잇는 intrusive list) 에 들어가고 다음 wait 가 먼저 돌려준다. 할당은 open 의 배열 둘뿐이다.
+- detach 는 `EPOLL_CTL_DEL` 뒤에 복제 fd 를 닫는다 (원래 fd 가 열려 있으면 close 만으로는 등록이 지워지지 않는다). wake 는 eventfd (`data.ptr == nullptr`).
+- 복제 fd 라서 "원래 socket 을 닫은 뒤 submit" 은 즉시 실패가 아니다. 이 순서는 정상 경로에 없다 (detach 가 close 보다 먼저). 공통 테스트 `ImmediateFailure...` 는 `shutdown(양방향)` 뒤 submit 으로 두 backend 에서 같은 뜻을 본다.
+
 3b 테스트에서 바뀌는 것: `WriteLargerThanSocketBufferCompletesPossiblyPartiallyAndTheRestIsResubmittable` 을 `WriteLargerThanSocketBufferCompletesOnceWithFullLength` 로. `TwoSendsSubmittedInOrderArriveAtPeerInThatOrder` 와 `DetachWithPendingReadAndWriteDeliversTwoCancelled` 는 event 둘을 read / write 모양 (`IoAction::read` 하나 + `IoAction::write` 하나) 으로 다시 쓴다. listener 구현은 바뀌지 않는다.
 
 ## 8. tls
