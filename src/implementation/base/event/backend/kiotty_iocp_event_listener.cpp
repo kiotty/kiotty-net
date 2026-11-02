@@ -1,3 +1,5 @@
+#if defined(_WIN32)
+
 #include "base/event/kiotty_event_listener.h"
 
 #if !defined(WIN32_LEAN_AND_MEAN)
@@ -499,3 +501,5 @@ namespace kiotty
         }
     }
 }
+
+#endif

@@ -59,6 +59,8 @@ src/
 
 v2 2절 그대로. 더하는 것:
 
+- backend 선택은 빌드 시스템이 아니라 소스가 한다. CMake 는 모든 `.cpp` 를 나열하고, backend 파일은 전체를 운영체제 매크로로 감싼다 (`_WIN32` → windows / iocp, `!_WIN32` → posix, `__linux__` → epoll, 뒤에 `__APPLE__` → kqueue). backend 가 있는지는 `kiotty_event_listener.h` 의 `KIOTTY_NET_HAS_EVENT_BACKEND` 로 본다.
+
 - Connection 안에서 Stage 를 직접 만지는 클래스는 그 Stage 의 소유자 하나다. receive Stage 는 Connection 의 수신 코드 (drive / refill) 와 ConnectionStream (WORKING) 만, send Stage 는 `Sender _send` 만, notify Stage 는 `Sender _notify` 만, cipher Stage 둘은 TlsEngine 과 ConnectionStream (WORKING) 만 만진다.
 - 콜백은 IO Thread 의 step 안 (`onOpened`, `dispatch`) 에서만 나간다. drain, settle, collectIoEvents, collectLocalEvents, resolve, pick 은 handler 를 받지 않는다.
 - IO Thread 밖에서 EventListener 에 들어가는 호출은 `wake()` 하나. 다른 thread 가 Connection 에 무엇을 적으면 (notify Stage, WorkContext) 반드시 wake 한다. IO Thread 안에서 적어도 wake 한다 (WAKE 완료 하나가 더 돌 뿐이다). 그래서 "IO Thread 인가" 를 보는 분기가 wake 경로에 없다.

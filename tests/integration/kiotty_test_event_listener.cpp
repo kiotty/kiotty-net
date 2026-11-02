@@ -1,4 +1,7 @@
 #include "base/event/kiotty_event_listener.h"
+
+#if KIOTTY_NET_HAS_EVENT_BACKEND
+
 #include "base/socket/kiotty_socket.h"
 
 #include "support/kiotty_test_peer.h"
@@ -622,4 +625,6 @@ TEST_F(EventListener_Epoll, NoCompletionArrivesWithoutASubmitEvenIfPeerSends)
     ASSERT_TRUE(link.peer.sendAll("unasked", 7));
     EXPECT_TRUE(listener.wait(50).empty());
 }
+#endif
+
 #endif

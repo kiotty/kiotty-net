@@ -10,6 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(_WIN32) || defined(__linux__)
+#define KIOTTY_NET_HAS_EVENT_BACKEND 1
+#else
+#define KIOTTY_NET_HAS_EVENT_BACKEND 0
+#endif
+
 namespace kiotty
 {
     namespace net

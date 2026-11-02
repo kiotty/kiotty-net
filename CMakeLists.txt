@@ -29,31 +29,15 @@ set(KIOTTY_NET_SOURCES
     src/implementation/core/kiotty_pool.cpp
     src/implementation/core/kiotty_stage.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
+    src/implementation/base/error/backend/kiotty_posix_error.cpp
+    src/implementation/base/error/backend/kiotty_windows_error.cpp
     src/implementation/base/socket/kiotty_socket.cpp
+    src/implementation/base/socket/backend/kiotty_posix_socket.cpp
+    src/implementation/base/socket/backend/kiotty_windows_socket.cpp
     src/implementation/base/event/kiotty_io_action.cpp
+    src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
+    src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
 )
-
-set(KIOTTY_NET_HAS_EVENT_BACKEND OFF)
-
-if(WIN32)
-    set(KIOTTY_NET_HAS_EVENT_BACKEND ON)
-    list(APPEND KIOTTY_NET_SOURCES
-        src/implementation/base/error/backend/kiotty_windows_error.cpp
-        src/implementation/base/socket/backend/kiotty_windows_socket.cpp
-        src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
-    )
-else()
-    list(APPEND KIOTTY_NET_SOURCES
-        src/implementation/base/error/backend/kiotty_posix_error.cpp
-        src/implementation/base/socket/backend/kiotty_posix_socket.cpp
-    )
-    if(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
-        set(KIOTTY_NET_HAS_EVENT_BACKEND ON)
-        list(APPEND KIOTTY_NET_SOURCES
-            src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
-        )
-    endif()
-endif()
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
 

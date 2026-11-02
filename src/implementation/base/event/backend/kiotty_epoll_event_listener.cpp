@@ -1,3 +1,5 @@
+#if defined(__linux__)
+
 #include "base/event/kiotty_event_listener.h"
 
 #include <sys/epoll.h>
@@ -646,3 +648,5 @@ namespace kiotty
         }
     }
 }
+
+#endif

@@ -1,3 +1,5 @@
+#if !defined(_WIN32)
+
 #include "base/error/kiotty_socket_error.h"
 
 #include <cerrno>
@@ -57,3 +59,5 @@ namespace kiotty
         }
     }
 }
+
+#endif

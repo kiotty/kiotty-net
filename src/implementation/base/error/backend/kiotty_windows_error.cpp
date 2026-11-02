@@ -1,3 +1,5 @@
+#if defined(_WIN32)
+
 #include "base/error/kiotty_socket_error.h"
 
 #if !defined(WIN32_LEAN_AND_MEAN)
@@ -68,3 +70,5 @@ namespace kiotty
         }
     }
 }
+
+#endif

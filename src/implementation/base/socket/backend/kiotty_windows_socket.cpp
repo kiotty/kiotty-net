@@ -1,3 +1,5 @@
+#if defined(_WIN32)
+
 #include "base/socket/kiotty_socket.h"
 #include "core/kiotty_clock.h"
 
@@ -479,3 +481,5 @@ namespace kiotty
         }
     }
 }
+
+#endif
