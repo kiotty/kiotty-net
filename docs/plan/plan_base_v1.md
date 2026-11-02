@@ -83,7 +83,7 @@ Connection 과 StreamClient 가 같이 쓰는 동기 통로다. 소켓 + TlsEngi
 
 | 구현 | `connection/kiotty_sender.h` (stage / readable / peek / release / clear. release 는 늘 compact), `kiotty_work_context.h` (IDLE / REQUESTED / WORKING / DONE, request / abandon / start / requested / finished / onFinished / working / reset / verify / finish), `kiotty_notification_context.h` (mutex, listener, io_thread. queued 없음), `kiotty_io_source.h` (eventFor 가 방향으로, shutdown), `kiotty_connection.h/.cpp` (v4 9.2 의 상태 전부, 9.4 의 인터페이스, 9.5 의 dispatch / apply / onOpened / onReceived / onSent / onTimeout / onWorkReady / onWorkFinished / onPeerGone / adopt / drive / refill / extend, 9.6 의 pickWrite / select / encoded / resolve, 9.7 의 stream / closeStream, 9.8 의 notify. TLS 분기 `_tls.active()` 는 자리만 두고 5b 에서 채운다), `kiotty_connection_host.h/.cpp` (acquire / release / full / empty / find / broadcast, Phase::IDLE) |
 |---|---|
-| 테스트 | R3 에서 다시 센 9절의 평문 케이스. 특히: `drive` 가 recv_capacity 번 안에 끝난다 (1 바이트 READ 를 가득 찬 Stage 에), `refill` 이 compact 뒤 writable 을 돌려준다, Stage 가 가득 찬 채 조건이 안 차면 REQUEST_TOO_LARGE, pickWrite 의 순서 여섯 (dead / working / pending / notify 먼저 / send / 없음), notify 송신 중 thenWrite 는 stage 와 deadline 만, SEND(NOTIFY) 가 `_notify` 만 release 하고 SEND(USER) 가 `_send` 만 release, onTimeout 의 다섯 행, apply(START_WORK) 는 REQUESTED 만, workReady 는 두 event 가 비었을 때만, apply(CLOSE) 가 REQUESTED 를 거둔다, closeStream 의 verify 셋 (BUSY / PEER_CLOSED / SUCCESS), CLOSING 중 closeStream 은 CLOSED 를 돌려주되 DONE 으로 간다. support: `RecordingHandler`, `ScriptedHandler`, `completion::*`, 가짜 listener (pending 을 세우고 내리는 더블) |
+| 테스트 | R3 에서 다시 센 9절의 평문 케이스 94 개. 특히: `drive` 가 recv_capacity 번 안에 끝난다 (1 바이트 READ 를 가득 찬 Stage 에), `refill` 이 compact 뒤 writable 을 돌려준다, Stage 가 가득 찬 채 조건이 안 차면 REQUEST_TOO_LARGE, pickWrite 의 순서 여섯 (dead / working / pending / notify 먼저 / send / 없음), notify 송신 중 thenWrite 는 stage 와 deadline 만, SEND(NOTIFY) 가 `_notify` 만 release 하고 SEND(USER) 가 `_send` 만 release, onTimeout 의 다섯 행, apply(START_WORK) 는 REQUESTED 만, workReady 는 두 event 가 비었을 때만, apply(CLOSE) 가 REQUESTED 를 거둔다, closeStream 의 verify 셋 (BUSY / PEER_CLOSED / SUCCESS), CLOSING 중 closeStream 은 CLOSED 를 돌려주되 DONE 으로 간다. support: `RecordingHandler`, `ScriptedHandler`, `completion::*`, 가짜 listener (pending 을 세우고 내리는 더블) |
 | 확인받을 계약 | 테스트 v0 14절 1 ~ 2 (READ_UNTIL 이 delimiter 포함, READ 0 / WRITE 0 / delimiter 0 또는 5 는 onError(INVALID_ARGUMENT) + CLOSE). 이 사이클 시작 전에 확정 |
 | commit | `connection: Sender, WorkContext, Connection with drive/refill/pickWrite, ConnectionHost (plaintext unit tests)` |
 
@@ -91,7 +91,7 @@ Connection 과 StreamClient 가 같이 쓰는 동기 통로다. 소켓 + TlsEngi
 
 | 구현 | `_tls.active()` 분기 네 자리 (onOpened 의 deadline + onHandshake, refill 의 decode, select 의 cipherSend 우선과 encoded, onSent 의 cipherSend consume), `receiveStage(HANDSHAKE / TLS USER)`. `connection/kiotty_acceptor.h/.cpp` + IOCP / epoll 쪽 resolve (AcceptEx 버퍼 / 빈 payload) |
 |---|---|
-| 테스트 | TLS 케이스 (TlsPump 로 DONE 까지 간 engine 을 심는다): handshake 의 SEND → NONE 과 drain 의 WRITE(HANDSHAKE), TLS 1.3 의 ticket 이 DONE 앞에 SEND 로 한 번 더, `as.write.length` 는 평문 / `completion.length` 는 암호문, encode 순서 = 송신 순서 (notify 와 send 가 같이 기다릴 때 notify 레코드가 먼저), KeyUpdate 답장이 cipherSend 에 남아 다음 drain 이 CONTROL 로 보낸다, decode 실패는 onError + CLOSE(RECORD_ERROR). Acceptor 3 (integration) |
+| 테스트 | 9절의 TLS 케이스 23 개 (TlsPump 로 DONE 까지 간 engine 을 심는다): handshake 의 SEND → NONE 과 drain 의 WRITE(HANDSHAKE), TLS 1.3 의 ticket 이 DONE 앞에 SEND 로 한 번 더, `as.write.length` 는 평문 / `completion.length` 는 암호문, encode 순서 = 송신 순서 (notify 와 send 가 같이 기다릴 때 notify 레코드가 먼저), KeyUpdate 답장이 cipherSend 에 남아 다음 drain 이 CONTROL 로 보낸다, decode 실패는 onError + CLOSE(RECORD_ERROR). 9절의 Acceptor 3 (integration) |
 | 완료 | unit 전부 매트릭스 초록 (TLS ON job 에서 TLS 케이스 포함). Acceptor integration 은 Windows / Linux |
 | commit | `connection: TLS path in Connection, Acceptor as IoSource` |
 
@@ -99,7 +99,7 @@ Connection 과 StreamClient 가 같이 쓰는 동기 통로다. 소켓 + TlsEngi
 
 | 구현 | `io_loop/kiotty_io_loop.h/.cpp`: v4 10절 그대로. `run / runOnce / drain / settle / collectIoEvents / step / collectLocalEvents / access / admit / submit / waitTimeout / shutdown`. local completion 배열 3 × capacity. `submit` 의 WRITE case 가 listener 를 부르고 `drain` 은 `submit(c, c.pickWrite())` 만 |
 |---|---|
-| 테스트 | R3 에서 다시 쓴 10절 (integration). IoLoop 를 Server 없이 직접 조립 (ConnectionHost + EventListener + Acceptor + IoLoop), run 은 테스트 thread. 네 성질: `ClientHelloIsArmedBeforeFirstWait` (TLS EventClient 모양으로 admit 뒤 run), `TimeoutIsNotDeliveredAfterCloseInTheSameBatch`, `WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle`, `WorkStartedWaitsForInFlightNotifyThenFires`, `NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder`, `OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream`. 벤치마크 `EchoRoundtrip1KiB`, `IdleCpu`, `NotifyLatencyFromOtherThread`, `NotifyFromHandlerLatency` 를 IoLoop 조립으로 먼저 |
+| 테스트 | R3 에서 다시 쓴 10절의 32 개 (integration). IoLoop 를 Server 없이 직접 조립 (ConnectionHost + EventListener + Acceptor + IoLoop), run 은 테스트 thread. 네 성질: `ClientHelloIsArmedBeforeFirstWait` (TLS EventClient 모양으로 admit 뒤 run), `TimeoutIsNotDeliveredAfterCloseInTheSameBatch`, `WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle`, `WorkStartedWaitsForInFlightNotifyThenFires`, `NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder`, `OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream`. 벤치마크 `EchoRoundtrip1KiB`, `IdleCpu`, `NotifyLatencyFromOtherThread`, `NotifyFromHandlerLatency` 를 IoLoop 조립으로 먼저 |
 | CI | Windows / Linux integration. TSan 이 notify 의 lock (stage / pick / release / clear) 과 closeStream 의 CAS 를 처음 본다. 플래키 방지는 v0 그대로 (`waitUntil`, 포트 0, 상한 넉넉히) |
 | 완료 | integration 매트릭스 초록, TSan 경고 0. 벤치마크 넷의 첫 수치를 테스트 v0 12절에 |
 | commit | `io_loop: drain/settle/collectIoEvents/step/collectLocalEvents cycle with loopback tests` |
@@ -133,7 +133,7 @@ Connection 과 StreamClient 가 같이 쓰는 동기 통로다. 소켓 + TlsEngi
 | 4 | 8절 | 8절 + 3 | tls | 예 | 2부 |
 | 4b | 9.7 ConnectionStream | 새 10 개 | stream | 예 | 2부 (새 사이클) |
 | 5a | 9.2 ~ 9.8 평문 | 9절 | connection | 예 | 2부 |
-| 5b | 9절 TLS, 9.9 Acceptor | 9절, 10절 Acceptor | connection | 예 | 2부 |
+| 5b | 9절 TLS, 9.9 Acceptor | 9절 TLS, 9절 Acceptor | connection | 예 | 2부 |
 | 6 | 10 ~ 11절 | 10절, 벤치 4 | io_loop | 예 | 2부 |
 | 7 | 12 ~ 13절 | 11절 (내부 클래스) | owner, config | 예 | 2부 |
 | 8 | 15절 | 11절 (C API), 벤치 나머지 | base.cpp | 예 | 2부 |

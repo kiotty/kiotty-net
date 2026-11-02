@@ -168,7 +168,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td><code>TlsPump</code></td><td>TlsEngine 둘 (서버 profile, 클라이언트 profile) 을 들고 <code>step()</code> 마다 한쪽의 <code>cipher().send</code> 를 다른 쪽의 <code>cipher().receive</code> 로 옮긴 뒤 둘의 <code>handshake()</code> 를 부른다. 소켓 없이 TLS 전체를 검증한다</td><td>TlsEngine unit</td></tr>
   <tr><td><code>LoopbackPeer</code></td><td>테스트 thread 가 직접 쓰는 blocking 소켓. Server 테스트의 클라이언트, EventClient 테스트의 서버. <code>sendAll</code>, <code>recvExactly(n, timeout)</code>, <code>shutdownWrite</code>, <code>close</code></td><td>integration</td></tr>
   <tr><td><code>waitUntil(pred, ms)</code></td><td>조건 폴링. 고정 sleep 은 금지. 느린 CI 에서 깨지는 테스트를 만들지 않는다</td><td>integration</td></tr>
-  <tr><td><code>NotificationContext</code> 의 <code>listener</code></td><td>Connection::notify 는 IO Thread 밖이면 <code>listener-&gt;wake()</code> 를 부른다. unit 에서는 <code>io_thread</code> 를 현재 thread 로 두어 wake 가 안 나가게 하고, wake 자체는 EventListener integration 이 검증한다</td><td>Connection unit</td></tr>
+  <tr><td><code>NotificationContext</code> 의 <code>listener</code></td><td>Connection::notify 와 closeStream 은 늘 <code>listener-&gt;wake()</code> 를 부른다 (설계 v4 2절). unit 에서는 wake 횟수만 세는 가짜 listener 를 꽂고, wake 자체는 EventListener integration 이 검증한다</td><td>Connection unit</td></tr>
 </table>
 
 <h2 id="s5">5. 케이스 : core</h2>
@@ -302,115 +302,225 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s9">9. 케이스 : connection</h2>
-<p>Connection 은 listener 를 모른다. 테스트는 Stage 에 바이트를 넣고 IoCompletion 을 손으로 만들어 <code>dispatch</code> 에 넣은 뒤, 돌아온 IoAction 과 handler 기록, Stage 상태, <code>resolve</code> 의 payload 를 본다. 이것이 설계 9.5 의 "역할 분담이 맞았다는 증거" 를 테스트로 옮긴 것이다.</p>
+<p>기준은 설계 v4 9.1 ~ 9.9 와 11절이다. Connection 은 listener 를 모른다. 테스트는 Stage 에 바이트를 넣고 IoCompletion 을 손으로 만들어 <code>dispatch</code> 에 넣는다. 그 뒤 돌아온 IoAction, handler 기록, Stage 상태, <code>pickWrite</code> 가 고른 WRITE, <code>resolve</code> 의 payload 를 본다. step 쪽 (dispatch → apply) 과 drain 쪽 (pickWrite → resolve) 을 따로 부르므로 "어느 lane 이 거는가" 가 테스트에서 그대로 보인다.</p>
+<p>support 는 넷이다. <code>RecordingHandler</code>, <code>ScriptedHandler</code>, <code>completion::*</code> (receive / sent / timeout / workReady / workDone), 가짜 listener. 가짜 listener 는 <code>wake</code> 횟수를 세고, 테스트가 read event 와 write event 의 pending 을 세우고 내린다. 실제 listener 의 동작은 7절이 검증한다.</p>
+<p>평문 케이스는 사이클 5a, TLS 케이스와 Acceptor 는 사이클 5b 에서 돈다. <code>_tls.active()</code> 가 거짓인 Connection 은 5a 에서 전부 통과해야 한다.</p>
+
+<h3>Phase × completion (설계 9.5 의 표)</h3>
+<p>칸마다 그 칸을 지나는 케이스다. IDLE 은 completion 이 오지 않으므로 칸 대신 "IDLE slot 을 그대로 돌아도 아무 일이 없다" 를 본다.</p>
+<table>
+  <tr><th>Phase</th><th>RECEIVE</th><th>SEND</th><th>TIMEOUT</th><th>WORK_READY</th><th>WORK_DONE</th></tr>
+  <tr><td>IDLE</td><td colspan="5">오지 않는다. AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck</td></tr>
+  <tr><td>HANDSHAKING</td><td>HandshakeReceiveThatNeedsToSendReturnsNoneAndLeavesBytesForDrain</td><td>SendHandshakeConsumesCipherSendByCompletionLengthAndContinuesHandshake</td><td>TimeoutDuringHandshakeReportsHandshakeTimeoutAndCloses</td><td>오지 않는다</td><td>오지 않는다</td></tr>
+  <tr><td>READY</td><td>ReceiveThatSatisfiesExactReadCallsOnReadWithExactlyThoseBytes 외 drive / refill 군, ReceiveWithClosedCodeReturnsClosePeerClosedAndOnDisconnectedOnce</td><td>SendNotifyReleasesOnlyNotifyAndReturnsNone, SendUserReleasesOnlySendAndCallsOnWrittenWithPlainLength, KeyUpdateReplyStaysInCipherSendAndNextPickSendsItAsControl</td><td>onTimeout 다섯 행 (아래 표)</td><td>WorkReadyCompletionStartsWorkAndCallsOnWorkStartedWithStreamHandle</td><td>WorkDoneDrivesTheOutcomeThatCloseStreamStored</td></tr>
+  <tr><td>CLOSING</td><td colspan="5">AnyCompletionInClosingReturnsNoneAndCallsNothing (다섯 kind 와 CANCELLED 를 TEST_P 로)</td></tr>
+</table>
+
+<h3>onTimeout 의 <code>userActionPending</code> (설계 11절의 표)</h3>
+<table>
+  <tr><th><code>userActionPending()</code></th><th>handler 의 return</th><th>케이스</th></tr>
+  <tr><td>false (HOLD 뒤)</td><td>무엇이든</td><td>TimeoutAfterHoldAppliesWhateverHandlerReturns</td></tr>
+  <tr><td>true</td><td>thenClose</td><td>TimeoutWithUserActionPendingAndCloseReturnedCloses</td></tr>
+  <tr><td>true</td><td>thenHold, thenRead, thenReadUntil</td><td>TimeoutWithUserActionPendingAndHoldOrReadReturnedOnlyExtendsDeadline</td></tr>
+  <tr><td>true</td><td>thenWrite</td><td>TimeoutWithUserActionPendingAndWriteReturnedReportsBusyOnceAndExtends</td></tr>
+  <tr><td>true</td><td>thenWork</td><td>TimeoutWithUserActionPendingAndWorkReturnedReportsBusyAndLeavesNoDeadline</td></tr>
+</table>
+<p>true 인 두 모양 (read event pending, <code>_send</code> 에 바이트) 을 TEST_P 로 둘 다 돈다. notify 의 write event 만 걸린 것은 true 가 아니다 (TimeoutWithOnlyNotifyWriteInFlightIsNotUserActionPending).</p>
+
+<h3>평문 (사이클 5a)</h3>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>WorkContext</td><td>StartFinishOnFinishedCyclesIdleWorkingDoneIdle</td><td><span class="tag ok">정상</span></td><td>finished() 는 DONE 에서만, working() 은 WORKING 과 DONE 에서, onFinished 가 outcome 을 돌려준다</td></tr>
-  <tr><td>WorkContext</td><td>FinishBeforeStartReturnsBusy</td><td><span class="tag misuse">오용</span></td><td>IDLE 에서 finish</td></tr>
-  <tr><td>WorkContext</td><td>SecondFinishReturnsBusyAndKeepsTheFirstOutcome</td><td><span class="tag misuse">오용</span></td><td>DONE 에서 finish</td></tr>
-  <tr><td>WorkContext</td><td>FinishWithDifferentGenerationReturnsPeerClosed</td><td><span class="tag ok">정상</span></td><td>소유자 close 뒤 늦은 finish</td></tr>
-  <tr><td>WorkContext</td><td>FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome</td><td><span class="tag ok">정상</span></td><td>1000 회 반복. release / acquire 의 가시성 (outcome 이 찢어지지 않음)</td></tr>
-  <tr><td>Connection</td><td>FreshConnectionIsIdleNotAliveAndEventsNotPending</td><td><span class="tag ok">정상</span></td><td>생성 직후 상태표의 초기값</td></tr>
+  <tr><td>Sender</td><td>StageCopiesDataAndReadableEqualsItsLength</td><td><span class="tag ok">정상</span></td><td>readable == 길이, peek 이 같은 바이트. 호출자 버퍼를 지운 뒤에도 Stage 내용 유효</td></tr>
+  <tr><td>Sender</td><td>StageBeyondWritableReturnsBufferFullAndWritesNothing</td><td><span class="tag edge">엣지</span></td><td>writable + 1 → BUFFER_FULL, readable 불변</td></tr>
+  <tr><td>Sender</td><td>StageOfExactlyWritableSucceeds</td><td><span class="tag edge">엣지</span></td><td>경계</td></tr>
+  <tr><td>Sender</td><td>ReleaseConsumesAndAlwaysCompacts</td><td><span class="tag ok">정상</span></td><td>뒤에 바이트가 남은 채 앞을 release → writable == capacity - readable. 비었을 때만이 아니라 늘 compact</td></tr>
+  <tr><td>Sender</td><td>ReleaseOfThePeekedLengthKeepsWhatWasStagedBehind</td><td><span class="tag edge">엣지</span></td><td>stage A, peek 길이 a, stage B, release(a) → peek 이 B 만. 완료가 보낸 구간만 치운다</td></tr>
+  <tr><td>Sender</td><td>ContinuousAppendWhileReleasingNeverLocksIntoBufferFull</td><td><span class="tag edge">엣지</span></td><td>"peek → 뒤에 stage → release" 1000 회. 늘 compact 하므로 BUFFER_FULL 이 굳지 않는다 (설계 9.3)</td></tr>
+  <tr><td>Sender</td><td>ClearDropsEverything</td><td><span class="tag ok">정상</span></td><td>readable 0, writable == capacity</td></tr>
+  <tr><td>WorkContext</td><td>RequestStartFinishOnFinishedCyclesIdleRequestedWorkingDoneIdle</td><td><span class="tag ok">정상</span></td><td>네 상태에서 requested (REQUESTED 만), working (REQUESTED / WORKING / DONE), finished (DONE 만). onFinished 가 finish 의 outcome 을 돌려주고 IDLE</td></tr>
+  <tr><td>WorkContext</td><td>AbandonTurnsRequestedBackToIdle</td><td><span class="tag ok">정상</span></td><td>시작하지 않은 Work 는 CLOSE 가 거둔다</td></tr>
+  <tr><td>WorkContext</td><td>AbandonInWorkingOrDoneDoesNothing</td><td><span class="tag edge">엣지</span></td><td>worker 가 끝낸다. IDLE 의 abandon 도 그대로</td></tr>
+  <tr><td>WorkContext</td><td>VerifyIsSuccessOnlyWhenWorkingWithTheSameGeneration</td><td><span class="tag ok">정상</span></td><td>start(g) 뒤 verify(g) SUCCESS</td></tr>
+  <tr><td>WorkContext</td><td>VerifyInIdleRequestedOrDoneIsBusy</td><td><span class="tag misuse">오용</span></td><td>셋 다 BUSY</td></tr>
+  <tr><td>WorkContext</td><td>VerifyWithDifferentGenerationIsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>WORKING 이고 generation 다름</td></tr>
+  <tr><td>WorkContext</td><td>FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome</td><td><span class="tag ok">정상</span></td><td>1000 회. release / acquire 의 가시성 (outcome 이 찢어지지 않음)</td></tr>
+  <tr><td>WorkContext</td><td>ResetReturnsToIdleFromEveryState</td><td><span class="tag ok">정상</span></td><td>release 가 부른다</td></tr>
+  <tr><td>NotificationContext</td><td>IsIoThreadIsTrueOnlyOnTheRecordedThread</td><td><span class="tag ok">정상</span></td><td>io_thread 를 적은 thread 에서 true, 다른 thread 에서 false</td></tr>
+  <tr><td>Connection</td><td>FreshConnectionIsIdleNotAliveWithBothEventsEmpty</td><td><span class="tag ok">정상</span></td><td>phase IDLE, deadline 0, working false, readEvent / writeEvent 둘 다 pending 아님</td></tr>
   <tr><td>Connection</td><td>OpenRaisesGenerationAndHandleChangesEachOpen</td><td><span class="tag ok">정상</span></td><td>open / release / open → handle 다름, slot 같음</td></tr>
-  <tr><td>Connection</td><td>OnOpenedPlainCallsOnReadyOnceAndAppliesItsAction</td><td><span class="tag ok">정상</span></td><td>onReady → READ(4, 500) → 돌아온 action READ, deadline 이 now + 500 (expireDeadline(now + 499) false, (now + 500) true)</td></tr>
-  <tr><td>Connection</td><td>OnOpenedTlsServerReturnsHandshakeReadWithoutCallingOnReady</td><td><span class="tag ok">정상</span></td><td>purpose HANDSHAKE, exact 0, timeout = profile 의 것. 콜백 기록 비어 있음</td></tr>
-  <tr><td>Connection</td><td>ReceiveThatSatisfiesExactReadCallsOnReadWithExactlyThoseBytes</td><td><span class="tag ok">정상</span></td><td>READ(4) 걸고 Stage 에 4 → onRead 의 data 4 바이트, Stage 소비됨</td></tr>
-  <tr><td>Connection</td><td>ReceiveShortOfExactReturnsTheSameReadAndNoCallback</td><td><span class="tag ok">정상</span></td><td>READ(4) 에 3 → 돌아온 action 이 같은 READ, onRead 없음. resolve 가 남은 자리</td></tr>
+  <tr><td>Connection</td><td>StreamHandleIsHandleWithTheTypeBit</td><td><span class="tag ok">정상</span></td><td>streamHandle 의 bit 63 을 지우면 handle 과 같다</td></tr>
+  <tr><td>Connection</td><td>EventForChoosesByDirection</td><td><span class="tag ok">정상</span></td><td>WRITE (USER / NOTIFY / HANDSHAKE / CONTROL) → write event. READ / READ_UNTIL → read event</td></tr>
+  <tr><td>Connection</td><td>OnOpenedPlainCallsOnReadyOnceAndAppliesItsAction</td><td><span class="tag ok">정상</span></td><td>onReady → thenRead(4, 500) → READ, deadline now + 500 (expireDeadline(now + 499) false, (now + 500) true)</td></tr>
+  <tr><td>Connection</td><td>AnyCompletionInClosingReturnsNoneAndCallsNothing</td><td><span class="tag ok">정상</span></td><td>RECEIVE / SEND / TIMEOUT / WORK_READY / WORK_DONE 와 CANCELLED. dispatch 첫 줄. 늦은 완료가 콜백을 못 낸다</td></tr>
+  <tr><td>Connection</td><td>ReceiveWithClosedCodeReturnsClosePeerClosedAndOnDisconnectedOnce</td><td><span class="tag ok">정상</span></td><td>onDisconnected(app, ctx, handle, PEER_CLOSED) 정확히 1 회, phase CLOSING, deadline 0</td></tr>
+  <tr><td>Connection</td><td>ReceiveOrSendWithErrorCodeReturnsCloseSocketError</td><td><span class="tag ok">정상</span></td><td>RESET 등 → onPeerGone → SOCKET_ERROR. RECEIVE 와 SEND 둘 다</td></tr>
+  <tr><td>Connection</td><td>CloseIsAppliedOnlyOnceEvenIfReadAndWriteCompletionsBothCarryErrors</td><td><span class="tag edge">엣지</span></td><td>read event 와 write event 가 둘 다 오류로 → onDisconnected 1 회. 둘째는 CLOSING 의 첫 줄</td></tr>
+  <tr><td>Connection</td><td>ReceiveThatSatisfiesExactReadCallsOnReadWithExactlyThoseBytes</td><td><span class="tag ok">정상</span></td><td>READ(4) 에 4 → onRead 의 data 4 바이트, receive Stage 소비됨</td></tr>
+  <tr><td>Connection</td><td>ReceiveShortOfExactReturnsTheSameReadAndNoCallback</td><td><span class="tag ok">정상</span></td><td>READ(4) 에 3 → 걸었던 READ 그대로, onRead 없음</td></tr>
   <tr><td>Connection</td><td>ReceiveWithMoreThanExactDeliversExactAndKeepsTheRest</td><td><span class="tag edge">엣지</span></td><td>READ(4) 에 10 → onRead 4, readable 6</td></tr>
-  <tr><td>Connection</td><td>TwoMessagesAlreadyBufferedAreDeliveredInOneDispatchWhenHandlerKeepsReading</td><td><span class="tag ok">정상</span></td><td>onRead 가 또 READ(4) 를 돌려주면 pump 가 두 번째도 바로 낸다. 콜백 2 회, submit 할 action 은 세 번째 READ</td></tr>
-  <tr><td>Connection</td><td>ReadUntilDeliversUpToAndIncludingTheDelimiter</td><td><span class="tag ok">정상</span></td><td>"abc\r\n" + "de" 에 READ_UNTIL("\r\n") → data "abc\r\n", readable 2. 포함 여부는 여기서 확정 (requirement 에 명시 필요)</td></tr>
-  <tr><td>Connection</td><td>ReadUntilWithDelimiterSplitAcrossTwoReceivesStillFinds</td><td><span class="tag edge">엣지</span></td><td>"abc\r" 뒤 "\n". scanned 가 되돌아가 경계를 잡는다</td></tr>
-  <tr><td>Connection</td><td>ReadUntilDoesNotRescanBytesItAlreadyScanned</td><td><span class="tag perf">성능</span></td><td>1 MiB 를 1 KiB 씩 넣으며 delimiter 없음 → satisfied 의 비교 횟수가 O(n). scanned 를 뽑아 보는 관찰 지점 (13절)</td></tr>
-  <tr><td>Connection</td><td>ReadUntilExceedingMaxReturnsCloseRequestTooLarge</td><td><span class="tag edge">엣지</span></td><td>max 8 에 delimiter 없는 9 바이트 → CLOSE(REQUEST_TOO_LARGE), onDisconnected 그 이유로</td></tr>
-  <tr><td>Connection</td><td>ReadExactLargerThanReceiveCapacityReturnsCloseRequestTooLarge</td><td><span class="tag misuse">오용</span></td><td>recv 4 KiB 에 READ(8 KiB). 받기 전에 바로</td></tr>
-  <tr><td>Connection</td><td>ReadExactZeroIsRejectedAsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>READ(0) → onError(INVALID_ARGUMENT, message) 뒤 CLOSE. 14절에서 확정</td></tr>
-  <tr><td>Connection</td><td>ReadUntilWithEmptyOrFiveByteDelimiterIsRejected</td><td><span class="tag misuse">오용</span></td><td>길이 0, 5 → INVALID_ARGUMENT</td></tr>
-  <tr><td>Connection</td><td>OnReadReturningWriteCopiesDataIntoSendStageAndReturnsWriteUser</td><td><span class="tag ok">정상</span></td><td>_plain.send 에 바이트, _write_length, resolve(WRITE) 가 그 자리와 길이. 사용자 버퍼를 지운 뒤에도 Stage 내용 유효</td></tr>
+  <tr><td>Connection</td><td>TwoMessagesAlreadyBufferedAreDeliveredInOneDriveWhenHandlerKeepsReading</td><td><span class="tag ok">정상</span></td><td>onRead 가 또 thenRead(4) → 같은 drive 가 두 번째도 낸다. 콜백 2 회, 돌아온 action 은 세 번째 READ</td></tr>
+  <tr><td>Connection</td><td>DriveTerminatesWithinRecvCapacityIterations</td><td><span class="tag edge">엣지</span></td><td>recv_capacity 만큼 찬 Stage 에 handler 가 매번 thenRead(1) → onRead 정확히 recv_capacity 회 뒤 READ(1) 을 돌려준다. 반복 상한이 recv_capacity (onRead 한 번이 1 바이트 이상 소비)</td></tr>
+  <tr><td>Connection</td><td>RefillCompactsSoTheReturnedReadHasWritableRoom</td><td><span class="tag edge">엣지</span></td><td>앞을 소비해 뒤만 남은 Stage 에 조건 미달 → refill 의 compact 뒤 resolve(READ) 의 길이 == capacity - readable, 0 이 아님</td></tr>
+  <tr><td>Connection</td><td>FullStageWithoutTheConditionReturnsCloseRequestTooLarge</td><td><span class="tag edge">엣지</span></td><td>thenReadUntil(delimiter, max ≥ recv_capacity) 에 delimiter 없는 recv_capacity 바이트 → refill 이 REQUEST_TOO_LARGE → onError 뒤 CLOSE(REQUEST_TOO_LARGE), onDisconnected 그 이유로</td></tr>
+  <tr><td>Connection</td><td>ReadExactLargerThanReceiveCapacityReturnsCloseRequestTooLarge</td><td><span class="tag misuse">오용</span></td><td>recv 4 KiB 에 thenRead(8 KiB). satisfied 의 "조건 초과". 받기 전에 바로</td></tr>
+  <tr><td>Connection</td><td>ReadUntilDeliversUpToAndIncludingTheDelimiter</td><td><span class="tag ok">정상</span></td><td>"abc\r\n" + "de" 에 thenReadUntil("\r\n") → data "abc\r\n", readable 2. 포함 여부는 14절 1</td></tr>
+  <tr><td>Connection</td><td>ReadUntilWithDelimiterSplitAcrossTwoReceivesStillFinds</td><td><span class="tag edge">엣지</span></td><td>"abc\r" 뒤 "\n". scanned 가 되돌아가 경계를 잡는다. refill 의 compact 뒤에도 scanned 는 begin 기준이라 그대로</td></tr>
+  <tr><td>Connection</td><td>ReadUntilDoesNotRescanBytesItAlreadyScanned</td><td><span class="tag perf">성능</span></td><td>1 MiB 를 1 KiB 씩 넣으며 delimiter 없음 → 비교 횟수 O(n). 돌아온 READ 의 <code>as.read_until.scanned</code> 로 본다 (13절)</td></tr>
+  <tr><td>Connection</td><td>ReadUntilWithoutDelimiterWithinMaxReturnsCloseProtocolError</td><td><span class="tag edge">엣지</span></td><td>max 8 에 delimiter 없는 9 바이트 → CLOSE(PROTOCOL_ERROR) (설계 9.5 satisfied 의 주석), onDisconnected 그 이유로</td></tr>
+  <tr><td>Connection</td><td>ReadExactZeroIsRejectedAsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>thenRead(0) → onError(INVALID_ARGUMENT, message) 뒤 CLOSE. 14절 2</td></tr>
+  <tr><td>Connection</td><td>ReadUntilWithEmptyOrFiveByteDelimiterIsRejected</td><td><span class="tag misuse">오용</span></td><td>길이 0, 5 → INVALID_ARGUMENT. 14절 2</td></tr>
+  <tr><td>Connection</td><td>OnReadReturningWriteStagesIntoSendAndReturnsHoldWithDeadline</td><td><span class="tag ok">정상</span></td><td>thenWrite(data, 300) → <code>_send</code> readable == 길이, 돌아온 action HOLD, deadline now + 300. step 의 output 에 WRITE 가 없다</td></tr>
   <tr><td>Connection</td><td>WriteLargerThanSendCapacityReturnsCloseBufferFullWithoutPartialCopy</td><td><span class="tag edge">엣지</span></td><td>capacity + 1 → CLOSE(BUFFER_FULL), send Stage 비어 있음</td></tr>
   <tr><td>Connection</td><td>WriteOfExactlySendCapacitySucceeds</td><td><span class="tag edge">엣지</span></td><td>경계</td></tr>
-  <tr><td>Connection</td><td>WriteOfZeroBytesCompletesWithOnWrittenZeroWithoutSubmitting</td><td><span class="tag edge">엣지</span></td><td>0 바이트 WRITE 의 계약. "바로 onWritten(0)" 또는 "INVALID_ARGUMENT". 14절에서 확정</td></tr>
-  <tr><td>Connection</td><td>PartialSendCompletionReturnsWriteForTheRemainder</td><td><span class="tag edge">엣지</span></td><td>1000 걸고 SEND length 400 → WRITE(USER) 다시, resolve 가 600 을 가리킨다, onWritten 없음</td></tr>
-  <tr><td>Connection</td><td>FullSendCompletionCallsOnWrittenWithPlainLengthAndCompactsSendStage</td><td><span class="tag ok">정상</span></td><td>onWritten(length) 1 회, send Stage writable == capacity</td></tr>
-  <tr><td>Connection</td><td>ReceiveWithClosedCodeReturnsClosePeerClosedAndOnDisconnectedOnce</td><td><span class="tag ok">정상</span></td><td>onDisconnected(app, ctx, handle, PEER_CLOSED) 정확히 1 회, phase CLOSING</td></tr>
-  <tr><td>Connection</td><td>ReceiveWithResetCodeReturnsCloseSocketError</td><td><span class="tag ok">정상</span></td><td>RESET → SOCKET_ERROR</td></tr>
-  <tr><td>Connection</td><td>AnyCompletionInClosingReturnsNoneAndCallsNothing</td><td><span class="tag ok">정상</span></td><td>RECEIVE / SEND / CANCELLED 전부. 늦은 완료가 콜백을 못 낸다</td></tr>
-  <tr><td>Connection</td><td>CloseIsAppliedOnlyOnceEvenIfTwoCompletionsCarryErrors</td><td><span class="tag edge">엣지</span></td><td>stream 과 notify 둘이 오류로 → onDisconnected 1 회</td></tr>
-  <tr><td>Connection</td><td>TimeoutWithoutPendingCallsOnTimeoutAndAppliesWhateverItReturns</td><td><span class="tag ok">정상</span></td><td>HOLD(100) 뒤 TIMEOUT → onTimeout → WRITE 가 그대로 간다 (stageWrite 됨)</td></tr>
-  <tr><td>Connection</td><td>TimeoutWithPendingReadAndCloseReturnedCloses</td><td><span class="tag ok">정상</span></td><td>stream pending 으로 두고 TIMEOUT → CLOSE 통과, onDisconnected</td></tr>
-  <tr><td>Connection</td><td>TimeoutWithPendingReadAndReadReturnedOnlyExtendsDeadline</td><td><span class="tag ok">정상</span></td><td>돌아온 action NONE, deadline = now + 새 timeout, Stage 불변</td></tr>
-  <tr><td>Connection</td><td>TimeoutWithPendingReadAndWriteReturnedReportsBusyAndLeavesSendStageEmpty</td><td><span class="tag misuse">오용</span></td><td>onError(handle, BUSY, "action rejected: io outstanding. use notify") 1 회, send Stage 비어 있음, deadline 연장</td></tr>
-  <tr><td>Connection</td><td>TimeoutWithPendingReadAndStartWorkReturnedReportsBusyAndDoesNotStartWork</td><td><span class="tag misuse">오용</span></td><td>onWorkStarted 없음, _work IDLE</td></tr>
-  <tr><td>Connection</td><td>TimeoutDuringHandshakeReportsHandshakeTimeoutAndCloses</td><td><span class="tag ok">정상</span></td><td>onError(TLS_HANDSHAKE_TIMEOUT, "tls: handshake timeout") → CLOSE 같은 코드. onTimeout 콜백 없음</td></tr>
-  <tr><td>Connection</td><td>StartWorkClearsDeadlineCallsOnWorkStartedAndReturnsStartWork</td><td><span class="tag ok">정상</span></td><td>expireDeadline(now + 1e9) false, onWorkStarted(ctx, work) 1 회, work handle 의 generation == connection 의 것</td></tr>
-  <tr><td>Connection</td><td>FinishWorkWithWriteCopiesPlaintextAndWorkDoneReturnsWrite</td><td><span class="tag ok">정상</span></td><td>다른 thread 에서 finishWork(WRITE) → workFinished true → WORK_DONE dispatch → WRITE(USER), resolve 가 그 바이트</td></tr>
-  <tr><td>Connection</td><td>FinishWorkWithReadThatIsAlreadySatisfiedCallsOnReadAtWorkDone</td><td><span class="tag ok">정상</span></td><td>Work 중 Stage 에 쌓인 바이트로 바로 onRead</td></tr>
-  <tr><td>Connection</td><td>FinishWorkWithWriteLargerThanSendCapacityReturnsBufferFullAndWorkStaysValid</td><td><span class="tag edge">엣지</span></td><td>두 번째 finishWork(CLOSE) 가 SUCCESS</td></tr>
-  <tr><td>Connection</td><td>FinishWorkWithStartWorkReturnsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>Work 유지</td></tr>
-  <tr><td>Connection</td><td>FinishWorkTwiceReturnsBusy</td><td><span class="tag misuse">오용</span></td><td>WorkContext 의 것을 Connection 층에서도</td></tr>
-  <tr><td>Connection</td><td>FinishWorkAfterReleaseReturnsPeerClosedAndTouchesNothing</td><td><span class="tag misuse">오용</span></td><td>옛 generation. Stage 불변</td></tr>
-  <tr><td>Connection</td><td>PeerCloseOnNotifySendDuringWorkIsRecordedAndAppliedAtWorkDone</td><td><span class="tag edge">엣지</span></td><td>Work 중 SEND(NOTIFY) 가 CLOSED → NONE, isWorkConnected false. WORK_DONE → CLOSE(PEER_CLOSED), worker 의 WRITE 는 버려진다</td></tr>
-  <tr><td>Connection</td><td>IsWorkConnectedIsTrueDuringWorkAndFalseAfterPeerClosedOrRelease</td><td><span class="tag ok">정상</span></td><td>세 시점</td></tr>
-  <tr><td>Connection</td><td>NotifyAppendsPlaintextAndSetsQueued</td><td><span class="tag ok">정상</span></td><td>_plain.notify readable == 길이, queued true</td></tr>
-  <tr><td>Connection</td><td>NotifyOnIdleOrClosingConnectionReturnsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>두 phase</td></tr>
-  <tr><td>Connection</td><td>NotifyBeyondPushCapacityReturnsBufferFullAndWritesNothing</td><td><span class="tag edge">엣지</span></td><td>이미 찬 Stage 에 1 바이트</td></tr>
-  <tr><td>Connection</td><td>NotifyDuringWorkIsAccepted</td><td><span class="tag ok">정상</span></td><td>Work 중에도 push lane 은 산다</td></tr>
-  <tr><td>Connection</td><td>OnNotifiedWithBytesAndFreeEventReturnsWriteNotify</td><td><span class="tag ok">정상</span></td><td>resolve 가 notify Stage</td></tr>
-  <tr><td>Connection</td><td>OnNotifiedWithEmptyStageOrPendingNotifyEventReturnsNone</td><td><span class="tag ok">정상</span></td><td>둘 다 NONE</td></tr>
-  <tr><td>Connection</td><td>SendNotifyCompletionConsumesAndReturnsNextWriteNotifyIfMoreQueued</td><td><span class="tag ok">정상</span></td><td>걸린 동안 notify 추가 → SEND(NOTIFY) 뒤 다시 WRITE(NOTIFY). 없으면 NONE 이고 compact 됨</td></tr>
-  <tr><td>Connection</td><td>NotifyAndUserWriteUseDifferentEventsAndCanBothBePending</td><td><span class="tag ok">정상</span></td><td>eventFor(WRITE USER) != eventFor(WRITE NOTIFY)</td></tr>
-  <tr><td>Connection</td><td>TlsReceiveDecodesIntoPlainStageBeforePump</td><td><span class="tag ok">정상</span></td><td>TlsPump 로 DONE 까지 간 engine 을 Connection 에 심고, 상대 engine 의 encode 결과를 cipher.receive 에 → onRead 평문</td></tr>
-  <tr><td>Connection</td><td>TlsReceiveWithHalfRecordReturnsTheSameReadAndNoCallback</td><td><span class="tag edge">엣지</span></td><td>decode 0 바이트 경로</td></tr>
-  <tr><td>Connection</td><td>TlsReceiveWithCorruptRecordReportsRecordErrorAndCloses</td><td><span class="tag edge">엣지</span></td><td>onError(TLS_RECORD_ERROR, message) → CLOSE</td></tr>
-  <tr><td>Connection</td><td>TlsControlOutputDefersReadAndSendControlCompletionResumesItThroughPump</td><td><span class="tag edge">엣지</span></td><td>KeyUpdate 가 섞인 수신 → WRITE(CONTROL), _resume_read 보존 → SEND(CONTROL) → 이미 decode 된 평문으로 onRead 가 바로 나간다 (v1 검토 8 의 수정)</td></tr>
-  <tr><td>Connection</td><td>TlsOnReadReturningWriteEncodesIntoCipherSendAndOnWrittenReportsPlainLength</td><td><span class="tag ok">정상</span></td><td>cipher 길이 ≠ plain 길이, onWritten 은 plain 길이</td></tr>
-  <tr><td>Connection</td><td>TlsOnNotifiedEncodesIntoCipherNotifyAndConsumesPlainLengthAfterSend</td><td><span class="tag ok">정상</span></td><td>_notify_plain_length 경로</td></tr>
-  <tr><td>Connection</td><td>TlsFinishWorkWriteIsEncodedAtWorkDoneNotByTheWorker</td><td><span class="tag ok">정상</span></td><td>finishWork 직후 cipher.send 비어 있음, WORK_DONE 뒤 차 있음</td></tr>
-  <tr><td>Connection</td><td>TlsHandshakeFailureReportsEngineCodeAndMessageThenCloses</td><td><span class="tag ok">정상</span></td><td>untrusted CA 상대 → onError(VERIFY_FAILED, X509 문자열), onDisconnected 같은 코드, onReady 없음</td></tr>
-  <tr><td>Connection</td><td>ResolveReadPointsAtReceiveStageFreeSpaceOfWritableLength</td><td><span class="tag ok">정상</span></td><td>provider.prepare 의 자리</td></tr>
-  <tr><td>Connection</td><td>ResolveWriteAfterPartialSendPointsAtTheUnsentTail</td><td><span class="tag edge">엣지</span></td><td>peek 자리가 앞으로 간다</td></tr>
-  <tr><td>Connection</td><td>ResolveOfNoneHoldStartWorkCloseIsEmptyPayload</td><td><span class="tag edge">엣지</span></td><td>{ nullptr, 0 }</td></tr>
-  <tr><td>Connection</td><td>ReleaseReturnsToIdleClearsStagesAndResetsWork</td><td><span class="tag ok">정상</span></td><td>다음 open 이 깨끗하게 시작</td></tr>
-  <tr><td>Connection</td><td>HandlerReturningUnknownActionTypeIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>type 99 → onError + CLOSE</td></tr>
+  <tr><td>Connection</td><td>WriteOfZeroBytesFollowsTheConfirmedContract</td><td><span class="tag edge">엣지</span></td><td>thenWrite 0 바이트. 14절 2 에서 정한 대로 (INVALID_ARGUMENT + CLOSE 또는 바로 onWritten(0))</td></tr>
   <tr><td>Connection</td><td>WriteWithNullDataAndNonZeroLengthIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>span { nullptr, 10 }</td></tr>
+  <tr><td>Connection</td><td>HandlerReturningUnknownActionTypeIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>type 99 → onError + CLOSE</td></tr>
+  <tr><td>Connection</td><td>PickWriteOnIdleOrClosingIsNone</td><td><span class="tag ok">정상</span></td><td>pickWrite 순서 1 (alive). <code>_send</code> / <code>_notify</code> 에 바이트가 있어도 NONE</td></tr>
+  <tr><td>Connection</td><td>PickWriteWhileWorkIsRequestedWorkingOrDoneIsNone</td><td><span class="tag ok">정상</span></td><td>순서 2 (working). 세 상태 모두. socket 은 worker 의 것</td></tr>
+  <tr><td>Connection</td><td>PickWriteWithPendingWriteEventIsNone</td><td><span class="tag ok">정상</span></td><td>순서 3 (pending). socket 당 write 하나</td></tr>
+  <tr><td>Connection</td><td>PickWriteWithNotifyAndSendBothStagedPicksNotifyFirst</td><td><span class="tag ok">정상</span></td><td>순서 4 (notify). WRITE(NOTIFY), <code>as.write.length</code> == notify readable 전체. 두 맥락을 한 WRITE 에 섞지 않는다</td></tr>
+  <tr><td>Connection</td><td>PickWriteWithOnlySendStagedReturnsWriteUserOfItsWholeReadable</td><td><span class="tag ok">정상</span></td><td>순서 5 (send). WRITE(USER), length == send readable</td></tr>
+  <tr><td>Connection</td><td>PickWriteWithNothingStagedIsNone</td><td><span class="tag ok">정상</span></td><td>순서 6 (없음)</td></tr>
+  <tr><td>Connection</td><td>ResolveWriteOfNotifyKeepsThePickedLengthWhenMoreIsAppendedBeforeResolve</td><td><span class="tag edge">엣지</span></td><td>pick 뒤 notify 를 더 붙여도 payload 의 시작 주소와 길이는 pick 이 정한 그대로 (compact 는 release 에서만)</td></tr>
+  <tr><td>Connection</td><td>ResolveReadPointsAtReceiveStageFreeSpaceOfWritableLength</td><td><span class="tag ok">정상</span></td><td>provider.prepare 의 자리</td></tr>
+  <tr><td>Connection</td><td>ResolveOfNoneHoldStartWorkCloseIsEmptyPayload</td><td><span class="tag edge">엣지</span></td><td>{ nullptr, 0 }</td></tr>
+  <tr><td>Connection</td><td>SendNotifyReleasesOnlyNotifyAndReturnsNone</td><td><span class="tag ok">정상</span></td><td><code>_send</code> 에 바이트를 둔 채 SEND(NOTIFY, length L) → <code>_notify</code> 에서 L 만 빠지고 <code>_send</code> 불변, onWritten 없음, NONE</td></tr>
+  <tr><td>Connection</td><td>SendUserReleasesOnlySendAndCallsOnWrittenWithPlainLength</td><td><span class="tag ok">정상</span></td><td><code>_notify</code> 불변, <code>_send</code> writable == capacity, onWritten(<code>as.write.length</code>) 1 회, 그 return 이 adopt → drive</td></tr>
+  <tr><td>Connection</td><td>NotifyStagedWhileNotifyWriteIsInFlightGoesOutAsTheNextWrite</td><td><span class="tag edge">엣지</span></td><td>WRITE(NOTIFY) 가 걸린 동안 notify 추가 → SEND(NOTIFY) 뒤 readable 은 추가분만, 다음 pickWrite 가 그 길이로 WRITE(NOTIFY)</td></tr>
+  <tr><td>Connection</td><td>ThenWriteDuringNotifySendOnlyStagesAndSetsDeadline</td><td><span class="tag ok">정상</span></td><td>write event 에 NOTIFY 가 걸린 채 onRead → thenWrite → <code>_send</code> stage, HOLD, deadline. pickWrite NONE. SEND(NOTIFY) 뒤 pickWrite 가 WRITE(USER). 분기가 없다</td></tr>
+  <tr><td>Connection</td><td>TimeoutAfterHoldAppliesWhateverHandlerReturns</td><td><span class="tag ok">정상</span></td><td>11절 1 행. thenHold(100) 뒤 TIMEOUT → onTimeout → adopt → drive → apply. thenWrite 면 stage + HOLD, thenWork 면 REQUESTED</td></tr>
+  <tr><td>Connection</td><td>TimeoutWithUserActionPendingAndCloseReturnedCloses</td><td><span class="tag ok">정상</span></td><td>11절 2 행. onDisconnected, CLOSING. 걸린 READ 는 CANCELLED 로 돌아온다 (dispatch 첫 줄)</td></tr>
+  <tr><td>Connection</td><td>TimeoutWithUserActionPendingAndHoldOrReadReturnedOnlyExtendsDeadline</td><td><span class="tag ok">정상</span></td><td>11절 3 행. 걸린 요청 그대로 (새로 걸 것 없음), deadline = now + 새 timeout_ms, 0 이면 없음. Stage 불변</td></tr>
+  <tr><td>Connection</td><td>TimeoutWithUserActionPendingAndWriteReturnedReportsBusyOnceAndExtends</td><td><span class="tag misuse">오용</span></td><td>11절 4 행. onError(info, BUSY, "action rejected: io outstanding. use notify") 1 회, 거부된 데이터가 <code>_send</code> 에 없다 (extend 는 adopt 를 지나지 않는다), deadline 은 그 WRITE 의 timeout_ms</td></tr>
+  <tr><td>Connection</td><td>TimeoutWithUserActionPendingAndWorkReturnedReportsBusyAndLeavesNoDeadline</td><td><span class="tag misuse">오용</span></td><td>11절 5 행. 같은 onError 1 회, _work IDLE, onWorkStarted 없음, deadline 0</td></tr>
+  <tr><td>Connection</td><td>TimeoutWithOnlyNotifyWriteInFlightIsNotUserActionPending</td><td><span class="tag edge">엣지</span></td><td>write event 에 NOTIFY 만 걸림, read event 비었음, <code>_send</code> 비었음 → 1 행 경로. notify 의 write event 는 보지 않는다</td></tr>
+  <tr><td>Connection</td><td>ApplyStartWorkOnlyMarksRequestedAndClearsDeadline</td><td><span class="tag ok">정상</span></td><td>onRead → thenWork → START_WORK, deadline 0, working() true, onWorkStarted 는 아직 없음</td></tr>
+  <tr><td>Connection</td><td>WorkReadyIsTrueOnlyWhenRequestedAndBothEventsAreEmpty</td><td><span class="tag ok">정상</span></td><td>REQUESTED 에서 read pending / write pending / 둘 다 비었음 → false / false / true. REQUESTED 가 아니면 늘 false</td></tr>
+  <tr><td>Connection</td><td>WorkReadyCompletionStartsWorkAndCallsOnWorkStartedWithStreamHandle</td><td><span class="tag ok">정상</span></td><td>WORK_READY dispatch → WORKING, onWorkStarted(ctx, streamHandle()) 1 회, 돌아온 action NONE</td></tr>
+  <tr><td>Connection</td><td>ApplyCloseAbandonsRequestedWork</td><td><span class="tag ok">정상</span></td><td>REQUESTED 에서 CLOSE → _work IDLE, workReady false, working false (settle 대상). onWorkStarted 는 끝내 없음</td></tr>
+  <tr><td>Connection</td><td>ApplyCloseDuringWorkingKeepsWorkUntilCloseStream</td><td><span class="tag edge">엣지</span></td><td>Owner close 모양. CLOSING, onDisconnected 1 회, working() 은 true 로 남는다. socket 은 shutdown 만</td></tr>
+  <tr><td>Connection</td><td>StreamReturnsConnectionStreamOnlyWhileWorking</td><td><span class="tag ok">정상</span></td><td>stream(g) 가 WORKING 에서 값, REQUESTED / DONE 에서 BUSY</td></tr>
+  <tr><td>Connection</td><td>CloseStreamVerifyIsBusyWhenNotWorking</td><td><span class="tag misuse">오용</span></td><td>verify 1. REQUESTED 에서, 그리고 같은 Stream 의 두 번째 closeStream (DONE 또는 IDLE) → BUSY, outcome 은 첫 번째 것</td></tr>
+  <tr><td>Connection</td><td>CloseStreamVerifyIsPeerClosedForAnOldGeneration</td><td><span class="tag misuse">오용</span></td><td>verify 2. release 뒤 다시 open 한 slot 에 옛 Stream → PEER_CLOSED. Stage 불변</td></tr>
+  <tr><td>Connection</td><td>CloseStreamVerifyIsSuccessAndGoesDone</td><td><span class="tag ok">정상</span></td><td>verify 3. 다른 thread 에서 closeStream(thenRead(4)) → SUCCESS, workFinished true, wake 1 회</td></tr>
+  <tr><td>Connection</td><td>WorkDoneDrivesTheOutcomeThatCloseStreamStored</td><td><span class="tag ok">정상</span></td><td>takeWorkOutcome → IDLE, <code>IoCompletion::workDone(slot, outcome)</code> dispatch → drive → READ(4), deadline 이 그 timeout</td></tr>
+  <tr><td>Connection</td><td>CloseStreamWithThenWriteStagesOnTheWorkerAndWorkDoneReturnsHold</td><td><span class="tag ok">정상</span></td><td>worker thread 가 <code>_send</code> 에 stage, outcome 은 HOLD(timeout). WORK_DONE 뒤 pickWrite 가 WRITE(USER)</td></tr>
+  <tr><td>Connection</td><td>CloseStreamWithThenReadAlreadySatisfiedCallsOnReadAtWorkDone</td><td><span class="tag ok">정상</span></td><td>receive Stage 에 남은 바이트로 WORK_DONE 의 drive 가 바로 onRead</td></tr>
+  <tr><td>Connection</td><td>CloseStreamWithThenWorkReturnsInvalidArgumentAndStreamStaysValid</td><td><span class="tag misuse">오용</span></td><td>WORKING 유지, 다음 closeStream(thenClose) 가 SUCCESS</td></tr>
+  <tr><td>Connection</td><td>CloseStreamWithWriteLargerThanSendCapacityReturnsBufferFullAndStreamStaysValid</td><td><span class="tag edge">엣지</span></td><td><code>_send</code> 비어 있음, 다음 closeStream(thenClose) 가 SUCCESS</td></tr>
+  <tr><td>Connection</td><td>CloseStreamDuringClosingReturnsClosedButGoesDone</td><td><span class="tag edge">엣지</span></td><td>apply(CLOSE) 뒤 closeStream → CLOSED, workFinished true. takeWorkOutcome 뒤 WORK_DONE dispatch 는 NONE, working false (settle 이 반납할 수 있다)</td></tr>
+  <tr><td>Connection</td><td>NotifyDuringWorkIsStagedAndPickedOnlyAfterWorkDone</td><td><span class="tag ok">정상</span></td><td>WORKING 중 notify SUCCESS, pickWrite NONE. WORK_DONE 뒤 pickWrite 가 WRITE(NOTIFY)</td></tr>
+  <tr><td>Connection</td><td>NotifyStagesPlaintextAndWakesTheListener</td><td><span class="tag ok">정상</span></td><td><code>_notify</code> readable == 길이, 가짜 listener 의 wake 1 회. IO Thread 에서 불러도 wake 한다</td></tr>
+  <tr><td>Connection</td><td>NotifyDuringHandshakingIsAccepted</td><td><span class="tag edge">엣지</span></td><td>alive 이므로 SUCCESS. 보내는 것은 READY 뒤 (TLS 의 HANDSHAKING pick 은 5b)</td></tr>
+  <tr><td>Connection</td><td>NotifyOnIdleOrClosingConnectionReturnsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>두 phase. wake 없음</td></tr>
+  <tr><td>Connection</td><td>NotifyBeyondPushCapacityReturnsBufferFullAndWritesNothing</td><td><span class="tag edge">엣지</span></td><td>이미 찬 Stage 에 1 바이트</td></tr>
+  <tr><td>Connection</td><td>NotifyFromAnotherThreadAThousandTimesWhilePickAndReleaseRunKeepsEveryByteInOrder</td><td><span class="tag ok">정상</span></td><td>notify 의 lock 네 자리 (stage / pick / release / clear). TSan job 에서 경고 0</td></tr>
+  <tr><td>Connection</td><td>ReleaseReturnsToIdleClearsStagesAndResetsWork</td><td><span class="tag ok">정상</span></td><td>socket.close, notify Stage 는 lock 안에서 clear, generation++. 다음 open 이 깨끗하게 시작</td></tr>
   <tr><td>ConnectionHost</td><td>AcquireHandsOutEveryIdleSlotThenNull</td><td><span class="tag ok">정상</span></td><td>capacity 번 성공, 다음 nullptr, full() true</td></tr>
   <tr><td>ConnectionHost</td><td>ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent</td><td><span class="tag ok">정상</span></td><td>empty() / full() 과 acquire 결과가 일치 (무작위 순서 1000 회)</td></tr>
   <tr><td>ConnectionHost</td><td>FindWithCurrentHandleReturnsTheConnection</td><td><span class="tag ok">정상</span></td><td>open 뒤 handle 로</td></tr>
   <tr><td>ConnectionHost</td><td>FindWithStaleGenerationOrIdleSlotOrOutOfRangeSlotReturnsNull</td><td><span class="tag misuse">오용</span></td><td>셋 다 nullptr, crash 없음</td></tr>
-  <tr><td>ConnectionHost</td><td>BroadcastWritesToEveryAliveConnectionAndSkipsIdleAndClosing</td><td><span class="tag ok">정상</span></td><td>phase 섞인 32 slot</td></tr>
-  <tr><td>ConnectionHost</td><td>BroadcastReturnsBufferFullAndWritesNowhereWhenOneConnectionCannotTakeIt</td><td><span class="tag edge">엣지</span></td><td>all-or-nothing</td></tr>
-  <tr><td>ConnectionHost</td><td>BroadcastWithNoAliveConnectionReturnsSuccess</td><td><span class="tag edge">엣지</span></td><td>빈 host. 코드 확정 (SUCCESS 추천)</td></tr>
-  <tr><td>ConnectionHost</td><td>AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck</td><td><span class="tag ok">정상</span></td><td>IDLE 의 expireDeadline false, workFinished false, onNotified NONE, phase != CLOSING. 9.7 의 주장을 그대로</td></tr>
+  <tr><td>ConnectionHost</td><td>BroadcastStagesToEveryAliveConnectionAndSkipsIdleAndClosing</td><td><span class="tag ok">정상</span></td><td>phase 섞인 32 slot. wake 는 끝에 한 번</td></tr>
+  <tr><td>ConnectionHost</td><td>BroadcastReturnsBufferFullAndWritesNowhereWhenOneConnectionCannotTakeIt</td><td><span class="tag edge">엣지</span></td><td>all-or-nothing. lock 안에서 전부 검사 뒤 전부 stage</td></tr>
+  <tr><td>ConnectionHost</td><td>BroadcastWithNoAliveConnectionReturnsSuccess</td><td><span class="tag edge">엣지</span></td><td>빈 host. 14절 3</td></tr>
+  <tr><td>ConnectionHost</td><td>AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck</td><td><span class="tag ok">정상</span></td><td>IDLE 의 expireDeadline false, workReady false, workFinished false, pickWrite NONE, phase != CLOSING</td></tr>
+</table>
+
+<h3>TLS (사이클 5b)</h3>
+<p>TlsPump 로 handshake 를 DONE 까지 간 engine (또는 handshake 중인 engine) 을 Connection 에 심는다. 상대 engine 이 encode 한 것을 cipherReceive 에 넣고, Connection 의 cipherSend 를 상대 engine 이 decode 해 순서를 본다. TLS 1.3 / 1.2 를 TEST_P 로 돈다 (14절).</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Connection</td><td>OnOpenedTlsServerReturnsHandshakeReadWithoutCallingOnReady</td><td><span class="tag ok">정상</span></td><td>READ(HANDSHAKE), exact 0, timeout = handshake timeout. 콜백 기록 비어 있음, phase HANDSHAKING</td></tr>
+  <tr><td>Connection</td><td>OnOpenedTlsClientReturnsNoneAndLeavesClientHelloForDrain</td><td><span class="tag ok">정상</span></td><td>NONE, deadline = handshake timeout, pickWrite 가 WRITE(HANDSHAKE, length 0), resolve 가 cipherSend 의 readable</td></tr>
+  <tr><td>Connection</td><td>HandshakeReceiveThatNeedsToSendReturnsNoneAndLeavesBytesForDrain</td><td><span class="tag ok">정상</span></td><td>RECEIVE(HANDSHAKE) → commit → onHandshake SEND → NONE. step 은 WRITE 를 걸지 않고 다음 pickWrite 가 WRITE(HANDSHAKE)</td></tr>
+  <tr><td>Connection</td><td>SendHandshakeConsumesCipherSendByCompletionLengthAndContinuesHandshake</td><td><span class="tag ok">정상</span></td><td>SEND(HANDSHAKE) → cipherSend 에서 completion.length 만큼 consume → onHandshake RECEIVE → READ(HANDSHAKE)</td></tr>
+  <tr><td>Connection</td><td>Tls13TicketGoesOutAsOneMoreHandshakeSendBeforeOnReady</td><td><span class="tag edge">엣지</span></td><td>client Finished 수신 뒤 onHandshake 가 SEND (NewSessionTicket 이 cipherSend 에) → WRITE(HANDSHAKE) → SEND 완료 뒤에 DONE → onReady. 설계 10절 TLS 바퀴 4 ~ 5</td></tr>
+  <tr><td>Connection</td><td>PickWriteDuringHandshakingOffersOnlyCipherSend</td><td><span class="tag edge">엣지</span></td><td><code>_notify</code> 에 바이트가 있어도 HANDSHAKING 의 pick 은 WRITE(HANDSHAKE) 또는 NONE. READY 뒤 첫 pick 이 그 notify</td></tr>
+  <tr><td>Connection</td><td>PickWritePutsCipherSendBeforeNotifyAndSend</td><td><span class="tag ok">정상</span></td><td>READY 에서 cipherSend 잔여 + notify + send → WRITE(CONTROL, length 0) 먼저, 그 다음 NOTIFY, 그 다음 USER. pickWrite 순서의 cipherSend 칸</td></tr>
+  <tr><td>Connection</td><td>TimeoutDuringHandshakeReportsHandshakeTimeoutAndCloses</td><td><span class="tag ok">정상</span></td><td>onError(info, TLS_HANDSHAKE_TIMEOUT, "tls: handshake timeout") → CLOSE 같은 코드. onTimeout 콜백 없음</td></tr>
+  <tr><td>Connection</td><td>HandshakeFailureReportsEngineCodeAndMessageThenCloses</td><td><span class="tag ok">정상</span></td><td>untrusted CA 상대 → onError(info, VERIFY_FAILED, X509 문자열), onDisconnected 같은 코드, onReady 없음</td></tr>
+  <tr><td>Connection</td><td>ApplicationDataArrivingWithFinishedIsDeliveredByRefillAtOnReady</td><td><span class="tag edge">엣지</span></td><td>Finished 와 같은 수신에 평문 4 바이트 → onHandshake DONE → onReady thenRead(4) → drive 의 refill 이 SSL 안의 것을 꺼내 바로 onRead</td></tr>
+  <tr><td>Connection</td><td>TlsReceiveDecodesInRefillAndDeliversPlaintext</td><td><span class="tag ok">정상</span></td><td>RECEIVE(USER) commit 은 cipherReceive 로, decode 는 refill 한 자리 → onRead 평문</td></tr>
+  <tr><td>Connection</td><td>TlsReceiveWithHalfRecordReturnsTheSameReadAndNoCallback</td><td><span class="tag edge">엣지</span></td><td>decode 0 → refill 0 → 걸었던 READ 그대로</td></tr>
+  <tr><td>Connection</td><td>PlaintextLeftInSslIsDrainedByRefillBeforeReadIsReturned</td><td><span class="tag edge">엣지</span></td><td>16 KiB 레코드 하나, recv 4 KiB → handler 의 thenRead(4096) 네 번이 한 drive 안에서. 다섯 번째에야 READ 를 돌려준다. "SSL 안에 평문이 남은 채 READ 를 건다" 가 없다</td></tr>
+  <tr><td>Connection</td><td>TlsReceiveWithCorruptRecordReportsRecordErrorAndCloses</td><td><span class="tag edge">엣지</span></td><td>refill 의 decode 실패 → onError(info, TLS_RECORD_ERROR, message) → CLOSE(RECORD_ERROR)</td></tr>
+  <tr><td>Connection</td><td>CloseNotifyFromPeerClosesWithPeerClosed</td><td><span class="tag ok">정상</span></td><td>debugShutdown 으로 유도 → refill 의 decode 가 PEER_CLOSED → CLOSE(PEER_CLOSED), onDisconnected 그 이유로</td></tr>
+  <tr><td>Connection</td><td>WriteLengthIsPlaintextAndCompletionLengthIsCiphertext</td><td><span class="tag ok">정상</span></td><td>WRITE(USER) 의 <code>as.write.length</code> == 평문, completion.length == 암호문 (≠ 평문). cipherSend 는 암호문 길이로, <code>_send</code> 는 평문 길이로 치우고 onWritten 은 평문 길이</td></tr>
+  <tr><td>Connection</td><td>PickedContextIsEncodedAtPickTimeNotAtStage</td><td><span class="tag ok">정상</span></td><td>thenWrite / notify 직후 cipherSend 비어 있음. pickWrite 뒤에만 차 있다</td></tr>
+  <tr><td>Connection</td><td>EncodeOrderEqualsSendOrderNotifyRecordFirst</td><td><span class="tag ok">정상</span></td><td>notify 와 send 가 같이 기다릴 때 첫 pick 은 notify 만 encode. 상대 engine 의 decode 가 notify 평문, 그 다음 응답 평문 순서</td></tr>
+  <tr><td>Connection</td><td>KeyUpdateReplyStaysInCipherSendAndNextPickSendsItAsControl</td><td><span class="tag edge">엣지</span></td><td>debugKeyUpdate 가 섞인 수신 → drive 는 READ 를 미루지 않고 돌려준다. 다음 pickWrite 가 WRITE(CONTROL, length 0). SEND(CONTROL) → NONE, 양쪽 계속 통신</td></tr>
+  <tr><td>Connection</td><td>CloseStreamWithThenWriteIsEncodedAtPickNotByTheWorker</td><td><span class="tag ok">정상</span></td><td>closeStream(thenWrite) 직후 cipherSend 비어 있음, WORK_DONE 뒤 pickWrite 에서 차 있다</td></tr>
+  <tr><td>Connection</td><td>ReceiveStageIsCipherReceiveForHandshakeAndTlsUser</td><td><span class="tag ok">정상</span></td><td>resolve(READ HANDSHAKE) 와 resolve(READ USER) 가 cipherReceive 의 빈 자리</td></tr>
+  <tr><td>Connection</td><td>ResolveWriteOnTlsPointsAtCipherSendReadable</td><td><span class="tag ok">정상</span></td><td>purpose 와 무관하게 cipherSend 의 peek 과 readable</td></tr>
+  <tr><td>Connection</td><td>ReleaseThenOpenReusesTheEngineWithoutPoolFallback</td><td><span class="tag ok">정상</span></td><td>release → open → handshake DONE. Pool fallbackCount 가 늘지 않는다</td></tr>
+</table>
+
+<h3>Acceptor (사이클 5b, integration)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Acceptor</td><td>OpenListensAndEventIsNotPendingUntilSubmitted</td><td><span class="tag ok">정상</span></td><td>초기 상태. slot -1, eventFor 는 하나</td></tr>
+  <tr><td>Acceptor</td><td>AcceptAfterCompletionReturnsPeerSocketWithNoDelayApplied</td><td><span class="tag ok">정상</span></td><td>getsockopt TCP_NODELAY. IOCP 는 AcceptEx 버퍼, epoll 은 빈 payload</td></tr>
+  <tr><td>Acceptor</td><td>DetachWhileAcceptPendingYieldsCancelledCompletion</td><td><span class="tag ok">정상</span></td><td>submit(CLOSE) 의 detach + shutdown 경로. IoLoop shutdown 이 이것을 쓴다</td></tr>
 </table>
 
 <h2 id="s10">10. 케이스 : io_loop</h2>
-<p>IoLoop 는 Server 를 통하지 않고 직접 조립한다 (ConnectionHost, EventListener, Acceptor, IoLoop). run 은 테스트가 띄운 thread 에서 돌고 LoopbackPeer 가 접속한다. 콜백은 RecordingHandler 가 적는다.</p>
+<p>기준은 설계 v4 10절이다. IoLoop 는 Server 를 통하지 않고 직접 조립한다 (ConnectionHost, EventListener, Acceptor, IoLoop). run 은 테스트가 띄운 thread 에서 돌고 LoopbackPeer 가 접속한다. 콜백은 RecordingHandler 가 적는다. runOnce 는 열지 않는다 (13절). 프로세스의 순서는 peer 가 받는 바이트 순서와 콜백 기록의 순서로 관찰한다.</p>
+
+<h3>한 바퀴의 여섯 프로세스</h3>
+<p class="flow">drain → settle → collectIoEvents → step (OS 완료마다) → collectLocalEvents → step (local completion 마다)</p>
+<table>
+  <tr><th>프로세스</th><th>input</th><th>output</th><th>그 output 을 보는 케이스</th></tr>
+  <tr><td>drain</td><td>연결마다의 Stage (cipherSend / notify / send) 와 write event</td><td>write lane 의 WRITE, 연결당 최대 하나</td><td>ClientHelloIsArmedBeforeFirstWait, DrainSubmitsAtMostOneWritePerConnection, ThenWriteFromHandlerGoesOutBeforeTheNextWait</td></tr>
+  <tr><td>settle</td><td>host (phase, 두 event, working)</td><td>slot 반납, ACCEPT 재무장, <code>_stopped</code></td><td>HandlerCloseWhileReadPendingReleasesSlotOnlyAfterCancelledCompletionReturns, WhenHostIsFullAcceptIsNotRearmedAndResumesAfterARelease, StopWhenEmptyEndsRunWhenTheLastConnectionCloses</td></tr>
+  <tr><td>collectIoEvents</td><td>가장 가까운 deadline (waitTimeout)</td><td>OS 완료의 <code>Span&lt;IoCompletion&gt;</code></td><td>DeadlineTimeoutFiresOnTimeoutWithinTolerance, HoldWithTimeoutZeroNeverTimesOut, WakeCompletionIsDroppedByStepAndCausesNoCallback</td></tr>
+  <tr><td>step (OS 완료)</td><td>IoCompletion 하나</td><td>read lane 의 READ / ACCEPT 하나 또는 lifecycle 변화 (CLOSE 는 detach + shutdown), Stage 에 쌓인 바이트. WRITE 는 없다</td><td>EchoThroughReadWriteReadCompletesTheCycle, IgnoredConnectionIsClosedAtOnceAndTakesNoSlot, PeerCloseWhileReadPendingCallsOnDisconnectedPeerClosedAndFreesTheSlot</td></tr>
+  <tr><td>collectLocalEvents</td><td>step 뒤의 연결 상태 (deadline, _work, 두 event)</td><td>TIMEOUT / WORK_READY / WORK_DONE 의 <code>Span&lt;IoCompletion&gt;</code></td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch, WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle, WorkStartedWaitsForInFlightNotifyThenFires</td></tr>
+  <tr><td>step (local)</td><td>local completion 하나</td><td>위와 같다</td><td>StartWorkThenCloseStreamFromWorkerThreadResumesTheFlow, OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream</td></tr>
+</table>
+
+<h3>네 성질</h3>
+<table>
+  <tr><th>성질 (설계 10절)</th><th>케이스</th></tr>
+  <tr><td>wait 전에 Stage 에 걸리지 않은 바이트가 없다</td><td>ClientHelloIsArmedBeforeFirstWait, ThenWriteFromHandlerGoesOutBeforeTheNextWait, NotifyFromInsideAHandlerGoesOutBeforeTheNextWait</td></tr>
+  <tr><td>CLOSE 뒤 같은 배치의 TIMEOUT 이 없다</td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch, ReadCompletionInTheSameBatchAsAnExpiredDeadlineRearmsInsteadOfTimingOut</td></tr>
+  <tr><td>WORK_READY 는 같은 runOnce 안</td><td>WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle, WorkStartedWaitsForInFlightNotifyThenFires</td></tr>
+  <tr><td>notify 송신 중 thenWrite 는 두 WRITE 로 순서대로</td><td>NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder</td></tr>
+</table>
+
+<h3>케이스</h3>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>Acceptor</td><td>OpenListensAndEventIsNotPendingUntilSubmitted</td><td><span class="tag ok">정상</span></td><td>초기 상태</td></tr>
-  <tr><td>Acceptor</td><td>AcceptAfterCompletionReturnsPeerSocketWithNoDelayApplied</td><td><span class="tag ok">정상</span></td><td>getsockopt TCP_NODELAY</td></tr>
-  <tr><td>Acceptor</td><td>CloseWhileAcceptPendingYieldsCancelledCompletion</td><td><span class="tag ok">정상</span></td><td>shutdown 경로</td></tr>
+  <tr><td>IoLoop</td><td>ClientHelloIsArmedBeforeFirstWait</td><td><span class="tag ok">정상</span></td><td>TLS EventClient 모양. acceptor 없이 admit (onOpened 가 NONE, ClientHello 는 cipherSend 에) 뒤 run → 첫 runOnce 의 drain 이 WRITE(HANDSHAKE). blocking TLS peer 가 ClientHello 를 받고 handshake 가 끝나 onReady</td></tr>
+  <tr><td>IoLoop</td><td>DrainSubmitsAtMostOneWritePerConnection</td><td><span class="tag ok">정상</span></td><td>한 콜백 안에서 notify 와 thenWrite → peer 는 notify 전체를 먼저, 응답 전체를 그 다음에 받는다. 두 맥락이 한 WRITE 에 섞이지 않는다</td></tr>
+  <tr><td>IoLoop</td><td>ThenWriteFromHandlerGoesOutBeforeTheNextWait</td><td><span class="tag ok">정상</span></td><td>다른 연결도 deadline 도 없는 상태에서 onRead → thenWrite(응답, 0). 다음 wait 는 끝없이 막히므로 peer 가 응답을 받는다는 것이 "다음 runOnce 의 drain 이 wait 전에 걸었다" 의 증거</td></tr>
+  <tr><td>IoLoop</td><td>NotifyFromInsideAHandlerGoesOutBeforeTheNextWait</td><td><span class="tag ok">정상</span></td><td>onRead 안에서 notify 하고 thenHold(10000) → peer 가 수 ms 안에 받는다. notify 는 늘 wake, drain 은 wait 전</td></tr>
+  <tr><td>IoLoop</td><td>NotifyFromAnotherThreadReachesThePeerWithoutWaitingForAnyCallback</td><td><span class="tag ok">정상</span></td><td>thenHold 중인 연결에 다른 thread 가 notify → wake → 다음 runOnce 의 drain. 콜백 기록에 변화 없음</td></tr>
   <tr><td>IoLoop</td><td>RunSubmitsAcceptAndAClientConnectCallsOnConnectedWithPeerInfo</td><td><span class="tag ok">정상</span></td><td>onConnected(app, info) 의 info 가 127.0.0.1 과 peer 포트. handle 인자 없음</td></tr>
-  <tr><td>IoLoop</td><td>AcceptedConnectionGetsOnReadyWithAHandleThatFindsIt</td><td><span class="tag ok">정상</span></td><td>onReady 의 handle 로 getConnectionInfo 가 같은 info</td></tr>
+  <tr><td>IoLoop</td><td>AcceptedConnectionGetsOnReadyWithAHandleThatFindsIt</td><td><span class="tag ok">정상</span></td><td>onReady 의 handle 로 host.find 가 같은 Connection, info 같음</td></tr>
   <tr><td>IoLoop</td><td>IgnoredConnectionIsClosedAtOnceAndTakesNoSlot</td><td><span class="tag ok">정상</span></td><td>peer 의 recv 가 0 (FIN), host.empty() true, onDisconnected 없음</td></tr>
-  <tr><td>IoLoop</td><td>WhenHostIsFullAcceptIsNotRearmedAndResumesAfterARelease</td><td><span class="tag edge">엣지</span></td><td>capacity 2 에 3 번째 접속 → backlog 에 머묾 (connect 는 성공, onConnected 없음). 하나 닫히면 3 번째가 onConnected</td></tr>
-  <tr><td>IoLoop</td><td>EchoThroughReadWriteReadCompletesTheSevenCycleStory</td><td><span class="tag ok">정상</span></td><td>onReady READ(4) → peer 4 바이트 → onRead → WRITE 4 → peer 받음 → onWritten → READ. 설계 10.3 의 바퀴</td></tr>
-  <tr><td>IoLoop</td><td>NotifyFromAnotherThreadReachesThePeerWithoutWaitingForAnyCallback</td><td><span class="tag ok">정상</span></td><td>HOLD 중인 연결에 다른 thread 가 notify → peer 가 받는다. 콜백 기록에 변화 없음</td></tr>
-  <tr><td>IoLoop</td><td>NotifyQueuedFromInsideAHandlerGoesOutOnTheNextCycleWithoutBlockingInWait</td><td><span class="tag ok">정상</span></td><td>onRead 안에서 notify 하고 HOLD(10000) 반환 → peer 가 10 초 전에 (수 ms 안에) 받는다. queued → wait(0) 경로</td></tr>
-  <tr><td>IoLoop</td><td>BroadcastPhaseRunsBeforeStepSoNotifyBytesPrecedeTheHandlerWrite</td><td><span class="tag ok">정상</span></td><td>notify 와 수신 완료가 같은 바퀴에 모이게 만들면 peer 가 notify 바이트를 먼저 받는다 (10.2 의 순서)</td></tr>
-  <tr><td>IoLoop</td><td>UserWriteAndNotifyPendingTogetherArriveInSubmitOrderAndBothComplete</td><td><span class="tag ok">정상</span></td><td>onWritten 1 회, notify 바이트도 도착</td></tr>
-  <tr><td>IoLoop</td><td>DeadlineTimeoutFiresOnTimeoutWithinTolerance</td><td><span class="tag ok">정상</span></td><td>READ(4, 100) 에 아무것도 안 보냄 → onTimeout 이 100 ~ 150 ms 에</td></tr>
+  <tr><td>IoLoop</td><td>WhenHostIsFullAcceptIsNotRearmedAndResumesAfterARelease</td><td><span class="tag edge">엣지</span></td><td>capacity 2 에 3 번째 접속 → backlog 에 머묾 (connect 는 성공, onConnected 없음). 하나 닫히면 settle 이 ACCEPT 를 다시 걸어 3 번째가 onConnected</td></tr>
+  <tr><td>IoLoop</td><td>AcceptFailureReportsOnErrorWithOwnerEndpointAndKeepsAccepting</td><td><span class="tag edge">엣지</span></td><td>fd 한도를 낮춰 accept 실패 유도 (POSIX setrlimit) → onError(app, info = 소유자의 endpoint, SOCKET_ERROR, "accept failed"), 한도 복구 뒤 다시 접속됨. Windows 는 skip</td></tr>
+  <tr><td>IoLoop</td><td>EchoThroughReadWriteReadCompletesTheCycle</td><td><span class="tag ok">정상</span></td><td>onReady thenRead(4) → peer 4 바이트 → onRead → thenWrite 4 (step 은 HOLD, drain 이 WRITE) → peer 받음 → onWritten(4) → thenRead</td></tr>
+  <tr><td>IoLoop</td><td>UserWriteAndNotifyStagedTogetherArriveNotifyFirstAndBothComplete</td><td><span class="tag ok">정상</span></td><td>onWritten 1 회, peer 는 notify 바이트 뒤 응답 바이트</td></tr>
+  <tr><td>IoLoop</td><td>NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder</td><td><span class="tag ok">정상</span></td><td>peer 의 SO_RCVBUF 를 작게 두고 push_capacity 크기의 notify 를 걸어 둔 채 onRead → thenWrite(send_capacity 크기) → peer 가 천천히 읽어 notify 전체, 응답 전체 순서. 경계가 섞이지 않는다. epoll 의 "끝까지 보낸 뒤 완료 하나" 가 같이 검증된다</td></tr>
+  <tr><td>IoLoop</td><td>DeadlineTimeoutFiresOnTimeoutWithinTolerance</td><td><span class="tag ok">정상</span></td><td>thenRead(4, 100) 에 아무것도 안 보냄 → onTimeout 이 100 ~ 150 ms 에</td></tr>
   <tr><td>IoLoop</td><td>HoldWithTimeoutZeroNeverTimesOut</td><td><span class="tag edge">엣지</span></td><td>500 ms 기다려도 onTimeout 없음, loop 가 busy 하지 않음 (CPU 관찰은 12절)</td></tr>
-  <tr><td>IoLoop</td><td>PeerCloseWhileReadPendingCallsOnDisconnectedPeerClosedAndFreesTheSlot</td><td><span class="tag ok">정상</span></td><td>onDisconnected 1 회, 그 뒤 host.empty() (settle 이 CANCELLED 없이도 반납: 완료가 CLOSED 로 왔으므로)</td></tr>
-  <tr><td>IoLoop</td><td>HandlerCloseWhileReadPendingReleasesSlotOnlyAfterCancelledCompletionReturns</td><td><span class="tag ok">정상</span></td><td>onTimeout → CLOSE 로 걸린 READ 를 끊는 경로. onDisconnected 뒤 슬롯이 다음 바퀴 안에 비고, 새 접속이 그 slot 을 받아도 콜백이 섞이지 않는다 (handle 다름)</td></tr>
-  <tr><td>IoLoop</td><td>SlotReuseAfterCloseGivesANewHandleAndOldHandleCallsReturnPeerClosed</td><td><span class="tag ok">정상</span></td><td>닫힌 handle 로 notify → PEER_CLOSED, 새 연결 영향 없음</td></tr>
-  <tr><td>IoLoop</td><td>StopFromAnotherThreadMakesRunReturnAfterOnDisconnectedClosedForEveryConnection</td><td><span class="tag ok">정상</span></td><td>연결 3 개 (하나는 Work 중) → 셋 다 onDisconnected(CLOSED), run return, peer 들의 recv 가 0</td></tr>
-  <tr><td>IoLoop</td><td>FinishWorkAfterStopReturnsPeerClosed</td><td><span class="tag ok">정상</span></td><td>stop 이 WORKING 도 바로 닫은 뒤</td></tr>
-  <tr><td>IoLoop</td><td>StopWhenEmptyEndsRunWhenTheLastConnectionCloses</td><td><span class="tag ok">정상</span></td><td>acceptor 없이 admit 하나. peer 가 닫으면 run return (EventClient 모양)</td></tr>
-  <tr><td>IoLoop</td><td>StartWorkThenFinishWorkFromWorkerThreadResumesTheFlow</td><td><span class="tag ok">정상</span></td><td>onRead → START_WORK → onWorkStarted → 다른 thread 가 finishWork(WRITE) → peer 받음 → onWritten</td></tr>
-  <tr><td>IoLoop</td><td>NoCallbackIsDeliveredForAConnectionWhileItIsWorking</td><td><span class="tag ok">정상</span></td><td>Work 중 peer 가 보내도 onRead 없음, 끊어도 onDisconnected 는 WORK_DONE 뒤</td></tr>
   <tr><td>IoLoop</td><td>WakeCompletionIsDroppedByStepAndCausesNoCallback</td><td><span class="tag ok">정상</span></td><td>notify 없이 listener.wake() 만 → 기록 없음</td></tr>
-  <tr><td>IoLoop</td><td>AcceptFailureReportsOnErrorWithConnectionZeroAndKeepsAccepting</td><td><span class="tag edge">엣지</span></td><td>fd 한도를 낮춰 accept 실패 유도 (POSIX setrlimit) → onError(app, 0, SOCKET_ERROR, "accept failed"), 한도 복구 뒤 다시 접속됨. Windows 는 skip</td></tr>
-  <tr><td>IoLoop</td><td>ThirtyTwoClientsEachDoingOneHundredEchoesAllCompleteWithNoCrossTalk</td><td><span class="tag ok">정상</span></td><td>각 클라이언트가 자기 id 를 보내고 그대로 받는다. slot 혼선 검출</td></tr>
+  <tr><td>IoLoop</td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch</td><td><span class="tag edge">엣지</span></td><td>연결 A 에 thenRead(4, 50), A 의 peer 가 FIN. 연결 B 의 onRead 가 IO Thread 를 100 ms 잡아 A 의 deadline 이 지난 채 다음 wait 배치에 RECEIVE(CLOSED) 가 오게 한다 → A 는 onDisconnected(PEER_CLOSED) 1 회, onTimeout 0 회</td></tr>
+  <tr><td>IoLoop</td><td>ReadCompletionInTheSameBatchAsAnExpiredDeadlineRearmsInsteadOfTimingOut</td><td><span class="tag edge">엣지</span></td><td>같은 방법으로 A 의 peer 가 4 바이트 → onRead → thenRead(4, 1000) → onTimeout 0 회. 새 deadline 이 미래다</td></tr>
+  <tr><td>IoLoop</td><td>WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle</td><td><span class="tag ok">정상</span></td><td>다른 연결도 deadline 도 없는 상태에서 onRead → thenWork. thenWork 뒤 다음 wait 는 끝없이 막히므로 onWorkStarted 가 온다는 것이 "같은 runOnce 의 collectLocalEvents" 의 증거</td></tr>
+  <tr><td>IoLoop</td><td>WorkStartedWaitsForInFlightNotifyThenFires</td><td><span class="tag edge">엣지</span></td><td>peer 가 천천히 읽는 큰 notify 가 write event 에 걸린 채 onRead → thenWork → onWorkStarted 는 peer 가 notify 를 다 받은 뒤 (SEND(NOTIFY) 완료와 같은 runOnce). worker 의 첫 Stream write 가 notify 뒤에 도착</td></tr>
+  <tr><td>IoLoop</td><td>StartWorkThenCloseStreamFromWorkerThreadResumesTheFlow</td><td><span class="tag ok">정상</span></td><td>onRead → thenWork → onWorkStarted(ctx, stream) → worker 가 readConnectionStream / writeConnectionStream 뒤 closeConnectionStream(stream, thenWrite(끝)) → peer 받음 → onWritten</td></tr>
+  <tr><td>IoLoop</td><td>NoCallbackIsDeliveredForAConnectionWhileItIsWorking</td><td><span class="tag ok">정상</span></td><td>Work 중 peer 가 보내면 worker 의 Stream read 가 받고 onRead 는 없다. peer 가 끊으면 Stream read 가 0, onDisconnected 는 closeStream 뒤의 WORK_DONE 에서</td></tr>
+  <tr><td>IoLoop</td><td>NotifyDuringWorkIsSentAfterCloseStream</td><td><span class="tag ok">정상</span></td><td>WORKING 중 다른 thread 의 notify 는 SUCCESS 이고 peer 에 안 간다. closeStream 뒤 WORK_DONE 다음 drain 에서 도착. worker 의 Stream write 와 섞이지 않는다</td></tr>
+  <tr><td>IoLoop</td><td>OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream</td><td><span class="tag edge">엣지</span></td><td>WORKING 연결에 stop → onDisconnected(CLOSED) 즉시, peer 의 recv 가 0 (FIN), slot 은 반납되지 않고 run 도 돌아오지 않는다. worker 의 Stream read 가 0 을 보고 closeConnectionStream → KIOTTY_CLOSED. 그 뒤 settle 이 반납하고 run return</td></tr>
+  <tr><td>IoLoop</td><td>PeerCloseWhileReadPendingCallsOnDisconnectedPeerClosedAndFreesTheSlot</td><td><span class="tag ok">정상</span></td><td>onDisconnected 1 회, 그 뒤 host.empty() (완료가 CLOSED 로 왔으므로 기다릴 CANCELLED 가 없다)</td></tr>
+  <tr><td>IoLoop</td><td>HandlerCloseWhileReadPendingReleasesSlotOnlyAfterCancelledCompletionReturns</td><td><span class="tag ok">정상</span></td><td>onTimeout → thenClose 로 걸린 READ 를 끊는 경로. onDisconnected 뒤 슬롯이 다음 바퀴 안에 비고, 새 접속이 그 slot 을 받아도 콜백이 섞이지 않는다 (handle 다름)</td></tr>
+  <tr><td>IoLoop</td><td>SlotReuseAfterCloseGivesANewHandleAndOldHandleCallsReturnPeerClosed</td><td><span class="tag ok">정상</span></td><td>닫힌 handle 로 notify → PEER_CLOSED, 새 연결 영향 없음</td></tr>
+  <tr><td>IoLoop</td><td>StopFromAnotherThreadMakesRunReturnAfterOnDisconnectedClosedForEveryConnection</td><td><span class="tag ok">정상</span></td><td>연결 3 개 (하나는 WORKING, 그 worker 는 Stream read 의 0 을 보고 closeStream) → 셋 다 onDisconnected(CLOSED), run return, peer 들의 recv 가 0</td></tr>
+  <tr><td>IoLoop</td><td>StopWhenEmptyEndsRunWhenTheLastConnectionCloses</td><td><span class="tag ok">정상</span></td><td>acceptor 없이 admit 하나. peer 가 닫으면 run return (EventClient 모양)</td></tr>
+  <tr><td>IoLoop</td><td>OneHundredTwentyEightClientsEachDoingOneHundredEchoesAllCompleteWithNoCrossTalk</td><td><span class="tag ok">정상</span></td><td>max_clients 기본 128. 각 클라이언트가 자기 id 를 보내고 그대로 받는다. slot 혼선 검출</td></tr>
+  <tr><td>IoLoop</td><td>TlsEchoWithTicketAndNotifyFollowsTheTenCycleTable</td><td><span class="tag ok">정상</span></td><td>설계 10절 TLS 서버 바퀴 표 그대로 (TLS 1.3). peer 는 응답 뒤 notify 를 받고, onReady 는 ticket 의 SEND 뒤</td></tr>
   <tr><td>IoLoop</td><td>TlsClientWithUntrustedCaIsDisconnectedWithVerifyFailedAndServerKeepsRunning</td><td><span class="tag ok">정상</span></td><td>Pump 가 아니라 소켓 위에서. 그 뒤 올바른 클라이언트는 성공</td></tr>
 </table>
 
@@ -483,7 +593,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EchoRoundtrip1KiB</td><td>클라이언트 1, 1 KiB echo 직렬</td><td>왕복 p50 / p99</td><td>p50 &lt; 80 µs, p99 &lt; 300 µs</td><td>바퀴당 고정 비용, no_delay 누락 (Nagle 이면 ~40 ms)</td></tr>
   <tr><td>EchoRoundtrip32Clients</td><td>32 클라이언트 동시 1 KiB echo</td><td>초당 메시지 합</td><td>&gt; 150 k msg/s</td><td>slot 선형 탐색, 완료 배열 복사</td></tr>
   <tr><td>ReadHeavyStream</td><td>32 클라이언트가 각각 64 MiB 를 밀어넣고 서버는 READ(4 KiB) 반복</td><td>MB/s 합, 콜백 수</td><td>&gt; 1.5 GB/s</td><td>recv 자리 계산, Stage compact 빈도</td></tr>
-  <tr><td>ReadHeavyTinyExact</td><td>1 클라이언트가 16 MiB 를 보내고 서버는 READ(1) 반복 (극단)</td><td>초당 onRead</td><td>&gt; 5 M/s (pump 가 submit 없이 돈다)</td><td>pump 가 바이트마다 submit 하면 100 배 느려진다</td></tr>
+  <tr><td>ReadHeavyTinyExact</td><td>1 클라이언트가 16 MiB 를 보내고 서버는 READ(1) 반복 (극단)</td><td>초당 onRead</td><td>&gt; 5 M/s (drive 가 submit 없이 돈다)</td><td>drive 가 바이트마다 submit 하면 100 배 느려진다</td></tr>
   <tr><td>ReadUntilNoDelimiterScan</td><td>READ_UNTIL max 1 MiB 에 delimiter 없는 1 MiB 를 1 KiB 씩</td><td>총 시간</td><td>O(n). 1 MiB 에 &lt; 20 ms</td><td>scanned 를 무시한 재탐색 (O(n²))</td></tr>
   <tr><td>WriteHeavyStream</td><td>서버가 32 클라이언트에 각각 64 MiB 를 WRITE(4 KiB) → onWritten → WRITE</td><td>MB/s 합</td><td>&gt; 1.5 GB/s</td><td>부분 완료 처리, compact</td></tr>
   <tr><td>WriteHeavyLargeMessage</td><td>send_capacity 1 MiB, 메시지 1 MiB 를 반복 (극단)</td><td>MB/s</td><td>&gt; 2 GB/s</td><td>큰 WSASend 의 부분 완료 재제출</td></tr>
@@ -500,7 +610,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s13">13. 설계에 요구하는 관찰 지점</h2>
-<p>테스트할 수 없는 동작은 없는 동작이다. 설계 v2 에서 테스트가 들여다볼 자리가 없는 곳과, 그걸 어떻게 열지의 제안이다. private 을 public 으로 여는 것은 마지막 수단이다.</p>
+<p>테스트할 수 없는 동작은 없는 동작이다. 설계 (v2 에서 시작해 v4 로 이어진) 에서 테스트가 들여다볼 자리가 없는 곳과, 그걸 어떻게 열지의 제안이다. private 을 public 으로 여는 것은 마지막 수단이다.</p>
 <table>
   <tr><th>필요한 관찰</th><th>지금</th><th>제안</th></tr>
   <tr><td>Connection 의 deadline 이 얼마로 걸렸나</td><td>private <code>_deadline</code></td><td><code>expireDeadline(now)</code> 가 이미 now 를 받으므로 두 now 로 경계를 확인한다. 추가 필요 없음</td></tr>
@@ -508,7 +618,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Stage 의 내부 위치 (begin / end)</td><td>private</td><td>writable / readable / capacity 조합으로 유도된다. 추가 필요 없음</td></tr>
   <tr><td>Pool 이 어느 등급에서 fallback 했나</td><td><code>fallbackCount()</code> 합계만</td><td>합계로 충분. 등급별은 벤치마크 때 필요하면 추가</td></tr>
   <tr><td>EventListener 의 완료 배열에 몇 개가 남았나</td><td>없음</td><td>필요 없음. "다음 wait 에 나머지" 를 두 번 wait 로 확인</td></tr>
-  <tr><td>IoLoop 의 한 바퀴를 한 번만 돌리기</td><td><code>runOnce</code> private</td><td>통합 테스트는 run thread + waitUntil 로 충분하다. 바퀴 순서 (broadcast 가 step 앞) 는 peer 가 받는 바이트 순서로 관찰한다. 열지 않는다</td></tr>
+  <tr><td>IoLoop 의 한 바퀴를 한 번만 돌리기</td><td><code>runOnce</code> private</td><td>통합 테스트는 run thread + waitUntil 로 충분하다. 바퀴 순서 (v4 10절 : drain → settle → collectIoEvents → step → collectLocalEvents → step) 는 peer 가 받는 바이트 순서와 콜백 순서로 관찰한다. 열지 않는다</td></tr>
   <tr><td>Connection 생성에 필요한 NotificationContext, Pool</td><td>ConnectionHost 가 만든다</td><td>테스트가 capacity 1 의 ConnectionHost 를 만들고 <code>at(0)</code> 을 쓴다. Connection 생성자를 직접 부르지 않는다</td></tr>
   <tr><td>TlsEngine 둘을 맞붙이기</td><td>cipher() 가 public</td><td>그대로 된다. TlsPump 는 테스트 support</td></tr>
   <tr><td>KeyUpdate / close_notify 유도</td><td>TlsEngine 에 없음</td><td>테스트 support 가 <code>_ssl</code> 을 꺼낼 수 없다. 테스트 전용 <code>TlsEngine::debugKeyUpdate()</code> / <code>debugShutdown()</code> 를 <code>KIOTTY_NET_TESTING</code> 매크로 아래에 둔다. 이것이 유일한 테스트 훅이다</td></tr>
@@ -522,7 +632,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><th>축</th><th>군</th><th>쓰는 곳</th></tr>
   <tr><td>Stage capacity</td><td>{ 1, 16, 4096 (기본), 65536 }</td><td>Stage, Connection 의 BUFFER_FULL / REQUEST_TOO_LARGE 경계</td></tr>
   <tr><td>메시지 길이 (capacity c 에 대해)</td><td>{ 0, 1, c - 1, c, c + 1, 16 KiB + 1 (TLS 레코드 경계) }</td><td>WRITE, notify, READ exact, StreamClient write</td></tr>
-  <tr><td>클라이언트 수 (max_clients m)</td><td>{ 1, m, m + 1 }, m ∈ { 1, 32 }</td><td>Server, IoLoop, broadcast</td></tr>
+  <tr><td>클라이언트 수 (max_clients m)</td><td>{ 1, m, m + 1 }, m ∈ { 1, 128 }, 상한 경계는 1024</td><td>Server, IoLoop, broadcast</td></tr>
   <tr><td>timeout_ms</td><td>{ 0 (없음), 1, 100, 60000 }</td><td>HOLD / READ 의 deadline, await, StreamClient read</td></tr>
   <tr><td>transport</td><td>{ TCP, PIPE }</td><td>echo 류 전부 두 번</td></tr>
   <tr><td>TLS</td><td>{ 평문, TLS 1.3, TLS 1.2 }</td><td>echo 류, Connection 의 TLS 판</td></tr>
@@ -532,23 +642,21 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <ol>
   <li><b>READ_UNTIL 의 data 가 delimiter 를 포함하는가.</b> 포함을 전제했다 (HTTP 줄 파싱이 편하다).</li>
   <li><b>READ exact 0, WRITE 0 바이트, delimiter 길이 0 / 5 초과.</b> 전부 <code>onError(INVALID_ARGUMENT)</code> 뒤 CLOSE 를 전제했다. WRITE 0 을 "바로 onWritten(0)" 로 둘 수도 있다.</li>
-  <li><b>Stage::commit 이 writable 을 넘길 때, Pool::release 에 남의 포인터.</b> debug assert + release clamp / 무시 를 전제했다.</li>
   <li><b>빈 host 의 broadcast, close 뒤 run, connect 전의 StreamClient read.</b> 각각 SUCCESS, CLOSED, PEER_CLOSED 를 전제했다.</li>
-  <li><b>EventListener 의 오용 셋</b> (pending 인 event 에 submit, attach 없는 submit, NONE kind submit) 을 코드로 막을지 debug assert 로 막을지. <b>확정 (사이클 3b)</b>: 셋 다 코드로 막는다. pending → BUSY, kind → INVALID_ARGUMENT, attach 없는 submit 은 attach 가 IoEvent 를 돌려주는 모양으로 바꿔 없앴다. 설계 v2 7절.</li>
   <li><b>테스트 훅</b> <code>KIOTTY_NET_TESTING</code> 아래의 <code>TlsEngine::debugKeyUpdate / debugShutdown</code> 둘을 허용하는지.</li>
   <li><b>성능 기준치</b> 12절의 숫자는 추정이다. 첫 측정값으로 바꾼다.</li>
 </ol>
 
 <h2 id="s15">15. 구현 순서와 테스트 순서</h2>
-<p>설계 v2 17절의 ① ~ ⑧ 과 같이 간다. 단계마다 그 단계의 테스트가 전부 통과해야 다음으로 간다. "돌려보지 않은 테스트는 테스트가 아니다."</p>
+<p>설계 v4 18절의 ① ~ ⑨ (plan_base_v1 의 사이클) 과 같이 간다. 단계마다 그 단계의 테스트가 전부 통과해야 다음으로 간다. "돌려보지 않은 테스트는 테스트가 아니다."</p>
 <table>
   <tr><th>단계</th><th>구현</th><th>테스트</th><th>층</th></tr>
   <tr><td>①</td><td>base.h 3절 변경, statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
   <tr><td>②</td><td>core : Stage, StageSet, Span, PoolHandle, Pool, Clock + tests/CMakeLists 골격</td><td>5절 전부, PoolAllocateRelease, StageProvideConsume</td><td>unit, benchmark</td></tr>
   <tr><td>③</td><td>error, socket, event (IOCP 먼저, 그 다음 epoll)</td><td>6절, 7절. 두 backend 가 같은 테스트를 통과하는 것이 proactor 흉내의 완성 조건</td><td>integration</td></tr>
   <tr><td>④</td><td>tls : stub, 그 다음 OpenSSL</td><td>8절. TlsPump 로 소켓 없이</td><td>unit</td></tr>
-  <tr><td>⑤</td><td>connection 전부</td><td>9절. 가장 많은 케이스가 여기 있고 소켓 없이 돈다</td><td>unit</td></tr>
-  <tr><td>⑥</td><td>io_loop</td><td>10절, EchoRoundtrip, IdleCpu, NotifyLatency</td><td>integration, benchmark</td></tr>
+  <tr><td>⑤</td><td>connection 전부 (사이클 5a 평문, 5b TLS 와 Acceptor)</td><td>9절. 평문 94 (5a), TLS 23 과 Acceptor 3 (5b). 가장 많은 케이스가 여기 있고 Acceptor 말고는 소켓 없이 돈다</td><td>unit, integration (Acceptor)</td></tr>
+  <tr><td>⑥</td><td>io_loop</td><td>10절 32, EchoRoundtrip, IdleCpu, NotifyLatency</td><td>integration, benchmark</td></tr>
   <tr><td>⑦</td><td>server, client, context, config</td><td>11절의 Config / Action unit, Context / Server / Client integration</td><td>unit, integration</td></tr>
   <tr><td>⑧</td><td>base.cpp 번역</td><td>11절 전부를 C API 로 다시. 12절 나머지 벤치마크</td><td>integration, benchmark</td></tr>
 </table>
