@@ -172,7 +172,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s5">5. 케이스 : core</h2>
-<p>Stage 와 StageSet 은 버퍼를 <code>base/pool</code> 의 Pool 에서 받는다 (설계 v4 4절, 19절). 테스트는 <code>tests/unit/support/kiotty_test_pool.h</code> 의 <code>TestPool</code> (넉넉한 등급 일곱) 을 쓴다.</p>
+<p>Stage 와 StageSet 은 버퍼를 <code>core/kiotty_pool.h</code> 의 Pool 에서 받는다 (설계 v4 4절, 19절). 테스트는 <code>tests/unit/support/kiotty_test_pool.h</code> 의 <code>TestPool</code> (넉넉한 등급 일곱) 을 쓴다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>Stage</td><td>PrepareThenCommitMakesBytesReadable</td><td><span class="tag ok">정상</span></td><td>provider.prepare(n) 에 쓰고 commit(n) 하면 consumer.readable() == n, prepare 로 같은 바이트</td></tr>
@@ -198,7 +198,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Holder, Result</td><td>(있음) 기존 헤더의 계약을 같은 규칙의 이름으로 옮긴다. make / get / 소멸, Result 의 ok / code / value</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만</td></tr>
 </table>
 
-<h3>5.1 pool, context (<code>base/pool</code>, <code>base/context</code>)</h3>
+<h3>5.1 pool, context (<code>core</code> 의 Pool / StaticPool, <code>base/pool</code> 의 번역기, <code>base/context</code>)</h3>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>Pool</td><td>AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock</td><td><span class="tag ok">정상</span></td><td>등급 32 / 64 / 256. 20, 33, 200 B 가 각자의 등급에서, 16 B 정렬</td></tr>

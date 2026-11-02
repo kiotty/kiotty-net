@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_TEST_POOL_H)
 #define KIOTTY_TEST_POOL_H
 
-#include "base/pool/kiotty_pool.h"
+#include "core/kiotty_pool.h"
 
 namespace kiotty_test
 {

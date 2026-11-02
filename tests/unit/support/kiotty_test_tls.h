@@ -3,7 +3,7 @@
 
 #include "base/tls/kiotty_tls_engine.h"
 #include "base/tls/kiotty_tls_profile.h"
-#include "base/pool/kiotty_pool.h"
+#include "core/kiotty_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <cstring>

@@ -25,8 +25,8 @@ kiotty_net_base.cpp ── 번역
                                      Acceptor ──── PassiveSocket, IoEvent 하나
                                      EventListener + IoEvent ── IOCP (있음) / epoll / kqueue / io_uring
                                      ActiveSocket / PassiveSocket (있음), TlsProfile / TlsEngine
-core/ : Stage, StageSet, Span, Holder, Result, PoolHandle, Clock (있음)
-base/pool/ : Pool, StaticPool, PoolLayout, MemoryLimits, ContextPoolLayout, TlsPoolLayout (19절)
+core/ : Stage, StageSet, Span, Holder, Result, PoolHandle, Clock, Pool, StaticPool, PoolLayout (있음)
+base/pool/ : MemoryLimits, ContextPoolLayout, TlsPoolLayout (19절)
 ```
 
 ## 1. 폴더
@@ -35,11 +35,11 @@ base/pool/ : Pool, StaticPool, PoolLayout, MemoryLimits, ContextPoolLayout, TlsP
 src/
     kiotty_net_base.cpp
     implementation/
-        core/                       namespace kiotty                        (있음. Stage / StageSet 은 base/pool 의 Pool 에서 버퍼를 받는다)
+        core/                       namespace kiotty                        (있음. 무엇에도 의존하지 않는다)
+                    kiotty_pool_layout.h (PoolClass, BlockClass, PoolLayout), kiotty_pool.h/.cpp (Context 의 heap Pool),
+                    kiotty_static_pool.h (전역에만 놓이는 Pool). Stage / StageSet 이 Pool 에서 버퍼를 받는다 (19절)
         base/                       namespace kiotty::net
-            pool/       kiotty_pool_layout.h (PoolClass, BlockClass, PoolLayout), kiotty_pool.h/.cpp (Context 의 heap Pool),
-                        kiotty_static_pool.h (전역에만 놓이는 Pool), kiotty_memory_limits.h (compile time 상한), kiotty_memory_layout.h (번역기)
-                        19절. Pool 세 가지는 namespace kiotty (core 와 같이 아무것에도 의존하지 않는다), limits 와 layout 은 kiotty::net
+            pool/       kiotty_memory_limits.h (compile time 상한), kiotty_memory_layout.h (번역기). kiotty-net 의 크기를 아는 것만 여기 (19절)
             error/      (있음)
             socket/     (있음)
             event/      kiotty_io_action.h (as.write.length 추가), kiotty_event.h (IoKind::WORK_READY 추가), kiotty_event_listener.h (그대로),

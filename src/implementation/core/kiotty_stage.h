@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_STAGE_H)
 #define KIOTTY_STAGE_H
 
-#include "base/pool/kiotty_pool.h"
+#include "core/kiotty_pool.h"
 
 #include <cstddef>
 

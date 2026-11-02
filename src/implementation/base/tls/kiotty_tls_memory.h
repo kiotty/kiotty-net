@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_TLS_MEMORY_H)
 #define KIOTTY_TLS_MEMORY_H
 
-#include "base/pool/kiotty_static_pool.h"
+#include "core/kiotty_static_pool.h"
 
 #include <cstddef>
 

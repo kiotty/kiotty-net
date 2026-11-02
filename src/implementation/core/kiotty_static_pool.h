@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_STATIC_POOL_H)
 #define KIOTTY_STATIC_POOL_H
 
-#include "base/pool/kiotty_pool_layout.h"
+#include "core/kiotty_pool_layout.h"
 
 #include <atomic>
 #include <cstddef>

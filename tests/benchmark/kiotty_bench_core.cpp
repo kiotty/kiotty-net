@@ -1,4 +1,4 @@
-#include "base/pool/kiotty_pool.h"
+#include "core/kiotty_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <benchmark/benchmark.h>

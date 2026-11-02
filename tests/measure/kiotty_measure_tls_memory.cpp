@@ -1,4 +1,4 @@
-#include "base/pool/kiotty_pool.h"
+#include "core/kiotty_pool.h"
 #include "support/kiotty_test_tls.h"
 
 #include <openssl/crypto.h>

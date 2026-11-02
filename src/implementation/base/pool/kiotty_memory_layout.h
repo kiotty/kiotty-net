@@ -2,7 +2,7 @@
 #define KIOTTY_MEMORY_LAYOUT_H
 
 #include "base/pool/kiotty_memory_limits.h"
-#include "base/pool/kiotty_pool_layout.h"
+#include "core/kiotty_pool_layout.h"
 
 namespace kiotty
 {

@@ -60,13 +60,13 @@ push 뒤 CI (새 tls 축) 확인 → R4.
 - OpenSSL 은 정적 링크일 때 정적 TLS Pool 이다 (.bss, process 수명). DLL 이면 OpenSSL 의 malloc 이다.
 
 코드:
-- `base/pool/`
+- `core/` (무엇에도 의존하지 않는 범용 Pool)
   - `kiotty_pool_layout.h` (PoolClass, BlockClass, PoolLayout)
   - `kiotty_pool.h/.cpp`: 등급 목록으로 만든다. 생성자는 arena 를 건드리지 않는다 (free list 먼저, 비면 bump index). fallback 없음
   - `kiotty_static_pool.h` (`StaticPool<Tag, PoolLayout<...>>`)
+- `base/pool/` (kiotty-net 의 크기를 아는 것)
   - `kiotty_memory_limits.h` (`KIOTTY_NET_MAX_*`)
   - `kiotty_memory_layout.h` (번역기: ContextPoolLayout, TlsPoolLayout)
-  - `core/kiotty_pool.*` 는 이리로 옮겼다
 - `base/context/kiotty_context.h/.cpp`: `Context()` 가 Pool 을 잡고 `useTlsStaticPool()` 로 OpenSSL 에 정적 Pool 을 건다. 기본 malloc 이 아닌 hook 이 이미 있으면 덮지 않는다.
 - `Stage(Pool&, capacity)`, `StageSet(Pool&, ...)`, `TlsEngine(Pool&, ...)`.
 - **BIO pair:** TlsEngine 의 memory BIO 둘을 4 KiB 고정 BIO pair 하나로 바꿨다. feed / flush 가 옮긴 길이를 돌려주고, WANT_READ / WANT_WRITE 에서 자리를 만들어 다시 부른다.

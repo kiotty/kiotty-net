@@ -34,7 +34,7 @@ set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_stage.cpp
-    src/implementation/base/pool/kiotty_pool.cpp
+    src/implementation/core/kiotty_pool.cpp
     src/implementation/base/context/kiotty_context.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
     src/implementation/base/error/backend/kiotty_posix_error.cpp
