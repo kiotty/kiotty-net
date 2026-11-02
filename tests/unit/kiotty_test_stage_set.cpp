@@ -1,12 +1,15 @@
 #include "core/kiotty_stage_set.h"
+#include "support/kiotty_test_pool.h"
 
 #include <gtest/gtest.h>
 
 using kiotty::StageSet;
+using kiotty_test::TestPool;
 
 TEST(StageSet, EachMemberHasItsOwnCapacity)
 {
-    StageSet set(16, 32, 64);
+    TestPool pool;
+    StageSet set(pool, 16, 32, 64);
     EXPECT_TRUE(set.valid());
     EXPECT_EQ(set.receive.capacity(), 16u);
     EXPECT_EQ(set.send.capacity(), 32u);
@@ -15,13 +18,14 @@ TEST(StageSet, EachMemberHasItsOwnCapacity)
 
 TEST(StageSet, ZeroMembersAllocateNothingAndSetStaysValid)
 {
-    StageSet empty(0, 0, 0);
+    TestPool pool;
+    StageSet empty(pool, 0, 0, 0);
     EXPECT_TRUE(empty.valid());
     EXPECT_EQ(empty.receive.capacity(), 0u);
     EXPECT_EQ(empty.send.capacity(), 0u);
     EXPECT_EQ(empty.notify.capacity(), 0u);
 
-    StageSet receive_only(16, 0, 0);
+    StageSet receive_only(pool, 16, 0, 0);
     EXPECT_TRUE(receive_only.valid());
     EXPECT_EQ(receive_only.receive.capacity(), 16u);
     EXPECT_EQ(receive_only.send.capacity(), 0u);

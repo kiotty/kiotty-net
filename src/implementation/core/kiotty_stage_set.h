@@ -9,7 +9,7 @@ namespace kiotty
 {
     struct StageSet
     {
-        StageSet(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
+        StageSet(Pool& pool, size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
 
         bool valid() const;
 
@@ -18,10 +18,10 @@ namespace kiotty
         Stage notify;
     };
 
-    inline StageSet::StageSet(size_t receive_capacity, size_t send_capacity, size_t notify_capacity)
-        : receive(receive_capacity)
-        , send(send_capacity)
-        , notify(notify_capacity)
+    inline StageSet::StageSet(Pool& pool, size_t receive_capacity, size_t send_capacity, size_t notify_capacity)
+        : receive(pool, receive_capacity)
+        , send(pool, send_capacity)
+        , notify(pool, notify_capacity)
     {
     }
 

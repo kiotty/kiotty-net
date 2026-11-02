@@ -4,6 +4,13 @@ project(kiotty_net LANGUAGES C CXX)
 
 option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF builds the stub backend without OpenSSL" ON)
 option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
+option(KIOTTY_NET_TLS_STATIC_POOL "Route OpenSSL allocations into the static TLS pool. Only for OpenSSL linked statically into kiotty_net" ON)
+set(KIOTTY_NET_MAX_OWNERS "16" CACHE STRING "Servers and clients one context can hold at once, 1 to 16")
+set(KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER "128" CACHE STRING "Upper bound of max_clients, 1 to 1024")
+set(KIOTTY_NET_MAX_RECV_CAPACITY "16384" CACHE STRING "Upper bound of recv_capacity in bytes")
+set(KIOTTY_NET_MAX_SEND_CAPACITY "16384" CACHE STRING "Upper bound of send_capacity in bytes")
+set(KIOTTY_NET_MAX_PUSH_CAPACITY "16384" CACHE STRING "Upper bound of push_capacity in bytes")
+set(KIOTTY_NET_MAX_TLS_CONTEXTS "1" CACHE STRING "Contexts that use TLS at once. Sizes the static TLS pool")
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)
 option(KIOTTY_NET_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
 set(KIOTTY_NET_SANITIZER "" CACHE STRING "Sanitizer for every target: address, thread, undefined or a comma list")
@@ -26,8 +33,9 @@ target_compile_options(kiotty_net_warnings INTERFACE
 set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
-    src/implementation/core/kiotty_pool.cpp
     src/implementation/core/kiotty_stage.cpp
+    src/implementation/base/pool/kiotty_pool.cpp
+    src/implementation/base/context/kiotty_context.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
     src/implementation/base/error/backend/kiotty_posix_error.cpp
     src/implementation/base/error/backend/kiotty_windows_error.cpp
@@ -58,6 +66,15 @@ target_compile_features(kiotty_net PUBLIC c_std_99)
 
 target_link_libraries(kiotty_net PRIVATE kiotty_net_warnings)
 
+target_compile_definitions(kiotty_net PUBLIC
+    KIOTTY_NET_MAX_OWNERS=${KIOTTY_NET_MAX_OWNERS}
+    KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER=${KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER}
+    KIOTTY_NET_MAX_RECV_CAPACITY=${KIOTTY_NET_MAX_RECV_CAPACITY}
+    KIOTTY_NET_MAX_SEND_CAPACITY=${KIOTTY_NET_MAX_SEND_CAPACITY}
+    KIOTTY_NET_MAX_PUSH_CAPACITY=${KIOTTY_NET_MAX_PUSH_CAPACITY}
+    KIOTTY_NET_MAX_TLS_CONTEXTS=${KIOTTY_NET_MAX_TLS_CONTEXTS}
+)
+
 if(KIOTTY_NET_USE_TLS)
     include(FetchContent)
     FetchContent_Declare(
@@ -68,9 +85,14 @@ if(KIOTTY_NET_USE_TLS)
     set(OPENSSL_CMAKE_USE_PREBUILT ${KIOTTY_NET_OPENSSL_PREBUILT} CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(openssl-cmake)
     target_link_libraries(kiotty_net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    target_compile_definitions(kiotty_net PRIVATE KIOTTY_NET_USE_TLS=1)
+    target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USE_TLS=1)
+    if(KIOTTY_NET_TLS_STATIC_POOL)
+        target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_TLS_STATIC_POOL=1)
+    else()
+        target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_TLS_STATIC_POOL=0)
+    endif()
 else()
-    target_compile_definitions(kiotty_net PRIVATE KIOTTY_NET_USE_TLS=0)
+    target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USE_TLS=0 KIOTTY_NET_TLS_STATIC_POOL=0)
 endif()
 
 if(WIN32)

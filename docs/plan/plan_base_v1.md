@@ -10,7 +10,7 @@ v4 가 v2 와 다른 점 중 코드에 닿는 것 (설계 v4 17절):
 | `IoAction::as.write.length`, `IoKind::WORK_READY`, `IoCompletion::workReady / workDone(slot, outcome)`, "WRITE 완료 = payload 전부" 계약 | event (3b 코드와 테스트) |
 | event 둘이 방향 (read / write) 으로, 송신 맥락 셋 (send / notify / cipherSend) 이 각자 Stage, write lane 하나 (`drain` → `pickWrite`), `drive` loop, `refill`, WorkContext 의 REQUESTED, ConnectionStream | connection, io_loop, tls, stream (아직 코드 없음. 2부) |
 | 한 바퀴 `drain → settle → collectIoEvents → step → collectLocalEvents → step` | io_loop (코드 없음), 테스트 계획 10절 |
-| max_clients 128 / 1024, TLS Pool 8 MiB 인자 | config, context (코드 없음), requirement |
+| max_clients 128 / compile time 상한 (`KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER`), Context 의 Pool 과 정적 TLS Pool (설계 v4 19절, 사이클 4 에서 코드) | config, context, requirement |
 
 ## 1부. 끝난 사이클에서 고칠 것
 
@@ -106,9 +106,9 @@ Connection 과 StreamClient 가 같이 쓰는 동기 통로다. 소켓 + TlsEngi
 
 ### 7. server, client, context, config
 
-| 구현 | `context/kiotty_owner.h`, `kiotty_context.h/.cpp` (`Context(tls_pool_bytes)`, 기본 8 MiB, Holder<Owner>[16], g_contexts[16], WSAStartup. TLS Pool 과 g_contexts 는 R4 에서 정리), `config/kiotty_config.h/.cpp` (initialize* / configure*, `configureServerMaxClients` 의 [1, 1024] 검사, 기본 128, isInitialized 4 오버로드, mark), `config/kiotty_action.h` (then* 여섯 + accept / ignore 조립), `server/kiotty_server.h/.cpp`, `client/kiotty_event_client.h/.cpp` (run 전 admit → 첫 runOnce 의 drain 이 ClientHello 를 건다), `client/kiotty_stream_client.h/.cpp` (ConnectionStream 하나를 값으로. connect 는 connectWithRetry → `_stream.handshake`). Owner::shutdown 은 WORKING 연결의 closeStream 을 기다린다 (문서에 적힌 계약) |
+| 구현 | `context/kiotty_owner.h`, `kiotty_context.h/.cpp` (`Context()` 는 사이클 4 에서 Pool 과 정적 TLS Pool 까지 있음. 여기서 Holder<Owner>[16], WSAStartup 을 더한다. g_contexts 는 R4 에서 정리), `config/kiotty_config.h/.cpp` (initialize* / configure*, `configureServerMaxClients` 의 [1, 1024] 검사, 기본 128, isInitialized 4 오버로드, mark), `config/kiotty_action.h` (then* 여섯 + accept / ignore 조립), `server/kiotty_server.h/.cpp`, `client/kiotty_event_client.h/.cpp` (run 전 admit → 첫 runOnce 의 drain 이 ClientHello 를 건다), `client/kiotty_stream_client.h/.cpp` (ConnectionStream 하나를 값으로. connect 는 connectWithRetry → `_stream.handshake`). Owner::shutdown 은 WORKING 연결의 closeStream 을 기다린다 (문서에 적힌 계약) |
 |---|---|
-| 테스트 | 테스트 v0 11절 중 Config (max_clients 0 / 1025 거부, 1024 허용, 기본 128), Action (then* 여섯). Context, Server, EventClient, StreamClient 를 내부 클래스로 먼저 (C API 는 8). 더하는 것: `ServerCloseWaitsForWorkerCloseStream`, `StreamClientSharesConnectionStreamCode` (같은 더블로 Connection WORKING 과 같은 케이스), `InitializeContextWithTlsPoolSizesThePool` |
+| 테스트 | 테스트 v0 11절 중 Config (max_clients 0 / 상한 + 1 거부, 상한 허용, 기본 128. capacity 0 / 상한 + 1 거부), Action (then* 여섯). Context, Server, EventClient, StreamClient 를 내부 클래스로 먼저 (C API 는 8). 더하는 것: `ServerCloseWaitsForWorkerCloseStream`, `StreamClientSharesConnectionStreamCode` (같은 더블로 Connection WORKING 과 같은 케이스), `InitializeContextReturnsOutOfMemoryWhenThePoolCannotBeReserved` |
 | 완료 | 매트릭스 초록 (TLS ON / OFF). `OnDisconnectedIsCalledExactlyOncePerAcceptedConnectionOverAThousandConnections` 가 ASan 에서 누수 0 |
 | commit | `owner: Server, EventClient, StreamClient over ConnectionStream, Context with TLS pool size, config bounds` |
 

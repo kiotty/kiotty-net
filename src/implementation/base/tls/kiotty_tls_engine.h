@@ -32,7 +32,7 @@ namespace kiotty
         class TlsEngine
         {
         public:
-            TlsEngine(size_t receive_capacity, size_t send_capacity);
+            TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity);
             ~TlsEngine();
 
             TlsEngine(const TlsEngine&) = delete;
@@ -59,15 +59,14 @@ namespace kiotty
 
         private:
             TlsStep fail(KiottyNetCode code, const char* message);
-            void    feed();
-            void    flush();
+            size_t  feed();
+            size_t  flush();
             size_t  pending() const;
 
             Stage         _cipher_receive;
             Stage         _cipher_send;
             ssl_st*       _ssl;
-            bio_st*       _receive_bio;
-            bio_st*       _send_bio;
+            bio_st*       _network;
             bool          _active;
             bool          _failed;
             KiottyNetCode _last_code;

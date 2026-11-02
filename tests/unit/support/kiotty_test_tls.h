@@ -3,6 +3,7 @@
 
 #include "base/tls/kiotty_tls_engine.h"
 #include "base/tls/kiotty_tls_profile.h"
+#include "base/pool/kiotty_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <cstring>
@@ -103,9 +104,9 @@ namespace kiotty_test
     class TlsPump
     {
     public:
-        explicit TlsPump(size_t capacity = 16384)
-            : server(capacity, capacity)
-            , client(capacity, capacity)
+        explicit TlsPump(kiotty::Pool& pool, size_t capacity = 16384)
+            : server(pool, capacity, capacity)
+            , client(pool, capacity, capacity)
         {
         }
 

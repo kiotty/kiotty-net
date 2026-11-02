@@ -47,3 +47,45 @@
 ## 다음 할 일
 
 push 뒤 CI (새 tls 축) 확인 → R4.
+
+## 추가 (같은 날) : 메모리 할당 (설계 v4 19절)
+
+결정한 것:
+- stack 이 아닌 메모리는 전부 Pool 에서 받는다. 실행 중 malloc fallback 은 없다.
+- `initializeContext` 가 최악 크기 (Owner 16 개가 모두 서버, 서버마다 연결 상한) 를 한 번에 잡는다. 못 잡으면 `KIOTTY_OUT_OF_MEMORY` (base.h enum 끝에 추가). `initializeContextWithTlsPool` 은 지웠다.
+- 잡아 둔 메모리는 쓰기 전까지 RAM 에 올라가지 않는다.
+  - 256 MiB 를 잡고 1.6 MiB 를 쓴 실측: Linux RSS 4 MB, Windows working set 4.5 MB / commit 257 MB.
+  - 옛 `kiotty::Pool` 은 생성자의 memset 과 free list 엮기 때문에 잡는 순간 전부 RAM 에 올라갔다.
+- kiotty 데이터는 Context 마다 heap Pool 에 둔다 (격리, releaseContext 에서 해제).
+- OpenSSL 은 정적 링크일 때 정적 TLS Pool 이다 (.bss, process 수명). DLL 이면 OpenSSL 의 malloc 이다.
+
+코드:
+- `base/pool/`
+  - `kiotty_pool_layout.h` (PoolClass, BlockClass, PoolLayout)
+  - `kiotty_pool.h/.cpp`: 등급 목록으로 만든다. 생성자는 arena 를 건드리지 않는다 (free list 먼저, 비면 bump index). fallback 없음
+  - `kiotty_static_pool.h` (`StaticPool<Tag, PoolLayout<...>>`)
+  - `kiotty_memory_limits.h` (`KIOTTY_NET_MAX_*`)
+  - `kiotty_memory_layout.h` (번역기: ContextPoolLayout, TlsPoolLayout)
+  - `core/kiotty_pool.*` 는 이리로 옮겼다
+- `base/context/kiotty_context.h/.cpp`: `Context()` 가 Pool 을 잡고 `useTlsStaticPool()` 로 OpenSSL 에 정적 Pool 을 건다. 기본 malloc 이 아닌 hook 이 이미 있으면 덮지 않는다.
+- `Stage(Pool&, capacity)`, `StageSet(Pool&, ...)`, `TlsEngine(Pool&, ...)`.
+- **BIO pair:** TlsEngine 의 memory BIO 둘을 4 KiB 고정 BIO pair 하나로 바꿨다. feed / flush 가 옮긴 길이를 돌려주고, WANT_READ / WANT_WRITE 에서 자리를 만들어 다시 부른다.
+  - 연결당 OpenSSL 최대치가 Stage 크기와 무관해졌다. 64 KiB Stage 에서 183 KiB → 68 KiB.
+- CMake: cache 변수 `KIOTTY_NET_MAX_OWNERS` (16), `_CONNECTIONS_PER_SERVER` (128), `_RECV/SEND/PUSH_CAPACITY` (16384), `_TLS_CONTEXTS` (1), option `KIOTTY_NET_TLS_STATIC_POOL` (ON). `KIOTTY_NET_USE_TLS` 와 함께 PUBLIC 정의다.
+- 계측 도구:
+  - 등급을 1.5 배 간격으로 바꿨다.
+  - 번역기 표 (`tlsBlocks(global, profile, connection)`) 를 그대로 출력한다.
+  - 기본값의 예약 크기: Context Pool 161 MB, 정적 TLS Pool 302 MB (설계 v4 19.5).
+
+테스트:
+- Pool 10, StaticPool 11, MemoryLimits / ContextPoolLayout / TlsPoolLayout 4, Context 3, Stage 1 을 더하거나 다시 썼다.
+- 별도 실행 파일 `kiotty_net_tls_pool_tests` (TlsStaticPool 2) 를 더했다.
+- 테스트 계획: 5절 (Stage 와 5.1 pool, context), 8절 (정적 TLS Pool, BIO pair 수치).
+- 로컬: WSL gcc / clang TLS 184, TLS OFF 182, Release TLS 183, ASan / TSan TLS 184. MSVC TLS ON 183, OFF 181.
+
+남은 것 (설계 v4 19.7):
+- Connection / Owner 객체의 등급
+- `OPENSSL_thread_stop`
+- trust store 계측
+- Linux 엄격 build 옵션
+- 정적 Pool 이 바닥날 때의 handshake 실패 테스트

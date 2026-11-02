@@ -28,12 +28,11 @@ namespace kiotty
             return bound + CONTROL_RESERVE_BYTES;
         }
 
-        TlsEngine::TlsEngine(size_t receive_capacity, size_t send_capacity)
-            : _cipher_receive(receive_capacity)
-            , _cipher_send(tlsCipherCapacity(send_capacity))
+        TlsEngine::TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity)
+            : _cipher_receive(pool, receive_capacity)
+            , _cipher_send(pool, tlsCipherCapacity(send_capacity))
             , _ssl(nullptr)
-            , _receive_bio(nullptr)
-            , _send_bio(nullptr)
+            , _network(nullptr)
             , _active(false)
             , _failed(false)
             , _last_code(KIOTTY_SUCCESS)

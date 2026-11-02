@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstring>
-#include <new>
 
 namespace kiotty
 {
@@ -66,8 +65,9 @@ namespace kiotty
         _stage._begin_pos += consumed;
     }
 
-    Stage::Stage(size_t capacity)
-        : _buffer(nullptr)
+    Stage::Stage(Pool& pool, size_t capacity)
+        : _pool(pool)
+        , _buffer(nullptr)
         , _capacity(0)
         , _begin_pos(0)
         , _end_pos(0)
@@ -77,7 +77,7 @@ namespace kiotty
         {
             return;
         }
-        _buffer = new (std::nothrow) char[capacity];
+        _buffer = static_cast<char*>(_pool.allocate(capacity));
         if (_buffer == nullptr)
         {
             _valid = false;
@@ -88,7 +88,7 @@ namespace kiotty
 
     Stage::~Stage()
     {
-        delete[] _buffer;
+        _pool.release(_buffer);
     }
 
     bool Stage::valid() const

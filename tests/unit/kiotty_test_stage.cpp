@@ -1,10 +1,12 @@
 #include "core/kiotty_stage.h"
+#include "support/kiotty_test_pool.h"
 
 #include <gtest/gtest.h>
 
 #include <cstring>
 
 using kiotty::Stage;
+using kiotty_test::TestPool;
 
 namespace
 {
@@ -20,7 +22,8 @@ namespace
 
 TEST(Stage, PrepareThenCommitMakesBytesReadable)
 {
-    Stage stage(16);
+    TestPool pool;
+    Stage stage(pool, 16);
     write(stage, "hello");
     EXPECT_EQ(stage.consumer().readable(), 5u);
     EXPECT_EQ(std::memcmp(stage.consumer().peek(), "hello", 5), 0);
@@ -28,7 +31,8 @@ TEST(Stage, PrepareThenCommitMakesBytesReadable)
 
 TEST(Stage, ConsumerPeekStaysUntilCommit)
 {
-    Stage stage(16);
+    TestPool pool;
+    Stage stage(pool, 16);
     write(stage, "abcdef");
     char* first = stage.consumer().peek();
     char* second = stage.consumer().peek();
@@ -41,7 +45,8 @@ TEST(Stage, ConsumerPeekStaysUntilCommit)
 
 TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 {
-    Stage stage(16);
+    TestPool pool;
+    Stage stage(pool, 16);
     char* target = stage.provider().prepare(10);
     ASSERT_NE(target, nullptr);
     stage.provider().commit(4);
@@ -51,7 +56,8 @@ TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 
 TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "12345678");
     EXPECT_EQ(stage.provider().writable(), 0u);
     stage.consumer().commit(3);
@@ -60,7 +66,8 @@ TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 
 TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "12345678");
     stage.consumer().commit(5);
     stage.compact();
@@ -71,7 +78,8 @@ TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 
 TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "1234");
     stage.consumer().commit(4);
     stage.compact();
@@ -81,7 +89,8 @@ TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 
 TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "123");
     EXPECT_EQ(stage.provider().prepare(6), nullptr);
     EXPECT_EQ(stage.provider().writable(), 5u);
@@ -90,7 +99,8 @@ TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 
 TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "123456");
     EXPECT_DEBUG_DEATH(stage.provider().commit(3), "");
 #if defined(NDEBUG)
@@ -101,7 +111,8 @@ TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 {
-    Stage stage(8);
+    TestPool pool;
+    Stage stage(pool, 8);
     write(stage, "123");
     EXPECT_DEBUG_DEATH(stage.consumer().commit(4), "");
 #if defined(NDEBUG)
@@ -111,7 +122,8 @@ TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 {
-    Stage stage(0);
+    TestPool pool;
+    Stage stage(pool, 0);
     EXPECT_TRUE(stage.valid());
     EXPECT_EQ(stage.capacity(), 0u);
     EXPECT_EQ(stage.provider().writable(), 0u);
@@ -124,7 +136,8 @@ TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 
 TEST(Stage, SingleByteCapacityRoundTrips)
 {
-    Stage stage(1);
+    TestPool pool;
+    Stage stage(pool, 1);
     write(stage, "x");
     EXPECT_EQ(stage.provider().writable(), 0u);
     EXPECT_EQ(*stage.consumer().peek(), 'x');
@@ -133,4 +146,21 @@ TEST(Stage, SingleByteCapacityRoundTrips)
     EXPECT_EQ(stage.provider().writable(), 1u);
     write(stage, "y");
     EXPECT_EQ(*stage.consumer().peek(), 'y');
+}
+
+TEST(Stage, TakesItsBufferFromThePoolAndGivesItBackOnDestruction)
+{
+    typedef kiotty::PoolLayout<kiotty::BlockClass<64, 1>> OneBlock;
+    kiotty::Pool pool(OneBlock::classes(), OneBlock::CLASS_COUNT);
+    {
+        Stage first(pool, 64);
+        EXPECT_TRUE(first.valid());
+        Stage second(pool, 64);
+        EXPECT_FALSE(second.valid());
+        EXPECT_EQ(second.capacity(), 0u);
+        EXPECT_EQ(second.provider().prepare(1), nullptr);
+    }
+    Stage again(pool, 64);
+    EXPECT_TRUE(again.valid());
+    EXPECT_EQ(pool.failureCount(), 1u);
 }

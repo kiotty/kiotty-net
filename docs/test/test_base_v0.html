@@ -172,7 +172,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s5">5. 케이스 : core</h2>
-<p class="note"><code>src/implementation/core/kiotty_stage.h</code> 는 지금 빈 파일이다 (0 줄). 설계가 "있음" 이라 적은 것과 다르다. Stage 는 ② 단계에서 StageSet 과 함께 짜고 아래 테스트가 그 계약이다 (requirement 4절).</p>
+<p>Stage 와 StageSet 은 버퍼를 <code>base/pool</code> 의 Pool 에서 받는다 (설계 v4 4절, 19절). 테스트는 <code>tests/unit/support/kiotty_test_pool.h</code> 의 <code>TestPool</code> (넉넉한 등급 일곱) 을 쓴다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>Stage</td><td>PrepareThenCommitMakesBytesReadable</td><td><span class="tag ok">정상</span></td><td>provider.prepare(n) 에 쓰고 commit(n) 하면 consumer.readable() == n, prepare 로 같은 바이트</td></tr>
@@ -185,6 +185,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Stage</td><td>CommitBeyondPreparedIsClampedToWritable</td><td><span class="tag misuse">오용</span></td><td>commit(writable + 1) 이 capacity 를 넘기지 않는다 (debug 는 assert, release 는 clamp. 둘 중 하나로 확정해 적는다)</td></tr>
   <tr><td>Stage</td><td>ZeroCapacityStageIsValidAndAlwaysFull</td><td><span class="tag edge">엣지</span></td><td>capacity 0 → 할당 없음, writable 0, readable 0, prepare nullptr. StageSet 의 "0 은 잡지 않는다" 가 이 위에 선다</td></tr>
   <tr><td>Stage</td><td>SingleByteCapacityRoundTrips</td><td><span class="tag edge">엣지</span></td><td>capacity 1 에서 쓰고 읽고 compact</td></tr>
+  <tr><td>Stage</td><td>TakesItsBufferFromThePoolAndGivesItBackOnDestruction</td><td><span class="tag edge">엣지</span></td><td>블록 하나짜리 Pool: 첫 Stage 는 valid, 둘째는 invalid (capacity 0, prepare nullptr). 첫 Stage 가 사라지면 다시 valid. failureCount 1</td></tr>
   <tr><td>StageSet</td><td>EachMemberHasItsOwnCapacity</td><td><span class="tag ok">정상</span></td><td>(a, b, c) 로 만들면 receive / send / notify 의 capacity 가 각각</td></tr>
   <tr><td>StageSet</td><td>ZeroMembersAllocateNothingAndSetStaysValid</td><td><span class="tag edge">엣지</span></td><td>(0, 0, 0) 도 valid, (n, 0, 0) 도 valid</td></tr>
   <tr><td>Span</td><td>BeginEndCoverExactlyLengthElements</td><td><span class="tag ok">정상</span></td><td>range for 가 length 번</td></tr>
@@ -193,15 +194,41 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>PoolHandle</td><td>ZeroRawIsTheInvalidHandle</td><td><span class="tag edge">엣지</span></td><td>fromRaw(0) 은 generation 0, index 0. 유효 handle 의 toRaw 는 0 이 아니다 (generation 은 1 부터)</td></tr>
   <tr><td>PoolHandle</td><td>OwnerOfAndSlotOfExtractTheirBits</td><td><span class="tag ok">정상</span></td><td>13.3 의 4 / 4 / 8 / 16 배치. 각 필드 최대값 (15, 15, 255, 65535) 에서도</td></tr>
   <tr><td>PoolHandle</td><td>GenerationChangeChangesRawOfSameSlot</td><td><span class="tag ok">정상</span></td><td>같은 index, 다른 generation → 다른 raw</td></tr>
-  <tr><td>Pool</td><td>AllocateReturnsBlockAlignedToSixteen</td><td><span class="tag ok">정상</span></td><td>OpenSSL 이 요구하는 정렬</td></tr>
-  <tr><td>Pool</td><td>ReleasedBlockIsHandedOutAgain</td><td><span class="tag ok">정상</span></td><td>release 뒤 같은 크기 allocate → 같은 주소, fallbackCount 0</td></tr>
-  <tr><td>Pool</td><td>ExhaustedSizeClassFallsBackToHeapAndCounts</td><td><span class="tag edge">엣지</span></td><td>한 등급을 다 쓰면 nullptr 이 아니라 heap, fallbackCount 가 1 씩</td></tr>
-  <tr><td>Pool</td><td>ReallocatePreservesContentUpToOldSize</td><td><span class="tag ok">정상</span></td><td>작은 블록 → 큰 블록으로 옮기며 바이트 보존</td></tr>
-  <tr><td>Pool</td><td>ReleaseOfNullDoesNothing</td><td><span class="tag misuse">오용</span></td><td>crash 없음, 카운터 불변. OpenSSL 이 free(NULL) 을 부른다</td></tr>
-  <tr><td>Pool</td><td>AllocateZeroReturnsUsableNonNullBlock</td><td><span class="tag edge">엣지</span></td><td>malloc(0) 호환. release 할 수 있어야 한다</td></tr>
-  <tr><td>Pool</td><td>ReleaseOfForeignPointerIsRejected</td><td><span class="tag misuse">오용</span></td><td>Pool 밖 주소의 release 는 debug assert / release 무시. 둘 중 하나로 확정</td></tr>
   <tr><td>Clock</td><td>MonotonicMsNeverDecreasesAcrossTenThousandCalls</td><td><span class="tag ok">정상</span></td><td>단조성. 해상도는 측정만 하고 단정하지 않는다</td></tr>
   <tr><td>Holder, Result</td><td>(있음) 기존 헤더의 계약을 같은 규칙의 이름으로 옮긴다. make / get / 소멸, Result 의 ok / code / value</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만</td></tr>
+</table>
+
+<h3>5.1 pool, context (<code>base/pool</code>, <code>base/context</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Pool</td><td>AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock</td><td><span class="tag ok">정상</span></td><td>등급 32 / 64 / 256. 20, 33, 200 B 가 각자의 등급에서, 16 B 정렬</td></tr>
+  <tr><td>Pool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>free list 가 LIFO 라 방금 놓은 블록이 다음 allocate</td></tr>
+  <tr><td>Pool</td><td>UntouchedBlocksAreHandedOutInAddressOrder</td><td><span class="tag ok">정상</span></td><td>free list 가 비었을 때만 bump index. 연속 주소</td></tr>
+  <tr><td>Pool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td>32 B 등급 넷을 다 쓰면 다섯째는 64 B 등급. failure 0</td></tr>
+  <tr><td>Pool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>heap 으로 넘어가지 않는다. nullptr, failureCount 가 1 씩. 놓으면 다시 준다</td></tr>
+  <tr><td>Pool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td>4096 / 64 / 1024 순서로 줘도 가장 작은 등급부터</td></tr>
+  <tr><td>Pool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>arena 밖, 블록 경계가 아닌 주소는 false. nullptr 은 true</td></tr>
+  <tr><td>Pool</td><td>ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero</td><td><span class="tag ok">정상</span></td><td>등급 안이면 그 자리, 넘으면 옮기며 보존. 0 은 release. 남의 포인터는 nullptr</td></tr>
+  <tr><td>Pool</td><td>ALayoutThatCannotBeReservedLeavesThePoolInvalid</td><td><span class="tag misuse">오용</span></td><td>크기 overflow, 등급 17 개 → valid() false, allocate nullptr</td></tr>
+  <tr><td>Pool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>4 thread × 2000 회. 블록을 thread 번호로 채우고 다시 읽어 겹침 0</td></tr>
+  <tr><td>StaticPool</td><td>AllocatesFromTheSmallestClassThatFits</td><td><span class="tag ok">정상</span></td><td>Pool 과 같은 규칙. 등급마다 live 0 으로 돌아온다</td></tr>
+  <tr><td>StaticPool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>LIFO</td></tr>
+  <tr><td>StaticPool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td></td></tr>
+  <tr><td>StaticPool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>failure 는 맞는 가장 작은 등급에 센다</td></tr>
+  <tr><td>StaticPool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>holds() 도 false</td></tr>
+  <tr><td>StaticPool</td><td>ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows</td><td><span class="tag ok">정상</span></td><td></td></tr>
+  <tr><td>StaticPool</td><td>PeakIsTheMostBlocksLiveAtOnce</td><td><span class="tag ok">정상</span></td><td>usage(): block_bytes, block_count, live, peak</td></tr>
+  <tr><td>StaticPool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>spinlock. TSan 에서도</td></tr>
+  <tr><td>StaticPool</td><td>LayoutConstantsDescribeTheArena</td><td><span class="tag ok">정상</span></td><td>CLASS_COUNT, ARENA_BYTES, 범위 밖 usage 는 0</td></tr>
+  <tr><td>StaticPool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td></td></tr>
+  <tr><td>StaticPool</td><td>AClassWithNoBlocksIsSkipped</td><td><span class="tag edge">엣지</span></td><td>개수 0 등급은 arena 0 B, 다음 등급으로</td></tr>
+  <tr><td>MemoryLimits</td><td>FollowTheBuildConfiguration</td><td><span class="tag ok">정상</span></td><td>CMake 의 KIOTTY_NET_MAX_* 와 같은 값. CONNECTIONS = OWNERS × CONNECTIONS_PER_SERVER</td></tr>
+  <tr><td>ContextPoolLayout</td><td>ReservesEveryStageAsIfEveryOwnerWereAFullServer</td><td><span class="tag ok">정상</span></td><td>등급 다섯: receive / send / notify 는 CONNECTIONS 개, cipher 둘은 TLS 일 때만</td></tr>
+  <tr><td>ContextPoolLayout</td><td>CipherSendBlockHoldsTheLargestPlainMessageWithRecordOverhead</td><td><span class="tag ok">정상</span></td><td>plain + 레코드마다 64 + 512</td></tr>
+  <tr><td>TlsPoolLayout</td><td>GrowsWithOwnersConnectionsAndTlsContexts</td><td><span class="tag ok">정상</span></td><td>tlsBlocks 의 세 항, 모든 등급이 16 B 배수이고 개수 &gt; 0</td></tr>
+  <tr><td>Context</td><td>ReservesTheWholeWorstCaseLayoutWhenItIsCreated</td><td><span class="tag ok">정상</span></td><td>생성 직후 layout 의 블록을 전부 꺼낼 수 있고, 하나 더는 nullptr (failure 1). 실행 중 부족이 없다는 계약</td></tr>
+  <tr><td>Context</td><td>EachContextHasItsOwnPool</td><td><span class="tag ok">정상</span></td><td>한 Context 의 블록을 다른 Context 의 Pool 이 거절</td></tr>
+  <tr><td>Context</td><td>LeavesOpenSslAloneWhenAnotherAllocatorIsAlreadyInstalled</td><td><span class="tag misuse">오용</span></td><td>unit 실행 파일은 세는 hook 이 먼저 걸려 있다 → tlsPooled() false, 그 hook 을 덮지 않는다</td></tr>
 </table>
 
 <h2 id="s6">6. 케이스 : error, socket</h2>
@@ -285,7 +312,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>TlsEngine</td><td>DecodeWithHalfARecordYieldsZeroBytesAndNoError</td><td><span class="tag edge">엣지</span></td><td>암호문을 반만 옮긴다 → SUCCESS, plain 0 바이트. 나머지 반 → 전체</td></tr>
   <tr><td>TlsEngine</td><td>DecodeWithOneByteAtATimeEventuallyYieldsTheRecord</td><td><span class="tag edge">엣지</span></td><td>바이트 단위 분할</td></tr>
   <tr><td>TlsEngine</td><td>DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage</td><td><span class="tag edge">엣지</span></td><td>암호문 마지막 바이트 뒤집기 → RECORD_ERROR, lastMessage() 가 OpenSSL 문자열</td></tr>
-  <tr><td>TlsEngine</td><td>DecodeDrainsPlaintextLeftInSslAcrossCalls</td><td><span class="tag edge">엣지</span></td><td>16 KiB 레코드 하나를 4 KiB plain 으로 네 번 꺼낸다. 다섯째는 0</td></tr>
+  <tr><td>TlsEngine</td><td>DecodeDrainsPlaintextLeftInSslAcrossCalls</td><td><span class="tag edge">엣지</span></td><td>16 KiB 레코드 하나를 4 KiB plain 으로 네 번 꺼낸다. 다섯째는 0. BIO pair (4 KiB) 라 레코드 일부는 SSL 이 아니라 cipherReceive 에 남아 있다가 다음 decode 가 넣는다</td></tr>
   <tr><td>TlsEngine</td><td>DecodeCompactsCipherReceive</td><td><span class="tag ok">정상</span></td><td>decode 뒤 cipherReceive 의 writable == capacity</td></tr>
   <tr><td>TlsEngine</td><td>ClientRejectsServerSignedByUntrustedCaWithVerifyFailed</td><td><span class="tag ok">정상</span></td><td>trust store 가 other_ca → 클라이언트 FAILED, VERIFY_FAILED, message 가 X509 문자열</td></tr>
   <tr><td>TlsEngine</td><td>ClientWithVerifyServerOffAcceptsUntrustedCa</td><td><span class="tag ok">정상</span></td><td>skip_server_verification / skip_hostname_verification</td></tr>
@@ -304,8 +331,15 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>TlsMemory</td><td>OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose</td><td><span class="tag ok">정상</span></td><td>두 번 데운 뒤 profile 둘 + 연결 한 쌍을 열고 닫는다 → OpenSSL live bytes / blocks 가 연 전과 같다</td></tr>
   <tr><td>TlsMemory</td><td>EachConnectedPairHoldsABoundedAmountOfOpenSslMemory</td><td><span class="tag ok">정상</span></td><td>profile 하나에 연결 4 쌍 → 쌍당 보유량과 최대치가 128 KiB 미만, 모두 닫으면 원래대로. 수치는 XML 의 held_bytes_per_pair / peak_bytes_per_pair</td></tr>
 </table>
-<h3>OpenSSL 메모리 수치 (사이클 4 에서 잰 것)</h3>
-<p>library 는 OpenSSL 할당 hook 을 걸지 않는다 (OpenSSL 은 자체 malloc). 테스트 실행 파일만 <code>tests/unit/support/kiotty_test_openssl_memory.cpp</code> 에서 <code>CRYPTO_set_mem_functions</code> 로 세는 hook 을 건다. OpenSSL 3.6.1, TLS 1.3 기본 profile, engine capacity 4 KiB 에서 연결된 쌍 (server + client) 하나가 쥐는 양은 약 70 KiB, handshake 중 최대 약 89 KiB 다 (WSL gcc 71812 / 91422 B, MSVC 71252 / 90862 B).</p>
+<h3>정적 TLS Pool (<code>kiotty_net_tls_pool_tests</code>)</h3>
+<p>세는 hook 이 없는 별도 실행 파일이다 (TLS ON, <code>KIOTTY_NET_TLS_STATIC_POOL</code> ON 일 때만). gtest_discover_tests 가 테스트마다 process 를 새로 띄우므로 각 테스트가 OpenSSL 을 부르기 전에 Context 를 만든다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>TlsStaticPool</td><td>ContextRoutesOpenSslIntoTheStaticPoolBeforeAnyTlsObjectExists</td><td><span class="tag ok">정상</span></td><td>첫 Context 가 hook 을 걸고 (tlsPooled true), 둘째 Context 도 true</td></tr>
+  <tr><td>TlsStaticPool</td><td>HandshakeTakesBlocksFromTheStaticPoolAndClosingGivesThemBack</td><td><span class="tag ok">정상</span></td><td>데운 뒤 연결 4 쌍 → 정적 Pool 의 live 가 늘고, 닫으면 원래 live 로. failure 0</td></tr>
+</table>
+<h3>OpenSSL 메모리 수치 (BIO pair, 사이클 4 에서 잰 것)</h3>
+<p>unit 실행 파일은 <code>tests/unit/support/kiotty_test_openssl_memory.cpp</code> 에서 <code>CRYPTO_set_mem_functions</code> 로 세는 hook 을 건다 (TlsMemory 두 테스트). 등급별 계측과 번역기 표는 <code>tests/measure/kiotty_measure_tls_memory.cpp</code> 가 낸다 (설계 v4 19.4). OpenSSL 3.6.1, 연결 하나의 최대치는 Stage 4 / 16 / 64 KiB 모두 약 66 ~ 68 KiB, 대기 28 ~ 50 KiB 다 (memory BIO 때는 64 KiB 에서 183 KiB). 표는 설계 v4 19.6.</p>
 
 <h2 id="s9">9. 케이스 : connection</h2>
 <p>기준은 설계 v4 9.1 ~ 9.9 와 11절이다. Connection 은 listener 를 모른다. 테스트는 Stage 에 바이트를 넣고 IoCompletion 을 손으로 만들어 <code>dispatch</code> 에 넣는다. 그 뒤 돌아온 IoAction, handler 기록, Stage 상태, <code>pickWrite</code> 가 고른 WRITE, <code>resolve</code> 의 payload 를 본다. step 쪽 (dispatch → apply) 과 drain 쪽 (pickWrite → resolve) 을 따로 부르므로 "어느 lane 이 거는가" 가 테스트에서 그대로 보인다.</p>

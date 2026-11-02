@@ -1,6 +1,8 @@
 #if KIOTTY_NET_USE_TLS
 
+#include "base/pool/kiotty_memory_layout.h"
 #include "base/tls/kiotty_tls_engine.h"
+#include "base/tls/kiotty_tls_memory.h"
 #include "base/tls/kiotty_tls_profile.h"
 
 #include <openssl/crypto.h>
@@ -44,6 +46,33 @@ namespace kiotty
             };
 
             const size_t SUITE_LIST_BYTES = 256;
+            const size_t BIO_PAIR_BYTES = 4096;
+
+#if KIOTTY_NET_TLS_STATIC_POOL
+            struct TlsPoolTag;
+            typedef StaticPool<TlsPoolTag, TlsPoolLayout> TlsPool;
+
+            void* hookAllocate(size_t size, const char* file, int line)
+            {
+                (void)file;
+                (void)line;
+                return TlsPool::allocate(size);
+            }
+
+            void* hookReallocate(void* block, size_t size, const char* file, int line)
+            {
+                (void)file;
+                (void)line;
+                return TlsPool::reallocate(block, size);
+            }
+
+            void hookRelease(void* block, const char* file, int line)
+            {
+                (void)file;
+                (void)line;
+                TlsPool::release(block);
+            }
+#endif
 
             template <size_t N>
             bool terminated(const char (&text)[N])
@@ -256,6 +285,53 @@ namespace kiotty
             return true;
         }
 
+#if KIOTTY_NET_TLS_STATIC_POOL
+        bool useTlsStaticPool()
+        {
+            CRYPTO_malloc_fn allocate = nullptr;
+            CRYPTO_realloc_fn reallocate = nullptr;
+            CRYPTO_free_fn release = nullptr;
+            CRYPTO_get_mem_functions(&allocate, &reallocate, &release);
+            if (allocate == hookAllocate)
+            {
+                return true;
+            }
+            if (allocate != CRYPTO_malloc)
+            {
+                return false;
+            }
+            int installed = CRYPTO_set_mem_functions(hookAllocate, hookReallocate, hookRelease);
+            return installed == 1;
+        }
+
+        size_t tlsPoolClassCount()
+        {
+            return TlsPool::CLASS_COUNT;
+        }
+
+        StaticPoolUsage tlsPoolUsage(size_t index)
+        {
+            return TlsPool::usage(index);
+        }
+#else
+        bool useTlsStaticPool()
+        {
+            return false;
+        }
+
+        size_t tlsPoolClassCount()
+        {
+            return 0;
+        }
+
+        StaticPoolUsage tlsPoolUsage(size_t index)
+        {
+            (void)index;
+            StaticPoolUsage usage = { 0, 0, 0, 0, 0 };
+            return usage;
+        }
+#endif
+
         TlsProfile::TlsProfile()
             : _context(nullptr)
             , _server(false)
@@ -380,6 +456,7 @@ namespace kiotty
         TlsEngine::~TlsEngine()
         {
             SSL_free(_ssl);
+            BIO_free(_network);
         }
 
         KiottyNetCode TlsEngine::open(TlsProfile& profile, const char* hostname)
@@ -402,24 +479,26 @@ namespace kiotty
             }
             if (_ssl == nullptr)
             {
+                BIO_free(_network);
+                _network = nullptr;
                 _ssl = SSL_new(profile.context());
-                _receive_bio = BIO_new(BIO_s_mem());
-                _send_bio = BIO_new(BIO_s_mem());
-                if (_ssl == nullptr || _receive_bio == nullptr || _send_bio == nullptr)
+                BIO* internal = nullptr;
+                int paired = BIO_new_bio_pair(&internal, BIO_PAIR_BYTES, &_network, BIO_PAIR_BYTES);
+                if (_ssl == nullptr || paired != 1)
                 {
-                    BIO_free(_receive_bio);
-                    BIO_free(_send_bio);
+                    BIO_free(internal);
+                    BIO_free(_network);
+                    _network = nullptr;
                     SSL_free(_ssl);
                     _ssl = nullptr;
                     ERR_clear_error();
                     return KIOTTY_TLS_NOT_SUPPORTED;
                 }
-                BIO_set_mem_eof_return(_receive_bio, -1);
-                BIO_set_mem_eof_return(_send_bio, -1);
-                SSL_set_bio(_ssl, _receive_bio, _send_bio);
+                SSL_set_bio(_ssl, internal, internal);
             }
-            BIO_reset(_receive_bio);
-            BIO_reset(_send_bio);
+            BIO* internal = SSL_get_rbio(_ssl);
+            BIO_reset(internal);
+            BIO_reset(_network);
 
             if (profile.server())
             {
@@ -464,16 +543,25 @@ namespace kiotty
             {
                 return TlsStep::FAILED;
             }
-            feed();
-            ERR_clear_error();
-            int result = SSL_do_handshake(_ssl);
-            int reason = SSL_get_error(_ssl, result);
-            flush();
+            int result = 0;
+            int reason = SSL_ERROR_NONE;
+            bool progressing = true;
+            while (progressing)
+            {
+                size_t fed = feed();
+                ERR_clear_error();
+                result = SSL_do_handshake(_ssl);
+                reason = SSL_get_error(_ssl, result);
+                size_t flushed = flush();
+                bool retry = result != 1 && (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE);
+                progressing = retry && (fed > 0 || flushed > 0);
+            }
             if (result != 1 && reason == SSL_ERROR_ZERO_RETURN)
             {
                 return fail(KIOTTY_PEER_CLOSED, "tls: peer closed during handshake");
             }
-            if (result != 1 && reason != SSL_ERROR_WANT_READ)
+            bool retry = reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE;
+            if (result != 1 && !retry)
             {
                 unsigned long error_code = ERR_peek_last_error();
                 int library_reason = ERR_GET_REASON(error_code);
@@ -528,12 +616,30 @@ namespace kiotty
                     continue;
                 }
                 int reason = SSL_get_error(_ssl, result);
+                if (reason == SSL_ERROR_WANT_READ)
+                {
+                    size_t fed = feed();
+                    if (fed > 0)
+                    {
+                        continue;
+                    }
+                    break;
+                }
+                if (reason == SSL_ERROR_WANT_WRITE)
+                {
+                    size_t flushed = flush();
+                    if (flushed > 0)
+                    {
+                        continue;
+                    }
+                    break;
+                }
                 if (reason == SSL_ERROR_ZERO_RETURN)
                 {
                     code = KIOTTY_PEER_CLOSED;
                     _last_message = "tls: close_notify from peer";
                 }
-                else if (reason != SSL_ERROR_WANT_READ)
+                else
                 {
                     code = KIOTTY_TLS_RECORD_ERROR;
                     _last_message = lastErrorMessage();
@@ -581,6 +687,17 @@ namespace kiotty
             }
             size_t written = 0;
             int result = SSL_write_ex(_ssl, plain.data, plain.length, &written);
+            int reason = SSL_get_error(_ssl, result);
+            while (result != 1 && reason == SSL_ERROR_WANT_WRITE)
+            {
+                size_t flushed = flush();
+                if (flushed == 0)
+                {
+                    break;
+                }
+                result = SSL_write_ex(_ssl, plain.data, plain.length, &written);
+                reason = SSL_get_error(_ssl, result);
+            }
             assert(result == 1 && written == plain.length);
             if (result != 1)
             {
@@ -604,20 +721,23 @@ namespace kiotty
         }
 #endif
 
-        void TlsEngine::feed()
+        size_t TlsEngine::feed()
         {
             Stage::Consumer consumer = _cipher_receive.consumer();
             size_t readable = consumer.readable();
-            if (readable > 0)
+            size_t room = BIO_ctrl_get_write_guarantee(_network);
+            size_t length = readable < room ? readable : room;
+            size_t written = 0;
+            if (length > 0)
             {
-                size_t written = 0;
-                BIO_write_ex(_receive_bio, consumer.peek(), readable, &written);
+                BIO_write_ex(_network, consumer.peek(), length, &written);
                 consumer.commit(written);
             }
             _cipher_receive.compact();
+            return written;
         }
 
-        void TlsEngine::flush()
+        size_t TlsEngine::flush()
         {
             Stage::Consumer waiting = _cipher_send.consumer();
             if (waiting.readable() == 0)
@@ -630,17 +750,18 @@ namespace kiotty
             size_t length = room < queued ? room : queued;
             if (length == 0)
             {
-                return;
+                return 0;
             }
             char* target = provider.prepare(length);
             size_t read = 0;
-            BIO_read_ex(_send_bio, target, length, &read);
+            BIO_read_ex(_network, target, length, &read);
             provider.commit(read);
+            return read;
         }
 
         size_t TlsEngine::pending() const
         {
-            return BIO_ctrl_pending(_send_bio);
+            return BIO_ctrl_pending(_network);
         }
     }
 }

@@ -23,7 +23,7 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.stream_client_result = sizeof(KiottyNetStreamClientResult);
     layout.transition           = sizeof(KiottyNetTransition);
     layout.rule                 = sizeof(KiottyNetRule);
-    layout.last_code            = KIOTTY_TLS_RECORD_ERROR;
+    layout.last_code            = KIOTTY_OUT_OF_MEMORY;
     layout.last_action_type     = KIOTTY_ACTION_CLOSE;
     return layout;
 }

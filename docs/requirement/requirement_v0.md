@@ -26,7 +26,7 @@
     - 추후, DICOM 라이브러리 개발에 소스 코드를 그대로 활용할 예정
 8. AI 또는 사람이 읽기 좋은 단순한 문서화
 9.  HTTP는 Rest API 뿐만 아니라 정적 파일 서빙 기능도 제공함. 정적파일 서빙은 파일 redirecting 뿐만 아니라 메모리에 올라와있는 바이너리 파일도 적절한 redirecting을 통해 제공해줄 수 있음
-10. 서버의 성능은 고성능이 아니라 일반 PC 또는 모바일 디바이스에서 최대 128 Client (설정으로 1024 까지) 를 지원하는 것으로 가정하고 있음.
+10. 서버의 성능은 고성능이 아니라 일반 PC 또는 모바일 디바이스에서 최대 128 Client (설정으로 1024 까지. compile time 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 함께 올린다) 를 지원하는 것으로 가정하고 있음.
 11. 서버가 완전 고성능을 지원하는 게 아닌데신 의료기기 소프트웨어에서 사용할 확률이 높기 때문에 매우 높은 수준의 메모리 안정성을 지원해야 함.
 
 - Runtime 동적 할당을 최대한 제약하기
@@ -161,7 +161,8 @@ typedef enum KiottyNetCode {
     KIOTTY_TLS_HOSTNAME_MISMATCH,      /* handshake : 클라이언트의 hostname 검증 실패 */
     KIOTTY_TLS_HANDSHAKE_FAILED,       /* handshake : 버전 / cipher 불일치, alert, 평문 상대 */
     KIOTTY_TLS_HANDSHAKE_TIMEOUT,
-    KIOTTY_TLS_RECORD_ERROR            /* handshake 뒤 : 복호화 실패 */
+    KIOTTY_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
+    KIOTTY_OUT_OF_MEMORY               /* initializeContext : compile time 상한 (KIOTTY_NET_MAX_*) 만큼의 Pool 을 잡지 못함. 그 뒤에는 나오지 않는다 */
 } KiottyNetCode;
 ```
 
@@ -171,6 +172,7 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
+- `KiottyNet_initializeContext` 는 그 Context 가 쓸 메모리 (compile time 상한 `KIOTTY_NET_MAX_*` 의 최악, 즉 Owner 16 개가 모두 서버이고 각자 연결 상한만큼 가진 경우) 를 한 번에 잡는다. 실패하면 `KIOTTY_OUT_OF_MEMORY` 이고, 성공하면 그 뒤 실행 중에 메모리 부족은 생기지 않는다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
 
@@ -240,8 +242,8 @@ typedef struct KiottyNetEndpoint {
 typedef struct KiottyNetServerConfig {
     uint32_t          initialization_mark;
     KiottyNetEndpoint endpoint;
-    size_t            max_clients;      /* 기본 128, 1 ~ 1024. 동시 연결 수. 이만큼의 Connection, Stage 가 생성 시점에 잡힌다 */
-    size_t            recv_capacity;    /* 기본 4 KiB. Connection 당 수신 Stage 크기 */
+    size_t            max_clients;      /* 기본 128, 1 ~ KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER (compile time, 기본 128, 최대 1024). 동시 연결 수. Context 의 Pool 에서 생성 시점에 잡힌다 */
+    size_t            recv_capacity;    /* 기본 4 KiB, 상한 KIOTTY_NET_MAX_RECV_CAPACITY (기본 16 KiB). Connection 당 수신 Stage 크기 */
     size_t            send_capacity;    /* 기본 4 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
     bool              no_delay;         /* 기본 true. TCP_NODELAY. KIOTTY_PIPE 는 무시 */
@@ -261,8 +263,8 @@ typedef struct KiottyNetClientConfig {
 
 KiottyNetCode KiottyNet_initializeTcpServerConfig(KiottyNetServerConfig* config, const char* host, uint16_t port);   /* port != 0 */
 KiottyNetCode KiottyNet_initializePipeServerConfig(KiottyNetServerConfig* config, const char* pipe_name);
-KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfig* config, size_t max_clients);                /* 0 또는 1024 초과면 KIOTTY_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfig* config, size_t recv_capacity, size_t send_capacity, size_t push_capacity);
+KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfig* config, size_t max_clients);                /* 0 또는 KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER 초과면 KIOTTY_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfig* config, size_t recv_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 KIOTTY_NET_MAX_*_CAPACITY 초과면 KIOTTY_INVALID_ARGUMENT. Client 도 같다 */
 KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfig* config, bool no_delay);
 
 KiottyNetCode KiottyNet_initializeTcpClientConfig(KiottyNetClientConfig* config, const char* host, uint16_t port);

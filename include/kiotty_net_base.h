@@ -50,7 +50,8 @@ typedef enum KiottyNetCode
     KIOTTY_TLS_HOSTNAME_MISMATCH,
     KIOTTY_TLS_HANDSHAKE_FAILED,
     KIOTTY_TLS_HANDSHAKE_TIMEOUT,
-    KIOTTY_TLS_RECORD_ERROR
+    KIOTTY_TLS_RECORD_ERROR,
+    KIOTTY_OUT_OF_MEMORY
 } KiottyNetCode;
 
 typedef struct KiottyNetResult
@@ -282,7 +283,6 @@ typedef struct KiottyNetContextResult
 } KiottyNetContextResult;
 
 KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
-KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContextWithTlsPool(size_t bytes);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;

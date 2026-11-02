@@ -1,6 +1,8 @@
 #if !defined(KIOTTY_STAGE_H)
 #define KIOTTY_STAGE_H
 
+#include "base/pool/kiotty_pool.h"
+
 #include <cstddef>
 
 namespace kiotty
@@ -34,7 +36,7 @@ namespace kiotty
             Stage& _stage;
         };
 
-        explicit Stage(size_t capacity);
+        Stage(Pool& pool, size_t capacity);
         ~Stage();
 
         Stage(const Stage&) = delete;
@@ -47,6 +49,7 @@ namespace kiotty
         void     compact();
 
     private:
+        Pool&  _pool;
         char*  _buffer;
         size_t _capacity;
         size_t _begin_pos;

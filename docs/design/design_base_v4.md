@@ -17,7 +17,7 @@
 
 ```
 kiotty_net_base.cpp ── 번역
-    ├── Context ───── Holder<Owner> slot 16, TLS Pool, g_contexts[16]
+    ├── Context ───── Pool (ContextPoolLayout, 19절), Holder<Owner> slot 16, g_contexts[16]
     ├── Server ──────┐
     ├── EventClient ─┼── Owner ── ConnectionHost + EventListener + IoLoop (+ Acceptor) + TlsProfile
     └── StreamClient ┘               IoLoop ── drain (pick → submit) → settle → collectIoEvents → step (dispatch → apply → submit) → collectLocalEvents → step
@@ -25,7 +25,8 @@ kiotty_net_base.cpp ── 번역
                                      Acceptor ──── PassiveSocket, IoEvent 하나
                                      EventListener + IoEvent ── IOCP (있음) / epoll / kqueue / io_uring
                                      ActiveSocket / PassiveSocket (있음), TlsProfile / TlsEngine
-core/ : Stage, StageSet, Span, Holder, Result, PoolHandle, Pool, Clock (있음)
+core/ : Stage, StageSet, Span, Holder, Result, PoolHandle, Clock (있음)
+base/pool/ : Pool, StaticPool, PoolLayout, MemoryLimits, ContextPoolLayout, TlsPoolLayout (19절)
 ```
 
 ## 1. 폴더
@@ -34,13 +35,16 @@ core/ : Stage, StageSet, Span, Holder, Result, PoolHandle, Pool, Clock (있음)
 src/
     kiotty_net_base.cpp
     implementation/
-        core/                       namespace kiotty                        (있음. 바뀌지 않는다)
+        core/                       namespace kiotty                        (있음. Stage / StageSet 은 base/pool 의 Pool 에서 버퍼를 받는다)
         base/                       namespace kiotty::net
+            pool/       kiotty_pool_layout.h (PoolClass, BlockClass, PoolLayout), kiotty_pool.h/.cpp (Context 의 heap Pool),
+                        kiotty_static_pool.h (전역에만 놓이는 Pool), kiotty_memory_limits.h (compile time 상한), kiotty_memory_layout.h (번역기)
+                        19절. Pool 세 가지는 namespace kiotty (core 와 같이 아무것에도 의존하지 않는다), limits 와 layout 은 kiotty::net
             error/      (있음)
             socket/     (있음)
             event/      kiotty_io_action.h (as.write.length 추가), kiotty_event.h (IoKind::WORK_READY 추가), kiotty_event_listener.h (그대로),
                         backend/kiotty_iocp_event_listener.cpp (있음), kiotty_epoll_event_listener.cpp, kiotty_kqueue_*, kiotty_io_uring_*
-            tls/        kiotty_tls_profile.h, kiotty_tls_engine.h, backend/kiotty_openssl_tls.cpp | kiotty_stub_tls.cpp
+            tls/        kiotty_tls_profile.h, kiotty_tls_engine.h, kiotty_tls_memory.h (정적 TLS Pool 연결), backend/kiotty_openssl_tls.cpp | kiotty_stub_tls.cpp
             stream/     kiotty_connection_stream.h/.cpp                 동기 통로. Connection (WORKING) 과 StreamClient 가 같이 쓴다
                         backend/kiotty_posix_file.cpp, kiotty_windows_file.cpp   writeFile 의 파일 열기 / 읽기
             connection/ kiotty_io_source.h, kiotty_sender.h, kiotty_work_context.h, kiotty_notification_context.h,
@@ -48,7 +52,7 @@ src/
             io_loop/    kiotty_io_loop.h/.cpp
             server/     kiotty_server.h/.cpp
             client/     kiotty_event_client.h/.cpp, kiotty_stream_client.h/.cpp
-            context/    kiotty_owner.h, kiotty_context.h/.cpp
+            context/    kiotty_context.h/.cpp (있음. Pool 과 정적 TLS Pool 연결), kiotty_owner.h
             config/     kiotty_config.h/.cpp, kiotty_action.h
 ```
 
@@ -100,15 +104,17 @@ KiottyNetCode   KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream st
 bool            KiottyNet_isConnectionStreamOpen   (KiottyNetConnectionStream stream);                                   /* recv(MSG_PEEK). 닫혔으면 false */
 KiottyNetCode   KiottyNet_closeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetConnectionAction then);   /* 한 번. thenWork 는 INVALID_ARGUMENT. v2 의 finishWork */
 
-KiottyNetContextResult KiottyNet_initializeContext(void);                          /* TLS Pool 8 MiB */
-KiottyNetContextResult KiottyNet_initializeContextWithTlsPool(size_t bytes);
+KiottyNetContextResult KiottyNet_initializeContext(void);   /* 19절의 최악 크기를 한 번에 잡는다. 못 잡으면 KIOTTY_OUT_OF_MEMORY */
 ```
 
 | 항목 | 값 |
 |---|---|
 | `max_clients` 기본 | 128 |
-| `max_clients` 상한 | 1024. `configureServerMaxClients` 가 0 또는 1024 초과면 `KIOTTY_INVALID_ARGUMENT` |
-| TLS Pool 기본 | 8 MiB (128 × 64 KiB) |
+| `max_clients` 상한 | `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER`. `configureServerMaxClients` 가 0 또는 그 값 초과면 `KIOTTY_INVALID_ARGUMENT` |
+| `max_clients` 의 compile time 상한 | `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` (기본 128, 최대 1024). runtime 값이 넘으면 `KIOTTY_INVALID_ARGUMENT` |
+| recv / send / push capacity 의 상한 | `KIOTTY_NET_MAX_RECV / SEND / PUSH_CAPACITY` (기본 16 KiB) |
+| `KIOTTY_OUT_OF_MEMORY` | enum 끝에 더한다. `initializeContext` 만 돌려준다 |
+| `initializeContextWithTlsPool(bytes)` | 지운다. TLS 메모리는 19절의 정적 Pool 이다 |
 
 지우는 것: `KiottyNetWorkHandle`, `KiottyNet_finishWork`, `KiottyNet_isWorkConnected`, 옛 이름의 action 함수 여섯 (`holdCommunication`, `readConnection`, `readConnectionUntil`, `writeConnection`, `startWork`, `closeConnection`). C++ 의 `KiottyNet_Work` 는 `KiottyNet_ConnectionStream` 으로 이름을 바꾸고 `read / write / writeFile / open / close(action)` 을 가진다. 소멸자는 close 하지 않은 Stream 을 `thenClose(KIOTTY_SUCCESS)` 로 닫는다.
 
@@ -135,6 +141,8 @@ Stream 의 오용 (검사는 `WorkContext::verify` 한 자리다, 9.7):
 ## 4. core
 
 v2 4절 그대로. 코드가 있다. `StageSet { receive, send, notify }` 는 평문 Stage 셋의 저장 공간으로 그대로 쓰고, 9.3 의 `Sender` 둘이 send / notify 를 참조로 든다.
+
+- `Stage(Pool& pool, size_t capacity)`, `StageSet(Pool& pool, receive, send, notify)`. 버퍼는 Pool 에서 받고 소멸자에서 돌려준다. Pool 이 못 주면 `valid() == false` 이고 capacity 0 이다. Pool 은 19절.
 
 ## 5. IoAction, IoPayload, IoCompletion
 
@@ -211,12 +219,12 @@ v2 8절에서 cipher Stage 가 셋에서 둘로 준다. 송신 암호문은 하�
 
 ```cpp
 static const uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 10000;   // 설정에 handshake timeout 이 없으므로 상수
-class TlsProfile { /* v2 그대로. SSL_OP_NO_RENEGOTIATION 을 켠다. 기본 생성자, Pool 을 받지 않는다 */ };
+class TlsProfile { /* v2 그대로. SSL_OP_NO_RENEGOTIATION 을 켠다. 기본 생성자 */ };
 enum class TlsStep : uint8_t { SEND, RECEIVE, DONE, FAILED };
 class TlsEngine                                 // 연결 하나의 SSL + BIO 둘 + cipher Stage 둘
 {
 public:
-    TlsEngine(size_t receive_capacity, size_t send_capacity);   // 둘 다 0 이면 평문 (active 늘 false)
+    TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity);   // cipher Stage 둘을 pool 에서. 둘 다 0 이면 평문 (active 늘 false)
     KiottyNetCode open(TlsProfile& profile, const char* hostname);
     void          close();
     bool          active() const;
@@ -236,7 +244,8 @@ public:
 - 오류 분류 표는 v2 8절 그대로.
 - decode 가 끝날 때 상대의 KeyUpdate 가 답장을 기다리면 (`SSL_get_key_update_type` 이 NONE 이 아니면) `SSL_key_update(NOT_REQUESTED)` + `SSL_do_handshake` 로 그 답장을 cipherSend 에 꺼내 둔다. SSL_read 만으로는 다음 SSL_write 전까지 나오지 않기 때문이다.
 - handshake 가 DONE 을 돌려준 뒤에도 rbio 에 상대의 첫 응용 레코드나 NewSessionTicket 이 남아 있을 수 있다. 9.5 의 첫 READ 전에 decode 를 한 번 불러 소화한다 (사이클 5b).
-- **OpenSSL 의 메모리는 OpenSSL 이 관리한다.** library 는 `CRYPTO_set_mem_functions` 를 부르지 않는다. 그 hook 은 process 에 하나라 같은 libcrypto 를 쓰는 다른 library 의 할당까지 받고, OpenSSL 의 전역 / thread 상태는 `atexit` 의 `OPENSSL_cleanup` 때 해제되므로 Context 의 Pool 이 그때까지 살아 있어야 한다 (전역이 된다). 사용량은 테스트 실행 파일에서만 세는 hook 으로 잰다: 연결된 쌍 (server + client) 하나가 약 70 KiB, handshake 중 최대 약 89 KiB (테스트 v0 8절).
+- **SSL 과 cipher Stage 사이는 BIO pair 하나다** (`BIO_new_bio_pair`, 양쪽 버퍼 4 KiB 고정). SSL 은 안쪽 BIO 를 읽고 쓰고, engine 은 바깥쪽 BIO 하나 (`_network`) 만 든다. `feed()` 는 cipherReceive 에서 pair 에 들어갈 만큼만 넣고, `flush()` 는 pair 에서 cipherSend 에 들어갈 만큼만 꺼낸다. 둘 다 옮긴 길이를 돌려준다. handshake / decode / encode 는 OpenSSL 이 WANT_READ / WANT_WRITE 를 주면 feed / flush 로 자리를 만들고 다시 부르며, 아무것도 옮기지 못하면 멈춘다. 그래서 cipherReceive 에 레코드가 남은 채 decode 가 끝날 수 있고 (다음 decode 가 이어 넣는다), handshake 는 WANT_WRITE 도 SEND / RECEIVE 로 본다. memory BIO 는 메시지 크기만큼 자라고 줄지 않아 연결당 OpenSSL 메모리가 Stage 크기를 따라갔다 (64 KiB 에서 183 KiB). pair 로 바꾼 뒤에는 Stage 크기와 무관하게 약 68 KiB 다 (19절).
+- **OpenSSL 의 메모리는 19절의 정적 TLS Pool 이다** (OpenSSL 을 정적 링크한 build). DLL 로 쓰면 OpenSSL 의 malloc 그대로다.
 - IO thread 가 끝날 때 `OPENSSL_thread_stop` 을 부른다 (사이클 6). Windows 정적 링크에서는 OpenSSL 이 thread 종료를 스스로 알지 못한다.
 
 ## 9. connection
@@ -313,7 +322,7 @@ typedef KiottyNetConnectionHandler Handler;
 class Connection : public IoSource
 {
 public:
-    Connection(int32_t slot, Pool& tls_pool, NotificationContext& notification, size_t recv_capacity, size_t send_capacity, size_t push_capacity, bool tls);
+    Connection(int32_t slot, Pool& pool, NotificationContext& notification, size_t recv_capacity, size_t send_capacity, size_t push_capacity, bool tls);   // pool 은 Context 의 Pool
     bool valid() const;
 
     void       open(ActiveSocket&& socket, KiottyNetConnectionContext context, KiottyNetAppContext app_context, TlsProfile* profile, const char* hostname);
@@ -1092,8 +1101,8 @@ v2 12절 그대로. 바뀌는 것:
 
 v2 13절 그대로. 바뀌는 것:
 
-- `Context(size_t tls_pool_bytes)`. `initializeContext` 는 8 MiB, `initializeContextWithTlsPool(bytes)` 는 인자.
-- `config::configureServerMaxClients` 가 `[1, 1024]` 를 검사한다. 기본 128.
+- `Context()`. 생성자에서 `ContextPoolLayout` 의 Pool 을 잡고 정적 TLS Pool 을 OpenSSL 에 건다 (19절). `valid()` 가 false 면 `initializeContext` 는 `KIOTTY_OUT_OF_MEMORY`.
+- `config::configureServerMaxClients` 가 `[1, KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER]` 를 검사한다. 기본 128. buffer capacity 는 `[1, KIOTTY_NET_MAX_*_CAPACITY]`.
 - handle (int64): `generation (32) | index (32)`. Stream handle 은 같은 값에 최상위 비트 (bit 63) 를 세운다. `conn(h)` 는 그 비트를 벗기고 찾고, `KiottyNet_*ConnectionStream` 은 그 비트가 없으면 `KIOTTY_INVALID_ARGUMENT`.
 
 ## 14. thread 규칙
@@ -1118,7 +1127,7 @@ v2 13절 그대로. 바뀌는 것:
 |---|---|
 | `KiottyNet_initialize*Config`, `configure*` | `config::` 같은 이름. NULL 이면 INVALID_ARGUMENT |
 | `thenHold`, `thenRead`, `thenReadUntil`, `thenWrite`, `thenWork`, `thenClose`, `acceptConnection`, `ignoreConnection` | `action::` 같은 이름 |
-| `initializeContext` / `initializeContextWithTlsPool(bytes)` | `new (nothrow) Context(DEFAULT_TLS_POOL)` / `Context(bytes)` |
+| `initializeContext()` | `new (nothrow) Context()`. null 이거나 `valid()` 가 false 면 지우고 `KIOTTY_OUT_OF_MEMORY` |
 | `releaseContext` | `delete` |
 | `createServer(ctx, config, tls)` 등 create 셋 | `ctx->create<T>(...)`. NULL / `!isInitialized` 면 INVALID_ARGUMENT |
 | `destroy*` | `ctx->destroy(owner)` |
@@ -1131,16 +1140,16 @@ v2 13절 그대로. 바뀌는 것:
 
 StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다.
 
-## 16. 메모리 (128 client, 4 KiB 기준)
+## 16. 메모리 (128 client, 4 KiB 기준. 예약과 상한은 19절)
 
 | 객체 | 잡는 것 | 크기 |
 |---|---|---|
 | Connection (평문) | 객체 + StageSet (recv + send + push) + IoEvent 둘 | 약 12 KiB |
-| Connection (TLS) | 위 + cipherReceive (16 KiB + 헤더) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (OpenSSL malloc, SSL_clear 재사용) | 약 34 KiB + SSL 약 35 KiB |
+| Connection (TLS) | 위 + cipherReceive (recv) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (정적 TLS Pool, SSL_clear 재사용) | 약 21 KiB + SSL 대기 약 30 ~ 50 KiB, handshake 중 최대 약 68 KiB |
 | ConnectionHost | Connection[128] + NotificationContext | 평문 약 1.5 MiB, TLS 약 4.3 MiB |
 | IoLoop | local completion 배열 3 × 128 (OS 완료는 listener 의 배열) | |
 | EventClient | capacity 1 | 평문 약 13 KiB |
-| Context | Holder\<Owner\>[16] + TLS Pool | 8 MiB |
+| Context | Pool (19절) + Holder\<Owner\>[16] | 19절의 예약 표 |
 
 ## 17. v2 에서 바뀐 것 (코드가 있는 층)
 
@@ -1155,3 +1164,108 @@ StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다.
 ## 18. 구현 순서
 
 ① base.h 를 3절대로 고치고 statemachine.h / requirement 를 맞춘다 (사이클 1 재방문) ② event 의 세 줄 (사이클 3b 재방문) ③ epoll backend (사이클 3c) ④ tls (stub 먼저) ⑤ stream (ConnectionStream, 파일 backend) ⑥ connection (IoSource, Sender, WorkContext, NotificationContext, Connection, Acceptor, ConnectionHost) ⑦ io_loop ⑧ server / client / context / config ⑨ base.cpp 번역.
+
+## 19. 메모리 할당
+
+2026-11-02 에 정했다. 사이클 4 의 계측과 논의 (`docs/progress/261102_progress_base_cycle4.md`) 가 근거다.
+
+### 19.1 원칙
+
+1. **stack 이 아닌 메모리는 전부 Pool 에서 받는다.** Stage, cipher Stage, 뒤에 올 Connection / Owner 객체가 모두 그렇다. 실행 중에 malloc 으로 넘어가는 경로 (fallback) 는 없다.
+2. **`initializeContext` 가 그 Context 의 메모리를 전부 정한다.** 크기는 compile time 상한 (19.3) 의 최악, 즉 Owner 슬롯이 전부 서버이고 서버마다 연결 상한만큼 가진 경우다. 못 잡으면 `KIOTTY_OUT_OF_MEMORY` 이고, 잡았으면 그 뒤 실행 중에 메모리 부족은 생기지 않는다. Pool 이 줄 수 없는 요청은 상한을 넘은 설정이므로 create 의 `KIOTTY_INVALID_ARGUMENT` 로 미리 걸러진다.
+3. **잡아 둔 메모리는 쓰기 전까지 RAM 에 올라가지 않는다.** Pool 은 생성자에서 arena 를 건드리지 않는다. 0 초기화된 전역 배열 (.bss) 과 큰 heap 할당은 Linux, Windows, macOS, iOS, Android 모두 처음 쓰는 page 만 RAM 에 올린다. 256 MiB 를 잡고 1.6 MiB 를 쓴 실측이 Linux RSS 4 MB, Windows working set 4.5 MB 다. Windows 는 commit (RAM + pagefile 한도) 을 잡는 순간 전부 센다. 그래서 process 가 떴거나 Context 가 만들어졌다는 것이 그 메모리를 보장받았다는 뜻이다. Linux 는 overcommit 이라 처음 쓸 때 page 를 못 받을 수 있다. 엄격한 build 를 위한 미리 건드리기 / `mlock` 옵션은 아직 없다.
+4. **Context 마다 격리한다.** kiotty 의 데이터는 Context 의 heap Pool 에 있고 releaseContext 에서 한 번에 돌아간다. 전역은 정적 TLS Pool 하나뿐이다. OpenSSL 자체가 process 전역이고, 그 상태가 `atexit` 의 `OPENSSL_cleanup` 까지 살아 있어야 하기 때문이다.
+
+### 19.2 Pool 두 가지
+
+| | Context Pool (`kiotty::Pool`) | 정적 TLS Pool (`kiotty::StaticPool<Tag, Layout>`) |
+|---|---|---|
+| 담는 것 | Stage, cipher Stage, (뒤에) Connection / Owner 객체 | OpenSSL 의 모든 할당 (`CRYPTO_set_mem_functions`) |
+| 저장 공간 | Context 생성자의 `malloc` 한 번 | class template 의 static 배열 (.bss). 파괴자 없음, 상수 초기화 |
+| 수명 | Context | process |
+| 크기 | `ContextPoolLayout` | `TlsPoolLayout` |
+| 언제 | 항상 | `KIOTTY_NET_USE_TLS` 이고 `KIOTTY_NET_TLS_STATIC_POOL` (OpenSSL 을 kiotty 에 정적 링크) 일 때. DLL 로 쓰면 OpenSSL 의 malloc 그대로 |
+| 잠금 | mutex 하나 | 등급마다 `atomic_flag` spinlock |
+
+두 Pool 은 같은 방식으로 블록을 낸다.
+
+- 등급 (블록 크기, 개수) 의 목록을 받는다. 등급의 순서는 상관없고 개수 0 도 된다.
+- allocate 는 크기가 맞는 가장 작은 등급부터 시도하고, 그 등급이 비었으면 더 큰 등급으로 넘어간다. 다 비었으면 `nullptr` 이고 failure 를 센다.
+- 한 등급 안에서는 free list (LIFO) 를 먼저 보고, 비었을 때만 아직 쓰지 않은 블록을 bump index 로 꺼낸다. 놓은 블록을 먼저 다시 쓰므로 RAM 에 올라오는 양이 "동시에 가장 많이 쓴 양" 에서 멈춘다. 순서가 반대면 연결 / 해제만 반복해도 arena 전체를 한 번씩 건드리게 된다.
+- release 는 arena 밖이거나 블록 경계가 아닌 포인터를 false 로 거절한다.
+- 블록은 16 B 정렬이다.
+
+정적 TLS Pool 은 `Context()` 가 `useTlsStaticPool()` 로 건다. 이미 걸려 있으면 그대로 true 이고, OpenSSL 의 기본 malloc 이 아닌 다른 hook 이 있으면 덮어쓰지 않고 false 다 (`Context::tlsPooled()`). OpenSSL 은 사용자 hook 이 있으면 할당이 있은 뒤에도 교체를 허용하므로, 덮어쓰면 다른 hook 의 블록이 우리 release 로 온다. 실패해도 Context 는 유효하다. 그때 OpenSSL 은 기존 allocator 를 쓴다.
+
+### 19.3 compile time parameter
+
+CMake cache 변수이고 `kiotty_net` 의 PUBLIC 정의로 테스트까지 같은 값이 보인다. `base/pool/kiotty_memory_limits.h` 가 `MemoryLimits` 로 모으고 static_assert 로 범위를 검사한다.
+
+| 변수 | 기본 | 범위 | 뜻 |
+|---|---|---|---|
+| `KIOTTY_NET_MAX_OWNERS` | 16 | 1 ~ 16 (handle 의 owner 4 bit) | Context 하나가 동시에 가지는 Server + EventClient + StreamClient |
+| `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` | 128 | 1 ~ 1024 | `max_clients` 의 상한 |
+| `KIOTTY_NET_MAX_RECV_CAPACITY` | 16384 | 1 ~ | `recv_capacity` 의 상한. cipherReceive 도 이 크기 |
+| `KIOTTY_NET_MAX_SEND_CAPACITY` | 16384 | 1 ~ | `send_capacity` 의 상한 |
+| `KIOTTY_NET_MAX_PUSH_CAPACITY` | 16384 | 1 ~ | `push_capacity` 의 상한 |
+| `KIOTTY_NET_MAX_TLS_CONTEXTS` | 1 | 1 ~ 16 | 동시에 TLS 를 쓰는 Context 수. 정적 TLS Pool 의 배수 |
+| `KIOTTY_NET_USE_TLS` | ON | | cipher Stage 등급과 TLS Pool 의 유무 |
+| `KIOTTY_NET_TLS_STATIC_POOL` | ON | | OpenSSL 을 정적 TLS Pool 로 |
+
+Owner 는 서버로 셀지 클라이언트로 셀지 정하지 않는다. 클라이언트는 연결 하나라 서버보다 작으므로, 모든 Owner 를 연결 상한만큼 가진 서버로 셈한다 (`CONNECTIONS = OWNERS × CONNECTIONS_PER_SERVER`).
+
+### 19.4 번역기 (`base/pool/kiotty_memory_layout.h`)
+
+parameter 를 등급 목록 (`PoolLayout<BlockClass<bytes, count>...>`) 으로 바꾼다. 같은 목록을 `StaticPool` 은 타입으로, `kiotty::Pool` 은 `classes()` 배열로 받는다.
+
+```cpp
+typedef PoolLayout<
+    BlockClass<alignBlock(Limits::RECV_CAPACITY), Limits::CONNECTIONS>,                       // receive
+    BlockClass<alignBlock(Limits::SEND_CAPACITY), Limits::CONNECTIONS>,                       // send
+    BlockClass<alignBlock(Limits::PUSH_CAPACITY), Limits::CONNECTIONS>,                       // notify
+    BlockClass<alignBlock(Limits::RECV_CAPACITY), whenTls(Limits::CONNECTIONS)>,              // cipherReceive
+    BlockClass<alignBlock(cipherSendBytes(largerOf(SEND, PUSH))), whenTls(Limits::CONNECTIONS)> // cipherSend
+> ContextPoolLayout;
+
+constexpr size_t tlsBlocks(size_t global, size_t profile, size_t connection)
+{
+    return global + Limits::TLS_CONTEXTS * (profile * Limits::OWNERS + connection * Limits::CONNECTIONS);
+}
+typedef PoolLayout<BlockClass<32, tlsBlocks(5096, 381, 149)>, /* ... 20 등급 ... */> TlsPoolLayout;
+```
+
+- `ContextPoolLayout` 은 공식이라 정확하다. Connection / Owner 객체가 생기면 (사이클 5 ~ 8) `sizeof` 등급을 더한다.
+- `TlsPoolLayout` 의 세 수는 계측이다. `tests/measure/kiotty_measure_tls_memory.cpp` 가 OpenSSL 의 할당마다 "전역 / profile / 연결" 꼬리표와 크기 등급 (32, 48, 64, 96, … 1.5 배 간격) 을 기록한다. 연결 N 개를 handshake 와 최대 길이 왕복까지 한 걸음씩 같이 진행시켜 모두가 동시에 가장 많이 쥔 순간을 만들고, 인증서 (RSA 2048 / 4096, ECDSA P-256) × TLS 1.2 / 1.3 × client 인증 여덟 경우와 Stage 4 / 16 / 64 KiB 의 최악을 이 표로 출력한다. OpenSSL 을 올리거나 설정 범위 (key 종류, trust store) 를 넓히면 도구를 다시 돌려 표를 바꾼다. 인증서는 `tests/measure/generate_certs.sh` 가 만든다.
+- 등급마다의 최대치를 더하므로 실제 동시 최대치 (연결당 약 68 KiB) 보다 크다 (등급 반올림 포함 약 150 KiB). 등급끼리는 블록을 나눠 쓰지 못하기 때문이다.
+
+### 19.5 예약 크기
+
+`TLS ON`, `MAX_TLS_CONTEXTS = 1`. 둘 다 예약이고 RAM 은 쓴 만큼만이다.
+
+| Owner × 연결, Stage | Context Pool (Context 마다) | 정적 TLS Pool (process 에 하나) |
+|---|---|---|
+| 16 × 128, 16 KiB (기본) | 161 MB | 302 MB |
+| 16 × 128, 4 KiB | 41 MB | 302 MB |
+| 2 × 128, 16 KiB | 20 MB | 38 MB |
+| 2 × 32, 16 KiB | 5 MB | 10 MB |
+| 16 × 1024, 16 KiB | 1290 MB | 2399 MB |
+
+서버를 많아야 둘 쓰는 application 은 `KIOTTY_NET_MAX_OWNERS` 를 줄이는 것이 첫 손잡이다. 32-bit target 은 예약이 주소 공간을 넘지 않는지 따로 본다.
+
+### 19.6 OpenSSL 의 연결당 사용량 (BIO pair, OpenSSL 3.6.1, 실제 byte)
+
+| Stage | server 최대 / 대기 | client 최대 / 대기 |
+|---|---|---|
+| 4 KiB | 66 K / 28 ~ 47 K | 67 ~ 96 K / 33 ~ 50 K |
+| 16 KiB | 66 K / 28 ~ 47 K | 67 K / 33 ~ 50 K |
+| 64 KiB | 68 K / 29 ~ 48 K | 68 K / 33 ~ 50 K |
+
+전역 상태는 처음 한 번 약 1 MB 다. profile 하나는 인증서를 읽는 동안 수십 KB 를 쓰고, 열려 있는 동안은 수백 B 다.
+
+### 19.7 남은 것
+
+- Connection / Owner / IoEvent 객체의 등급 (사이클 5 ~ 8).
+- IO thread 가 끝날 때 `OPENSSL_thread_stop` (사이클 6).
+- trust store (OS 저장소, CA 수백 개) 를 쓰는 profile 의 계측.
+- Linux 의 엄격한 build 를 위한 미리 건드리기 / `mlock` 옵션.
+- Pool 이 바닥났을 때 handshake 가 깨끗하게 실패하는지 보는 테스트 (정적 TLS Pool 이 작은 build 가 따로 필요하다).

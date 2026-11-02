@@ -1,6 +1,7 @@
 #if !KIOTTY_NET_USE_TLS
 
 #include "base/tls/kiotty_tls_engine.h"
+#include "base/tls/kiotty_tls_memory.h"
 #include "base/tls/kiotty_tls_profile.h"
 
 namespace kiotty
@@ -10,6 +11,23 @@ namespace kiotty
         bool tlsSupported()
         {
             return false;
+        }
+
+        bool useTlsStaticPool()
+        {
+            return false;
+        }
+
+        size_t tlsPoolClassCount()
+        {
+            return 0;
+        }
+
+        StaticPoolUsage tlsPoolUsage(size_t index)
+        {
+            (void)index;
+            StaticPoolUsage usage = { 0, 0, 0, 0, 0 };
+            return usage;
         }
 
         TlsProfile::TlsProfile()
