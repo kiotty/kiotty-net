@@ -210,12 +210,13 @@ epoll backend (사이클 3c) 의 세부:
 v2 8절에서 cipher Stage 가 셋에서 둘로 준다. 송신 암호문은 하나다.
 
 ```cpp
-class TlsProfile { /* v2 그대로. SSL_OP_NO_RENEGOTIATION 을 켠다 */ };
+static const uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 10000;   // 설정에 handshake timeout 이 없으므로 상수
+class TlsProfile { /* v2 그대로. SSL_OP_NO_RENEGOTIATION 을 켠다. 기본 생성자, Pool 을 받지 않는다 */ };
 enum class TlsStep : uint8_t { SEND, RECEIVE, DONE, FAILED };
 class TlsEngine                                 // 연결 하나의 SSL + BIO 둘 + cipher Stage 둘
 {
 public:
-    TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity);   // 둘 다 0 이면 평문 (active 늘 false)
+    TlsEngine(size_t receive_capacity, size_t send_capacity);   // 둘 다 0 이면 평문 (active 늘 false)
     KiottyNetCode open(TlsProfile& profile, const char* hostname);
     void          close();
     bool          active() const;
@@ -233,6 +234,10 @@ public:
 - `encode` 는 실패하지 않는다. renegotiation 을 끄고 cipherSend 의 자리를 보장하므로 SSL_write 의 WANT_* 가 없고, SSL 의 fatal 오류는 decode / handshake 에서만 생겨 그 자리에서 닫힌다. debug 는 `assert`, release 는 cipherSend 에 아무것도 넣지 않는다 (그 WRITE 는 listener 가 payload 0 으로 거절하고, WRITE 의 timeout 이 사용자에게 알린다).
 - `decode` 는 "cipherReceive 의 레코드를 SSL 에 넣고, plain 이 찰 때까지 SSL_read" 다. 레코드가 덜 찼으면 0. 이것이 refill (9.5) 의 한 걸음이다.
 - 오류 분류 표는 v2 8절 그대로.
+- decode 가 끝날 때 상대의 KeyUpdate 가 답장을 기다리면 (`SSL_get_key_update_type` 이 NONE 이 아니면) `SSL_key_update(NOT_REQUESTED)` + `SSL_do_handshake` 로 그 답장을 cipherSend 에 꺼내 둔다. SSL_read 만으로는 다음 SSL_write 전까지 나오지 않기 때문이다.
+- handshake 가 DONE 을 돌려준 뒤에도 rbio 에 상대의 첫 응용 레코드나 NewSessionTicket 이 남아 있을 수 있다. 9.5 의 첫 READ 전에 decode 를 한 번 불러 소화한다 (사이클 5b).
+- **OpenSSL 의 메모리는 OpenSSL 이 관리한다.** library 는 `CRYPTO_set_mem_functions` 를 부르지 않는다. 그 hook 은 process 에 하나라 같은 libcrypto 를 쓰는 다른 library 의 할당까지 받고, OpenSSL 의 전역 / thread 상태는 `atexit` 의 `OPENSSL_cleanup` 때 해제되므로 Context 의 Pool 이 그때까지 살아 있어야 한다 (전역이 된다). 사용량은 테스트 실행 파일에서만 세는 hook 으로 잰다: 연결된 쌍 (server + client) 하나가 약 70 KiB, handshake 중 최대 약 89 KiB (테스트 v0 8절).
+- IO thread 가 끝날 때 `OPENSSL_thread_stop` 을 부른다 (사이클 6). Windows 정적 링크에서는 OpenSSL 이 thread 종료를 스스로 알지 못한다.
 
 ## 9. connection
 
@@ -1131,7 +1136,7 @@ StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다.
 | 객체 | 잡는 것 | 크기 |
 |---|---|---|
 | Connection (평문) | 객체 + StageSet (recv + send + push) + IoEvent 둘 | 약 12 KiB |
-| Connection (TLS) | 위 + cipherReceive (16 KiB + 헤더) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (Pool, SSL_clear 재사용) | 약 34 KiB + SSL |
+| Connection (TLS) | 위 + cipherReceive (16 KiB + 헤더) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (OpenSSL malloc, SSL_clear 재사용) | 약 34 KiB + SSL 약 35 KiB |
 | ConnectionHost | Connection[128] + NotificationContext | 평문 약 1.5 MiB, TLS 약 4.3 MiB |
 | IoLoop | local completion 배열 3 × 128 (OS 완료는 listener 의 배열) | |
 | EventClient | capacity 1 | 평문 약 13 KiB |

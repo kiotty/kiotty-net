@@ -37,6 +37,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/event/kiotty_io_action.cpp
     src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
     src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
+    src/implementation/base/tls/kiotty_tls_engine.cpp
+    src/implementation/base/tls/backend/kiotty_openssl_tls.cpp
+    src/implementation/base/tls/backend/kiotty_stub_tls.cpp
 )
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})

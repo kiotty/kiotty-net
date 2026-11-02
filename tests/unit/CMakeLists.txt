@@ -13,4 +13,15 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_clock.cpp
     kiotty_test_socket_error.cpp
     kiotty_test_io_action.cpp
+    kiotty_test_tls.cpp
+    support/kiotty_test_openssl_memory.cpp
 )
+
+target_compile_definitions(kiotty_net_unit_tests PRIVATE KIOTTY_TEST_CERT_DIR="${PROJECT_SOURCE_DIR}/tests/certs")
+
+if(KIOTTY_NET_USE_TLS)
+    target_link_libraries(kiotty_net_unit_tests PRIVATE OpenSSL::Crypto)
+    target_compile_definitions(kiotty_net_unit_tests PRIVATE KIOTTY_TEST_OPENSSL=1)
+else()
+    target_compile_definitions(kiotty_net_unit_tests PRIVATE KIOTTY_TEST_OPENSSL=0)
+endif()

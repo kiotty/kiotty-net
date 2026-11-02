@@ -21,13 +21,13 @@ ctest --test-dir build\msvc -L "unit|integration" --output-on-failure
 
 TLS 를 켜면 `-DKIOTTY_NET_USE_TLS=ON`. 시스템 OpenSSL 은 쓰지 않는다. prebuilt 는 `build/<이름>/_deps/openssl-cmake-build/prebuilt/<triple>/` 에 한 번만 받는다 (Windows x64 MSVC, Linux x64, Android 만. macOS / iOS 는 `-DKIOTTY_NET_OPENSSL_PREBUILT=OFF` 나 TLS OFF).
 
-## WSL Ubuntu 24.04 (배포판 이름 `Ubuntu`, gcc 13 / clang 18, epoll)
+## WSL Ubuntu 24.04 (배포판 이름 `Ubuntu-24.04`, gcc 13 / clang 18, epoll)
 
 ```bash
-wsl -d Ubuntu -- bash -lc 'cd /mnt/c/repository/private/kiotty-net && cmake -B build/wsl-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF && cmake --build build/wsl-gcc && ctest --test-dir build/wsl-gcc -L "unit|integration" --output-on-failure' | tr -d '\0'
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/d/repo/kiotty-net && cmake -B build/wsl-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF && cmake --build build/wsl-gcc && ctest --test-dir build/wsl-gcc -L "unit|integration" --output-on-failure' | tr -d '\0'
 ```
 
-clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl-clang`. sanitizer 는 `-DKIOTTY_NET_SANITIZER=address,undefined` 또는 `thread`. WSL 의 출력에는 NUL 이 섞이므로 `tr -d '\0'` 를 붙인다. TLS 는 `sudo apt install libssl-dev` 뒤 ON.
+clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl-clang`. sanitizer 는 `-DKIOTTY_NET_SANITIZER=address,undefined` 또는 `thread`. WSL 의 출력에는 NUL 이 섞이므로 `tr -d '\0'` 를 붙인다. TLS 는 시스템 OpenSSL 없이 ON 이 된다 (openssl-cmake 의 Linux x64 prebuilt). 로컬 matrix 는 gcc / clang × TLS ON / OFF, Release TLS, asan,undefined TLS, thread TLS 일곱 벌이다.
 
 ## 규칙
 
@@ -36,7 +36,7 @@ clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl
 - WSL 의 `/mnt/d` 에서 openssl-cmake 의 prebuilt 압축 해제 뒤 `file(RENAME)` 이 가끔 실패한다 (DrvFs). 그 빌드 디렉터리를 지우고 다시 configure 하면 된다.
 
 - integration 테스트의 Unix domain socket 경로는 POSIX 에서 `/tmp` 아래다. WSL 의 `/mnt/c` (DrvFs) 는 socket 파일을 만들 수 없다 (NOT_SUPPORTED).
-- Git Bash 에서 `wsl -- bash -lc '...'` 로 넘기면 `$변수` 가 사라질 수 있다. 긴 명령은 스크립트 파일로 만들고 `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash /mnt/c/.../script.sh` 로 돌린다.
+- Git Bash 에서 `wsl -- bash -lc '...'` 로 넘기면 `$변수` 가 사라질 수 있다. 긴 명령은 스크립트 파일로 만들고 `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-24.04 -- bash /mnt/c/.../script.sh` 로 돌린다.
 
 - 경고는 오류다 (`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror`). 경고를 끄지 말고 코드를 고친다.
 - 라이브러리는 gcc / clang 에서 C++11, MSVC 는 C++14 (`/permissive-`). 테스트 타깃만 C++14.

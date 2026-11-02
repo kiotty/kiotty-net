@@ -139,7 +139,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
             kiotty_test_completion.h# IoCompletion 을 손으로 만드는 함수들
             kiotty_test_tls.h       # TlsEngine 둘을 버퍼로 맞붙이는 Pump
         kiotty_test_stage.cpp, kiotty_test_stage_set.cpp, kiotty_test_span.cpp, kiotty_test_pool.cpp, kiotty_test_pool_handle.cpp,
-        kiotty_test_io_action.cpp, kiotty_test_socket_error.cpp, kiotty_test_tls_profile.cpp, kiotty_test_tls_engine.cpp,
+        kiotty_test_io_action.cpp, kiotty_test_socket_error.cpp, kiotty_test_tls.cpp,
         kiotty_test_work_context.cpp, kiotty_test_connection.cpp, kiotty_test_connection_host.cpp, kiotty_test_config.cpp, kiotty_test_action.cpp
     integration/
         CMakeLists.txt              # kiotty_net_integration_tests. ctest 라벨 integration
@@ -165,7 +165,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td><code>RecordingHandler</code></td><td><code>KiottyNetConnectionHandler</code> 표 하나와, <code>app_context</code> 로 넘기는 기록 struct. 콜백마다 (이름, handle, 인자) 를 vector 에 적고 <code>HOLD(0)</code> 을 돌려준다. onConnected 는 accept</td><td>unit, integration 공용</td></tr>
   <tr><td><code>ScriptedHandler</code></td><td>RecordingHandler 에 "n 번째 onRead 는 이 action 을 돌려준다" 를 큐로 준다. 테스트가 handler 의 return 을 조립한다</td><td>Connection unit</td></tr>
   <tr><td><code>completion::receive(slot, action, bytes)</code> 등</td><td>IoCompletion 을 손으로 만들고 Connection 의 수신 Stage 에 바이트를 미리 넣어 "OS 가 여기까지 썼다" 를 흉내낸다. Connection 은 listener 를 모르므로 이것만으로 dispatch / resolve 전부를 돌릴 수 있다</td><td>Connection unit</td></tr>
-  <tr><td><code>TlsPump</code></td><td>TlsEngine 둘 (서버 profile, 클라이언트 profile) 을 들고 <code>step()</code> 마다 한쪽의 <code>cipher().send</code> 를 다른 쪽의 <code>cipher().receive</code> 로 옮긴 뒤 둘의 <code>handshake()</code> 를 부른다. 소켓 없이 TLS 전체를 검증한다</td><td>TlsEngine unit</td></tr>
+  <tr><td><code>TlsPump</code></td><td>TlsEngine 둘 (서버 profile, 클라이언트 profile) 을 들고 <code>handshake()</code> 의 한 바퀴마다 클라이언트 handshake → 클라이언트 <code>cipherSend</code> 를 서버 <code>cipherReceive</code> 로 → 서버 handshake → 반대로 옮긴다. 걸음은 <code>server_steps</code> / <code>client_steps</code> 에 남는다. 소켓 없이 TLS 전체를 검증한다</td><td>TlsEngine unit</td></tr>
   <tr><td><code>LoopbackPeer</code></td><td>테스트 thread 가 직접 쓰는 blocking 소켓. Server 테스트의 클라이언트, EventClient 테스트의 서버. <code>sendAll</code>, <code>recvExactly(n, timeout)</code>, <code>shutdownWrite</code>, <code>close</code></td><td>integration</td></tr>
   <tr><td><code>waitUntil(pred, ms)</code></td><td>조건 폴링. 고정 sleep 은 금지. 느린 CI 에서 깨지는 테스트를 만들지 않는다</td><td>integration</td></tr>
   <tr><td><code>NotificationContext</code> 의 <code>listener</code></td><td>Connection::notify 와 closeStream 은 늘 <code>listener-&gt;wake()</code> 를 부른다 (설계 v4 2절). unit 에서는 wake 횟수만 세는 가짜 listener 를 꽂고, wake 자체는 EventListener integration 이 검증한다</td><td>Connection unit</td></tr>
@@ -267,39 +267,45 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s8">8. 케이스 : tls</h2>
-<p>TlsEngine 은 소켓을 모르므로 <code>TlsPump</code> 로 둘을 맞붙여 unit 에서 전부 돈다. stub 빌드에서는 TlsProfile 테스트 하나만 돌고 나머지는 skip 이다.</p>
+<p>TlsEngine 은 소켓을 모르므로 <code>TlsPump</code> (<code>tests/unit/support/kiotty_test_tls.h</code>) 로 둘을 맞붙여 unit 에서 전부 돈다. 테스트 파일은 <code>tests/unit/kiotty_test_tls.cpp</code> 하나, 인증서는 <code>tests/certs/generate.sh</code> 가 만든다 (ca, other_ca, server, client, server_wrong_host, server_expired, garbage). stub 빌드에서는 <code>StubBuildReturnsNotSupportedForBothOpens</code> 만 돌고 나머지는 <code>GTEST_SKIP</code> 이다 (<code>tlsSupported()</code> 로 고른다).</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>TlsProfile</td><td>OpenServerWithValidCertAndKeySucceeds</td><td><span class="tag ok">정상</span></td><td>certs/server.pem + key</td></tr>
+  <tr><td>TlsProfile</td><td>OpenServerWithValidCertAndKeySucceeds</td><td><span class="tag ok">정상</span></td><td>certs/server.pem + server.key</td></tr>
   <tr><td>TlsProfile</td><td>OpenServerWithMissingFileReturnsCertificateNotFound</td><td><span class="tag misuse">오용</span></td><td>존재하지 않는 경로</td></tr>
   <tr><td>TlsProfile</td><td>OpenServerWithKeyThatDoesNotMatchCertReturnsCertificateInvalid</td><td><span class="tag misuse">오용</span></td><td>server.pem + client.key</td></tr>
-  <tr><td>TlsProfile</td><td>OpenServerWithGarbageFileReturnsCertificateInvalid</td><td><span class="tag misuse">오용</span></td><td>텍스트 파일</td></tr>
-  <tr><td>TlsProfile</td><td>OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsFromConfig</td><td><span class="tag ok">정상</span></td><td>기본값</td></tr>
-  <tr><td>TlsProfile</td><td>StubBuildReturnsNotSupportedForBothOpens</td><td><span class="tag edge">엣지</span></td><td>KIOTTY_NET_USE_TLS 꺼진 빌드에서만</td></tr>
-  <tr><td>TlsEngine</td><td>InactiveEngineReportsActiveFalseAndAllocatesNoStage</td><td><span class="tag edge">엣지</span></td><td>(0, 0, 0) 생성, open 전. cipher().receive.capacity() == 0</td></tr>
-  <tr><td>TlsEngine</td><td>ServerFirstStepIsReceiveAndClientFirstStepIsSend</td><td><span class="tag ok">정상</span></td><td>open 직후 handshake(): 서버 RECEIVE (0 바이트에서), 클라이언트 SEND 이고 cipher().send 에 ClientHello</td></tr>
-  <tr><td>TlsEngine</td><td>PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth</td><td><span class="tag ok">정상</span></td><td>TLS 1.3 기본. step 수 ≤ 6. 둘 다 DONE</td></tr>
-  <tr><td>TlsEngine</td><td>Tls12OnlyProfilesAlsoReachDone</td><td><span class="tag ok">정상</span></td><td>versions(1.2 만)</td></tr>
-  <tr><td>TlsEngine</td><td>EncodeOnOneSideDecodesToTheSamePlaintextOnTheOther</td><td><span class="tag ok">정상</span></td><td>1 B, 4 KiB, 16 KiB - 1</td></tr>
+  <tr><td>TlsProfile</td><td>OpenServerWithGarbageFileReturnsCertificateInvalid</td><td><span class="tag misuse">오용</span></td><td>certs/garbage.pem (텍스트)</td></tr>
+  <tr><td>TlsProfile</td><td>OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault</td><td><span class="tag ok">정상</span></td><td>trust store 빈 문자열 (OS 기본). 설정에 handshake timeout 이 없으므로 <code>TLS_HANDSHAKE_TIMEOUT_MS</code> (10 s)</td></tr>
+  <tr><td>TlsProfile</td><td>StubBuildReturnsNotSupportedForBothOpens</td><td><span class="tag edge">엣지</span></td><td>KIOTTY_NET_USE_TLS=OFF 빌드에서만. engine open 도 TLS_NOT_SUPPORTED</td></tr>
+  <tr><td>TlsEngine</td><td>InactiveEngineReportsActiveFalseAndAllocatesNoStage</td><td><span class="tag edge">엣지</span></td><td>(0, 0) 생성. cipherReceive / cipherSend capacity 0, open 은 INVALID_ARGUMENT</td></tr>
+  <tr><td>TlsEngine</td><td>ServerFirstStepIsReceiveAndClientFirstStepIsSend</td><td><span class="tag ok">정상</span></td><td>open 직후 handshake(): 서버 RECEIVE (0 바이트에서), 클라이언트 SEND 이고 cipherSend 에 ClientHello</td></tr>
+  <tr><td>TlsEngine</td><td>PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth</td><td><span class="tag ok">정상</span></td><td>TLS 1.3 기본. 바퀴 수 ≤ 6 (실제 3). 둘 다 DONE</td></tr>
+  <tr><td>TlsEngine</td><td>Tls12OnlyProfilesAlsoReachDone</td><td><span class="tag ok">정상</span></td><td>versions(1.2 만). 평문 왕복까지</td></tr>
+  <tr><td>TlsEngine</td><td>EncodeOnOneSideDecodesToTheSamePlaintextOnTheOther</td><td><span class="tag ok">정상</span></td><td>1 B, 4 KiB, 16 KiB - 1. 양방향</td></tr>
   <tr><td>TlsEngine</td><td>EncodeLargerThanOneRecordProducesMultipleRecordsThatDecodeInOrder</td><td><span class="tag edge">엣지</span></td><td>40 KiB → 레코드 3 개, 순서 보존</td></tr>
   <tr><td>TlsEngine</td><td>DecodeWithHalfARecordYieldsZeroBytesAndNoError</td><td><span class="tag edge">엣지</span></td><td>암호문을 반만 옮긴다 → SUCCESS, plain 0 바이트. 나머지 반 → 전체</td></tr>
   <tr><td>TlsEngine</td><td>DecodeWithOneByteAtATimeEventuallyYieldsTheRecord</td><td><span class="tag edge">엣지</span></td><td>바이트 단위 분할</td></tr>
-  <tr><td>TlsEngine</td><td>DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage</td><td><span class="tag edge">엣지</span></td><td>암호문 한 바이트 뒤집기 → RECORD_ERROR, lastMessage() 가 OpenSSL 문자열</td></tr>
-  <tr><td>TlsEngine</td><td>ClientRejectsServerSignedByUntrustedCaWithVerifyFailed</td><td><span class="tag ok">정상</span></td><td>trust store 가 other_ca → FAILED, lastCode VERIFY_FAILED, message 가 X509 문자열</td></tr>
-  <tr><td>TlsEngine</td><td>ClientWithVerifyServerOffAcceptsUntrustedCa</td><td><span class="tag ok">정상</span></td><td>verification(false, false)</td></tr>
+  <tr><td>TlsEngine</td><td>DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage</td><td><span class="tag edge">엣지</span></td><td>암호문 마지막 바이트 뒤집기 → RECORD_ERROR, lastMessage() 가 OpenSSL 문자열</td></tr>
+  <tr><td>TlsEngine</td><td>DecodeDrainsPlaintextLeftInSslAcrossCalls</td><td><span class="tag edge">엣지</span></td><td>16 KiB 레코드 하나를 4 KiB plain 으로 네 번 꺼낸다. 다섯째는 0</td></tr>
+  <tr><td>TlsEngine</td><td>DecodeCompactsCipherReceive</td><td><span class="tag ok">정상</span></td><td>decode 뒤 cipherReceive 의 writable == capacity</td></tr>
+  <tr><td>TlsEngine</td><td>ClientRejectsServerSignedByUntrustedCaWithVerifyFailed</td><td><span class="tag ok">정상</span></td><td>trust store 가 other_ca → 클라이언트 FAILED, VERIFY_FAILED, message 가 X509 문자열</td></tr>
+  <tr><td>TlsEngine</td><td>ClientWithVerifyServerOffAcceptsUntrustedCa</td><td><span class="tag ok">정상</span></td><td>skip_server_verification / skip_hostname_verification</td></tr>
   <tr><td>TlsEngine</td><td>HostnameMismatchReturnsHostnameMismatch</td><td><span class="tag ok">정상</span></td><td>server_wrong_host.pem, hostname "localhost"</td></tr>
-  <tr><td>TlsEngine</td><td>ExpiredServerCertReturnsVerifyFailed</td><td><span class="tag edge">엣지</span></td><td>server_expired.pem</td></tr>
-  <tr><td>TlsEngine</td><td>ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt</td><td><span class="tag ok">정상</span></td><td>clientAuth(REQUIRED). identity 없음 → 서버 FAILED(VERIFY_FAILED). 있음 → DONE</td></tr>
-  <tr><td>TlsEngine</td><td>VersionMismatchReturnsHandshakeFailed</td><td><span class="tag edge">엣지</span></td><td>서버 1.3 만, 클라이언트 1.2 만</td></tr>
-  <tr><td>TlsEngine</td><td>PlaintextBytesFromPeerReturnHandshakeFailed</td><td><span class="tag misuse">오용</span></td><td>"GET / HTTP/1.1" 을 cipher.receive 에 → FAILED, HANDSHAKE_FAILED</td></tr>
-  <tr><td>TlsEngine</td><td>Tls13NewSessionTicketAfterDoneAppearsAsOneMoreSendOnServer</td><td><span class="tag edge">엣지</span></td><td>DONE 뒤 서버 handshake() 가 SEND 한 번 더, 클라이언트 decode 가 0 바이트로 삼킨다</td></tr>
-  <tr><td>TlsEngine</td><td>KeyUpdateFromPeerShowsAsHasControlOutputAfterDecode</td><td><span class="tag edge">엣지</span></td><td>SSL_key_update 로 유도 → 상대 decode 뒤 hasControlOutput true, 답장을 옮기면 양쪽 계속 통신</td></tr>
-  <tr><td>TlsEngine</td><td>CloseNotifyFromPeerDecodesAsPeerClosed</td><td><span class="tag ok">정상</span></td><td>SSL_shutdown 유도 → decode 가 PEER_CLOSED</td></tr>
-  <tr><td>TlsEngine</td><td>CloseThenOpenReusesTheSslObjectAndHandshakesAgain</td><td><span class="tag ok">정상</span></td><td>SSL_clear 경로. Pool fallbackCount 가 늘지 않는다</td></tr>
-  <tr><td>TlsEngine</td><td>AllAllocationsComeFromTheGivenPoolWhenItIsLargeEnough</td><td><span class="tag ok">정상</span></td><td>2 MiB Pool 로 32 engine handshake → fallbackCount 0. CRYPTO_set_mem_functions 가 걸렸다는 증거</td></tr>
-  <tr><td>TlsEngine</td><td>EncodeIntoAFullCipherStageReturnsBufferFullAndWritesNothing</td><td><span class="tag edge">엣지</span></td><td>cipher.send 를 채워 두고 encode</td></tr>
-  <tr><td>TlsEngine</td><td>EncodeOrDecodeOnInactiveEngineReturnsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>open 전 호출</td></tr>
+  <tr><td>TlsEngine</td><td>ExpiredServerCertReturnsVerifyFailed</td><td><span class="tag edge">엣지</span></td><td>server_expired.pem (2000 ~ 2001)</td></tr>
+  <tr><td>TlsEngine</td><td>ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt</td><td><span class="tag ok">정상</span></td><td>client_auth REQUIRED. identity 없음 → 서버 FAILED(VERIFY_FAILED). client.pem → DONE</td></tr>
+  <tr><td>TlsEngine</td><td>VersionMismatchReturnsHandshakeFailed</td><td><span class="tag edge">엣지</span></td><td>서버 1.3 만, 클라이언트 1.2 만 → 서버 HANDSHAKE_FAILED</td></tr>
+  <tr><td>TlsEngine</td><td>PlaintextBytesFromPeerReturnHandshakeFailed</td><td><span class="tag misuse">오용</span></td><td>"GET / HTTP/1.1" 을 cipherReceive 에 → FAILED, HANDSHAKE_FAILED</td></tr>
+  <tr><td>TlsEngine</td><td>Tls13ServerSendsNewSessionTicketAsOneMoreSendBeforeDone</td><td><span class="tag edge">엣지</span></td><td>한 걸음씩: 클라이언트 Finished 를 받은 서버 handshake() 가 SEND (ticket), 그 다음 DONE. 클라이언트 decode 가 0 바이트로 삼킨다</td></tr>
+  <tr><td>TlsEngine</td><td>KeyUpdateFromPeerLeavesTheReplyInCipherSendAfterDecode</td><td><span class="tag edge">엣지</span></td><td>debugKeyUpdate → 상대 decode 0 바이트 뒤 상대 cipherSend 에 답장. 옮기면 양방향 계속 통신</td></tr>
+  <tr><td>TlsEngine</td><td>CloseNotifyFromPeerDecodesAsPeerClosed</td><td><span class="tag ok">정상</span></td><td>debugShutdown → decode 가 PEER_CLOSED</td></tr>
+  <tr><td>TlsEngine</td><td>CloseThenOpenReusesTheSslObjectAndHandshakesAgain</td><td><span class="tag ok">정상</span></td><td>SSL_clear 경로. 닫은 engine 을 다시 open 해 handshake 와 왕복</td></tr>
+  <tr><td>TlsEngine</td><td>EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain</td><td><span class="tag edge">엣지</span></td><td>TLS 1.2 / 1.3 × send_capacity 4 KiB / 16 KiB / 64 KiB 의 가장 큰 평문 → cipherSend 가 평문보다 길고 상대가 그대로 decode</td></tr>
+  <tr><td>TlsEngine</td><td>EncodeIntoAFullCipherSendAssertsInDebugAndWritesNothingInRelease</td><td><span class="tag misuse">오용</span></td><td>cipherSend 를 채워 두고 encode → debug assert, release 는 cipherSend 그대로</td></tr>
+  <tr><td>TlsEngine</td><td>EncodeOrDecodeOnInactiveEngineIsRejected</td><td><span class="tag misuse">오용</span></td><td>open 전: decode 는 INVALID_ARGUMENT, encode 는 debug assert / release 무시</td></tr>
+  <tr><td>TlsMemory</td><td>OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose</td><td><span class="tag ok">정상</span></td><td>두 번 데운 뒤 profile 둘 + 연결 한 쌍을 열고 닫는다 → OpenSSL live bytes / blocks 가 연 전과 같다</td></tr>
+  <tr><td>TlsMemory</td><td>EachConnectedPairHoldsABoundedAmountOfOpenSslMemory</td><td><span class="tag ok">정상</span></td><td>profile 하나에 연결 4 쌍 → 쌍당 보유량과 최대치가 128 KiB 미만, 모두 닫으면 원래대로. 수치는 XML 의 held_bytes_per_pair / peak_bytes_per_pair</td></tr>
 </table>
+<h3>OpenSSL 메모리 수치 (사이클 4 에서 잰 것)</h3>
+<p>library 는 OpenSSL 할당 hook 을 걸지 않는다 (OpenSSL 은 자체 malloc). 테스트 실행 파일만 <code>tests/unit/support/kiotty_test_openssl_memory.cpp</code> 에서 <code>CRYPTO_set_mem_functions</code> 로 세는 hook 을 건다. OpenSSL 3.6.1, TLS 1.3 기본 profile, engine capacity 4 KiB 에서 연결된 쌍 (server + client) 하나가 쥐는 양은 약 70 KiB, handshake 중 최대 약 89 KiB 다 (WSL gcc 71812 / 91422 B, MSVC 71252 / 90862 B).</p>
 
 <h2 id="s9">9. 케이스 : connection</h2>
 <p>기준은 설계 v4 9.1 ~ 9.9 와 11절이다. Connection 은 listener 를 모른다. 테스트는 Stage 에 바이트를 넣고 IoCompletion 을 손으로 만들어 <code>dispatch</code> 에 넣는다. 그 뒤 돌아온 IoAction, handler 기록, Stage 상태, <code>pickWrite</code> 가 고른 WRITE, <code>resolve</code> 의 payload 를 본다. step 쪽 (dispatch → apply) 과 drain 쪽 (pickWrite → resolve) 을 따로 부르므로 "어느 lane 이 거는가" 가 테스트에서 그대로 보인다.</p>
