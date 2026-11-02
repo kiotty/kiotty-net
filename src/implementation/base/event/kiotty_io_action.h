@@ -52,6 +52,10 @@ namespace kiotty
                 } read_until;
                 struct
                 {
+                    size_t length;
+                } write;
+                struct
+                {
                     KiottyNetCode reason;
                 } close;
             } as;
@@ -60,7 +64,7 @@ namespace kiotty
             static IoAction hold(uint32_t timeout_ms);
             static IoAction read(IoPurpose purpose, uint32_t timeout_ms, size_t exact);
             static IoAction readUntil(uint32_t timeout_ms, KiottyNetSpan delimiter, size_t max);
-            static IoAction write(IoPurpose purpose, uint32_t timeout_ms);
+            static IoAction write(IoPurpose purpose, uint32_t timeout_ms, size_t length);
             static IoAction startWork();
             static IoAction close(KiottyNetCode reason);
             static IoAction accept();

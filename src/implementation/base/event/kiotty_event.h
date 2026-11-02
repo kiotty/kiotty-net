@@ -24,6 +24,7 @@ namespace kiotty
             SEND,
             WAKE,
             TIMEOUT,
+            WORK_READY,
             WORK_DONE
         };
 
@@ -37,7 +38,8 @@ namespace kiotty
 
             static IoCompletion wake();
             static IoCompletion timeout(int32_t slot);
-            static IoCompletion workDone(int32_t slot);
+            static IoCompletion workReady(int32_t slot);
+            static IoCompletion workDone(int32_t slot, IoAction outcome);
         };
 
         class IoEvent
@@ -68,9 +70,15 @@ namespace kiotty
             return completion;
         }
 
-        inline IoCompletion IoCompletion::workDone(int32_t slot)
+        inline IoCompletion IoCompletion::workReady(int32_t slot)
         {
-            IoCompletion completion = { IoKind::WORK_DONE, slot, SocketCode::SUCCESS, 0, IoAction::none() };
+            IoCompletion completion = { IoKind::WORK_READY, slot, SocketCode::SUCCESS, 0, IoAction::none() };
+            return completion;
+        }
+
+        inline IoCompletion IoCompletion::workDone(int32_t slot, IoAction outcome)
+        {
+            IoCompletion completion = { IoKind::WORK_DONE, slot, SocketCode::SUCCESS, 0, outcome };
             return completion;
         }
 

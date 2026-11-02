@@ -56,10 +56,12 @@ TEST(IoAction, FromMapsEveryPublicActionTypeWithPurposeUser)
     EXPECT_EQ(scanning.as.read_until.max, 1024u);
 
     KiottyNetConnectionAction write = publicAction(KIOTTY_ACTION_WRITE, 44);
+    write.as.write.data = spanOf("hello", 5);
     IoAction writing = IoAction::from(write);
     EXPECT_EQ(writing.kind, IoActionKind::WRITE);
     EXPECT_EQ(writing.purpose, IoPurpose::USER);
     EXPECT_EQ(writing.timeout_ms, 44u);
+    EXPECT_EQ(writing.as.write.length, 5u);
 
     KiottyNetConnectionAction work = publicAction(KIOTTY_ACTION_START_WORK, 55);
     IoAction working = IoAction::from(work);
@@ -110,6 +112,30 @@ TEST(IoAction, FromReadUntilCopiesDelimiterOfOneToFourBytesAndZeroScanned)
     KiottyNetConnectionAction empty = publicAction(KIOTTY_ACTION_READ_UNTIL, 0);
     empty.as.read_until.delimiter = spanOf(nullptr, 2);
     EXPECT_EQ(IoAction::from(empty).as.read_until.length, 0u);
+}
+
+TEST(IoAction, WriteCarriesPurposeTimeoutAndPlaintextLength)
+{
+    IoAction writing = IoAction::write(IoPurpose::NOTIFY, 250, 4096);
+    EXPECT_EQ(writing.kind, IoActionKind::WRITE);
+    EXPECT_EQ(writing.purpose, IoPurpose::NOTIFY);
+    EXPECT_EQ(writing.timeout_ms, 250u);
+    EXPECT_EQ(writing.as.write.length, 4096u);
+}
+
+TEST(IoAction, LocalCompletionsCarryTheirSlotAndWorkDoneCarriesTheOutcome)
+{
+    IoCompletion ready = IoCompletion::workReady(3);
+    EXPECT_EQ(ready.kind, kiotty::net::IoKind::WORK_READY);
+    EXPECT_EQ(ready.slot, 3);
+    EXPECT_EQ(ready.action.kind, IoActionKind::NONE);
+    IoAction outcome = IoAction::read(IoPurpose::USER, 77, 12);
+    IoCompletion done = IoCompletion::workDone(4, outcome);
+    EXPECT_EQ(done.kind, kiotty::net::IoKind::WORK_DONE);
+    EXPECT_EQ(done.slot, 4);
+    EXPECT_EQ(done.action.kind, IoActionKind::READ);
+    EXPECT_EQ(done.action.timeout_ms, 77u);
+    EXPECT_EQ(done.action.as.read.exact, 12u);
 }
 
 TEST(IoAction, SizeOfStaysUnderSixtyFourBytes)

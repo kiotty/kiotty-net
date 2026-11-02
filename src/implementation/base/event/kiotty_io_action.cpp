@@ -60,9 +60,11 @@ namespace kiotty
             return action;
         }
 
-        IoAction IoAction::write(IoPurpose purpose, uint32_t timeout_ms)
+        IoAction IoAction::write(IoPurpose purpose, uint32_t timeout_ms, size_t length)
         {
-            return blank(IoActionKind::WRITE, purpose, timeout_ms);
+            IoAction action = blank(IoActionKind::WRITE, purpose, timeout_ms);
+            action.as.write.length = length;
+            return action;
         }
 
         IoAction IoAction::startWork()
@@ -93,7 +95,7 @@ namespace kiotty
             case KIOTTY_ACTION_READ_UNTIL:
                 return readUntil(action.timeout_ms, action.as.read_until.delimiter, action.as.read_until.max);
             case KIOTTY_ACTION_WRITE:
-                return write(IoPurpose::USER, action.timeout_ms);
+                return write(IoPurpose::USER, action.timeout_ms, action.as.write.data.length);
             case KIOTTY_ACTION_START_WORK:
                 return startWork();
             case KIOTTY_ACTION_CLOSE:
