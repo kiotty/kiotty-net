@@ -42,7 +42,7 @@
 
 ## 미결
 
-- R3 (테스트 계획 9 ~ 10절을 v4 로) 는 따로 진행 중이다.
+- R3 (테스트 계획 9 ~ 10절을 v4 로) 는 `4f621a5` 로 끝났다. 그때 나온 설계 v4 의 질문 여덟은 사이클 5 전에 확정한다.
 - macOS 의 event backend (kqueue) 는 base 완성 뒤에 만든다. 그때까지 macOS CI 는 unit 과 socket integration 만 돈다.
 
 ## 다음 할 일
