@@ -35,7 +35,7 @@ typedef struct KiottyNetConnectionEvent
         } written;
         struct
         {
-            KiottyNetWorkHandle work;
+            KiottyNetConnectionStream stream;
         } work_started;
         struct
         {

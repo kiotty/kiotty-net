@@ -190,7 +190,7 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfi
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfig* config, bool no_delay);
 
 typedef int64_t KiottyNetConnectionHandle;
-typedef int64_t KiottyNetWorkHandle;
+typedef int64_t KiottyNetConnectionStream;
 typedef void*   KiottyNetAppContext;
 typedef void*   KiottyNetConnectionContext;
 
@@ -236,12 +236,12 @@ typedef struct KiottyNetConnectionAction
     } as;
 } KiottyNetConnectionAction;
 
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_holdCommunication(uint32_t timeout_ms);
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_readConnection(size_t exact, uint32_t timeout_ms);
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_readConnectionUntil(KiottyNetSpan delimiter, size_t max, uint32_t timeout_ms);
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_writeConnection(KiottyNetSpan data, uint32_t timeout_ms);
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_startWork(void);
-KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_closeConnection(KiottyNetCode reason);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenRead(size_t exact, uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenReadUntil(KiottyNetSpan delimiter, size_t max, uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenWrite(KiottyNetSpan data, uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenWork(void);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reason);
 
 typedef struct KiottyNetConnectionDecision
 {
@@ -259,16 +259,19 @@ typedef struct KiottyNetConnectionHandler
     KiottyNetConnectionAction (*onRead)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetSpan data);
     KiottyNetConnectionAction (*onWritten)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, size_t length);
     KiottyNetConnectionAction (*onTimeout)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);
-    void (*onWorkStarted)(KiottyNetConnectionContext connection_context, KiottyNetWorkHandle work);
+    void (*onWorkStarted)(KiottyNetConnectionContext connection_context, KiottyNetConnectionStream stream);
     void (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetCode reason);
-    void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionHandle connection, KiottyNetCode code, const char* message);
+    void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
 } KiottyNetConnectionHandler;
 
 KIOTTY_NET_API KiottyNetConnectionInfo KiottyNet_getConnectionInfo(KiottyNetConnectionHandle connection);
 KIOTTY_NET_API KiottyNetCode           KiottyNet_notifyConnection(KiottyNetConnectionHandle connection, KiottyNetSpan data);
 
-KIOTTY_NET_API KiottyNetCode KiottyNet_finishWork(KiottyNetWorkHandle work, KiottyNetConnectionAction action);
-KIOTTY_NET_API bool          KiottyNet_isWorkConnected(KiottyNetWorkHandle work);
+KIOTTY_NET_API KiottyNetResult KiottyNet_readConnectionStream(KiottyNetConnectionStream stream, void* buffer, size_t length, uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetResult KiottyNet_writeConnectionStream(KiottyNetConnectionStream stream, KiottyNetSpan data, uint32_t timeout_ms);
+KIOTTY_NET_API KiottyNetCode   KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream stream, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);
+KIOTTY_NET_API bool            KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream);
+KIOTTY_NET_API KiottyNetCode   KiottyNet_closeConnectionStream(KiottyNetConnectionStream stream, KiottyNetConnectionAction then);
 
 typedef struct KiottyNetContextImpl* KiottyNetContext;
 
@@ -279,6 +282,7 @@ typedef struct KiottyNetContextResult
 } KiottyNetContextResult;
 
 KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
+KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContextWithTlsPool(size_t bytes);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
@@ -516,25 +520,28 @@ private:
     KiottyNetConnectionHandle _handle;
 };
 
-class KiottyNet_Work
+class KiottyNet_ConnectionStream
 {
 public:
-    explicit KiottyNet_Work(KiottyNetWorkHandle work);
-    KiottyNet_Work(KiottyNet_Work&& other);
-    KiottyNet_Work& operator=(KiottyNet_Work&& other);
-    ~KiottyNet_Work();
+    explicit KiottyNet_ConnectionStream(KiottyNetConnectionStream stream);
+    KiottyNet_ConnectionStream(KiottyNet_ConnectionStream&& other);
+    KiottyNet_ConnectionStream& operator=(KiottyNet_ConnectionStream&& other);
+    ~KiottyNet_ConnectionStream();
 
-    KiottyNet_Work(const KiottyNet_Work&) = delete;
-    KiottyNet_Work& operator=(const KiottyNet_Work&) = delete;
+    KiottyNet_ConnectionStream(const KiottyNet_ConnectionStream&) = delete;
+    KiottyNet_ConnectionStream& operator=(const KiottyNet_ConnectionStream&) = delete;
 
-    bool          connected() const;
-    KiottyNetCode finish(KiottyNetConnectionAction action);
+    KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);
+    KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);
+    bool            open() const;
+    KiottyNetCode   close(KiottyNetConnectionAction then);
 
 private:
-    KiottyNetWorkHandle release();
-    void                reset();
+    KiottyNetConnectionStream release();
+    void                      reset();
 
-    KiottyNetWorkHandle _work;
+    KiottyNetConnectionStream _stream;
 };
 
 class KiottyNet_Context
@@ -847,39 +854,54 @@ inline KiottyNetCode KiottyNet_Connection::notify(KiottyNetSpan data)
     return KiottyNet_notifyConnection(_handle, data);
 }
 
-inline KiottyNet_Work::KiottyNet_Work(KiottyNetWorkHandle work)
-    : _work(work)
+inline KiottyNet_ConnectionStream::KiottyNet_ConnectionStream(KiottyNetConnectionStream stream)
+    : _stream(stream)
 {
 }
 
-inline KiottyNet_Work::KiottyNet_Work(KiottyNet_Work&& other)
-    : _work(other.release())
+inline KiottyNet_ConnectionStream::KiottyNet_ConnectionStream(KiottyNet_ConnectionStream&& other)
+    : _stream(other.release())
 {
 }
 
-inline KiottyNet_Work& KiottyNet_Work::operator=(KiottyNet_Work&& other)
+inline KiottyNet_ConnectionStream& KiottyNet_ConnectionStream::operator=(KiottyNet_ConnectionStream&& other)
 {
     if (this != &other)
     {
         reset();
-        _work = other.release();
+        _stream = other.release();
     }
     return *this;
 }
 
-inline KiottyNet_Work::~KiottyNet_Work()
+inline KiottyNet_ConnectionStream::~KiottyNet_ConnectionStream()
 {
     reset();
 }
 
-inline bool KiottyNet_Work::connected() const
+inline KiottyNetResult KiottyNet_ConnectionStream::read(void* buffer, size_t length, uint32_t timeout_ms)
 {
-    return KiottyNet_isWorkConnected(_work);
+    return KiottyNet_readConnectionStream(_stream, buffer, length, timeout_ms);
 }
 
-inline KiottyNetCode KiottyNet_Work::finish(KiottyNetConnectionAction action)
+inline KiottyNetResult KiottyNet_ConnectionStream::write(KiottyNetSpan data, uint32_t timeout_ms)
 {
-    KiottyNetCode code = KiottyNet_finishWork(_work, action);
+    return KiottyNet_writeConnectionStream(_stream, data, timeout_ms);
+}
+
+inline KiottyNetCode KiottyNet_ConnectionStream::writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms)
+{
+    return KiottyNet_writeConnectionStreamFile(_stream, path, offset, length, timeout_ms);
+}
+
+inline bool KiottyNet_ConnectionStream::open() const
+{
+    return KiottyNet_isConnectionStreamOpen(_stream);
+}
+
+inline KiottyNetCode KiottyNet_ConnectionStream::close(KiottyNetConnectionAction then)
+{
+    KiottyNetCode code = KiottyNet_closeConnectionStream(_stream, then);
     if (code == KIOTTY_BUFFER_FULL || code == KIOTTY_INVALID_ARGUMENT)
     {
         return code;
@@ -888,22 +910,22 @@ inline KiottyNetCode KiottyNet_Work::finish(KiottyNetConnectionAction action)
     return code;
 }
 
-inline KiottyNetWorkHandle KiottyNet_Work::release()
+inline KiottyNetConnectionStream KiottyNet_ConnectionStream::release()
 {
-    KiottyNetWorkHandle work = _work;
-    _work = 0;
-    return work;
+    KiottyNetConnectionStream stream = _stream;
+    _stream = 0;
+    return stream;
 }
 
-inline void KiottyNet_Work::reset()
+inline void KiottyNet_ConnectionStream::reset()
 {
-    if (_work == 0)
+    if (_stream == 0)
     {
         return;
     }
-    KiottyNetWorkHandle work = release();
-    KiottyNetConnectionAction close = KiottyNet_closeConnection(KIOTTY_SUCCESS);
-    KiottyNet_finishWork(work, close);
+    KiottyNetConnectionStream stream = release();
+    KiottyNetConnectionAction then = KiottyNet_thenClose(KIOTTY_SUCCESS);
+    KiottyNet_closeConnectionStream(stream, then);
 }
 
 inline KiottyNet_Context::KiottyNet_Context()

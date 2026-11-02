@@ -121,14 +121,15 @@ C++ 은 `KiottyNet_HttpResponse(r)` 가 같은 함수를 `status / header / body
 DB 조회, 리포트 생성처럼 IO Thread 를 붙잡으면 안 되는 일은 base 의 Work 모델을 HTTP 에 맞게 줄인 것으로 처리한다. 흐름은 세 단계다.
 
 1. `onRequest` 안에서 `KiottyNet_startHttpWork(response)` 를 부르고 return 한다. 응답은 아직 보내지지 않는다. 라우트의 `onWorkStarted` 가 `NULL` 이면 `KIOTTY_INVALID_ARGUMENT`, 이미 불렀으면 `KIOTTY_BUSY`.
-2. IO Thread 가 그 연결을 떼어내고 **다음 loop 에서** `onWorkStarted(app_context, request, response, work)` 를 한 번 낸다. 여기서 `response` 와 `work` 를 worker 에게 넘긴다. 둘 다 정수 handle 이라 복사해 두어도 dangling 이 없다. `request` 가 가리키는 데이터도 finish 까지 유효하다.
+2. IO Thread 가 그 연결에 걸린 송신을 마치고 떼어낸 뒤, **같은 loop 안에서** `onWorkStarted(app_context, request, response, work)` 를 한 번 낸다. 여기서 `response` 와 `work` 를 worker 에게 넘긴다. 둘 다 정수 handle 이라 복사해 두어도 dangling 이 없다. `request` 가 가리키는 데이터도 finish 까지 유효하다.
 3. worker 가 결과를 만들어 setter 로 응답을 채우고 (`KiottyNet_setHttpStatus`, `KiottyNet_setHttpBody` 등. 어느 thread 에서든 된다. 연결이 떼어져 있는 동안 IO Thread 는 응답 버퍼를 건드리지 않는다) `KiottyNet_finishHttpWorkWithResponse(work)` 로 보낸다. 보내지 않고 끊으려면 `KiottyNet_finishHttpWorkWithClose(work, reason)`.
 
 규칙은 base 의 Work 와 같다.
 
 - **Work 를 받았으면 반드시 finish 한다.** finish 는 한 번만 유효하고 두 번째는 `KIOTTY_BUSY`. 소유자가 destroy 된 뒤에 불러도 `KIOTTY_PEER_CLOSED` 만 돌아온다.
 - finish 전까지 그 연결에는 어떤 콜백도 없다. deadline 도 멈춘다. 라이브러리는 Work 에 timeout 을 두지 않는다. 오래 걸릴 것 같으면 `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 확인한다. 끊겼으면 finish 는 `KIOTTY_PEER_CLOSED` 다.
-- 소유자의 `close()` 는 Work 중인 연결도 바로 닫는다. 그 뒤의 finish 는 `KIOTTY_PEER_CLOSED` 다.
+- 소유자의 `close()` 는 Work 중인 연결에 FIN 만 보낸다. 연결은 finish 뒤에 닫히고, 그때까지 `run` 은 돌아오지 않는다. 그 finish 는 `KIOTTY_CLOSED` 를 돌려준다.
+- Work 중에 그 연결로 들어온 notify (WebSocket 송신, broadcast) 는 쌓이기만 하고 finish 뒤에 나간다.
 - `finishHttpWorkWithResponse` 는 응답 버퍼의 내용을 그대로 보낸다. body 가 `response_bytes` 보다 커서 setter 가 `KIOTTY_BUFFER_FULL` 이었다면 `setHttpBodyRef` 나 `setHttpFile` 로 바꾼다.
 
 C++ 은 `KiottyNet_HttpWork` 가 finish 의무를 소유한다. 이동만 되고, finish 하지 않은 채 소멸되면 `finishWithClose()` 를 불러 연결을 닫는다. 그래서 worker 로 `std::move` 해서 넘긴다 (C++14 init capture, C++11 은 `shared_ptr`).
