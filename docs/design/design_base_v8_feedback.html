@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design_base_v8 피드백 답변</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 980px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .agree { background: var(--agree); }
+  .partial { background: var(--partial); }
+  .concern { background: var(--concern); }
+  .ask { background: var(--accent); }
+  .done { background: var(--muted); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  td.rec { font-weight: 600; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .legend span { margin-right: 12px; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .rule { border-left: 3px solid var(--agree); padding: 4px 12px; margin: 8px 0; font-weight: 600; }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>design_base_v8 피드백 답변</h1>
+<p class="sub">2026-11-03. 설계 v4 19절 (멤버 표, 풀, Context, TLS 라우팅) 에 대한 열여섯 항목의 답이다. 결론은 요약하신 세 줄 그대로이고, 그 세 줄을 지키면 19.3 의 멤버 표가 어떻게 줄어드는지를 9절에 미리 그렸다. 새 이름은 둘뿐이다: <code>TlsMemory</code> (7번, 요청하신 것) 와 <code>Parker</code> (16번, 제안하신 것). 그 밖의 항목은 전부 "지운다" 이거나 "인자로 옮긴다" 다. 1번과 15번은 질문이라 경로를 표와 flow 로 답했다. 고르실 것은 넷이고 10절에 있다.</p>
+
+<p class="legend">
+  <span class="tag agree">동의</span> 그대로 반영한다
+  <span class="tag partial">부분 동의</span> 목적은 같고 방법을 바꾼다
+  <span class="tag ask">선택</span> 후보 중 하나를 골라 달라
+</p>
+
+<ol class="toc">
+  <li><a href="#p0">규칙 셋 (요약 1, 2, 3)</a></li>
+  <li><a href="#p1">NotificationContext 없는 Connection : IoLoop 경로 검토 (1)</a></li>
+  <li><a href="#p2">풀의 이름과 자리 (2, 3, 4, 5)</a></li>
+  <li><a href="#p3">Context 는 하나 (6)</a></li>
+  <li><a href="#p4">TlsMemory (7)</a></li>
+  <li><a href="#p5">IoLoop 가 드는 것 (8, 9, 10, 11)</a></li>
+  <li><a href="#p6">ConnectionConfiguration, Sender, ConnectionStream (12, 13, 14)</a></li>
+  <li><a href="#p7">handle 만으로 찾기, MISRA, int64 (15)</a></li>
+  <li><a href="#p8">Parker (16)</a></li>
+  <li><a href="#p9">바뀐 뒤의 19.3 멤버 표</a></li>
+  <li><a href="#choices">골라 주실 것</a></li>
+</ol>
+
+<h2 id="p0">0. 규칙 셋 (요약 1, 2, 3) <span class="tag agree">동의</span></h2>
+
+<p>요약하신 세 줄을 19.3 의 규칙으로 올린다. 아래 항목들은 전부 이 셋의 적용이다.</p>
+
+<div class="rule">1. 멤버는 run 보다 오래 사는 것만. 한 함수가 쓰고 마는 것은 그 함수의 인자다.</div>
+<div class="rule">2. 풀 안의 객체 (Connection, Owner) 는 자기 바깥을 가리키지 않는다. 필요한 것은 부르는 쪽이 그때 참조로 준다.</div>
+<div class="rule">3. OpenSSL 의 메모리는 TlsMemory 하나가 맡는다. 전역은 static, thread 는 private 함수 하나, Owner 는 멤버.</div>
+
+<p>규칙 2 의 알려진 예외 하나: <code>IoEvent</code> 가 드는 listener 포인터 (<code>IocpEvent::listener</code>, epoll 의 <code>ListenerState*</code>). backend 안의 것이고, <code>attach</code> 가 적고 <code>detach</code> 가 지우며, listener 가 완료의 주인을 확인하는 데 (<code>belongsTo</code>) 쓴다. listener 는 같은 Owner 의 형제라 Connection 보다 오래 산다. 이것은 "바깥" 이 아니라 "자기를 등록한 곳" 이라 둔다. 19.3 에 예외로 적는다.</p>
+
+<p>"주석으로 이 함수 호출 때 이 인자들이 필요하다 정도는 명시" 는 코드 주석 대신 19.3 의 표 (9절의 "함수가 받는 것" 열) 로 한다. 코드는 무주석 원칙 그대로다.</p>
+
+<h2 id="p1">1. NotificationContext 없는 Connection : IoLoop 경로 검토 (1) <span class="tag agree">동의</span></h2>
+
+<p>된다. v4 에서 Connection 이 <code>_notification</code> 으로 하던 일은 여섯이다. 하나씩 어디로 가는지 적는다.</p>
+
+<table>
+<tr><th>v4 에서 <code>_notification</code> 을 쓰던 자리</th><th>무엇을 썼나</th><th>어디로 가나</th></tr>
+<tr><td><code>Connection::notify</code> (아무 thread)</td><td>mutex, listener</td><td><b>ConnectionHost::notify(handle, data)</b> 가 자기 mutex 안에서 find → <code>c.stageNotification(data)</code>. wake 는 Owner 가 <code>_listener.wake()</code></td></tr>
+<tr><td><code>select</code> (drain, IO Thread)</td><td>mutex</td><td><code>pickWrite(std::mutex&amp; notification)</code>. IoLoop::drain 이 <code>host.notificationMutex()</code> 를 넘긴다</td></tr>
+<tr><td><code>onSent(NOTIFY)</code> 의 release (step)</td><td>mutex</td><td><code>dispatch(completion, handler, std::mutex&amp; notification)</code></td></tr>
+<tr><td><code>release</code> 의 notify clear (settle)</td><td>mutex</td><td><b>ConnectionHost::release(c)</b> 가 mutex 를 잡고 <code>c.reset()</code>. reset 은 <code>noexcept</code> 무인자 (풀 계약) 라 lock 을 모른다</td></tr>
+<tr><td><code>closeStream</code> 의 wake (worker)</td><td>listener</td><td>Owner 가 <code>_host.closeStream(h, then)</code> 뒤 <code>_listener.wake()</code></td></tr>
+<tr><td><code>isIoThread</code> (Stream 의 BUSY)</td><td>io_thread</td><td><code>IoLoop::isIoThread()</code>. run 이 <code>_io_thread</code> 에 적는다 (atomic). Owner 의 stream 함수가 먼저 본다</td></tr>
+</table>
+
+<p>그래서 <code>NotificationContext</code> 는 struct 로 남지 않는다. mutex 는 ConnectionHost 의 멤버, listener 는 Owner 의 멤버 (이미 있다), io_thread 는 IoLoop 의 멤버다. 셋 다 "참조" 가 아니라 "자기 것" 이다.</p>
+
+<h3>1.1 base.h 의 함수마다 경로</h3>
+
+<table>
+<tr><th>C 함수</th><th>thread</th><th>경로</th></tr>
+<tr><td><code>notifyConnection(h, data)</code></td><td>아무</td><td><code>Context::instance().owner(h)</code> → <code>Owner::notify(h, data)</code> = <code>_host.notify(h, data)</code> (lock 안: find, alive, <code>Sender::stage(_plain.notify, data)</code>) → <code>_listener.wake()</code></td></tr>
+<tr><td><code>broadcastServer(s, data)</code></td><td>아무</td><td><code>_host.broadcast(data)</code> (lock 안: 전부 검사 → 전부 stage) → <code>_listener.wake()</code> 한 번</td></tr>
+<tr><td><code>notifyEventClient(c, data)</code></td><td>아무</td><td>위와 같다. 연결 하나</td></tr>
+<tr><td><code>getConnectionInfo(h)</code></td><td>아무</td><td><code>owner(h)</code> → <code>_host.info(h)</code>. generation 이 맞으면 값 복사, 아니면 빈 값</td></tr>
+<tr><td><code>read / write / writeFile ConnectionStream(s, ...)</code></td><td>worker</td><td><code>owner(s)</code> → <code>_loop.isIoThread()</code> 면 BUSY → <code>_host.stream(s)</code> 가 <code>Result&lt;code, ConnectionStream&gt;</code> (14번, 값) → 그 값의 read / write / writeFile</td></tr>
+<tr><td><code>isConnectionStreamOpen(s)</code></td><td>worker</td><td>같다 → <code>connected()</code>. CLOSING 이면 false</td></tr>
+<tr><td><code>closeConnectionStream(s, then)</code></td><td>worker</td><td><code>_host.closeStream(s, then)</code> → <code>c.closeStream(generation, then)</code> (verify → WRITE 면 send stage → CAS) → <code>_listener.wake()</code></td></tr>
+</table>
+
+<p>v4 15절의 번역 표에서 바뀌는 것은 "<code>conn(h)</code>" 가 "<code>owner(h)</code>" 가 되는 것 하나다. base.cpp 는 여전히 한 줄 번역이고, 검사 (generation, alive, isIoThread) 는 Owner 와 host 안에 있다.</p>
+
+<h3>1.2 flow : 다른 thread 의 notify 가 나가고 치워지기까지</h3>
+
+<div class="flow">thread X    KiottyNet_notifyConnection(h, "NN")
+            Context::instance().owner(h)                 ── handle 의 type · owner 비트. 은퇴한 Owner 도 지워지지 않으므로 참조는 산다 (19.1 #4)
+            Server::notify(h, data)
+              _host.notify(h, data)                      ── lock(_host._notification)
+                c = find(h)                              ── generation 불일치면 INVALID_ARGUMENT
+                c.stageNotification(data)                ── alive() 아니면 PEER_CLOSED. Sender::stage(_plain.notify, data). lock 을 모른다
+              unlock
+              _listener.wake()
+
+IO Thread   collectIoEvents : { WAKE }       step(WAKE) : 아무것도
+  다음 바퀴  drain : c.pickWrite(_host.notificationMutex())
+              lock → notify.readable() = 2 → encode → WRITE(NOTIFY, plain 2) → unlock → submit(c, write, listener)
+IO Thread   collectIoEvents : { SEND NOTIFY, 2 }
+            step : c.dispatch(completion, handler, _host.notificationMutex())
+              onSent : cipherSend consume → lock → Sender::release(_plain.notify, 2) → unlock → NONE
+...
+IO Thread   settle : c 가 CLOSING 이고 두 event 가 비었고 working 아님
+              _host.release(c)                           ── lock → c.reset() (notify clear 포함) → unlock → generation++</div>
+
+<p>v4 9.8 과 비교해 바뀐 줄은 "누가 lock 을 잡나" 와 "누가 wake 하나" 둘뿐이다. 순서, 바퀴, 치우는 자리는 같다.</p>
+
+<h3>1.3 flow : worker 의 closeStream</h3>
+
+<div class="flow">worker      KiottyNet_closeConnectionStream(s, thenWrite("AAAA", 5000))
+            Context::instance().owner(s)
+            Server::closeStream(s, then)
+              code = _host.closeStream(s, then)         ── find(s) → c.closeStream(generation, then) : verify → _send stage → _work.finish(HOLD) → SUCCESS 또는 CLOSED
+              _listener.wake()                           ── code 와 무관하게 늘. IO Thread 가 자고 있을 수 있다
+              return code
+IO Thread   collectIoEvents : { WAKE }
+            stepLocalEvents : c.workFinished() → WORK_DONE(outcome HOLD) → dispatch → drive → apply(HOLD) → deadline
+  다음 바퀴  drain : _send 있음 → WRITE(USER, 4)</div>
+
+<h2 id="p2">2. 풀의 이름과 자리 (2, 3, 4, 5) <span class="tag partial">부분 동의</span></h2>
+
+<p>둘로 나누는 것, <code>Owner</code> 라는 말을 이름에서 빼는 것, <code>core/pool/</code> 로 모으는 것 전부 동의다. 이름 하나만 다시 보자고 한다.</p>
+
+<p>두 풀의 차이는 저장 공간 하나다. 객체가 풀 안의 배열에 있어 풀과 같이 태어나는가 (지금 ObjectPool), 처음 acquire 때 heap 에 한 번 만들고 그 뒤로 은퇴 상태로 두는가 (지금 OwnerPool). acquire → initialize, release → reset, find, generation 은 똑같다. 그래서 공통 단어는 계약 이름 그대로 <b>Reusable</b> 이고, 앞에 붙는 단어가 저장 공간을 말하면 된다.</p>
+
+<table>
+<tr><th></th><th>제안하신 이름</th><th>대안</th><th>저장 공간</th><th>상태</th><th>쓰는 곳</th></tr>
+<tr><td>지금 ObjectPool</td><td><code>StaticReusablePool&lt;T, N&gt;</code></td><td class="rec"><code>ReusablePool&lt;T, N&gt;</code></td><td><code>std::array&lt;T, N&gt;</code>. 풀과 같이 생성</td><td>EMPTY / ACTIVE</td><td>Connection</td></tr>
+<tr><td>지금 OwnerPool</td><td><code>ReusablePool&lt;T, N&gt;</code></td><td class="rec"><code>LazyReusablePool&lt;T, N&gt;</code></td><td><code>std::array&lt;std::unique_ptr&lt;T&gt;, N&gt;</code>. 첫 acquire 때 <code>new (nothrow)</code>, 그 뒤 RETIRED 로 재사용, <code>reserve(n)</code></td><td>EMPTY / ACTIVE / RETIRED</td><td>Server, StreamClient, EventClient</td></tr>
+</table>
+
+<p>대안을 권하는 이유: <code>core/pool/</code> 에는 이미 <code>StaticPool</code> 이 있고 거기서 Static 은 "멤버가 전부 static, .bss" 라는 뜻이다. 같은 폴더에서 <code>StaticReusablePool</code> 의 Static 이 "객체가 멤버 배열 안" 을 뜻하면 한 단어가 두 뜻이 된다. 멤버 배열 쪽을 기본 이름 (<code>ReusablePool</code>) 으로 두고, 다른 쪽에만 유일한 차이 (늦게 만든다) 를 붙이는 것이 "역할에 집중한 이름" 이다. 둘 다 <code>static_assert(is_reusable&lt;T&gt;::value)</code> 다. <b>choices 1.</b></p>
+
+<p>폴더는 이렇게 된다. core 의 다른 파일 (stage, span, result, clock) 은 그대로다.</p>
+
+<pre><code>core/pool/
+    kiotty_pool_layout.h          PoolClass, BlockClass, PoolLayout, alignBlock          (있음. 이사만)
+    kiotty_pool.h                 Pool&lt;Layout&gt; : 등급 풀. arena 가 멤버 (19.3)           (지금 kiotty_pool.h/.cpp 를 template 으로)
+    kiotty_static_pool.h          StaticPool&lt;Tag, Layout&gt; : .bss                        (있음. 이사만)
+    kiotty_pool_handle.h          PoolHandle, toRaw / fromRaw, 비트 배치 (7절)           (있음. context 비트를 뺀다)
+    kiotty_reusable.h             is_reusable                                            (새로)
+    kiotty_reusable_pool.h        ReusablePool&lt;T, N&gt;                                     (새로)
+    kiotty_lazy_reusable_pool.h   LazyReusablePool&lt;T, N&gt;                                 (새로)
+base/pool/
+    kiotty_memory_limits.h        KIOTTY_NET_MAX_*                                       (있음. TLS_CONTEXTS 를 뺀다)
+    kiotty_memory_layout.h        ServerTlsLayout, ClientTlsLayout, GlobalTlsLayout, CIPHER_SEND_BYTES   (ContextPoolLayout, TlsPoolLayout 을 지운다)</code></pre>
+
+<p>include 는 <code>core/pool/kiotty_pool.h</code> 식이다. 테스트 파일은 그대로이고 include 줄만 바뀐다. <code>kiotty_holder.h</code> 는 19.9 대로 지운다.</p>
+
+<h2 id="p3">3. Context 는 하나 (6) <span class="tag agree">동의</span></h2>
+<p class="note"><b>11.1 로 바뀜:</b> static 객체는 그대로이나 <code>instance()</code> 는 없다. <code>Context::open()</code> 을 initializeContext 만 부르고, handle 만 받던 C 함수 일곱은 context 를 첫 인자로 받는다.</p>
+
+<p>맞다. 같은 process 에서 Context 를 둘 만들 이유가 없고, 둘을 지원하느라 든 것 (handle 의 context 4 bit, <code>MAX_TLS_CONTEXTS</code>, <code>g_contexts</code> 와 그 lock, TLS 등록표의 Context 탐색) 이 전부 빠진다. 다만 그 static 을 base.cpp 가 아니라 <code>context/</code> 에 둔다. base.cpp 는 번역만 하기 때문이다.</p>
+
+<pre><code>// context/kiotty_context.h
+class Context                                   // process 에 하나. 복사 / 이동 없음
+{
+public:
+    static Context&amp; instance();                 // 함수 안의 static 객체 하나. 첫 호출에 생성된다 (C++11 의 thread-safe static init). heap 없음
+
+    KiottyNetCode initialize(const KiottyNetContextConfig&amp; config);   // OpenSSL 초기화 (process 첫 번째만), TlsMemory 설치, 예열, reserve. 두 번째 호출은 choices 2
+    void          release();                    // 남은 Owner destroy → 세 풀 비움 → TlsMemory 등록표 지움. OPENSSL_cleanup 은 부르지 않는다
+    bool          initialized() const;
+
+    Result&lt;KiottyNetCode, Server&amp;&gt;       createServer(const KiottyNetServerConfig&amp;, const KiottyNetTlsServerConfig*);
+    Result&lt;KiottyNetCode, StreamClient&amp;&gt; createStreamClient(...);
+    Result&lt;KiottyNetCode, EventClient&amp;&gt;  createEventClient(...);
+    void destroy(Server&amp;);  void destroy(StreamClient&amp;);  void destroy(EventClient&amp;);
+
+    Owner* owner(int64_t handle);               // handle 의 type · owner · owner_generation 비트로. 7절. 없으면 nullptr
+
+private:
+    Context();
+    LazyReusablePool&lt;Server,       MAX_SERVERS&gt;        _servers;
+    LazyReusablePool&lt;StreamClient, MAX_STREAM_CLIENTS&gt; _stream_clients;
+    LazyReusablePool&lt;EventClient,  MAX_EVENT_CLIENTS&gt;  _event_clients;
+    std::mutex                                         _mutex;        // initialize / release / create / destroy
+    bool                                               _initialized;
+};</code></pre>
+
+<p>base.cpp: <code>KiottyNet_initializeContext()</code> 는 <code>Context::instance().initialize(config)</code> 뒤 <code>&amp;Context::instance()</code> 를 handle 로 돌려주고, <code>KiottyNet_releaseContext(ctx)</code> 는 <code>ctx-&gt;release()</code> 다. <code>KiottyNetContext</code> 타입과 create 함수의 첫 인자는 그대로 둔다 (API 가 바뀌지 않는다). 사이클 4 노트의 R4 ("handle 함수가 전부 Context 를 첫 인자로 받는다") 는 <b>필요 없어진다.</b> 하나뿐이라 handle 만으로 찾는다 (7절).</p>
+
+<p><code>static std::unique_ptr&lt;Context&gt;</code> 대신 static 객체를 권하는 이유 하나: Context 자체는 수 KB 라 heap 이 필요 없고 (19.1 #2), 어느 쪽이든 process 종료 때 소멸자가 돈다는 점은 같다. <code>releaseContext</code> 를 불렀으면 그 소멸자는 빈 풀을 지우고 끝난다. 부르지 않았으면 Owner 들이 그때 지워진다 (run 중인 thread 가 있으면 사용자 오류다. 19.9 의 "releaseContext 없이 종료" 테스트가 보는 것이 이것이다).</p>
+
+<p>지워지는 것:</p>
+<ul>
+  <li><code>g_contexts</code>, <code>g_contexts_lock</code>, <code>MAX_CONTEXTS</code>, <code>Context::_id</code>, <code>ObjectPool&lt;Context, 16&gt;</code>. Context 는 풀 계약 (<code>is_reusable</code>) 을 따르지 않아도 된다.</li>
+  <li>handle 의 context 4 bit. index 는 <code>type (2) · owner (4) · owner_generation (6) · connection (16)</code> 28 bit 가 되어 int32 양수에 들어간다 (7절).</li>
+  <li><code>KIOTTY_NET_MAX_TLS_CONTEXTS</code>, <code>CONTEXT_SLOT_BITS</code>, <code>tlsBlocks</code> 의 <code>TLS_CONTEXTS</code> 곱.</li>
+  <li>Context 의 <code>_tls_ranges</code>. 등록표는 TlsMemory 의 static 이 된다 (4절).</li>
+  <li><code>_tls_pooled</code>. <code>TlsMemory::installed()</code> 가 답한다.</li>
+</ul>
+
+<h2 id="p4">4. TlsMemory (7) <span class="tag agree">동의</span></h2>
+
+<p>19.5 의 free 함수 셋 + thread_local 셋 + Context 의 등록표를 클래스 하나로 모은다. 요청하신 세 층이 그대로 세 구역이다: 전역은 static, thread 는 <code>thread()</code> 하나, Owner 는 멤버.</p>
+
+<pre><code>// tls/kiotty_tls_memory.h. OpenSSL 헤더를 모른다. 함수 포인터의 시그니처만 OpenSSL 의 것 (size, file, line) 이다
+struct TlsMemoryFunctions                       // CRYPTO_set_mem_functions 에 그대로 넘기는 셋. backend 의 installTlsMemory() 가 받는다
+{
+    void* (*allocate)(size_t bytes, const char* file, int line);
+    void* (*reallocate)(void* block, size_t bytes, const char* file, int line);
+    void  (*release)(void* block, const char* file, int line);
+};
+
+class TlsMemory
+{
+public:
+    // 전역 (process 에 하나). 전부 static
+    static TlsMemoryFunctions functions();      // Context::initialize → backend 가 CRYPTO_set_mem_functions(f.allocate, f.reallocate, f.release)
+    static bool               installed();      // hook 이 걸렸는가 (정적 링크 build). 지금의 Context::tlsPooled()
+    static void               warmThread();     // 이 thread 의 OpenSSL 상태를 전역 arena 에. thread().warmed 가 false 일 때만 backend 의 ERR_clear_error + RAND_bytes
+    static void               leaveThread();    // IO thread 끝. 전역으로 되돌리고 backend 의 OPENSSL_thread_stop
+    static size_t             lateFrees();      // 어느 arena 에도 없는 주소의 free. 역참조하지 않고 센다
+    static StaticPoolUsage    globalUsage(size_t index);
+
+    // Owner 별
+    class Scope                                 // RAII. 이 thread 의 할당을 이 Owner 의 서브풀로. 소멸자가 이전 값을 복원한다
+    {
+    public:
+        explicit Scope(TlsMemory&amp; owner);
+        ~Scope();
+    private:
+        PoolBase* _previous;
+    };
+    size_t failures() const;                    // 서브풀이 못 준 횟수. 그 handshake 만 실패했다
+
+protected:
+    TlsMemory();
+    void publish(PoolBase&amp; pool);               // 파생이 자기 서브풀을 만든 뒤 등록표에 (begin, end, &amp;pool). release 순서로 발행
+
+private:
+    struct Thread { PoolBase* current; PoolBase* last_hit; bool warmed; };
+    struct Range  { const unsigned char* begin; const unsigned char* end; std::atomic&lt;PoolBase*&gt; pool; };
+
+    static Thread&amp;  thread();                   // thread_local 을 돌려주는 유일한 자리. nullptr current 는 전역
+    static void*    allocate(size_t bytes, const char* file, int line);        // thread().current 또는 전역 arena. 못 주면 nullptr
+    static void*    reallocate(void* block, size_t bytes, const char* file, int line);   // block 의 arena 안에서 새로 꺼내 복사
+    static void     release(void* block, const char* file, int line);          // arenaOf → release. 없으면 lateFrees++
+    static PoolBase* arenaOf(const void* block); // last_hit → 등록표 → 전역. 비교는 std::less&lt;const unsigned char*&gt;
+
+    typedef StaticPool&lt;GlobalTlsTag, GlobalTlsLayout&gt; Global;   // 전역 arena. .bss
+    static Range            s_ranges[MAX_SERVERS + MAX_STREAM_CLIENTS + MAX_EVENT_CLIENTS];   // 등록표. Context::release 가 지운다
+    static std::atomic_flag s_ranges_lock;
+};
+
+template &lt;class Layout&gt;
+class OwnerTlsMemory : public TlsMemory         // Server 는 ServerTlsLayout, client 둘은 ClientTlsLayout. TLS OFF 면 Layout 의 ARENA_BYTES 가 0
+{
+public:
+    OwnerTlsMemory() { publish(_pool); }
+private:
+    Pool&lt;Layout&gt; _pool;
+};</code></pre>
+
+<p>클래스가 둘인 이유 하나: class template 의 static 멤버는 instantiation 마다 따로 생긴다. Server 와 client 의 Layout 이 다르므로 서브풀은 template 이어야 하고, 전역 arena 와 thread_local 은 하나여야 한다. 그래서 static 전부를 template 이 아닌 <code>TlsMemory</code> 에 두고, 서브풀 멤버만 <code>OwnerTlsMemory&lt;Layout&gt;</code> 이 든다. 사용자 (Server) 가 보는 이름은 <code>OwnerTlsMemory&lt;ServerTlsLayout&gt; _tls_memory</code> 하나다.</p>
+
+<p>guard 자리는 19.5 의 표 그대로이고, 전부 Owner 의 코드에 있다. IoLoop 는 TLS 를 모른다.</p>
+
+<pre><code>KiottyNetCode Server::run(const KiottyNetConnectionHandler* callbacks, KiottyNetAppContext app_context)
+{
+    Handler handler = { callbacks, app_context };
+    TlsMemory::warmThread();
+    KiottyNetCode code = KIOTTY_SUCCESS;
+    {
+        TlsMemory::Scope scope(_tls_memory);
+        code = _loop.run(_host, _listener, &amp;_acceptor, &amp;_profile, handler, false);
+    }
+    TlsMemory::leaveThread();
+    _parker.unpark(...);                        // 8절
+    return code;
+}</code></pre>
+
+<p>StreamClient 의 connect / read / write / close 는 함수마다 <code>warmThread()</code> + <code>Scope</code> 다. Owner 의 <code>initialize</code> (TlsProfile 생성) 와 <code>reset</code> (<code>SSL_CTX_free</code>) 도 <code>Scope</code> 안이다. <code>kiotty_tls_memory.h</code> 의 지금 함수 셋 (<code>useTlsStaticPool</code>, <code>tlsPoolClassCount</code>, <code>tlsPoolUsage</code>) 은 이 클래스의 static 이 된다.</p>
+
+<h2 id="p5">5. IoLoop 가 드는 것 (8, 9, 10, 11) <span class="tag partial">부분 동의</span></h2>
+
+<p>9, 10, 11 은 그대로 동의다. 8 은 목적 (멤버에서 뺀다) 은 같고 "run 의 지역 변수" 대신 <b>배열 자체를 없앤다.</b></p>
+
+<h3>5.1 run 이 전부 받는다 (9, 10, 11)</h3>
+
+<pre><code>struct Handler                                  // 콜백 여덟과 app_context. 늘 같이 다니므로 하나로. run 의 stack 에 있고 아래로 참조로 내려간다
+{
+    const KiottyNetConnectionHandler* callbacks;
+    KiottyNetAppContext               app_context;
+};
+
+class IoLoop                                    // 멤버 둘. 둘 다 다른 thread 가 읽거나 쓴다
+{
+public:
+    KiottyNetCode run(ConnectionHost&amp; host, EventListener&amp; listener, Acceptor* acceptor, TlsProfile* profile, const Handler&amp; handler, bool stop_when_empty);
+    void          stop();                       // 아무 thread. _stopped. 부른 쪽이 listener.wake()
+    bool          isIoThread() const;           // 아무 thread. Stream 의 BUSY
+    void          admit(ConnectionHost&amp; host, EventListener&amp; listener, TlsProfile* profile, ActiveSocket&amp;&amp; socket, const char* hostname, const Handler&amp; handler);   // EventClient 가 run 전에
+private:
+    void     runOnce(ConnectionHost&amp; host, EventListener&amp; listener, Acceptor* acceptor, TlsProfile* profile, const Handler&amp; handler, bool stop_when_empty);
+    void     drain(ConnectionHost&amp; host, EventListener&amp; listener);
+    void     settle(ConnectionHost&amp; host, EventListener&amp; listener, Acceptor* acceptor, bool stop_when_empty);
+    Span&lt;const IoCompletion&gt; collectIoEvents(ConnectionHost&amp; host, EventListener&amp; listener);
+    void     step(const IoCompletion&amp; completion, ConnectionHost&amp; host, EventListener&amp; listener, Acceptor* acceptor, TlsProfile* profile, const Handler&amp; handler);
+    bool     stepLocalEvents(ConnectionHost&amp; host, EventListener&amp; listener, const Handler&amp; handler);   // 5.2
+    void     shutdown(ConnectionHost&amp; host, EventListener&amp; listener, Acceptor* acceptor, const Handler&amp; handler);
+    IoAction access(const IoCompletion&amp; completion, ConnectionHost&amp; host, EventListener&amp; listener, Acceptor&amp; acceptor, TlsProfile* profile, const Handler&amp; handler);
+    void     submit(IoSource&amp; source, const IoAction&amp; action, EventListener&amp; listener);
+    uint32_t waitTimeout(ConnectionHost&amp; host, uint64_t now);
+
+    std::atomic&lt;bool&gt;            _stopped;
+    std::atomic&lt;std::thread::id&gt; _io_thread;   // run 의 첫 줄이 적고 끝에 비운다. thread::id 는 trivially copyable 이라 atomic 이 된다
+};</code></pre>
+
+<p>Server 는 <code>_loop.run(_host, _listener, &amp;_acceptor, &amp;_profile, handler, false)</code>, EventClient 는 <code>_loop.admit(...)</code> 뒤 <code>_loop.run(_host, _listener, nullptr, &amp;_profile, handler, true)</code> 다. <code>_stop_when_empty</code> 는 멤버가 아니라 인자다. step 의 인자가 여섯인 것은 그 함수가 그만큼 필요하다는 뜻이고, 그것을 보이는 것이 10번의 취지라 그대로 둔다. 네 참조 (host, listener, acceptor, profile) 를 struct 하나로 묶는 것은 지금 하지 않는다. 묶으면 "무엇이 필요한가" 가 다시 안 보인다.</p>
+
+<p><code>app_context</code> 를 <code>Handler</code> 안에 넣은 이유: 콜백 셋 (onConnected, onDisconnected, onError) 에만 들어가고 콜백 없이 쓰이는 자리가 없다. 따로 넘기면 모든 step / dispatch / on* 에 인자가 하나씩 더 붙는다. <code>Handler</code> 는 v4 에 이미 있는 이름 (typedef) 이라 새 개념이 아니다. <b>choices 3.</b></p>
+
+<h3>5.2 local completion 배열은 없앤다 (8)</h3>
+
+<p>run 의 지역 변수로 두면 멤버는 아니지만 stack 이다. <code>sizeof(IoCompletion)</code> 은 약 88 바이트 (IoAction 64 미만 + kind, slot, code, length) 라 3 × 128 이면 약 33 KB, 상한 1024 면 약 270 KB 가 IO thread 의 stack 에 run 내내 있다. cpp-developer 규약의 "큰 struct 를 stack 에 두지 않는다" 와 19.1 #1 ("stack 이 아닌 것은 Owner 의 멤버") 둘 다와 부딪힌다.</p>
+
+<p>그런데 모아 둘 이유가 없다. v4 가 모으는 이유는 "OS 완료를 다 step 한 뒤의 상태에서 만든다" 였고, 그것은 OS 완료 loop 가 끝난 <b>뒤에 scan 하면</b> 그대로 성립한다. scan 하면서 slot 마다 만들어 바로 step 하면 배열이 없다. slot i 의 step 이 slot j 의 deadline 이나 Work 를 바꾸는 길이 없으므로 (콜백이 다른 연결에 할 수 있는 것은 notify 뿐이고 그것은 Stage 에 넣는 것이다) 순서도 같다.</p>
+
+<pre><code>void IoLoop::runOnce(...)
+{
+    drain(host, listener);
+    settle(host, listener, acceptor, stop_when_empty);
+    Span&lt;const IoCompletion&gt; arrived = collectIoEvents(host, listener);
+    for (const IoCompletion&amp; completion : arrived)
+    {
+        step(completion, host, listener, acceptor, profile, handler);
+    }
+    bool stepped = true;
+    while (stepped)
+    {
+        stepped = stepLocalEvents(host, listener, handler);   // 아무것도 만들지 않을 때까지. 상한은 slot 당 셋 (아래)
+    }
+}
+
+bool IoLoop::stepLocalEvents(ConnectionHost&amp; host, EventListener&amp; listener, const Handler&amp; handler)
+{
+    bool stepped = false;
+    uint64_t now = monotonicMs();
+    for (int32_t i = 0; i &lt; host.capacity(); ++i)
+    {
+        Connection&amp; c = host.at(i);
+        if (c.expireDeadline(now))
+        {
+            step(IoCompletion::timeout(i), host, listener, nullptr, nullptr, handler);
+            stepped = true;
+        }
+        if (c.workReady())
+        {
+            step(IoCompletion::workReady(i), host, listener, nullptr, nullptr, handler);
+            stepped = true;
+        }
+        if (c.workFinished())
+        {
+            IoAction outcome = c.takeWorkOutcome();
+            step(IoCompletion::workDone(i, outcome), host, listener, nullptr, nullptr, handler);
+            stepped = true;
+        }
+    }
+    return stepped;
+}</code></pre>
+
+<div class="warn">while 이 붙은 이유는 v4 의 구멍 하나다. v4 는 collectLocalEvents 를 한 번만 돈다. local completion 의 step (TIMEOUT 의 onTimeout, WORK_DONE 뒤의 drive) 이 <code>thenWork</code> 를 돌려주면 REQUESTED 가 되지만 그것을 WORK_READY 로 만드는 scan 은 이미 지나갔고, 다음 바퀴의 wait 는 deadline 만 보므로 (REQUESTED 는 deadline 0) 다른 OS 완료가 올 때까지 Work 가 시작되지 않는다. 배열 버전도 같은 구멍이 있다. "아무것도 만들지 않을 때까지" 가 그것을 막는다. 끝나는 근거: 한 바퀴 안에서 slot 의 상태는 한 방향으로만 간다 (deadline 만료 → 0, REQUESTED → WORKING, DONE → IDLE). WORK_DONE → drive → START_WORK → REQUESTED → WORK_READY → WORKING 이 가장 긴 사슬이고, WORKING 에서 나가는 것은 worker thread 다. 그래서 slot 당 step 은 최대 셋, 전체 3 × N 이다. v4 10절의 "같은 slot 에서 local completion 셋이 함께 나오는 일은 없다" 는 "한 scan 에서" 로 읽으면 그대로 맞다.</div>
+
+<p>step 의 acceptor / profile 에 <code>nullptr</code> 를 넘기는 것은 connection 완료가 그 둘을 쓰지 않기 때문이다. ACCEPT 완료는 collectIoEvents 에서만 온다. v4 의 "여섯 프로세스" 는 "drain, settle, collectIoEvents, step, stepLocalEvents" 다섯으로 적는다. 설계 방침 3 의 "input → output 은 값" 은 stepLocalEvents 의 input 이 연결 상태, output 이 bool 이라 그대로다.</p>
+
+<h2 id="p6">6. ConnectionConfiguration, Sender, ConnectionStream (12, 13, 14) <span class="tag agree">동의</span></h2>
+
+<h3>6.1 ConnectionConfiguration 이 아홉 칸이었던 이유 (12)</h3>
+
+<p>Connection 이 Owner 의 상수 다섯 (notification, limits, tls, profile, handshake_timeout) 을 멤버로 들었기 때문에 initialize 가 그 다섯을 받아야 했고, 그래서 host 가 <code>_template</code> 으로 다섯을 복사해 두고 accept 마다 넷을 더 채웠다. 1번과 9번으로 Connection 이 그 다섯을 들지 않으면 initialize 가 "쓰고 버리는 것" 만 받으면 된다.</p>
+
+<pre><code>struct ConnectionLimits { size_t receive; size_t send; size_t notify; };
+
+struct ConnectionConfiguration                  // accept / admit 마다 하나. 이동만 (socket)
+{
+    ActiveSocket               socket;          // Connection 이 든다
+    KiottyNetConnectionContext context;         // Connection 이 든다
+    const char*                hostname;        // client 만. TlsEngine::open 에 쓰고 버린다
+    ConnectionLimits           limits;          // host 의 _limits. Stage::limit(capacity) 셋에 들어가고 버린다
+    TlsProfile*                profile;         // nullptr 이면 평문. TlsEngine::open 에 쓰고 버린다
+};</code></pre>
+
+<p>아홉에서 다섯으로, 그 중 Connection 에 남는 것은 둘이다. <code>handshake_timeout_ms</code> 는 코드에 이미 상수 (<code>TLS_HANDSHAKE_TIMEOUT_MS</code>) 라 어디에도 없고, <code>tls</code> 는 <code>_tls.active()</code> 다. host 의 <code>_template</code> 은 지우고 <code>ConnectionLimits _limits</code> (값) 만 <code>ConnectionHost::initialize(limits)</code> 로 받는다. profile 은 IoLoop::run 의 인자라 access / admit 이 넘긴다.</p>
+
+<h3>6.2 Sender 는 함수 둘 (13)</h3>
+
+<p>전제 하나만 바로잡는다. 참조 멤버가 있어도 기본 생성자는 된다. <code>Connection() : _send(_plain.send), _notify(_plain.notify), _stream(_socket, _tls, _plain.receive, _plain.send) {}</code> 처럼 형제 멤버에 묶으면 적법하고 <code>std::array&lt;Connection, N&gt;</code> 도 된다 (복사 / 이동이 막히는데 그것은 <code>is_reusable</code> 이 요구하는 바다). 그러니 "안 된다" 가 아니라 "둘 이유가 없다" 다. 10번의 규칙으로 뺀다.</p>
+
+<pre><code>struct Sender                                   // connection/kiotty_sender.h. 상태 없음. Stage 위의 두 걸음만
+{
+    static KiottyNetCode stage(StageBase&amp; stage, KiottyNetSpan data);   // writable &lt; length 면 BUFFER_FULL 이고 아무것도 넣지 않는다. 아니면 복사 + commit
+    static void          release(StageBase&amp; stage, size_t length);      // consume + compact
+};</code></pre>
+
+<p>readable 과 peek 은 <code>stage.consumer()</code> 가 이미 한다. clear 는 <code>StageBase::clear()</code> 를 더한다 (begin = end = 0). Connection 의 <code>_send</code> / <code>_notify</code> 멤버는 없고, 그 자리마다 <code>Sender::stage(_plain.send, data)</code>, <code>Sender::release(_plain.notify, plain)</code> 이라 어느 Stage 인지가 호출 줄에 보인다.</p>
+
+<h3>6.3 ConnectionStream 은 값으로 만든다 (14)</h3>
+
+<p>맞다. "Stream handle 과 Connection handle 은 같은 값 + 타입 비트" 이므로 handle 로 Connection 을 찾고 거기서 Stream 을 만든다. ConnectionStream 은 포인터 넷을 드는 값 타입 (복사 가능) 이라 <code>Result</code> 의 값으로 돌아온다.</p>
+
+<pre><code>class ConnectionStream                          // stream/kiotty_connection_stream.h. 포인터 넷. 멤버로 두지 않는다. 쓰는 함수가 만들고 그 자리에서 버린다
+{
+public:
+    ConnectionStream(ActiveSocket&amp; socket, TlsEngine&amp; tls, StageBase&amp; receive, StageBase&amp; send);
+    KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);
+    KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);
+    bool            connected() const;
+    KiottyNetCode   handshake(uint32_t timeout_ms);
+private:
+    ActiveSocket* _socket;  TlsEngine* _tls;  StageBase* _receive;  StageBase* _send;
+};
+
+Result&lt;KiottyNetCode, ConnectionStream&gt; Connection::stream(int32_t generation)   // worker. _work.verify(generation) 이 SUCCESS 일 때만 값
+{
+    KiottyNetCode verified = _work.verify(generation);
+    if (verified != KIOTTY_SUCCESS)
+    {
+        return error(verified);
+    }
+    return ok(ConnectionStream(_socket, _tls, _plain.receive, _plain.send));
+}
+
+KiottyNetResult Server::readStream(int64_t stream, void* buffer, size_t length, uint32_t timeout_ms)   // base.cpp 의 readConnectionStream 이 부른다
+{
+    if (_loop.isIoThread())
+    {
+        return failure(KIOTTY_BUSY);
+    }
+    return _host.readStream(stream, buffer, length, timeout_ms);   // find → c.stream(generation) → 값의 read
+}</code></pre>
+
+<p>StreamClient 도 같다. <code>_stream</code> 멤버 대신 read / write / connect 마다 <code>ConnectionStream stream(_socket, _tls, _receive, _send)</code> 를 그 자리에서 만든다. 생성자는 포인터 넷을 적는 것뿐이라 비용이 없다.</p>
+
+<h2 id="p7">7. handle 만으로 찾기, MISRA, int64 (15) <span class="tag agree">동의</span></h2>
+
+<h3>7.1 handle 만으로 찾을 수 있나</h3>
+<p class="note"><b>11.1 로 바뀜:</b> 아래의 <code>Context::instance()</code> 는 인자로 받은 context 가 되고, <code>Context::owner</code> 는 <code>Result&lt;KiottyNetCode, Owner&amp;&gt;</code> 를 돌려준다 (11.2).</p>
+
+<p>있다. 단, 길은 하나뿐이다. <code>notifyConnection(h, data)</code> 에는 Context 인자가 없으므로 static 저장소에서 닿는 표를 거쳐야 한다. 6번으로 그 표는 <code>Context::instance()</code> 하나다. 비트를 푸는 함수도 하나 (<code>Context::owner</code>) 고, 그 밖의 코드는 비트를 모른다.</p>
+
+<div class="flow">int64 handle
+  ├ 상위 32 : connection generation            ── Connection 의 PoolHandle.generation 과 비교 (ReusablePool::find)
+  └ 하위 32 : index
+       bit 31      : 0 (int32 양수)
+       bit 30 ~ 29 : type (SERVER, EVENT_CLIENT)  ── Context 가 어느 LazyReusablePool 을 볼지
+       bit 28 ~ 25 : owner slot                   ── 그 풀의 칸
+       bit 24 ~ 19 : owner generation             ── destroy 뒤의 handle 을 거른다
+       bit 18 ~ 16 : (비움)
+       bit 15 ~ 0  : connection slot              ── ConnectionHost 의 칸
+Stream handle 은 같은 값에 bit 63 (generation 의 부호 비트. generation 은 int32 양수라 늘 0 이다) 을 세운다
+
+Context::owner(h)   : type → 풀 → slot 의 Owner → owner generation 비교 → Owner* 또는 nullptr. _mutex 는 잡지 않는다 (아래)
+Owner::notify(h, d) : _host.notify(h, d) → ReusablePool::find(PoolHandle{generation, slot}) → Connection 또는 nullptr</div>
+
+<p>lock 없이 찾아도 되는 이유: Owner 는 destroy 로 지워지지 않고 은퇴한다 (19.1 #4). 그래서 <code>Owner*</code> 는 releaseContext 전까지 늘 유효하고, 틀린 handle 은 두 generation (owner, connection) 중 하나가 걸러 빈 값 / <code>INVALID_ARGUMENT</code> 로 돌아온다. 사용자가 handle 을 받은 뒤에 그 Owner 가 만들어졌을 수는 없으므로 (handle 은 그 Owner 가 만든 것이다) 풀의 <code>unique_ptr</code> 을 읽는 쪽과 쓰는 쪽의 경합도 없다.</p>
+
+<h3>7.2 MISRA C++:2023 과의 관계</h3>
+
+<table>
+<tr><th>자리</th><th>규칙 (제가 아는 범위. 번호는 확인이 필요하다)</th><th>상태</th></tr>
+<tr><td>handle 의 비트 풀기 / 묶기</td><td>포인터 ↔ 정수 변환 금지</td><td><b>어기지 않는다.</b> 정수에서 index 를 꺼내 배열을 찾는다. 포인터를 정수로 만드는 자리가 없다. shift / mask 는 전부 unsigned 다</td></tr>
+<tr><td><code>static_cast&lt;int32_t&gt;(index)</code></td><td>값이 안 들어가는 변환은 implementation-defined</td><td>28 bit 라 늘 양수. 6번 덕이다 (context 비트가 있을 때는 bit 31 까지 썼다)</td></tr>
+<tr><td><code>Context::instance()</code> 의 static</td><td>6.7.1 지역 static 변수 (Advisory), 6.7.2 전역 변수 (Advisory)</td><td>deviation 하나로 기록. 19.1 #7 의 "create* 는 초기화 단계" 와 같은 묶음. 전역 TLS arena 도 이미 같은 자리다</td></tr>
+<tr><td>Owner 의 <code>new (nothrow)</code></td><td>21.6.1 동적 메모리 (Advisory)</td><td>19.1 #7 에 이미 있다</td></tr>
+</table>
+
+<p>즉 "handle 로 찾는 방법" 자체는 MISRA 와 부딪히지 않는다. 부딪히는 것은 "static 저장소가 하나 있다" 이고, 그것은 TLS arena 때문에 어차피 있는 deviation 이다. 6번이 그 수를 하나 (Context) 로 줄인다.</p>
+
+<h3>7.3 int64 를 struct 로 바꿀까</h3>
+
+<p>바꾸지 않는 쪽을 권한다. C API 에서 int64 는 0 이 무효이고, <code>==</code> 로 비교되고, 사용자의 map 과 로그에 그대로 들어간다. struct 로 바꾸면 비교 함수와 "무효인가" 함수가 API 에 더 생기고 얻는 것은 "비트가 보인다" 인데, 그것은 라이브러리 안에서만 보이면 된다. 안에서는 지금처럼 <code>PoolHandle { generation, index }</code> 로 풀고, 비트를 아는 자리는 <code>core/pool/kiotty_pool_handle.h</code> 의 <code>makeIndex / ownerOf / slotOf</code> 와 <code>Context::owner</code> 뿐이다. 혼란스러웠던 부분은 "누가 풀어서 누가 찾나" 였고 그 답이 7.1 의 두 줄이다.</p>
+
+<h2 id="p8">8. Parker (16) <span class="tag partial">부분 동의</span></h2>
+
+<p>mutex + condition_variable 을 "재우고 깨운다" 하나로 묶는 것은 맞다. 모양 하나만 바꾼다. 생성자가 lock 을 잡으면 멤버로 둔 Parker 는 영원히 잠긴 채이고, 함수 안에서 만들면 mutex 와 cv 가 밖에 따로 있어야 해서 묶은 의미가 없다. lock 의 범위는 객체의 수명이 아니라 park 와 unpark 의 본문이다. 그래서:</p>
+
+<pre><code>class Parker                                    // core/kiotty_parker.h. mutex 와 condition_variable 이 있는 유일한 자리
+{
+public:
+    template &lt;class Ready&gt;
+    bool park(Ready ready, uint64_t timeout_ms);        // lock → ready() 가 참이 될 때까지 wait (0 이면 무한) → unlock. 돌아올 때의 ready()
+    template &lt;class Change&gt;
+    void unpark(Change change);                         // lock → change() → unlock → notify_all. ready() 가 읽는 것은 change() 가 적는다
+private:
+    std::mutex              _mutex;
+    std::condition_variable _cv;
+};
+
+// Server
+KiottyNetCode Server::await(uint64_t timeout_ms)
+{
+    bool finished = _parker.park([this]() { return _finished; }, timeout_ms);
+    if (!finished)
+    {
+        return KIOTTY_TIMEOUT;
+    }
+    return _code;
+}
+// run 의 끝
+_parker.unpark([this, code]() { _code = code; _finished = true; });</code></pre>
+
+<p>Server 와 EventClient 의 <code>_mutex + _cv + _code</code> 가 <code>_parker + _code + _finished</code> 가 된다. Context 의 create / destroy mutex 와 host 의 notification mutex 는 기다리는 것이 아니라 잠그는 것이라 <code>std::mutex</code> 그대로다. Parker 는 await 자리 둘에만 있다.</p>
+
+<h2 id="p9">9. 바뀐 뒤의 19.3 멤버 표</h2>
+
+<p>위 전부를 적용한 멤버 표다. 확정되면 이것으로 19.3 을 다시 쓴다. "받는 것" 열이 10번에서 말씀하신 "이 함수가 필요한 인자" 다.</p>
+
+<pre><code>// context. process 에 하나 (3절)
+class Context
+{
+    LazyReusablePool&lt;Server, MAX_SERVERS&gt;               _servers;
+    LazyReusablePool&lt;StreamClient, MAX_STREAM_CLIENTS&gt;  _stream_clients;
+    LazyReusablePool&lt;EventClient, MAX_EVENT_CLIENTS&gt;    _event_clients;
+    std::mutex                                          _mutex;
+    bool                                                _initialized;
+};
+
+// server / client. 멤버의 선언 순서가 생성 순서다. 형제를 가리키는 멤버는 없다
+class Server : public Owner                     // configuration_type = ServerConfiguration { KiottyNetServerConfig config; const KiottyNetTlsServerConfig* tls; }
+{
+    KiottyNetServerConfig              _config;
+    OwnerTlsMemory&lt;ServerTlsLayout&gt;    _tls_memory;   // 4절. TLS OFF 면 0 바이트
+    TlsProfile                         _profile;
+    ConnectionHost&lt;MAX_CONNECTIONS&gt;    _host;
+    EventListener                      _listener;
+    Acceptor                           _acceptor;
+    IoLoop                             _loop;
+    Parker                             _parker;
+    KiottyNetCode                      _code;
+    bool                               _finished;
+    PoolHandle                         _id;
+};
+class EventClient : public Owner                // 위에서 _acceptor 가 없고 host 는 &lt;1&gt;, Layout 은 ClientTlsLayout
+class StreamClient : public Owner
+{
+    KiottyNetClientConfig              _config;
+    OwnerTlsMemory&lt;ClientTlsLayout&gt;    _tls_memory;
+    TlsProfile                         _profile;
+    ActiveSocket                       _socket;
+    TlsEngine                          _tls;
+    Stage&lt;MAX_RECV_CAPACITY&gt;           _receive;
+    Stage&lt;MAX_SEND_CAPACITY&gt;           _send;
+    std::atomic&lt;bool&gt;                  _stop;
+    PoolHandle                         _id;
+};                                              // _stream 없음 (6.3)
+
+class Owner                                     // 데이터 없음. handle 로 오는 호출의 인터페이스 (Context::owner 가 돌려준다)
+{
+public:
+    virtual ~Owner();
+    virtual KiottyNetCode           notify(int64_t handle, KiottyNetSpan data) = 0;
+    virtual KiottyNetConnectionInfo info(int64_t handle) const = 0;
+    virtual KiottyNetResult         readStream(int64_t stream, void* buffer, size_t length, uint32_t timeout_ms) = 0;
+    virtual KiottyNetResult         writeStream(int64_t stream, KiottyNetSpan data, uint32_t timeout_ms) = 0;
+    virtual KiottyNetCode           writeStreamFile(int64_t stream, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms) = 0;
+    virtual bool                    isStreamOpen(int64_t stream) = 0;
+    virtual KiottyNetCode           closeStream(int64_t stream, const KiottyNetConnectionAction&amp; then) = 0;
+};                                              // StreamClient 는 연결 handle 을 내지 않으므로 전부 INVALID_ARGUMENT
+
+// connection
+template &lt;size_t N&gt;
+class ConnectionHost                            // initialize(limits). acquire(configuration). release(c) 가 lock 안에서 c.reset()
+{
+    std::mutex                         _notification;  // 모든 연결의 notify Stage 를 지킨다. notificationMutex() 로 IoLoop 에
+    ConnectionLimits                   _limits;
+    ReusablePool&lt;Connection, N&gt;        _connections;
+};
+
+class Connection : public IoSource              // configuration_type = ConnectionConfiguration (6.1). 자기 바깥을 가리키지 않는다
+{
+    std::atomic&lt;Phase&gt;          _phase;
+    uint64_t                    _deadline;
+    WorkContext                 _work;
+    IoEvent                     _read_event;    // backend 의 listener 포인터는 0절의 예외
+    IoEvent                     _write_event;
+    StageSet                    _plain;         // Stage&lt;N&gt; 셋. limit 은 initialize 가
+    TlsEngine                   _tls;           // cipher Stage 둘 + SSL
+    ActiveSocket                _socket;
+    PoolHandle                  _id;
+    KiottyNetConnectionContext  _context;
+    KiottyNetConnectionInfo     _info;
+    int32_t                     _state;
+};
+
+// io_loop
+class IoLoop
+{
+    std::atomic&lt;bool&gt;            _stopped;
+    std::atomic&lt;std::thread::id&gt; _io_thread;
+};</code></pre>
+
+<table>
+<tr><th>Connection 의 함수</th><th>thread</th><th>받는 것</th><th>왜 그것만</th></tr>
+<tr><td><code>initialize(id, ConnectionConfiguration&amp;&amp;)</code></td><td>IO</td><td>socket, context, hostname, limits, profile</td><td>셋은 쓰고 버린다 (6.1)</td></tr>
+<tr><td><code>onOpened(handler)</code>, <code>dispatch(completion, handler, notification)</code></td><td>IO</td><td>Handler (콜백 + app_context), host 의 mutex</td><td>콜백은 여기서만 나간다. mutex 는 onSent(NOTIFY) 의 release</td></tr>
+<tr><td><code>pickWrite(notification)</code></td><td>IO</td><td>host 의 mutex</td><td>notify Stage 를 읽고 encode 한다</td></tr>
+<tr><td><code>stageNotification(data)</code></td><td>아무</td><td>없음</td><td>host 가 lock 을 잡고 부른다</td></tr>
+<tr><td><code>reset()</code></td><td>IO</td><td>없음</td><td>풀 계약. host.release 가 lock 을 잡고 부른다</td></tr>
+<tr><td><code>stream(generation)</code>, <code>closeStream(generation, then)</code></td><td>worker</td><td>generation, then</td><td>wake 는 Owner 가 한다</td></tr>
+<tr><td><code>expireDeadline(now)</code>, <code>workReady()</code>, <code>workFinished()</code>, <code>takeWorkOutcome()</code>, <code>deadline()</code>, <code>phase()</code>, <code>working()</code></td><td>IO</td><td>now 또는 없음</td><td>v4 그대로</td></tr>
+</table>
+
+<table>
+<tr><th>v4 19.3 에서 지워진 멤버</th><th>어디로</th></tr>
+<tr><td>Connection: <code>_notification</code>, <code>_limits</code>, <code>_tls_enabled</code>, <code>_send</code>, <code>_notify</code>, <code>_stream</code>, <code>_handshake_timeout_ms</code>, <code>_app_context</code> (여덟. 19 → 11)</td><td>host 의 mutex / Stage::limit / <code>_tls.active()</code> / <code>Sender::</code> 함수 / 값으로 생성 / 상수 / Handler</td></tr>
+<tr><td>ConnectionHost: <code>NotificationContext _notification</code>, <code>ConnectionConfiguration _template</code></td><td><code>std::mutex</code> + <code>ConnectionLimits</code></td></tr>
+<tr><td>IoLoop: <code>_connections</code>, <code>_notification</code>, <code>_listener</code>, <code>_acceptor</code>, <code>_profile</code>, <code>_handler</code>, <code>_app_context</code>, <code>_completions</code>, <code>_stop_when_empty</code> (아홉. 11 → 2)</td><td>run 의 인자 / 배열 없음 (5.2) / <code>_io_thread</code> 가 하나 더</td></tr>
+<tr><td>Context: <code>_tls_ranges</code>, <code>_id</code>, <code>_tls_pooled</code>, <code>g_contexts</code>, <code>g_contexts_lock</code></td><td>TlsMemory 의 static / 없음 / <code>TlsMemory::installed()</code> / <code>instance()</code></td></tr>
+<tr><td>Server / EventClient: <code>_mutex</code>, <code>_cv</code>; Server 의 IoLoop 생성자 인자 넷</td><td><code>Parker</code>; run 의 인자</td></tr>
+<tr><td>StreamClient: <code>_stream</code></td><td>함수 안에서 생성</td></tr>
+<tr><td><code>NotificationContext</code>, <code>Sender</code> 객체, <code>ObjectPool</code>, <code>OwnerPool</code>, <code>TlsRange</code> (Context 의), thread_local 셋 (namespace 의)</td><td>타입이 없어진다 / static 함수 둘 / <code>ReusablePool</code>, <code>LazyReusablePool</code> / <code>TlsMemory::Range</code> / <code>TlsMemory::thread()</code></td></tr>
+</table>
+
+<h2 id="choices">10. 골라 주실 것 <span class="tag ask">선택</span></h2>
+
+<table>
+<tr><th>#</th><th>질문</th><th>A</th><th>B</th><th>권하는 것</th></tr>
+<tr><td>1</td><td>풀 이름 (2절)</td><td><code>ReusablePool</code> (멤버 배열) / <code>LazyReusablePool</code> (heap, 은퇴)</td><td><code>StaticReusablePool</code> (멤버 배열) / <code>ReusablePool</code> (heap)</td><td class="rec">A. StaticPool 의 Static 과 뜻이 겹치지 않는다</td></tr>
+<tr><td>2</td><td><code>initializeContext</code> 를 두 번 부르면 (3절)</td><td>같은 handle 과 <code>KIOTTY_SUCCESS</code>. release 는 한 번으로 끝난다</td><td><code>KIOTTY_BUSY</code>. release 뒤에만 다시 된다</td><td class="rec">A. 말씀하신 "첫 호출 때만 initialize". 두 모듈이 각자 release 하면 첫 release 가 둘 다 끝내는데, 그것이 "Context 둘은 없다" 의 뜻이다</td></tr>
+<tr><td>3</td><td>app_context 의 자리 (5.1)</td><td><code>Handler { callbacks, app_context }</code> 하나</td><td>handler 와 app_context 두 인자</td><td class="rec">A. 늘 같이 다니고 콜백 셋에만 들어간다</td></tr>
+<tr><td>4</td><td>local completion (5.2)</td><td>배열 없이 slot 마다 바로 step, 아무것도 없을 때까지 반복</td><td>run 의 지역 배열 3 × N (stack 33 KB ~ 270 KB)</td><td class="rec">A. 멤버도 stack 도 없고, thenWork 가 local completion 에서 나올 때의 구멍을 막는다</td></tr>
+</table>
+
+<p>고르시면 19.3 (멤버 표), 19.2 (풀 이름), 19.5 (TlsMemory), 10절 (IoLoop 의 다섯 프로세스와 run 의 인자), 13절 (Context 하나), 15절 (<code>owner(h)</code>), 1절 (폴더) 을 한 번에 고쳐 쓴다.</p>
+
+<h2 id="p11">11. 2차 답 (11월 3일의 열한 항목)</h2>
+
+<p>1, 3, 4, 5, 7, 8a, 9, 10 은 동의이고 3절, 4절, 5.1, 6 의 그림이 이 절대로 바뀐다. 6 과 8b 는 목적은 같되 자리를 하나씩 남긴다. 아래 번호는 2차 의견의 번호다.</p>
+
+<h3>11.1 static 객체는 두되 singleton 접근은 없앤다 (1) <span class="tag agree">동의</span></h3>
+
+<p>맞다. "하나뿐이다" 와 "어디서나 <code>instance()</code> 로 닿는다" 는 다른 말이고, 뒤쪽이 singleton 의 해로움이다. static 객체는 그대로 두고 (heap 없음, DLL 사본마다 하나) 그것에 닿는 함수를 <code>initializeContext</code> 하나로 줄인다. 그 뒤의 모든 C 함수는 인자로 받은 <code>KiottyNetContext</code> 를 통해 간다. 사이클 4 노트의 <b>R4 가 그대로 살아난다.</b></p>
+
+<pre><code>// context/kiotty_context.h
+class Context
+{
+public:
+    static Result&lt;KiottyNetCode, Context&amp;&gt; open(const KiottyNetContextConfig&amp; config);   // 유일한 static 함수. 함수 안의 static 객체 하나를 initialize 하고 돌려준다. initializeContext 만 부른다
+    void release();
+
+    Result&lt;KiottyNetCode, Server&amp;&gt;       createServer(...);
+    ...
+    Result&lt;KiottyNetCode, Owner&amp;&gt;        owner(int64_t handle);   // 11.2
+private:
+    Context();
+    ...
+};                                              // instance() 없음. 라이브러리 안의 어느 코드도 static 객체를 직접 부르지 않는다</code></pre>
+
+<table>
+<tr><th>C 함수</th><th>지금</th><th>바뀜</th></tr>
+<tr><td><code>initializeContext</code></td><td>새 Context</td><td><code>Context::open()</code>. 두 번째 호출은 같은 객체와 <code>KIOTTY_SUCCESS</code> (choices 2 의 A)</td></tr>
+<tr><td><code>releaseContext(ctx)</code>, <code>create* / destroy*(ctx, ...)</code></td><td>ctx 로</td><td>그대로</td></tr>
+<tr><td>Server / EventClient / StreamClient 의 run, close, await, broadcast, connect, read, write ...</td><td>Owner 포인터 (<code>struct KiottyNetServer*</code>) 로</td><td>그대로. handle 이 곧 객체라 찾을 것이 없다</td></tr>
+<tr><td><code>getConnectionInfo</code>, <code>notifyConnection</code>, Stream 함수 다섯 (int64 handle 만 받는 일곱)</td><td>handle 만</td><td><b><code>KiottyNetContext</code> 를 첫 인자로 받는다 (R4).</b> base.cpp 는 <code>context-&gt;owner(handle)</code> 뒤 Owner 의 가상 함수</td></tr>
+<tr><td>C++ wrapper <code>KiottyNet_Connection</code>, <code>KiottyNet_ConnectionStream</code></td><td>handle 만</td><td>context 를 함께 든다</td></tr>
+</table>
+
+<p>사용자 쪽 비용 하나: 콜백 (<code>onReceived</code> 등) 은 handle 과 <code>app_context</code> 만 받으므로, 콜백 안에서 <code>notifyConnection</code> 을 부르려면 사용자가 <code>app_context</code> 에 context 를 넣어 두어야 한다. 콜백 시그니처는 바꾸지 않는다. 7.1 의 "static 저장소에서 닿는 표" 와 7.2 의 "6.7.1 deviation" 은 <code>open()</code> 의 static 객체 하나로 남고, 그것에 닿는 자리가 함수 하나로 줄어든다.</p>
+
+<h3>11.2 <code>owner(h)</code> 는 <code>Result&lt;KiottyNetCode, Owner&amp;&gt;</code> (3) <span class="tag agree">동의</span></h3>
+
+<p><code>core/kiotty_result.h</code> 에 <code>Result&lt;E, T&amp;&gt;</code> 특수화가 이미 있다 (포인터 하나를 들고 <code>isOk()</code> / <code>code()</code> / <code>value()</code>). 틀린 type 비트, 범위 밖 slot, 맞지 않는 owner generation 은 전부 <code>KIOTTY_INVALID_ARGUMENT</code> 다. base.cpp 의 번역이 세 줄로 같아진다.</p>
+
+<pre><code>KiottyNetCode KiottyNet_notifyConnection(KiottyNetContext context, KiottyNetConnectionHandle handle, KiottyNetSpan data)
+{
+    if (context == nullptr)
+    {
+        return KIOTTY_INVALID_ARGUMENT;
+    }
+    Result&lt;KiottyNetCode, Owner&amp;&gt; owner = context-&gt;owner(handle);
+    if (!owner.isOk())
+    {
+        return owner.code();
+    }
+    return owner.value().notify(handle, data);
+}</code></pre>
+
+<h3>11.3 <code>Scope::_previous</code> 는 참조 (4) <span class="tag agree">동의</span></h3>
+
+<p>된다. 조건은 "현재 arena" 가 늘 있어야 한다는 것, 즉 전역 arena 도 <code>PoolBase</code> 객체여야 한다는 것이다. <code>StaticPool</code> 은 static 함수의 묶음이라 객체가 아니므로 그것을 감싼 <code>GlobalArena : PoolBase</code> 하나를 TlsMemory 의 static 으로 둔다. thread 의 <code>current</code> 는 처음부터 그것을 가리키고 nullptr 인 때가 없다. 같은 규칙으로 서브풀도 생성자에서 받는 참조가 된다.</p>
+
+<pre><code>class TlsMemory
+{
+public:
+    class Scope
+    {
+    public:
+        explicit Scope(TlsMemory&amp; owner);       // attachThread() → _previous 에 지금 것 → current = &amp;owner._pool
+        ~Scope();                               // current = &amp;_previous
+    private:
+        PoolBase&amp; _previous;
+    };
+protected:
+    explicit TlsMemory(PoolBase&amp; pool);         // 묶기만 한다. pool 은 아직 안 만들어졌을 수 있다
+    void publish();                             // 파생 생성자의 본문에서. 그때 _pool 은 만들어져 있다
+private:
+    struct Thread { PoolBase* current; PoolBase* last_hit; bool attached; };   // 값이 바뀌므로 포인터. 처음은 &amp;s_global, nullptr
+    PoolBase&amp;          _pool;
+    static GlobalArena s_global;                // StaticPool&lt;GlobalTlsTag, GlobalTlsLayout&gt; 을 PoolBase 로
+};
+
+template &lt;class Layout&gt;
+class OwnerTlsMemory : public TlsMemory
+{
+public:
+    OwnerTlsMemory() : TlsMemory(_pool), _pool() { publish(); }
+private:
+    Pool&lt;Layout&gt; _pool;
+};</code></pre>
+
+<p><code>TlsMemory(_pool)</code> 은 아직 만들어지지 않은 멤버에 참조를 묶는 것인데, 묶기만 하고 읽지 않으면 적법하다. 정적 분석기가 "초기화 전 사용" 으로 볼 수 있어 base 생성자가 <code>_pool</code> 을 건드리지 않는다는 것을 그 자리에 적는다. 남는 포인터는 <code>Thread</code> 의 둘뿐이고 둘 다 생성자 없이 바뀌는 값이다.</p>
+
+<h3>11.4 attachThread / detachThread (5) <span class="tag agree">동의</span></h3>
+
+<p>무리 없다. 같은 이름은 <code>EventListener::attach(socket, slot)</code> 뿐이고 클래스도 목적어도 다르다. 이 뒤로는 <code>attachThread</code> / <code>detachThread</code> 로 적는다.</p>
+
+<h3>11.5 attach 는 Scope 의 생성자로, detach 는 한 줄 남긴다 (6) <span class="tag partial">부분 동의</span></h3>
+
+<p>attach 는 합친다. 두 번째부터는 <code>thread().attached</code> 가 참이라 bool 하나 보고 끝이고, Scope 가 있는 곳은 늘 attach 가 먼저 필요한 곳이다. detach 는 합치지 않는다. 이유는 Server::run 이 아니라 StreamClient 다.</p>
+
+<div class="flow">detach 를 소멸자에 넣으면
+  StreamClient::read   → Scope 생성 (attach) → SSL_read → Scope 소멸 (detach = OPENSSL_thread_stop: 이 thread 의 오류 큐와 DRBG 를 지운다)
+  StreamClient::read   → Scope 생성 (attach = ERR_clear_error + RAND_bytes: DRBG 를 다시 만든다. OS 의 entropy 를 다시 읽는다)
+  ... 호출마다 지우고 다시 만든다
+
+IO thread 안에서 콜백이 StreamClient 를 부르면 (Scope 가 겹친다)
+  Server::run 의 Scope ─┬ 콜백 → StreamClient::read 의 Scope 소멸 → detach → Server 쪽 SSL 이 쓰던 thread 상태가 사라진다
+                       └ 이어지는 SSL_read 는 다시 만들어 쓰므로 틀리지는 않지만 매번 낸다</div>
+
+<p>그래서 detach 는 "이 thread 의 OpenSSL 이 끝났다" 를 아는 자리, IO thread 가 끝나는 둘 (Server::run, EventClient::run 의 끝) 에만 한 줄로 남긴다. StreamClient 가 쓰는 사용자 thread 는 언제 끝나는지 라이브러리가 모르므로 detach 할 자리가 없다 (사이클 4 노트의 "Windows 정적 링크에서는 남는다" 가 그 경우다).</p>
+
+<pre><code>KiottyNetCode Server::run(const KiottyNetConnectionHandler&amp; callbacks, KiottyNetAppContext app_context)
+{
+    Handler handler(callbacks, app_context);
+    KiottyNetCode code = KIOTTY_SUCCESS;
+    {
+        TlsMemory::Scope scope(_tls_memory);                    // attachThread 포함
+        code = _loop.run(_host, _listener, _acceptor, _profile, handler, false);
+    }
+    TlsMemory::detachThread();
+    _parker.unpark([this, code]() { _code = code; _finished = true; });
+    return code;
+}</code></pre>
+
+<h3>11.6 <code>Acceptor&amp;</code>, <code>TlsProfile&amp;</code> (7) <span class="tag agree">동의</span></h3>
+
+<p>둘 다 참조로 받는다. nullptr 가 뜻하던 두 경우는 객체의 상태로 답한다.</p>
+
+<table>
+<tr><th>인자</th><th>nullptr 가 뜻하던 것</th><th>참조로</th></tr>
+<tr><td><code>TlsProfile&amp; profile</code></td><td>TLS 를 쓰지 않는 Owner (평문)</td><td><code>profile.valid()</code> 가 거짓 (이미 있는 함수. <code>openServer</code> / <code>openClient</code> 를 부르지 않은 TlsProfile). <code>Connection::initialize</code> 는 <code>valid()</code> 일 때만 <code>_tls.open(profile, hostname)</code>. <code>ConnectionConfiguration::profile</code> 도 <code>TlsProfile&amp;</code> 다 (참조 멤버가 있는 struct 는 생성과 이동은 되고 대입만 안 되는데, initialize 로 이동만 한다)</td></tr>
+<tr><td><code>Acceptor&amp; acceptor</code></td><td>EventClient (listen 하지 않는다)</td><td>EventClient 도 <code>Acceptor _acceptor</code> 를 들되 <code>open</code> 하지 않는다. settle 과 collectIoEvents 는 <code>acceptor.listening()</code> 이 거짓이면 지나간다. 이 분기는 Server 가 close 된 뒤 (acceptor 를 닫고 연결만 비우는 동안) 에도 필요한 것이라 새로 생기는 것이 아니다. 비용은 EventClient 하나에 Acceptor 하나 (PassiveSocket + IoEvent + AcceptBuffer. Windows 의 AcceptEx 주소 버퍼 때문에 약 400 바이트)</td></tr>
+</table>
+
+<p>IoLoop 의 다른 자리도 같이 바뀐다: <code>step(..., Acceptor&amp;, TlsProfile&amp;, ...)</code>, <code>admit(host, listener, TlsProfile&amp;, socket, hostname, handler)</code>. 5.2 의 <code>step(IoCompletion::timeout(i), host, listener, nullptr, nullptr, handler)</code> 는 <code>acceptor, profile</code> 을 그대로 넘긴다. connection 완료의 step 이 그 둘을 읽지 않는 것은 같다.</p>
+
+<h3>11.7 Handler 는 참조를 받는 생성자 (8a) <span class="tag agree">동의</span></h3>
+
+<p>"Handler 의 멤버를 참조로" 로 읽었다. 콜백 struct 는 사용자의 것이고 run 이 돌아올 때까지 살아 있어야 하는 것은 포인터 때와 같다.</p>
+
+<pre><code>struct Handler
+{
+    Handler(const KiottyNetConnectionHandler&amp; callbacks, KiottyNetAppContext app_context);
+    const KiottyNetConnectionHandler&amp; callbacks;
+    KiottyNetAppContext               app_context;
+};                                              // run 의 stack 에 하나. 복사 없음. base.cpp 가 handler == nullptr 를 먼저 거른다</code></pre>
+
+<p>Connection 은 pool 안의 객체라 (규칙 2) Handler 를 들지 않고 <code>onOpened(handler)</code> / <code>dispatch(completion, handler, notification)</code> 로 그때그때 받는다. 이것은 9절 표 그대로다.</p>
+
+<h3>11.8 OS 완료의 배열은 이미 EventListener 가 들고 있다 (8b) <span class="tag partial">부분 동의</span></h3>
+
+<p>collectIoEvents 에는 배열이 없다. 지금 코드의 <code>EventListener::open(completion_capacity)</code> 가 <code>IoCompletion[capacity]</code> 를 heap 에 만들고 (iocp / epoll backend 의 <code>ListenerState::completions</code>), <code>wait()</code> 는 거기를 채운 <code>Span&lt;const IoCompletion&gt;</code> 을 돌려준다. open 은 Owner 의 create 때이므로 말씀하신 "Owner 가 생성될 때 heap 이 정해진다" 가 OS 완료에는 이미 그렇게 되어 있다. 5.2 가 없앤 것은 그 배열이 아니라 v4 가 IoLoop 의 멤버로 따로 두었던 <b>local completion</b> (TIMEOUT, WORK_READY, WORK_DONE) 의 <code>3 × N</code> 배열이다.</p>
+
+<table>
+<tr><th></th><th>A. 5.2 그대로: 배열 없이 slot 마다 만들어 바로 step, 아무것도 없을 때까지 반복</th><th>B. EventListener 가 local completion 자리도 든다: <code>open(os_capacity, local_capacity)</code>, collectLocalEvents 가 그 자리를 채워 Span 을 돌려준다</th></tr>
+<tr><td>메모리</td><td>없음</td><td>heap, create 때. 19.1 과 맞는다</td></tr>
+<tr><td>thenWork 가 local completion 에서 나오는 구멍 (5.2)</td><td>반복이 막는다</td><td>배열이 있어도 반복은 똑같이 필요하다. 배열이 막아 주는 것이 아니다</td></tr>
+<tr><td>EventListener 가 아는 것</td><td>OS 완료만 (지금과 같다)</td><td>OS 가 아닌 완료의 저장소가 된다. 채우는 쪽이 IoLoop 라 "wait 가 돌려주는 것" 과 "IoLoop 가 적은 것" 이 같은 타입의 Span 으로 섞인다</td></tr>
+<tr><td>runOnce 의 모양</td><td>OS 완료 loop 하나 + stepLocalEvents 의 while</td><td>v4 의 "collect → step" 둘이 같은 모양으로 남는다</td></tr>
+</table>
+
+<p>A 를 그대로 권한다. B 로 얻는 것은 모양의 대칭뿐이고 구멍은 어느 쪽이든 반복으로 막는다. B 를 고르시면 자리는 EventListener 의 storage 이고 IoLoop 에는 여전히 배열이 없다. 어느 쪽이든 stack 에는 아무것도 없다.</p>
+
+<h3>11.9 hostname 과 profile 의 주인은 Owner (9) <span class="tag agree">동의</span></h3>
+
+<table>
+<tr><th></th><th>주인</th><th>Connection 이 읽는 때</th><th>그 뒤</th></tr>
+<tr><td><code>hostname</code></td><td>client Owner 의 <code>_config.hostname</code> (<code>KiottyNetClientConfig</code> 의 <code>char[KIOTTY_MAX_HOST_LENGTH]</code>. create 때 복사된 값). Server 는 빈 문자열 <code>""</code> 을 넘긴다</td><td><code>initialize</code> 안의 <code>TlsEngine::open</code> 한 번. <code>SSL_set1_host</code> 와 SNI 는 문자열을 복사한다</td><td>Connection 에 포인터가 남지 않는다</td></tr>
+<tr><td><code>profile</code></td><td>Owner 의 <code>TlsProfile _profile</code></td><td>같은 자리. <code>SSL_new(ctx)</code> 는 SSL_CTX 의 참조 수를 올린다</td><td>Connection 의 <code>_tls</code> 가 든 SSL 이 OpenSSL 안에서 SSL_CTX 를 가리키는데, 그것은 OpenSSL 의 소유 규칙이고 우리 참조가 아니다. Owner 의 reset 이 <code>SSL_CTX_free</code> 를 부르는 때는 모든 연결이 닫힌 뒤다</td></tr>
+</table>
+
+<p>둘 다 Owner 의 멤버라 그 Owner 의 모든 Connection 보다 오래 산다. ConnectionConfiguration 은 그 둘을 initialize 한 번 동안만 빌려 준다 (<code>const char* hostname</code>, <code>TlsProfile&amp; profile</code>). hostname 이 포인터로 남는 것은 C 문자열이라서다.</p>
+
+<h3>11.10 ConnectionStream 의 멤버 넷은 참조 (10) <span class="tag agree">동의</span></h3>
+
+<p>"ConnectionStream 의 멤버를 참조로" 로 읽었다. 생성자에서 넷을 받으므로 4 의 규칙 그대로다. <code>Result&lt;KiottyNetCode, ConnectionStream&gt;</code> 은 값을 그 자리에 생성하므로 복사 생성만 있으면 되고, 대입은 어디서도 쓰지 않는다.</p>
+
+<pre><code>class ConnectionStream
+{
+public:
+    ConnectionStream(ActiveSocket&amp; socket, TlsEngine&amp; tls, StageBase&amp; receive, StageBase&amp; send);
+    ...
+private:
+    ActiveSocket&amp; _socket;  TlsEngine&amp; _tls;  StageBase&amp; _receive;  StageBase&amp; _send;
+};</code></pre>
+
+<p>"Connection 의 멤버로 <code>ConnectionStream&amp;</code>" 로 읽으셨다면 그쪽은 아니다. Connection 은 pool 안의 객체라 바깥을 가리키지 않고 (규칙 2), 묶을 ConnectionStream 객체도 없다. 쓰는 함수가 만들고 그 자리에서 버리는 6.3 그대로다.</p>
+
+<h3>11.11 결정된 것</h3>
+
+<table>
+<tr><th>choices</th><th>결정</th></tr>
+<tr><td>1 풀 이름</td><td>A. <code>ReusablePool</code> / <code>LazyReusablePool</code></td></tr>
+<tr><td>2 initializeContext 두 번</td><td>A. <code>Context::open()</code> 이 같은 객체와 SUCCESS (11.1)</td></tr>
+<tr><td>3 app_context 의 자리</td><td>A. <code>Handler</code>, 콜백은 참조 (11.7)</td></tr>
+<tr><td>4 local completion</td><td>A 를 권한다 (11.8). B 라면 EventListener 의 storage</td></tr>
+</table>
+
+<p>이 절까지 반영해 설계 v4 의 19.3 (멤버 표), 19.2 (풀 이름), 19.5 (TlsMemory, GlobalArena, Scope), 10절 (IoLoop 의 다섯 프로세스, run 의 참조 인자, EventClient 의 Acceptor), 13절 (Context::open, R4), 15절 (<code>owner(h)</code> 의 Result), 1절 (폴더) 을 고쳐 쓴다.</p>
+
+<h3>11.12 콜백에서 context 에 닿는 길 (3차, 1) <span class="tag ask">선택</span></h3>
+
+<p>R4 의 비용이 드러났다. 콜백 (<code>onReady</code>, <code>onRead</code>, <code>onWorkStarted</code> ...) 은 handle 과 사용자의 connection_context 만 받으므로, 거기서 <code>notifyConnection</code> 이나 Stream 함수를 부르려면 사용자가 context 를 어딘가에 넣어 두어야 한다. 길은 셋이다.</p>
+
+<table>
+<tr><th></th><th>A. R4: 일곱 함수가 context 를 받는다</th><th>B. <code>Context::instance()</code></th><th>C. handle 이 Owner 를 든다</th></tr>
+<tr><td>C API</td><td>일곱 함수에 인자 하나. 콜백은 그대로. 사용자는 <code>onConnected</code> 에서 만드는 connection_context (또는 app_context) 에 context 를 넣는다</td><td>바뀌지 않는다</td><td><code>KiottyNetConnectionHandle</code> 이 int64 에서 struct <code>{ owner, id }</code> 가 된다. 함수와 콜백은 그대로</td></tr>
+<tr><td>라이브러리 안의 static</td><td><code>open()</code> 의 객체 하나. 닿는 함수 하나</td><td>같은 객체. 일곱 함수가 전부 닿는다 (singleton)</td><td><code>open()</code> 의 객체 하나. 닿는 함수 하나</td></tr>
+<tr><td>handle → Owner</td><td><code>context-&gt;owner(h)</code>: type · slot · owner generation 비트 (7.1)</td><td>같다</td><td><code>h.owner</code> 포인터. 비트 셋과 <code>Context::owner</code> 가 없어진다. id 는 <code>generation (32) · slot (16)</code> 뿐</td></tr>
+<tr><td>사용자 코드</td><td>context 를 connection_context 에 넣는 줄이 는다. C 라이브러리의 흔한 모양 (uv_loop 를 handle 에 묶는 것과 같다)</td><td>가장 짧다</td><td>A 의 줄이 없다. <code>==</code> 가 안 되므로 비교는 <code>id</code> 와 <code>owner</code> 둘, 무효는 <code>owner == NULL</code></td></tr>
+<tr><td>틀린 handle</td><td>owner generation 과 connection generation 둘이 거른다</td><td>같다</td><td>connection generation 하나가 거른다. Owner 의 reset 을 지나도 Connection 의 generation 이 0 으로 돌아가지 않아야 한다 (ReusablePool 의 generation 은 slot 에 붙어 있어 그렇다). Owner 는 은퇴할 뿐 지워지지 않으므로 (19.1 #4) 포인터는 releaseContext 전까지 유효하다. releaseContext 뒤의 handle 은 A 의 context 와 똑같이 dangling 이다</td></tr>
+<tr><td>MISRA</td><td>static 하나 (deviation 하나)</td><td>static 하나. 접근 자리 여덟</td><td>static 하나. 포인터 ↔ 정수 변환 없음 (struct 의 필드다)</td></tr>
+</table>
+
+<p><b>C 를 권한다.</b> "C 인터페이스는 받은 것을 통해 간다" 는 입장을 그대로 지키면서 사용자에게 아무것도 시키지 않는 것은 C 뿐이다. 7.3 에서 int64 를 권한 이유는 <code>==</code> 와 map 이었는데, 그 둘은 C++ wrapper (<code>KiottyNet_Connection</code>) 의 <code>operator==</code> / <code>operator&lt;</code> 로 돌려줄 수 있고, C 사용자는 같은 Owner 안에서 <code>id</code> 로 비교하면 된다. 얻는 것이 더 크다: handle 의 비트 다섯 중 셋 (type, owner slot, owner generation) 과 <code>Context::owner</code>, R4 가 전부 없어지고, Context 는 create / destroy / release 만 남는다.</p>
+
+<pre><code>// kiotty_net_base.h
+typedef struct KiottyNetConnectionOwner KiottyNetConnectionOwner;      // 불투명. C++ 에서는 Owner (가상 함수 일곱)
+typedef struct KiottyNetConnectionHandle
+{
+    KiottyNetConnectionOwner* owner;            // NULL 이면 무효
+    int64_t                   id;               // 상위 32 generation, 하위 16 slot
+} KiottyNetConnectionHandle;
+typedef struct KiottyNetConnectionStream { KiottyNetConnectionOwner* owner; int64_t id; } KiottyNetConnectionStream;   // 같은 값. 타입만 다르다
+
+// base.cpp
+KiottyNetCode KiottyNet_notifyConnection(KiottyNetConnectionHandle handle, KiottyNetSpan data)
+{
+    if (handle.owner == nullptr)
+    {
+        return KIOTTY_INVALID_ARGUMENT;
+    }
+    return handle.owner-&gt;notify(handle.id, data);                       // Owner::notify → _host.notify(PoolHandle{generation, slot}, data)
+}
+
+// Server 가 handle 을 만드는 자리 (onReady 등을 부르기 전)
+KiottyNetConnectionHandle handle = { this, connection.id().value() };   // Server* → Owner* 는 암묵 upcast</code></pre>
+
+<p>A 로 가시면 11.1 그대로이고, B 로 가시면 3절 그대로다. 어느 쪽이든 2 (detach 한 줄) 와 3 (local completion 은 A) 은 확정이다.</p>
+
+<p class="note"><b>결정 (11월 3일):</b> C. 설계 v4 의 3절 (handle struct), 9절, 10절, 12 ~ 16절, 19절을 이것으로 고쳐 썼다. R4 는 없어진다. 2 와 3 도 확정이다.</p>
+
+</body>
+</html>
