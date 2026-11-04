@@ -166,7 +166,7 @@ typedef enum KiottyNetCode {
     KIOTTY_TLS_HANDSHAKE_FAILED,       /* handshake : 버전 / cipher 불일치, alert, 평문 상대 */
     KIOTTY_TLS_HANDSHAKE_TIMEOUT,
     KIOTTY_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
-    KIOTTY_OUT_OF_MEMORY               /* create* (또는 initializeContext 의 미리 만들기) : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
+    KIOTTY_OUT_OF_MEMORY               /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
 } KiottyNetCode;
 ```
 
@@ -176,7 +176,7 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (연결 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 만큼의 연결, 버퍼, TLS 메모리) 을 한 번에 잡는다. 못 잡으면 `KIOTTY_OUT_OF_MEMORY` 이고, 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. `KiottyNet_initializeContext` 의 config 로 타입별 개수를 주면 그때 미리 만든다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용하며, `KiottyNet_releaseContext` 가 한 번에 해제한다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춰 빌드한다).
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (연결 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 만큼의 연결, 버퍼, TLS 메모리) 을 한 번에 잡는다. 못 잡으면 `KIOTTY_OUT_OF_MEMORY` 이고, 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용하며, `KiottyNet_releaseContext` 가 한 번에 해제한다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춰 빌드한다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.

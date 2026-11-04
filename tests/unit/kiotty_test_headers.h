@@ -14,6 +14,10 @@ typedef struct KiottyTestHeaderLayout
     size_t connection_decision;
     size_t connection_handler;
     size_t connection_info;
+    size_t connection_handle;
+    size_t connection_stream;
+    size_t connection_handle_id_offset;
+    size_t connection_stream_id_offset;
     size_t server_config;
     size_t client_config;
     size_t tls_server_config;

@@ -24,6 +24,26 @@
   - 5절 Stream 오용 표, `KiottyNetConnectionStream` struct, C++ `KiottyNet_Connection` 의 `operator==` / `operator<`.
 - `user_guide_http.md`, `implementation_guide_v0.md` 는 HTTP 층의 int64 handle 을 말하므로 두었다.
 
+## 결정 (같은 날) : initializeContext 는 인자 없이
+
+- `KiottyNet_initializeContext(void)` 를 그대로 둔다. 공개 `KiottyNetContextConfig` 는 만들지 않는다.
+- `Context::open` 이 받는 `ContextConfiguration` 은 라이브러리 안의 struct 이고, base.cpp 가 기본값 (타입별 미리 만들 개수 0) 으로 넘긴다. 필요해지면 그때 base.h 에 공개한다.
+- 설계 v4 3, 13, 19.2, 19.3, 19.9 와 plan v2 R5 / 7 / 8, requirement 2절, 테스트 계획 11절 (`ReservedOwnersFromTheConfig...` 삭제) 을 맞췄다. `KIOTTY_OUT_OF_MEMORY` 는 `create*` 만 돌려준다.
+
+## R5. base.h 의 handle 을 struct 로
+
+- `include/kiotty_net_base.h`:
+  - `KiottyNetConnectionOwner` (불투명).
+  - `KiottyNetConnectionHandle { owner, id }`, `KiottyNetConnectionStream { owner, id }`. 같은 필드의 다른 타입이라 서로 넘길 수 없다.
+  - `KiottyNet_serverMemorySize()` / `KiottyNet_clientMemorySize()` 선언 (구현은 사이클 8).
+  - C++ `KiottyNet_Connection` 에 `operator==` / `!=` / `<` (owner 는 `std::less`, 그 다음 id). `KiottyNet_ConnectionStream` 은 owner 가 NULL 이면 빈 것으로 본다.
+- statemachine.h, http.h, websocket.h 는 타입 이름만 쓰므로 바뀐 줄이 없다. HTTP / WebSocket 의 `int64_t` handle 은 그 층에서 맞춘다.
+- 테스트: 헤더 layout 비교에 handle 둘의 크기와 `id` offset, `ConnectionHandleAndStreamAreDistinctTypesWithTheSameFields`, `ConnectionWrappersCompareByOwnerThenId` (map key).
+- 로컬:
+  - MSVC Debug TLS ON 185/185. 헤더만 `/Zs /std:c++14 /permissive- /W4 /WX`, `/TC /std:c11` 경고 0.
+  - WSL gcc / clang TLS ON 186/186, OFF 184/184. 헤더만 clang `-std=c++11`, `-std=c99` 경고 0.
+- 환경 메모: 이 PC 는 MSVC toolset 이 14.52 로 올라 옛 `build/msvc` 의 cache 가 깨져 `build/msvc-tls` 를 새로 만들었다. vcvars64 가 vswhere 를 찾도록 Installer 경로를 PATH 앞에 둔다. WSL 배포판 이름은 `Ubuntu` 다.
+
 ## 다음 할 일
 
-R5. `initializeContext` 시그니처 확정 → base.h 의 handle struct, `KiottyNetConnectionOwner`, `KiottyNetContextConfig`, C++ 래퍼의 비교 연산자 → statemachine.h → 헤더 테스트 → commit.
+R6. core/pool (ReusablePool, LazyReusablePool, PoolBase, Pool<Layout>), StageBase / Stage<N>, Parker, PoolHandle 에서 owner 비트 제거, memory limits 와 TLS Layout 셋. 사이클 4 의 Context 코드와 테스트를 지운다. R8 까지 push 하지 않는다.

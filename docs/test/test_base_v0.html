@@ -610,7 +610,6 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Context</td><td>InitializeContextTwiceReturnsTheSameContextAndSuccess</td><td><span class="tag ok">정상</span></td><td>두 번째 initializeContext 는 같은 포인터와 SUCCESS. process 에 Context 는 하나다 (설계 13절)</td></tr>
   <tr><td>Context</td><td>OneReleaseEndsBothInitializeCalls</td><td><span class="tag edge">엣지</span></td><td>두 번 initialize 뒤 한 번 release → 그 뒤의 create 는 INVALID_ARGUMENT (초기화 안 됨). 두 번째 release 는 아무 일도 하지 않는다</td></tr>
   <tr><td>Context</td><td>OneMoreServerThanMaxServersReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>MAX_SERVERS 개 create 뒤. StreamClient 표는 영향 없음 (표가 타입별이다)</td></tr>
-  <tr><td>Context</td><td>ReservedOwnersFromTheConfigAreCreatedAtInitializeAndCreateDoesNotAllocate</td><td><span class="tag ok">정상</span></td><td>config 에 servers 2 → initialize 뒤 createServer 둘은 new 없이 (lateFrees / 할당 수를 세는 hook 또는 주소 비교). 셋째가 new</td></tr>
   <tr><td>Context</td><td>DestroyedOwnerIsRetiredAndReusedByTheNextCreateOfTheSameType</td><td><span class="tag ok">정상</span></td><td>destroy 뒤 create → 같은 주소 (은퇴한 객체의 재사용. 설계 19.1 #4)</td></tr>
   <tr><td>Context</td><td>OldConnectionHandlesOfADestroyedOwnerReturnPeerClosed</td><td><span class="tag ok">정상</span></td><td>destroy 전의 handle 로 notify → owner 포인터는 살아 있고 (은퇴) Connection generation 이 거른다 → PEER_CLOSED. 그 Owner 를 재사용한 새 Server 의 연결에도 옛 handle 은 PEER_CLOSED</td></tr>
   <tr><td>Context</td><td>LateFreesAreZeroAfterDestroyAndAfterRelease</td><td><span class="tag ok">정상</span></td><td>TLS Server 를 돌리고 연결 몇 개를 닫고 destroy → <code>TlsMemory::lateFrees()</code> 0. release 뒤에도 0</td></tr>
@@ -739,7 +738,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p>설계 v4 18절의 ① ~ ⑨ 와 <code>plan_base_v2.md</code> 의 사이클 (1부 R4 ~ R8 은 끝난 층을 19절에 맞게 고치는 것, 2부 4b ~ 8 은 새 층) 과 같이 간다. 단계마다 그 단계의 테스트가 전부 통과해야 다음으로 간다. "돌려보지 않은 테스트는 테스트가 아니다."</p>
 <table>
   <tr><th>단계</th><th>구현</th><th>테스트</th><th>층</th></tr>
-  <tr><td>① (R5)</td><td>base.h 3절 변경 (handle struct, ContextConfig), statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
+  <tr><td>① (R5)</td><td>base.h 3절 변경 (handle struct, MemorySize), statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
   <tr><td>② (R6)</td><td>core : StageBase / Stage&lt;N&gt;, StageSet, Span, Clock, Parker, core/pool (PoolHandle, Pool&lt;Layout&gt;, StaticPool, ReusablePool, LazyReusablePool), base/pool (상한, TLS Layout 셋)</td><td>5절 전부</td><td>unit, benchmark</td></tr>
   <tr><td>③ (끝. R7)</td><td>error, socket, event (IOCP, epoll). R7 은 IoEvent 구체 타입</td><td>6절, 7절. 두 backend 가 같은 테스트를 통과하는 것이 proactor 흉내의 완성 조건</td><td>integration</td></tr>
   <tr><td>④ (끝. R8)</td><td>tls : stub, OpenSSL. R8 은 TlsEngine 의 Stage&lt;N&gt; 과 TlsMemory</td><td>8절. TlsPump 로 소켓 없이. TlsMemory 는 별도 실행 파일</td><td>unit</td></tr>

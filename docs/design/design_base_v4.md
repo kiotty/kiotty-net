@@ -117,7 +117,10 @@ KiottyNetCode   KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream st
 bool            KiottyNet_isConnectionStreamOpen   (KiottyNetConnectionStream stream);                                   /* recv(MSG_PEEK). 닫혔으면 false */
 KiottyNetCode   KiottyNet_closeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetConnectionAction then);   /* 한 번. thenWork 는 INVALID_ARGUMENT. v2 의 finishWork */
 
-KiottyNetContextResult KiottyNet_initializeContext(void);   /* 19절의 최악 크기를 한 번에 잡는다. 못 잡으면 KIOTTY_OUT_OF_MEMORY */
+KiottyNetContextResult KiottyNet_initializeContext(void);   /* process 에 하나인 Context 를 연다. 두 번째 호출은 같은 handle 과 SUCCESS. 설정은 안의 기본값 (13절) */
+
+size_t KiottyNet_serverMemorySize(void);       /* Server 하나의 sizeof. create 가 잡는 크기 (19.3) */
+size_t KiottyNet_clientMemorySize(void);       /* StreamClient / EventClient 중 큰 쪽의 sizeof */
 ```
 
 | 항목 | 값 |
@@ -126,7 +129,7 @@ KiottyNetContextResult KiottyNet_initializeContext(void);   /* 19절의 최악 �
 | `max_clients` 상한 | `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER`. `configureServerMaxClients` 가 0 또는 그 값 초과면 `KIOTTY_INVALID_ARGUMENT` |
 | `max_clients` 의 compile time 상한 | `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` (기본 128, 최대 1024). runtime 값이 넘으면 `KIOTTY_INVALID_ARGUMENT` |
 | recv / send / push capacity 의 상한 | `KIOTTY_NET_MAX_RECV / SEND / PUSH_CAPACITY` (기본 16 KiB) |
-| `KIOTTY_OUT_OF_MEMORY` | enum 끝에 더한다. `initializeContext` 만 돌려준다 |
+| `KIOTTY_OUT_OF_MEMORY` | enum 끝에 더한다. `create*` 가 돌려준다 (Owner 하나를 만들 메모리가 없을 때) |
 | `initializeContextWithTlsPool(bytes)` | 지운다. TLS 메모리는 19.5 의 arena 다 |
 
 지우는 것: `KiottyNetWorkHandle`, `KiottyNet_finishWork`, `KiottyNet_isWorkConnected`, 옛 이름의 action 함수 여섯 (`holdCommunication`, `readConnection`, `readConnectionUntil`, `writeConnection`, `startWork`, `closeConnection`). C++ 의 `KiottyNet_Work` 는 `KiottyNet_ConnectionStream` 으로 이름을 바꾸고 `read / write / writeFile / open / close(action)` 을 가진다. 소멸자는 close 하지 않은 Stream 을 `thenClose(KIOTTY_SUCCESS)` 로 닫는다. `KiottyNet_Connection` 은 `operator==` 와 `operator<` 를 가진다 (15절).
@@ -1215,7 +1218,7 @@ v2 13절 그대로. 바뀌는 것:
 
 - Context 는 process 에 하나인 static 객체다. heap 을 쓰지 않고, DLL 사본마다 하나다. 그것에 닿는 함수는 `Context::open()` 하나이고 그것을 부르는 자리는 `KiottyNet_initializeContext` 하나다. 라이브러리 안의 어느 코드도 static 객체를 직접 찾지 않는다 (singleton 접근 없음). 그 뒤의 모든 C 함수는 받은 것 (context, Owner 포인터, handle 의 owner) 을 통해 간다 (15절).
 - `initializeContext` 를 두 번 부르면 같은 객체와 `KIOTTY_SUCCESS` 다. release 는 한 번으로 끝난다. 두 모듈이 각자 release 하면 첫 release 가 둘 다 끝내는데, 그것이 "Context 둘은 없다" 의 뜻이다.
-- OpenSSL 초기화 (`OPENSSL_INIT_NO_ATEXIT`, process 첫 번째만), hook (`TlsMemory::functions()`), 예열 handshake 가 `open` 에서 돈다 (19.5). Owner 는 `create*` (또는 config 의 미리 만들기) 가 만들고, `KIOTTY_OUT_OF_MEMORY` 는 `create*` 가 돌려준다.
+- OpenSSL 초기화 (`OPENSSL_INIT_NO_ATEXIT`, process 첫 번째만), hook (`TlsMemory::functions()`), 예열 handshake 가 `open` 에서 돈다 (19.5). Owner 는 `create*` 가 만들고, `KIOTTY_OUT_OF_MEMORY` 는 `create*` 가 돌려준다. `KiottyNet_initializeContext(void)` 는 인자를 받지 않는다. `open` 이 받는 `ContextConfiguration` 은 라이브러리 안의 struct 이고 base.cpp 가 기본값 (타입별 미리 만들 개수 0) 으로 넘긴다. 공개 config 는 필요해지면 그때 base.h 에 더한다.
 - `config::configureServerMaxClients` 가 `[1, KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER]` 를 검사한다. 기본 128. buffer capacity 는 `[1, KIOTTY_NET_MAX_*_CAPACITY]`.
 - base.h 의 불투명 struct 는 C++ 클래스 그 자체다 (cast 없음): `KiottyNetContextImpl` 은 Context, `KiottyNetConnectionOwner` 는 Owner, `KiottyNetServer` / `KiottyNetEventClient` / `KiottyNetStreamClient` 는 Owner 셋. 전역 namespace 의 그 이름으로 정의하고 `kiotty::net` 안에서는 typedef 로 부른다.
 
@@ -1237,7 +1240,7 @@ namespace kiotty { namespace net { typedef ::KiottyNetConnectionOwner Owner; } }
 // context/kiotty_context.h
 struct KiottyNetContextImpl                     // = Context. 복사 / 이동 없음
 {
-    static Result<KiottyNetCode, Context&> open(const KiottyNetContextConfig& config);   // 유일한 static 함수. 함수 안의 static 객체 하나를 initialize 하고 돌려준다 (C++11 의 thread-safe static init)
+    static Result<KiottyNetCode, Context&> open(const ContextConfiguration& configuration);   // 유일한 static 함수. 함수 안의 static 객체 하나를 initialize 하고 돌려준다 (C++11 의 thread-safe static init)
     void release();                             // 남은 Owner destroy → 세 풀 비움 → TlsMemory 의 등록표 지움. OPENSSL_cleanup 은 부르지 않는다
 
     Result<KiottyNetCode, Server&>       createServer(const KiottyNetServerConfig& config, const KiottyNetTlsServerConfig* tls);
@@ -1376,7 +1379,7 @@ template <class T, size_t N>
 class LazyReusablePool                          // core/pool/kiotty_lazy_reusable_pool.h. static_assert(is_reusable<T>::value). 객체는 lazy 로 한 번 생성되고 RETIRED 로 남는다
 {                                               // acquire : RETIRED → initialize. 없으면 EMPTY 에 new (std::nothrow) T → initialize. 없으면 TABLE_FULL
     std::array<std::unique_ptr<T>, N> _objects; //           새로 만든 객체의 initialize 가 실패해도 지우지 않고 RETIRED 로 둔다
-    std::array<SlotState, N>          _states;  // release : reset, RETIRED.  reserve(n) : n 개를 만들어 RETIRED 로 (Context config)
+    std::array<SlotState, N>          _states;  // release : reset, RETIRED.  reserve(n) : n 개를 만들어 RETIRED 로 (ContextConfiguration. 기본 0)
 };
 ```
 
@@ -1612,7 +1615,7 @@ Connection 의 함수가 받는 것 (10번째 규칙의 "이 함수 호출 때 �
 
 켜고 끄는 순서.
 
-- `initializeContext()`: `Context::open(config)` → static 객체의 `initialize` 가 OpenSSL 을 `OPENSSL_INIT_NO_ATEXIT` 로 초기화하고 (process 첫 번째만) `TlsMemory::functions()` 로 hook 을 걸고 예열한다 → config 의 개수만큼 `LazyReusablePool::reserve`. 두 번째 호출은 같은 객체와 SUCCESS.
+- `initializeContext()`: `Context::open(ContextConfiguration())` (기본값) → static 객체의 `initialize` 가 OpenSSL 을 `OPENSSL_INIT_NO_ATEXIT` 로 초기화하고 (process 첫 번째만) `TlsMemory::functions()` 로 hook 을 걸고 예열한다 → configuration 의 개수만큼 `LazyReusablePool::reserve` (기본 0 이라 아무것도 만들지 않는다). 두 번째 호출은 같은 객체와 SUCCESS.
 - `create*`: `_mutex` 안에서 `LazyReusablePool::acquire({ config, tls })` → Owner 의 `initialize` 가 `TlsMemory::Scope` 안에서 `_profile` 을 만들고 `_host.initialize(limits)`, `_listener.open(LISTENER_CAPACITY)` 를 한다. 서브풀의 등록표 발행은 `OwnerTlsMemory` 의 생성자가 한 번 (19.5).
 - accept / admit: `host.acquire({ socket, context, hostname, host.limits(), profile })` → `Connection::initialize(id, configuration)` → `onOpened(handler)`.
 - `run`: `Handler handler(callbacks, app_context, *this)` → `TlsMemory::Scope` 안에서 `_loop.run(_host, _listener, _acceptor, _profile, handler, stop_when_empty)` → `TlsMemory::detachThread()` → `_parker.unpark` (12절).
@@ -1760,7 +1763,7 @@ OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_
 | 절 | 고칠 것 |
 |---|---|
 | 1 (구조도), 2 (파일) | `Holder`, Context 의 heap Pool, `ContextPoolLayout`, `TlsPoolLayout`, `MAX_TLS_CONTEXTS`, `kiotty_holder.h`, `kiotty_notification_context.h` 를 지우고 `core/pool/` (`is_reusable`, `ReusablePool`, `LazyReusablePool`), `StageBase` / `Stage<N>`, `Parker`, `TlsMemory` 를 적는다 |
-| 3 (base.h) | handle 둘을 struct `{ owner, id }` 로, `KiottyNetConnectionOwner` tag, `KiottyNet_*MemorySize`, Context config 의 미리 만들기 항목. C++ `KiottyNet_Connection` 의 `operator==` / `operator<` |
+| 3 (base.h) | handle 둘을 struct `{ owner, id }` 로, `KiottyNetConnectionOwner` tag, `KiottyNet_*MemorySize`. `initializeContext(void)` 는 그대로 (Context 설정은 안의 기본값). C++ `KiottyNet_Connection` 의 `operator==` / `operator<` |
 | 4 (core) | `Stage(Pool&, capacity)` → `StageBase` + `Stage<N>`, `limit(capacity)`, `clear()`. StageSet 은 `Stage<N>` 셋 |
 | 7 (event) | `IoEvent` → `IoEvent` 구체 타입, 기본 생성자. `attach(event, socket, slot)` 이 제자리에서 채운다. `eventFor` 의 반환형 |
 | 8 (tls) | `TlsEngine(Pool&, ...)` → `Stage<N>` 둘. `decode(StageBase&)`. `open(TlsProfile&, hostname)`. `OPENSSL_INIT_NO_ATEXIT`, `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list`. `kiotty_tls_memory.h` 의 free 함수 셋 → `TlsMemory` |

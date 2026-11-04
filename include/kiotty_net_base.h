@@ -190,8 +190,20 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetCl
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfig* config, uint32_t max_trial, uint32_t trial_interval_ms);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfig* config, bool no_delay);
 
-typedef int64_t KiottyNetConnectionHandle;
-typedef int64_t KiottyNetConnectionStream;
+typedef struct KiottyNetConnectionOwner KiottyNetConnectionOwner;
+
+typedef struct KiottyNetConnectionHandle
+{
+    KiottyNetConnectionOwner* owner;
+    int64_t                   id;
+} KiottyNetConnectionHandle;
+
+typedef struct KiottyNetConnectionStream
+{
+    KiottyNetConnectionOwner* owner;
+    int64_t                   id;
+} KiottyNetConnectionStream;
+
 typedef void*   KiottyNetAppContext;
 typedef void*   KiottyNetConnectionContext;
 
@@ -285,6 +297,9 @@ typedef struct KiottyNetContextResult
 KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
+KIOTTY_NET_API size_t KiottyNet_serverMemorySize(void);
+KIOTTY_NET_API size_t KiottyNet_clientMemorySize(void);
+
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
 
 typedef struct KiottyNetStreamClientResult
@@ -333,6 +348,8 @@ KIOTTY_NET_API KiottyNetCode         KiottyNet_broadcastServer(KiottyNetServerHa
 
 #ifdef __cplusplus
 }
+
+#include <functional>
 
 #ifndef KIOTTY_NET_OWNED_HANDLE_DEFINED
 #define KIOTTY_NET_OWNED_HANDLE_DEFINED
@@ -515,6 +532,10 @@ public:
     KiottyNetConnectionHandle handle() const;
     KiottyNetConnectionInfo   info() const;
     KiottyNetCode             notify(KiottyNetSpan data);
+
+    bool operator==(const KiottyNet_Connection& other) const;
+    bool operator!=(const KiottyNet_Connection& other) const;
+    bool operator<(const KiottyNet_Connection& other) const;
 
 private:
     KiottyNetConnectionHandle _handle;
@@ -854,6 +875,30 @@ inline KiottyNetCode KiottyNet_Connection::notify(KiottyNetSpan data)
     return KiottyNet_notifyConnection(_handle, data);
 }
 
+inline bool KiottyNet_Connection::operator==(const KiottyNet_Connection& other) const
+{
+    return _handle.owner == other._handle.owner && _handle.id == other._handle.id;
+}
+
+inline bool KiottyNet_Connection::operator!=(const KiottyNet_Connection& other) const
+{
+    return !(*this == other);
+}
+
+inline bool KiottyNet_Connection::operator<(const KiottyNet_Connection& other) const
+{
+    std::less<const KiottyNetConnectionOwner*> before;
+    if (before(_handle.owner, other._handle.owner))
+    {
+        return true;
+    }
+    if (before(other._handle.owner, _handle.owner))
+    {
+        return false;
+    }
+    return _handle.id < other._handle.id;
+}
+
 inline KiottyNet_ConnectionStream::KiottyNet_ConnectionStream(KiottyNetConnectionStream stream)
     : _stream(stream)
 {
@@ -913,13 +958,14 @@ inline KiottyNetCode KiottyNet_ConnectionStream::close(KiottyNetConnectionAction
 inline KiottyNetConnectionStream KiottyNet_ConnectionStream::release()
 {
     KiottyNetConnectionStream stream = _stream;
-    _stream = 0;
+    _stream.owner = nullptr;
+    _stream.id    = 0;
     return stream;
 }
 
 inline void KiottyNet_ConnectionStream::reset()
 {
-    if (_stream == 0)
+    if (_stream.owner == nullptr)
     {
         return;
     }

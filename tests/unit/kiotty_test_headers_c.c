@@ -5,6 +5,8 @@
 
 #include "kiotty_test_headers.h"
 
+#include <stddef.h>
+
 KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
 {
     KiottyTestHeaderLayout layout;
@@ -13,6 +15,10 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.connection_decision  = sizeof(KiottyNetConnectionDecision);
     layout.connection_handler   = sizeof(KiottyNetConnectionHandler);
     layout.connection_info      = sizeof(KiottyNetConnectionInfo);
+    layout.connection_handle    = sizeof(KiottyNetConnectionHandle);
+    layout.connection_stream    = sizeof(KiottyNetConnectionStream);
+    layout.connection_handle_id_offset = offsetof(KiottyNetConnectionHandle, id);
+    layout.connection_stream_id_offset = offsetof(KiottyNetConnectionStream, id);
     layout.server_config        = sizeof(KiottyNetServerConfig);
     layout.client_config        = sizeof(KiottyNetClientConfig);
     layout.tls_server_config    = sizeof(KiottyNetTlsServerConfig);
