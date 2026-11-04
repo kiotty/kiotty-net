@@ -3,7 +3,6 @@
 
 #include "base/tls/kiotty_tls_engine.h"
 #include "base/tls/kiotty_tls_profile.h"
-#include "core/kiotty_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <cstring>
@@ -12,7 +11,7 @@
 
 namespace kiotty_test
 {
-    using kiotty::Stage;
+    using kiotty::StageBase;
     using kiotty::net::TlsEngine;
     using kiotty::net::TlsProfile;
     using kiotty::net::TlsStep;
@@ -57,7 +56,7 @@ namespace kiotty_test
         return config;
     }
 
-    inline void put(Stage& stage, const std::string& bytes)
+    inline void put(StageBase& stage, const std::string& bytes)
     {
         char* target = stage.provider().prepare(bytes.size());
         if (target == nullptr)
@@ -68,7 +67,7 @@ namespace kiotty_test
         stage.provider().commit(bytes.size());
     }
 
-    inline std::string take(Stage& stage)
+    inline std::string take(StageBase& stage)
     {
         size_t readable = stage.consumer().readable();
         std::string bytes(stage.consumer().peek(), readable);
@@ -79,8 +78,8 @@ namespace kiotty_test
 
     inline size_t move(TlsEngine& from, TlsEngine& to, size_t limit = static_cast<size_t>(-1))
     {
-        Stage& source = from.cipherSend();
-        Stage& target = to.cipherReceive();
+        StageBase& source = from.cipherSend();
+        StageBase& target = to.cipherReceive();
         size_t length = source.consumer().readable();
         size_t room = target.provider().writable();
         if (length > room)
@@ -104,10 +103,12 @@ namespace kiotty_test
     class TlsPump
     {
     public:
-        explicit TlsPump(kiotty::Pool& pool, size_t capacity = 16384)
-            : server(pool, capacity, capacity)
-            , client(pool, capacity, capacity)
+        explicit TlsPump(size_t capacity = KIOTTY_NET_MAX_RECV_CAPACITY)
+            : server()
+            , client()
         {
+            server.limit(capacity, capacity);
+            client.limit(capacity, capacity);
         }
 
         KiottyNetCode open(TlsProfile& server_profile, TlsProfile& client_profile, const char* hostname = "localhost")

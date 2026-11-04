@@ -50,7 +50,7 @@ namespace kiotty
 
 #if KIOTTY_NET_TLS_STATIC_POOL
             struct TlsPoolTag;
-            typedef StaticPool<TlsPoolTag, TlsPoolLayout> TlsPool;
+            typedef StaticPool<TlsPoolTag, ProcessTlsLayout> TlsPool;
 
             void* hookAllocate(size_t size, const char* file, int line)
             {
@@ -271,13 +271,6 @@ namespace kiotty
                 return digits_and_dots;
             }
 
-            void clear(Stage& stage)
-            {
-                Stage::Consumer consumer = stage.consumer();
-                size_t readable = consumer.readable();
-                consumer.commit(readable);
-                stage.compact();
-            }
         }
 
         bool tlsSupported()
@@ -529,8 +522,8 @@ namespace kiotty
         void TlsEngine::close()
         {
             _active = false;
-            clear(_cipher_receive);
-            clear(_cipher_send);
+            _cipher_receive.clear();
+            _cipher_send.clear();
         }
 
         TlsStep TlsEngine::handshake()
@@ -578,7 +571,7 @@ namespace kiotty
                 }
                 return fail(KIOTTY_TLS_HANDSHAKE_FAILED, lastErrorMessage());
             }
-            Stage::Consumer waiting = _cipher_send.consumer();
+            StageBase::Consumer waiting = _cipher_send.consumer();
             if (waiting.readable() > 0)
             {
                 return TlsStep::SEND;
@@ -590,7 +583,7 @@ namespace kiotty
             return TlsStep::RECEIVE;
         }
 
-        DecodeResult TlsEngine::decode(Stage& plain)
+        DecodeResult TlsEngine::decode(StageBase& plain)
         {
             if (!_active || _failed)
             {
@@ -601,7 +594,7 @@ namespace kiotty
             feed();
             size_t total = 0;
             KiottyNetCode code = KIOTTY_SUCCESS;
-            Stage::Provider provider = plain.provider();
+            StageBase::Provider provider = plain.provider();
             while (provider.writable() > 0)
             {
                 size_t room = provider.writable();
@@ -672,12 +665,12 @@ namespace kiotty
             {
                 return;
             }
-            Stage::Consumer waiting = _cipher_send.consumer();
+            StageBase::Consumer waiting = _cipher_send.consumer();
             if (waiting.readable() == 0)
             {
                 _cipher_send.compact();
             }
-            Stage::Provider provider = _cipher_send.provider();
+            StageBase::Provider provider = _cipher_send.provider();
             size_t bound = tlsCipherBound(plain.length);
             size_t need = pending() + bound;
             assert(need <= provider.writable());
@@ -723,7 +716,7 @@ namespace kiotty
 
         size_t TlsEngine::feed()
         {
-            Stage::Consumer consumer = _cipher_receive.consumer();
+            StageBase::Consumer consumer = _cipher_receive.consumer();
             size_t readable = consumer.readable();
             size_t room = BIO_ctrl_get_write_guarantee(_network);
             size_t length = readable < room ? readable : room;
@@ -739,12 +732,12 @@ namespace kiotty
 
         size_t TlsEngine::flush()
         {
-            Stage::Consumer waiting = _cipher_send.consumer();
+            StageBase::Consumer waiting = _cipher_send.consumer();
             if (waiting.readable() == 0)
             {
                 _cipher_send.compact();
             }
-            Stage::Provider provider = _cipher_send.provider();
+            StageBase::Provider provider = _cipher_send.provider();
             size_t room = provider.writable();
             size_t queued = pending();
             size_t length = room < queued ? room : queued;

@@ -103,7 +103,7 @@ namespace kiotty
             return fail(KIOTTY_TLS_NOT_SUPPORTED, "tls: not supported");
         }
 
-        DecodeResult TlsEngine::decode(Stage& plain)
+        DecodeResult TlsEngine::decode(StageBase& plain)
         {
             (void)plain;
             return error(KIOTTY_TLS_NOT_SUPPORTED);

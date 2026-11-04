@@ -1,16 +1,15 @@
 #include "core/kiotty_stage.h"
-#include "support/kiotty_test_pool.h"
 
 #include <gtest/gtest.h>
 
 #include <cstring>
 
 using kiotty::Stage;
-using kiotty_test::TestPool;
+using kiotty::StageBase;
 
 namespace
 {
-    void write(Stage& stage, const char* bytes)
+    void write(StageBase& stage, const char* bytes)
     {
         size_t length = std::strlen(bytes);
         char* target = stage.provider().prepare(length);
@@ -22,8 +21,7 @@ namespace
 
 TEST(Stage, PrepareThenCommitMakesBytesReadable)
 {
-    TestPool pool;
-    Stage stage(pool, 16);
+    Stage<16> stage;
     write(stage, "hello");
     EXPECT_EQ(stage.consumer().readable(), 5u);
     EXPECT_EQ(std::memcmp(stage.consumer().peek(), "hello", 5), 0);
@@ -31,8 +29,7 @@ TEST(Stage, PrepareThenCommitMakesBytesReadable)
 
 TEST(Stage, ConsumerPeekStaysUntilCommit)
 {
-    TestPool pool;
-    Stage stage(pool, 16);
+    Stage<16> stage;
     write(stage, "abcdef");
     char* first = stage.consumer().peek();
     char* second = stage.consumer().peek();
@@ -45,8 +42,7 @@ TEST(Stage, ConsumerPeekStaysUntilCommit)
 
 TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 {
-    TestPool pool;
-    Stage stage(pool, 16);
+    Stage<16> stage;
     char* target = stage.provider().prepare(10);
     ASSERT_NE(target, nullptr);
     stage.provider().commit(4);
@@ -56,8 +52,7 @@ TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 
 TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "12345678");
     EXPECT_EQ(stage.provider().writable(), 0u);
     stage.consumer().commit(3);
@@ -66,8 +61,7 @@ TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 
 TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "12345678");
     stage.consumer().commit(5);
     stage.compact();
@@ -78,8 +72,7 @@ TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 
 TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "1234");
     stage.consumer().commit(4);
     stage.compact();
@@ -89,8 +82,7 @@ TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 
 TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "123");
     EXPECT_EQ(stage.provider().prepare(6), nullptr);
     EXPECT_EQ(stage.provider().writable(), 5u);
@@ -99,8 +91,7 @@ TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 
 TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "123456");
     EXPECT_DEBUG_DEATH(stage.provider().commit(3), "");
 #if defined(NDEBUG)
@@ -111,8 +102,7 @@ TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 {
-    TestPool pool;
-    Stage stage(pool, 8);
+    Stage<8> stage;
     write(stage, "123");
     EXPECT_DEBUG_DEATH(stage.consumer().commit(4), "");
 #if defined(NDEBUG)
@@ -122,9 +112,7 @@ TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 {
-    TestPool pool;
-    Stage stage(pool, 0);
-    EXPECT_TRUE(stage.valid());
+    Stage<0> stage;
     EXPECT_EQ(stage.capacity(), 0u);
     EXPECT_EQ(stage.provider().writable(), 0u);
     EXPECT_EQ(stage.consumer().readable(), 0u);
@@ -136,8 +124,7 @@ TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 
 TEST(Stage, SingleByteCapacityRoundTrips)
 {
-    TestPool pool;
-    Stage stage(pool, 1);
+    Stage<1> stage;
     write(stage, "x");
     EXPECT_EQ(stage.provider().writable(), 0u);
     EXPECT_EQ(*stage.consumer().peek(), 'x');
@@ -148,19 +135,54 @@ TEST(Stage, SingleByteCapacityRoundTrips)
     EXPECT_EQ(*stage.consumer().peek(), 'y');
 }
 
-TEST(Stage, TakesItsBufferFromThePoolAndGivesItBackOnDestruction)
+TEST(Stage, LimitBelowCapacityMakesWritableTheLimit)
 {
-    typedef kiotty::PoolLayout<kiotty::BlockClass<64, 1>> OneBlock;
-    kiotty::Pool pool(OneBlock::classes(), OneBlock::CLASS_COUNT);
-    {
-        Stage first(pool, 64);
-        EXPECT_TRUE(first.valid());
-        Stage second(pool, 64);
-        EXPECT_FALSE(second.valid());
-        EXPECT_EQ(second.capacity(), 0u);
-        EXPECT_EQ(second.provider().prepare(1), nullptr);
-    }
-    Stage again(pool, 64);
-    EXPECT_TRUE(again.valid());
-    EXPECT_EQ(pool.failureCount(), 1u);
+    Stage<4096> stage;
+    EXPECT_EQ(stage.capacity(), 4096u);
+    EXPECT_EQ(stage.maximum(), 4096u);
+    stage.limit(100);
+    EXPECT_EQ(stage.capacity(), 100u);
+    EXPECT_EQ(stage.maximum(), 4096u);
+    EXPECT_EQ(stage.provider().writable(), 100u);
+    EXPECT_EQ(stage.provider().prepare(101), nullptr);
+    EXPECT_NE(stage.provider().prepare(100), nullptr);
+    stage.limit(0);
+    EXPECT_EQ(stage.capacity(), 0u);
+    EXPECT_EQ(stage.provider().prepare(1), nullptr);
+    EXPECT_EQ(stage.consumer().peek(), nullptr);
+}
+
+TEST(Stage, LimitAboveTheMaximumIsClampedToTheMaximum)
+{
+    Stage<64> stage;
+    stage.limit(65);
+    EXPECT_EQ(stage.capacity(), 64u);
+}
+
+TEST(Stage, LimitOnANonEmptyStageAssertsInDebug)
+{
+    Stage<64> stage;
+    write(stage, "abc");
+    EXPECT_DEBUG_DEATH(stage.limit(32), "");
+}
+
+TEST(Stage, ClearResetsBothPositionsWithoutTouchingTheLimit)
+{
+    Stage<64> stage;
+    stage.limit(32);
+    write(stage, "abcdef");
+    stage.consumer().commit(2);
+    stage.clear();
+    EXPECT_EQ(stage.consumer().readable(), 0u);
+    EXPECT_EQ(stage.provider().writable(), 32u);
+    EXPECT_EQ(stage.capacity(), 32u);
+}
+
+TEST(Stage, StageBaseReferenceSeesTheSameBytesAsTheStage)
+{
+    Stage<64> stage;
+    StageBase& base = stage;
+    write(base, "kiotty");
+    EXPECT_EQ(stage.consumer().readable(), 6u);
+    EXPECT_EQ(std::memcmp(stage.consumer().peek(), "kiotty", 6), 0);
 }

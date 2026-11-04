@@ -1,4 +1,3 @@
-#include "core/kiotty_pool.h"
 #include "support/kiotty_test_tls.h"
 
 #include <openssl/crypto.h>
@@ -13,6 +12,7 @@
 #include <vector>
 
 using kiotty::Stage;
+using kiotty::StageBase;
 using kiotty::net::DecodeResult;
 using kiotty::net::TlsEngine;
 using kiotty::net::TlsProfile;
@@ -299,20 +299,7 @@ namespace
         return config;
     }
 
-    size_t g_stage_bytes = 65536;
-
-    typedef kiotty::PoolLayout<
-        kiotty::BlockClass<4096, 1024>,
-        kiotty::BlockClass<16384, 1024>,
-        kiotty::BlockClass<32768, 1024>,
-        kiotty::BlockClass<81920, 1024>
-    > StageLayout;
-
-    kiotty::Pool& stagePool()
-    {
-        static kiotty::Pool pool(StageLayout::classes(), StageLayout::CLASS_COUNT);
-        return pool;
-    }
+    size_t g_stage_bytes = KIOTTY_NET_MAX_RECV_CAPACITY;
     size_t g_message_bytes = 65536;
 
     KiottyNetSpan spanOf(const std::string& text)
@@ -335,7 +322,7 @@ namespace
     struct Pair
     {
         Pair()
-            : pump(stagePool(), g_stage_bytes)
+            : pump(g_stage_bytes)
             , server_last(TlsStep::RECEIVE)
             , client_last(TlsStep::RECEIVE)
         {
@@ -355,7 +342,7 @@ namespace
         return client_moved || server_moved;
     }
 
-    void decodeAll(TlsEngine& engine, Stage& plain, Tag tag)
+    void decodeAll(TlsEngine& engine, StageBase& plain, Tag tag)
     {
         TagScope scope(tag);
         for (;;)
@@ -369,7 +356,7 @@ namespace
         }
     }
 
-    void drain(TlsEngine& from, TlsEngine& to, Stage& plain, Tag tag)
+    void drain(TlsEngine& from, TlsEngine& to, StageBase& plain, Tag tag)
     {
         for (;;)
         {
@@ -409,7 +396,8 @@ namespace
                 }
             }
         }
-        Stage plain(stagePool(), g_stage_bytes);
+        Stage<KIOTTY_NET_MAX_RECV_CAPACITY> plain;
+        plain.limit(g_stage_bytes);
         for (size_t i = 0; i < pairs.size(); ++i)
         {
             if (pairs[i]->server_last != TlsStep::DONE || pairs[i]->client_last != TlsStep::DONE)
@@ -578,7 +566,7 @@ int main(int argc, char** argv)
     {
         std::printf("  %s live %zu B\n", TAG_NAMES[tag], g_ledgers[tag].live_bytes);
     }
-    std::printf("== TlsPoolLayout (tlsBlocks(global, profile, connection))\n");
+    std::printf("== TlsLayoutOf (Blocks::count(global, profile, connection))\n");
     size_t connection_bytes = 0;
     for (size_t index = 0; index < CLASS_COUNT; ++index)
     {
@@ -590,7 +578,7 @@ int main(int argc, char** argv)
             continue;
         }
         connection_bytes += connection * CLASS_BYTES[index];
-        std::printf("            BlockClass<%zu, tlsBlocks(%zu, %zu, %zu)>,\n", CLASS_BYTES[index], global, profile, connection);
+        std::printf("            BlockClass<%zu, Blocks::count(%zu, %zu, %zu)>,\n", CLASS_BYTES[index], global, profile, connection);
     }
     std::printf("  beyond the largest class: %zu blocks\n", g_connection_blocks[CLASS_COUNT] + g_ledgers[TAG_WARM].classes[CLASS_COUNT].peak);
     std::printf("  class-rounded bytes per connection: %zu\n", connection_bytes);

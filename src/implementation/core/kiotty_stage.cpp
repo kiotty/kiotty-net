@@ -5,26 +5,26 @@
 
 namespace kiotty
 {
-    Stage::Provider::Provider(Stage& stage)
+    StageBase::Provider::Provider(StageBase& stage)
         : _stage(stage)
     {
     }
 
-    size_t Stage::Provider::writable() const
+    size_t StageBase::Provider::writable() const
     {
         return _stage._capacity - _stage._end_pos;
     }
 
-    char* Stage::Provider::prepare(size_t requested)
+    char* StageBase::Provider::prepare(size_t requested)
     {
-        if (requested > writable())
+        if (_stage._capacity == 0 || requested > writable())
         {
             return nullptr;
         }
         return _stage._buffer + _stage._end_pos;
     }
 
-    void Stage::Provider::commit(size_t written)
+    void StageBase::Provider::commit(size_t written)
     {
         size_t room = writable();
         assert(written <= room);
@@ -35,26 +35,26 @@ namespace kiotty
         _stage._end_pos += written;
     }
 
-    Stage::Consumer::Consumer(Stage& stage)
+    StageBase::Consumer::Consumer(StageBase& stage)
         : _stage(stage)
     {
     }
 
-    size_t Stage::Consumer::readable() const
+    size_t StageBase::Consumer::readable() const
     {
         return _stage._end_pos - _stage._begin_pos;
     }
 
-    char* Stage::Consumer::peek()
+    char* StageBase::Consumer::peek()
     {
-        if (_stage._buffer == nullptr)
+        if (_stage._capacity == 0)
         {
             return nullptr;
         }
         return _stage._buffer + _stage._begin_pos;
     }
 
-    void Stage::Consumer::commit(size_t consumed)
+    void StageBase::Consumer::commit(size_t consumed)
     {
         size_t ready = readable();
         assert(consumed <= ready);
@@ -65,53 +65,36 @@ namespace kiotty
         _stage._begin_pos += consumed;
     }
 
-    Stage::Stage(Pool& pool, size_t capacity)
-        : _pool(pool)
-        , _buffer(nullptr)
-        , _capacity(0)
+    StageBase::StageBase(char* buffer, size_t maximum)
+        : _buffer(buffer)
+        , _maximum(maximum)
+        , _capacity(maximum)
         , _begin_pos(0)
         , _end_pos(0)
-        , _valid(true)
     {
-        if (capacity == 0)
-        {
-            return;
-        }
-        _buffer = static_cast<char*>(_pool.allocate(capacity));
-        if (_buffer == nullptr)
-        {
-            _valid = false;
-            return;
-        }
-        _capacity = capacity;
     }
 
-    Stage::~Stage()
-    {
-        _pool.release(_buffer);
-    }
-
-    bool Stage::valid() const
-    {
-        return _valid;
-    }
-
-    size_t Stage::capacity() const
+    size_t StageBase::capacity() const
     {
         return _capacity;
     }
 
-    Stage::Provider Stage::provider()
+    size_t StageBase::maximum() const
+    {
+        return _maximum;
+    }
+
+    StageBase::Provider StageBase::provider()
     {
         return Provider(*this);
     }
 
-    Stage::Consumer Stage::consumer()
+    StageBase::Consumer StageBase::consumer()
     {
         return Consumer(*this);
     }
 
-    void Stage::compact()
+    void StageBase::compact()
     {
         size_t unread = _end_pos - _begin_pos;
         if (unread > 0 && _begin_pos > 0)
@@ -120,5 +103,22 @@ namespace kiotty
         }
         _begin_pos = 0;
         _end_pos = unread;
+    }
+
+    void StageBase::clear()
+    {
+        _begin_pos = 0;
+        _end_pos = 0;
+    }
+
+    void StageBase::limit(size_t capacity)
+    {
+        assert(_end_pos == _begin_pos);
+        if (capacity > _maximum)
+        {
+            capacity = _maximum;
+        }
+        _capacity = capacity;
+        clear();
     }
 }

@@ -4,17 +4,10 @@ namespace kiotty
 {
     namespace net
     {
-        namespace
-        {
-            const size_t RECORD_PLAIN_BYTES = 16384;
-            const size_t RECORD_OVERHEAD_BYTES = 64;
-            const size_t CONTROL_RESERVE_BYTES = 512;
-        }
-
         size_t tlsCipherBound(size_t plain_length)
         {
-            size_t records = plain_length / RECORD_PLAIN_BYTES + 1;
-            size_t overhead = records * RECORD_OVERHEAD_BYTES;
+            size_t records = plain_length / TLS_RECORD_PLAIN_BYTES + 1;
+            size_t overhead = records * TLS_RECORD_OVERHEAD_BYTES;
             return plain_length + overhead;
         }
 
@@ -25,12 +18,12 @@ namespace kiotty
                 return 0;
             }
             size_t bound = tlsCipherBound(plain_capacity);
-            return bound + CONTROL_RESERVE_BYTES;
+            return bound + TLS_CONTROL_RESERVE_BYTES;
         }
 
-        TlsEngine::TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity)
-            : _cipher_receive(pool, receive_capacity)
-            , _cipher_send(pool, tlsCipherCapacity(send_capacity))
+        TlsEngine::TlsEngine()
+            : _cipher_receive()
+            , _cipher_send()
             , _ssl(nullptr)
             , _network(nullptr)
             , _active(false)
@@ -45,12 +38,18 @@ namespace kiotty
             return _active;
         }
 
-        Stage& TlsEngine::cipherReceive()
+        void TlsEngine::limit(size_t receive_capacity, size_t send_capacity)
+        {
+            _cipher_receive.limit(receive_capacity);
+            _cipher_send.limit(tlsCipherCapacity(send_capacity));
+        }
+
+        StageBase& TlsEngine::cipherReceive()
         {
             return _cipher_receive;
         }
 
-        Stage& TlsEngine::cipherSend()
+        StageBase& TlsEngine::cipherSend()
         {
             return _cipher_send;
         }

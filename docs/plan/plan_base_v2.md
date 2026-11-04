@@ -39,10 +39,12 @@ v1 과 달라진 것 중 코드에 닿는 것 (설계 v4 19.9 의 표를 층으�
 
 ### R6. core/pool, Stage, Parker, memory limits (사이클 2, 4 재방문)
 
+> 11-05 정정: Stage 를 바꾸면 TlsEngine 이 바로 깨지므로 TlsEngine 의 `Stage<N>` 멤버와 `limit()` 을 R8 에서 R6 으로 당겼다. `kiotty_holder.h` 는 event listener 가 쓰므로 R7 에서 지운다. OpenSSL 의 정적 Pool 은 R8 까지 `ProcessTlsLayout` (전역 + Server 몫 × MAX_SERVERS + client 몫 × 나머지) 하나로 둔다. 그래서 R6 의 commit 도 매트릭스가 초록이다.
+
 | 구현 | `core/pool/`: `kiotty_pool_handle.h` (`PoolHandle { generation, index }`, `value()` / `fromValue()`. type · owner · context 비트 없음), `kiotty_pool_layout.h` (이사만), `kiotty_pool.h` (`PoolBase` 가상 인터페이스 allocate / reallocate / release / holds 와 `Pool<Layout>`. arena 가 멤버. 지금의 `.cpp` 를 template 으로), `kiotty_static_pool.h` (이사만), `kiotty_reusable.h` (`is_reusable`, has_initialize / has_reset 검출), `kiotty_reusable_pool.h` (`ReusablePool<T, N>`: `std::array<T, N>`, EMPTY / ACTIVE, slot 에 붙은 generation, acquire / release / find / at / all / count), `kiotty_lazy_reusable_pool.h` (`LazyReusablePool<T, N>`: `std::array<std::unique_ptr<T>, N>`, EMPTY / ACTIVE / RETIRED, acquire / release / reserve / find / all). `core/kiotty_parker.h` (`park<Ready>(ready, timeout_ms)`, `unpark<Change>(change)`). `core/kiotty_stage.h`: `StageBase` (포인터 + capacity + limit, provider / consumer / compact / `limit(capacity)` / `clear()`) 와 `Stage<N>` (`std::array<char, N>` 위의 StageBase). `StageSet` 은 `Stage<MAX_RECV>`, `Stage<MAX_SEND>`, `Stage<MAX_PUSH>` 셋. `core/kiotty_holder.h` 삭제. `base/pool/kiotty_memory_limits.h`: `MAX_SERVERS` / `MAX_STREAM_CLIENTS` / `MAX_EVENT_CLIENTS` (`MAX_OWNERS`, `TLS_CONTEXTS` 삭제). `kiotty_memory_layout.h`: `GlobalTlsLayout`, `ServerTlsLayout`, `ClientTlsLayout`, `CIPHER_SEND_BYTES` (`ContextPoolLayout`, `TlsPoolLayout` 삭제). CMake cache 변수 같이. `base/context/kiotty_context.h/.cpp` 의 사이클 4 코드 (Pool 멤버, `useTlsStaticPool` 호출) 는 지운다. Context 는 사이클 7 에서 13절대로 새로 만든다. hook 설치는 R8 의 `TlsMemory::functions()` 로 간다 |
 |---|---|
 | 테스트 | R4 로 고친 5절: `PoolHandle` 넷, `Stage` (Pool 없는 `Stage<N>`, limit, clear), `StageSet`, `ReusablePool` 6, `LazyReusablePool` 6, `Parker` 3, `MemoryLimits`, 세 TlsLayout 의 등급이 16 B 배수이고 개수 > 0 (TLS OFF 면 ARENA_BYTES 0). `kiotty_test_holder.cpp`, `kiotty_test_context.cpp` 삭제 (Context 셋은 R8 의 TlsMemory 로). `support/kiotty_test_pool.h` 의 TestPool 은 `Pool<Layout>` 위에. `is_reusable` 이 복사 가능한 T 를 거부하는 것은 `static_assert` 가 아니라 `is_reusable<CopyableT>::value == false` 로 본다 |
-| 완료 | MSVC Debug 와 WSL gcc / clang unit 초록 (tls_pool_tests 는 R8 까지 제외) |
+| 완료 | MSVC Debug TLS ON / OFF, WSL gcc / clang TLS ON / OFF, clang ASan+UBSan, TSan 전부 초록 (tls_pool_tests 포함) |
 | commit | `core: pool folder with ReusablePool and LazyReusablePool, StageBase and Stage<N>, Parker, PoolHandle without owner bits` |
 
 ### R7. event : IoEvent 구체 타입 (사이클 3b, 3c 재방문)
@@ -53,13 +55,13 @@ v1 과 달라진 것 중 코드에 닿는 것 (설계 v4 19.9 의 표를 층으�
 | 완료 | MSVC (IOCP 5 회 반복), WSL gcc / clang / ASan / TSan (epoll 10 회 반복) 초록 |
 | commit | `event: IoEvent is a concrete backend type filled in place by attach` |
 
-### R8. tls : TlsEngine 위의 Stage<N>, TlsMemory (사이클 4 재방문)
+### R8. tls : TlsMemory (TlsEngine 의 Stage<N> 은 R6 에서 끝) (사이클 4 재방문)
 
 | 구현 | `kiotty_tls_engine.h`: `TlsEngine()` 기본 생성자, `Stage<MAX_RECV_CAPACITY>` cipherReceive 와 `Stage<CIPHER_SEND_BYTES>` cipherSend 를 멤버로 (TLS OFF 면 N 0). `open(TlsProfile&, const char* hostname)`, `decode(StageBase&)`, `encode(KiottyNetSpan)`. `kiotty_tls_memory.h`: `TlsMemoryFunctions`, `TlsMemory` (static: `functions`, `installed`, `detachThread`, `lateFrees`, `globalUsage`. private static: `thread()`, `attachThread`, `allocate` / `reallocate` / `release`, `arenaOf`, `GlobalArena : PoolBase` 하나, 등록표 `s_ranges[MAX_SERVERS + MAX_STREAM_CLIENTS + MAX_EVENT_CLIENTS]` 와 `atomic_flag`. 인스턴스: `Scope` (생성자가 attachThread → `_previous` 참조 → current 를 서브풀로), `failures()`, protected `TlsMemory(PoolBase&)` 와 `publish()`), `OwnerTlsMemory<Layout>`. backend: `installTlsMemory(functions)` (`CRYPTO_set_mem_functions`. 기본 malloc 이 아닌 hook 이 이미 있으면 덮지 않는다), `attachThread` 의 `ERR_clear_error` + `RAND_bytes`, `detachThread` 의 `OPENSSL_thread_stop`, `OPENSSL_INIT_NO_ATEXIT`, `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list(16 KiB)`. `Context::open` 이 할 OpenSSL 초기화 + hook + 예열은 `TlsMemory::installGlobal()` 같은 static 하나로 두고 사이클 7 의 Context 가 부른다. 계측 도구 (`tests/measure`) 는 등급 표의 출력을 세 Layout 이름으로 |
 |---|---|
-| 테스트 | 8절 (TlsProfile 6, TlsEngine 23 + 3) 은 모양만 (`TlsPump` 가 `TlsEngine` 둘을 멤버로). `kiotty_net_tls_pool_tests` 를 `TlsMemory` 로 다시: `InstalledIsFalseWhenAnotherAllocatorIsAlreadyThere` (unit 실행 파일의 세는 hook), `HandshakeInsideAScopeTakesBlocksFromThatOwnersSubpoolOnly`, `GlobalStateStaysInTheGlobalArenaAfterAttachThread` (전역 꼬리표 격리), `SubpoolExhaustionFailsOnlyThatHandshake` (서브풀 바닥), `ReleaseAfterPublishIsNotALateFree`, `DetachThreadReturnsCurrentToGlobal`. `TlsMemory(_pool)` 이 생성 전 멤버를 읽지 않는 것은 ASan / UBSan job 이 본다 |
+| 테스트 | 8절 (TlsProfile 6, TlsEngine 23 + 3) 은 모양만 (`TlsPump` 가 `TlsEngine` 둘을 멤버로). `ProcessTlsLayout` 을 지우고 `kiotty_net_tls_pool_tests` 를 `TlsMemory` 로 다시: `InstalledIsFalseWhenAnotherAllocatorIsAlreadyThere` (unit 실행 파일의 세는 hook), `HandshakeInsideAScopeTakesBlocksFromThatOwnersSubpoolOnly`, `GlobalStateStaysInTheGlobalArenaAfterAttachThread` (전역 꼬리표 격리), `SubpoolExhaustionFailsOnlyThatHandshake` (서브풀 바닥), `ReleaseAfterPublishIsNotALateFree`, `DetachThreadReturnsCurrentToGlobal`. `TlsMemory(_pool)` 이 생성 전 멤버를 읽지 않는 것은 ASan / UBSan job 이 본다 |
 | 완료 | TLS ON / OFF 매트릭스 초록. 여기서 R6 ~ R8 을 push |
-| commit | `tls: TlsEngine owns its cipher stages, TlsMemory routes OpenSSL into the global arena and owner subpools` |
+| commit | `tls: TlsMemory routes OpenSSL into the global arena and owner subpools` |
 
 ## 2부. 앞으로 할 사이클
 
@@ -152,4 +154,4 @@ v0 12절의 일곱 가지와 v1 4절의 다섯 가지는 그대로다. 19절로 
 
 ## 5. 지금 할 일
 
-R4, R5 끝 (11-04). 다음은 R6 → R7 → R8 (여기서 push) → 4b.
+R4, R5 (11-04), R6 (11-05) 끝. 다음은 R7 → R8 (여기서 push) → 4b.

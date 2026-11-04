@@ -1,4 +1,4 @@
-#include "core/kiotty_pool.h"
+#include "core/pool/kiotty_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <benchmark/benchmark.h>
@@ -9,7 +9,7 @@ typedef kiotty::PoolLayout<kiotty::BlockClass<64, 1024>, kiotty::BlockClass<4096
 
 static void PoolAllocateRelease(benchmark::State& state)
 {
-    kiotty::Pool pool(BenchLayout::classes(), BenchLayout::CLASS_COUNT);
+    static kiotty::Pool<BenchLayout> pool;
     for (auto _ : state)
     {
         void* block = pool.allocate(64);
@@ -21,8 +21,7 @@ BENCHMARK(PoolAllocateRelease);
 
 static void StageProvideConsume(benchmark::State& state)
 {
-    kiotty::Pool pool(BenchLayout::classes(), BenchLayout::CLASS_COUNT);
-    kiotty::Stage stage(pool, 4096);
+    kiotty::Stage<4096> stage;
     char message[64] = {};
     for (auto _ : state)
     {

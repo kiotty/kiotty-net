@@ -1,12 +1,13 @@
 #if !defined(KIOTTY_STATIC_POOL_H)
 #define KIOTTY_STATIC_POOL_H
 
-#include "core/kiotty_pool_layout.h"
+#include "core/pool/kiotty_pool_layout.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 
 namespace kiotty
 {
@@ -47,16 +48,18 @@ namespace kiotty
 
         static bool holds(const void* block)
         {
-            uintptr_t address = reinterpret_cast<uintptr_t>(block);
-            uintptr_t begin = reinterpret_cast<uintptr_t>(s_arena);
-            uintptr_t end = begin + ARENA_BYTES;
-            return address >= begin && address < end;
+            const unsigned char* address = static_cast<const unsigned char*>(block);
+            std::less<const unsigned char*> before;
+            if (before(address, s_arena))
+            {
+                return false;
+            }
+            return before(address, s_arena + ARENA_BYTES);
         }
 
         static bool aligned(const void* block)
         {
-            uintptr_t offset = reinterpret_cast<uintptr_t>(block) - reinterpret_cast<uintptr_t>(s_arena);
-            return offset % Class::BLOCK_BYTES == 0;
+            return offsetOf(block) % Class::BLOCK_BYTES == 0;
         }
 
         static void fail()
@@ -92,10 +95,15 @@ namespace kiotty
             s_lock.clear(std::memory_order_release);
         }
 
+        static size_t offsetOf(const void* block)
+        {
+            const unsigned char* address = static_cast<const unsigned char*>(block);
+            return static_cast<size_t>(address - s_arena);
+        }
+
         static size_t indexOf(const void* block)
         {
-            uintptr_t offset = reinterpret_cast<uintptr_t>(block) - reinterpret_cast<uintptr_t>(s_arena);
-            return static_cast<size_t>(offset / Class::BLOCK_BYTES);
+            return offsetOf(block) / Class::BLOCK_BYTES;
         }
 
         static unsigned char* blockAt(size_t index)

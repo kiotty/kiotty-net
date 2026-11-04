@@ -3,6 +3,7 @@
 
 #include "base/tls/kiotty_tls_profile.h"
 #include "core/kiotty_result.h"
+#include "base/pool/kiotty_memory_layout.h"
 #include "core/kiotty_stage.h"
 #include "kiotty_net_base.h"
 
@@ -32,7 +33,7 @@ namespace kiotty
         class TlsEngine
         {
         public:
-            TlsEngine(Pool& pool, size_t receive_capacity, size_t send_capacity);
+            TlsEngine();
             ~TlsEngine();
 
             TlsEngine(const TlsEngine&) = delete;
@@ -41,12 +42,13 @@ namespace kiotty
             KiottyNetCode open(TlsProfile& profile, const char* hostname);
             void          close();
             bool          active() const;
+            void          limit(size_t receive_capacity, size_t send_capacity);
 
-            Stage& cipherReceive();
-            Stage& cipherSend();
+            StageBase& cipherReceive();
+            StageBase& cipherSend();
 
             TlsStep      handshake();
-            DecodeResult decode(Stage& plain);
+            DecodeResult decode(StageBase& plain);
             void         encode(KiottyNetSpan plain);
 
             KiottyNetCode lastCode() const;
@@ -63,8 +65,8 @@ namespace kiotty
             size_t  flush();
             size_t  pending() const;
 
-            Stage         _cipher_receive;
-            Stage         _cipher_send;
+            Stage<CIPHER_RECEIVE_BYTES> _cipher_receive;
+            Stage<CIPHER_SEND_BYTES>    _cipher_send;
             ssl_st*       _ssl;
             bio_st*       _network;
             bool          _active;

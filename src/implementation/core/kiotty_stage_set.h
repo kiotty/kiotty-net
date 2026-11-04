@@ -7,27 +7,31 @@
 
 namespace kiotty
 {
+    template <size_t Receive, size_t Send, size_t Notify>
     struct StageSet
     {
-        StageSet(Pool& pool, size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
+        void limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
+        void clear();
 
-        bool valid() const;
-
-        Stage receive;
-        Stage send;
-        Stage notify;
+        Stage<Receive> receive;
+        Stage<Send>    send;
+        Stage<Notify>  notify;
     };
 
-    inline StageSet::StageSet(Pool& pool, size_t receive_capacity, size_t send_capacity, size_t notify_capacity)
-        : receive(pool, receive_capacity)
-        , send(pool, send_capacity)
-        , notify(pool, notify_capacity)
+    template <size_t Receive, size_t Send, size_t Notify>
+    void StageSet<Receive, Send, Notify>::limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity)
     {
+        receive.limit(receive_capacity);
+        send.limit(send_capacity);
+        notify.limit(notify_capacity);
     }
 
-    inline bool StageSet::valid() const
+    template <size_t Receive, size_t Send, size_t Notify>
+    void StageSet<Receive, Send, Notify>::clear()
     {
-        return receive.valid() && send.valid() && notify.valid();
+        receive.clear();
+        send.clear();
+        notify.clear();
     }
 }
 

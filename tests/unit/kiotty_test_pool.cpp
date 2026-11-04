@@ -1,4 +1,4 @@
-#include "core/kiotty_pool.h"
+#include "core/pool/kiotty_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -10,7 +10,7 @@
 
 using kiotty::BlockClass;
 using kiotty::Pool;
-using kiotty::PoolClass;
+using kiotty::PoolBase;
 using kiotty::PoolLayout;
 
 namespace
@@ -25,8 +25,7 @@ namespace
 
 TEST(Pool, AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
-    ASSERT_TRUE(pool.valid());
+    Pool<ThreeClasses> pool;
     void* small = pool.allocate(20);
     void* middle = pool.allocate(33);
     void* large = pool.allocate(200);
@@ -43,7 +42,7 @@ TEST(Pool, AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock)
 
 TEST(Pool, AReleasedBlockIsTheNextOneHandedOut)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     void* first = pool.allocate(32);
     void* second = pool.allocate(32);
     EXPECT_NE(first, second);
@@ -55,7 +54,7 @@ TEST(Pool, AReleasedBlockIsTheNextOneHandedOut)
 
 TEST(Pool, UntouchedBlocksAreHandedOutInAddressOrder)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     char* first = static_cast<char*>(pool.allocate(32));
     char* second = static_cast<char*>(pool.allocate(32));
     char* third = static_cast<char*>(pool.allocate(32));
@@ -68,7 +67,7 @@ TEST(Pool, UntouchedBlocksAreHandedOutInAddressOrder)
 
 TEST(Pool, AFullClassSpillsIntoTheNextLargerClass)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     std::vector<void*> blocks;
     for (int i = 0; i < 4; ++i)
     {
@@ -87,7 +86,7 @@ TEST(Pool, AFullClassSpillsIntoTheNextLargerClass)
 
 TEST(Pool, WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     std::vector<void*> blocks;
     for (int i = 0; i < 10; ++i)
     {
@@ -105,7 +104,7 @@ TEST(Pool, WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure)
 TEST(Pool, ClassesMayBeListedInAnyOrder)
 {
     typedef PoolLayout<BlockClass<4096, 1>, BlockClass<64, 1>, BlockClass<1024, 1>> Unordered;
-    Pool pool(Unordered::classes(), Unordered::CLASS_COUNT);
+    Pool<Unordered> pool;
     void* small = pool.allocate(10);
     void* middle = pool.allocate(1000);
     void* large = pool.allocate(1025);
@@ -120,7 +119,7 @@ TEST(Pool, ClassesMayBeListedInAnyOrder)
 
 TEST(Pool, ReleaseRejectsPointersItDidNotHandOut)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     alignas(16) unsigned char outside[64] = {};
     EXPECT_FALSE(pool.release(outside));
     unsigned char* block = static_cast<unsigned char*>(pool.allocate(64));
@@ -131,7 +130,7 @@ TEST(Pool, ReleaseRejectsPointersItDidNotHandOut)
 
 TEST(Pool, ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero)
 {
-    Pool pool(ThreeClasses::classes(), ThreeClasses::CLASS_COUNT);
+    Pool<ThreeClasses> pool;
     char* block = static_cast<char*>(pool.allocate(10));
     std::memcpy(block, "kiotty", 7);
     EXPECT_EQ(pool.reallocate(block, 30), block);
@@ -145,26 +144,10 @@ TEST(Pool, ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero)
     EXPECT_EQ(pool.reallocate(outside, 8), nullptr);
 }
 
-TEST(Pool, ALayoutThatCannotBeReservedLeavesThePoolInvalid)
-{
-    PoolClass huge[] = { { 1u << 20, static_cast<size_t>(-1) / 2 } };
-    Pool overflowing(huge, 1);
-    EXPECT_FALSE(overflowing.valid());
-    EXPECT_EQ(overflowing.allocate(1), nullptr);
-    PoolClass many[Pool::MAX_CLASSES + 1];
-    for (size_t i = 0; i < Pool::MAX_CLASSES + 1; ++i)
-    {
-        many[i].block_bytes = 64;
-        many[i].block_count = 1;
-    }
-    Pool crowded(many, Pool::MAX_CLASSES + 1);
-    EXPECT_FALSE(crowded.valid());
-}
-
 TEST(Pool, ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice)
 {
     typedef PoolLayout<BlockClass<64, 64>> Shared;
-    Pool pool(Shared::classes(), Shared::CLASS_COUNT);
+    Pool<Shared> pool;
     std::atomic<int> collisions(0);
     std::vector<std::thread> threads;
     for (int t = 0; t < 4; ++t)
@@ -196,4 +179,30 @@ TEST(Pool, ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice)
     }
     EXPECT_EQ(collisions.load(), 0);
     EXPECT_EQ(pool.failureCount(), 0u);
+}
+
+TEST(Pool, ArenaIsAMemberSoTwoPoolsOfOneLayoutDoNotShareBlocks)
+{
+    Pool<ThreeClasses> first;
+    Pool<ThreeClasses> second;
+    void* block = first.allocate(32);
+    ASSERT_NE(block, nullptr);
+    EXPECT_TRUE(first.holds(block));
+    EXPECT_FALSE(second.holds(block));
+    EXPECT_FALSE(second.release(block));
+    EXPECT_TRUE(first.release(block));
+    EXPECT_EQ(sizeof(Pool<ThreeClasses>) >= Pool<ThreeClasses>::ARENA_BYTES, true);
+    EXPECT_EQ(Pool<ThreeClasses>::ARENA_BYTES, 32u * 4 + 64u * 4 + 256u * 2);
+}
+
+TEST(Pool, PoolBaseReferenceAllocatesAndReleasesThroughTheVirtualInterface)
+{
+    Pool<ThreeClasses> pool;
+    PoolBase& base = pool;
+    void* block = base.allocate(60);
+    ASSERT_NE(block, nullptr);
+    EXPECT_TRUE(base.holds(block));
+    EXPECT_EQ(base.reallocate(block, 64), block);
+    EXPECT_TRUE(base.release(block));
+    EXPECT_EQ(base.failureCount(), 0u);
 }

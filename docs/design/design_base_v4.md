@@ -1351,6 +1351,8 @@ typedef KiottyNetCode    code_type;
 typedef XxxConfiguration configuration_type;    // initialize 에 필요한 것 전부를 담은 struct 하나
 code_type initialize(PoolHandle id, configuration_type configuration);   // 풀이 id 를 준다 (core/pool/kiotty_pool_handle.h 의 { generation, index })
 void      reset() noexcept;                     // 멱등. 한 번도 initialize 되지 않았거나 반쯤 켜진 상태에서도 안전
+static const code_type TABLE_FULL;             // 풀이 찼을 때 acquire 가 돌려줄 code (enum 값이어도 된다. 풀이 code_type 으로 바꾼다)
+static const code_type OUT_OF_MEMORY;          // LazyReusablePool 만. new (std::nothrow) 가 실패했을 때
 // 기본 생성자만. 복사 / 이동 없음
 
 // core/pool/kiotty_reusable.h : 검출 idiom (C++11). ReusablePool 과 LazyReusablePool 이 static_assert 로 쓴다

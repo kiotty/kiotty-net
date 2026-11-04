@@ -12,7 +12,9 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_pool.cpp
     kiotty_test_static_pool.cpp
     kiotty_test_memory_layout.cpp
-    kiotty_test_context.cpp
+    kiotty_test_reusable_pool.cpp
+    kiotty_test_lazy_reusable_pool.cpp
+    kiotty_test_parker.cpp
     kiotty_test_clock.cpp
     kiotty_test_socket_error.cpp
     kiotty_test_io_action.cpp

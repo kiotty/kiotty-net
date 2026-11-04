@@ -1,4 +1,4 @@
-#include "core/kiotty_static_pool.h"
+#include "core/pool/kiotty_static_pool.h"
 
 #include <gtest/gtest.h>
 

@@ -215,7 +215,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Pool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td>4096 / 64 / 1024 순서로 줘도 가장 작은 등급부터</td></tr>
   <tr><td>Pool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>arena 밖, 블록 경계가 아닌 주소는 false. nullptr 은 true</td></tr>
   <tr><td>Pool</td><td>ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero</td><td><span class="tag ok">정상</span></td><td>등급 안이면 그 자리, 넘으면 옮기며 보존. 0 은 release. 남의 포인터는 nullptr</td></tr>
-  <tr><td>Pool</td><td>ALayoutThatCannotBeReservedLeavesThePoolInvalid</td><td><span class="tag misuse">오용</span></td><td>크기 overflow, 등급 17 개 → valid() false, allocate nullptr</td></tr>
+  <tr><td>Pool</td><td>(삭제) ALayoutThatCannotBeReservedLeavesThePoolInvalid</td><td><span class="tag misuse">오용</span></td><td>Layout 이 compile time 이라 static_assert 가 막는다 (BlockClass 의 overflow, PoolLayout 의 합 overflow, 등급 32 개 초과). 실행 시 invalid 인 Pool 이 없다</td></tr>
   <tr><td>Pool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>4 thread × 2000 회. 블록을 thread 번호로 채우고 다시 읽어 겹침 0</td></tr>
   <tr><td>StaticPool</td><td>AllocatesFromTheSmallestClassThatFits</td><td><span class="tag ok">정상</span></td><td>Pool 과 같은 규칙. 등급마다 live 0 으로 돌아온다</td></tr>
   <tr><td>StaticPool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>LIFO</td></tr>

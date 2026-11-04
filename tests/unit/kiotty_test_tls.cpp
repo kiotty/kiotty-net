@@ -1,5 +1,4 @@
 #include "support/kiotty_test_openssl_memory.h"
-#include "support/kiotty_test_pool.h"
 #include "support/kiotty_test_tls.h"
 
 #include <gtest/gtest.h>
@@ -9,6 +8,8 @@
 #include <vector>
 
 using kiotty::Stage;
+using kiotty::StageBase;
+using kiotty::net::MemoryLimits;
 using kiotty::net::DecodeResult;
 using kiotty::net::TlsEngine;
 using kiotty::net::TlsProfile;
@@ -35,12 +36,6 @@ using kiotty_test::take;
 
 namespace
 {
-    kiotty_test::TestPool& testPool()
-    {
-        static kiotty_test::TestPool pool;
-        return pool;
-    }
-
     KiottyNetSpan spanOf(const std::string& text)
     {
         KiottyNetSpan span = { text.data(), text.size() };
@@ -74,7 +69,7 @@ namespace
         ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
         pump.handshake();
         ASSERT_TRUE(pump.done());
-        Stage plain(testPool(), 16);
+        Stage<16> plain;
         DecodeResult swallowed = pump.client.decode(plain);
         ASSERT_TRUE(swallowed.isOk());
         ASSERT_EQ(swallowed.value(), 0u);
@@ -84,7 +79,8 @@ namespace
     {
         from.encode(spanOf(text));
         std::string received;
-        Stage plain(testPool(), plain_capacity);
+        Stage<KIOTTY_NET_MAX_RECV_CAPACITY> plain;
+        plain.limit(plain_capacity);
         while (from.cipherSend().consumer().readable() > 0)
         {
             move(from, to);
@@ -156,7 +152,8 @@ TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
     EXPECT_EQ(client.openClient(clientConfig()), KIOTTY_TLS_NOT_SUPPORTED);
     EXPECT_FALSE(server.valid());
     EXPECT_FALSE(client.valid());
-    TlsEngine engine(testPool(), 4096, 4096);
+    TlsEngine engine;
+    engine.limit(4096, 4096);
     EXPECT_EQ(engine.open(server, nullptr), KIOTTY_TLS_NOT_SUPPORTED);
     EXPECT_FALSE(engine.active());
 }
@@ -166,7 +163,8 @@ TEST(TlsEngine, InactiveEngineReportsActiveFalseAndAllocatesNoStage)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsEngine engine(testPool(), 0, 0);
+    TlsEngine engine;
+    engine.limit(0, 0);
     EXPECT_FALSE(engine.active());
     EXPECT_EQ(engine.cipherReceive().capacity(), 0u);
     EXPECT_EQ(engine.cipherSend().capacity(), 0u);
@@ -179,7 +177,7 @@ TEST(TlsEngine, ServerFirstStepIsReceiveAndClientFirstStepIsSend)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     EXPECT_EQ(pump.server.handshake(), TlsStep::RECEIVE);
     EXPECT_EQ(pump.server.cipherSend().consumer().readable(), 0u);
@@ -192,7 +190,7 @@ TEST(TlsEngine, PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     int rounds = pump.handshake();
     EXPECT_TRUE(pump.done());
@@ -209,7 +207,7 @@ TEST(TlsEngine, Tls12OnlyProfilesAlsoReachDone)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     pump.handshake();
     EXPECT_TRUE(pump.done());
@@ -221,7 +219,7 @@ TEST(TlsEngine, EncodeOnOneSideDecodesToTheSamePlaintextOnTheOther)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     const size_t lengths[] = { 1, 4096, 16383 };
     for (size_t length : lengths)
@@ -237,12 +235,16 @@ TEST(TlsEngine, EncodeLargerThanOneRecordProducesMultipleRecordsThatDecodeInOrde
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool(), 65536);
+    if (MemoryLimits::SEND_CAPACITY <= kiotty::net::TLS_RECORD_PLAIN_BYTES || MemoryLimits::RECV_CAPACITY <= kiotty::net::TLS_RECORD_PLAIN_BYTES)
+    {
+        GTEST_SKIP() << "one plain message fits a single record in this build";
+    }
+    TlsPump pump;
     connect(pump, profiles);
-    std::string text = pattern(40 * 1024);
+    std::string text = pattern(MemoryLimits::SEND_CAPACITY);
     pump.client.encode(spanOf(text));
     EXPECT_GT(pump.client.cipherSend().consumer().readable(), text.size() + 2 * 5);
-    EXPECT_EQ(roundTrip(pump.client, pump.server, "", 65536), text);
+    EXPECT_EQ(roundTrip(pump.client, pump.server, "", MemoryLimits::RECV_CAPACITY), text);
 }
 
 TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
@@ -250,12 +252,12 @@ TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     std::string text = pattern(1000);
     pump.client.encode(spanOf(text));
     size_t record = pump.client.cipherSend().consumer().readable();
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     move(pump.client, pump.server, record / 2);
     DecodeResult first = pump.server.decode(plain);
     ASSERT_TRUE(first.isOk());
@@ -272,11 +274,11 @@ TEST(TlsEngine, DecodeWithOneByteAtATimeEventuallyYieldsTheRecord)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     std::string text = pattern(300);
     pump.client.encode(spanOf(text));
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     std::string received;
     while (pump.client.cipherSend().consumer().readable() > 0)
     {
@@ -293,14 +295,14 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     pump.client.encode(spanOf(std::string("hello")));
-    Stage& cipher = pump.client.cipherSend();
+    StageBase& cipher = pump.client.cipherSend();
     size_t length = cipher.consumer().readable();
     cipher.consumer().peek()[length - 1] ^= 0x01;
     move(pump.client, pump.server);
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result.isOk());
     EXPECT_EQ(result.code(), KIOTTY_TLS_RECORD_ERROR);
@@ -314,7 +316,7 @@ TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(clientConfig("other_ca.pem")), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
@@ -331,7 +333,7 @@ TEST(TlsEngine, ClientWithVerifyServerOffAcceptsUntrustedCa)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(config), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     pump.handshake();
     EXPECT_TRUE(pump.done());
@@ -343,7 +345,7 @@ TEST(TlsEngine, HostnameMismatchReturnsHostnameMismatch)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(serverConfig("server_wrong_host.pem", "server_wrong_host.key")), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client, "localhost"), KIOTTY_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
@@ -356,7 +358,7 @@ TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(serverConfig("server_expired.pem", "server_expired.key")), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
@@ -374,7 +376,7 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
 
     TlsProfile anonymous;
     ASSERT_EQ(anonymous.openClient(clientConfig()), KIOTTY_SUCCESS);
-    TlsPump rejected(testPool());
+    TlsPump rejected;
     ASSERT_EQ(rejected.open(server, anonymous), KIOTTY_SUCCESS);
     rejected.handshake();
     ASSERT_EQ(rejected.server_steps.back(), TlsStep::FAILED);
@@ -385,7 +387,7 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
     copyText(client_config.identity.key_file, certPath("client.key"));
     TlsProfile identified;
     ASSERT_EQ(identified.openClient(client_config), KIOTTY_SUCCESS);
-    TlsPump accepted(testPool());
+    TlsPump accepted;
     ASSERT_EQ(accepted.open(server, identified), KIOTTY_SUCCESS);
     accepted.handshake();
     EXPECT_TRUE(accepted.done());
@@ -401,7 +403,7 @@ TEST(TlsEngine, VersionMismatchReturnsHandshakeFailed)
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_SUCCESS);
     ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.server_steps.back(), TlsStep::FAILED);
@@ -413,7 +415,8 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsEngine server(testPool(), 4096, 4096);
+    TlsEngine server;
+    server.limit(4096, 4096);
     ASSERT_EQ(server.open(profiles.server, nullptr), KIOTTY_SUCCESS);
     put(server.cipherReceive(), "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
@@ -425,7 +428,7 @@ TEST(TlsEngine, Tls13ServerSendsNewSessionTicketAsOneMoreSendBeforeDone)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
     EXPECT_EQ(pump.client.handshake(), TlsStep::SEND);
     move(pump.client, pump.server);
@@ -437,7 +440,7 @@ TEST(TlsEngine, Tls13ServerSendsNewSessionTicketAsOneMoreSendBeforeDone)
     EXPECT_GT(move(pump.server, pump.client), 0u);
     EXPECT_EQ(pump.server.handshake(), TlsStep::DONE);
     EXPECT_GT(pump.client.cipherReceive().consumer().readable(), 0u);
-    Stage plain(testPool(), 16);
+    Stage<16> plain;
     DecodeResult swallowed = pump.client.decode(plain);
     ASSERT_TRUE(swallowed.isOk());
     EXPECT_EQ(swallowed.value(), 0u);
@@ -450,12 +453,12 @@ TEST(TlsEngine, KeyUpdateFromPeerLeavesTheReplyInCipherSendAfterDecode)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     pump.client.debugKeyUpdate();
     ASSERT_GT(pump.client.cipherSend().consumer().readable(), 0u);
     move(pump.client, pump.server);
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result.isOk());
     EXPECT_EQ(result.value(), 0u);
@@ -472,11 +475,11 @@ TEST(TlsEngine, CloseNotifyFromPeerDecodesAsPeerClosed)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     pump.client.debugShutdown();
     move(pump.client, pump.server);
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result.isOk());
     EXPECT_EQ(result.code(), KIOTTY_PEER_CLOSED);
@@ -487,7 +490,7 @@ TEST(TlsEngine, CloseThenOpenReusesTheSslObjectAndHandshakesAgain)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     EXPECT_EQ(roundTrip(pump.client, pump.server, "first", 64), "first");
     pump.server.close();
@@ -505,7 +508,7 @@ TEST(TlsMemory, OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose)
     {
         Profiles profiles;
         openDefaults(profiles);
-        TlsPump pump(testPool(), 4096);
+        TlsPump pump(4096);
         connect(pump, profiles);
         EXPECT_EQ(roundTrip(pump.client, pump.server, "warm", 64), "warm");
     }
@@ -513,7 +516,7 @@ TEST(TlsMemory, OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose)
     {
         Profiles profiles;
         openDefaults(profiles);
-        TlsPump pump(testPool(), 4096);
+        TlsPump pump(4096);
         connect(pump, profiles);
         EXPECT_EQ(roundTrip(pump.client, pump.server, "counted", 64), "counted");
         EXPECT_GT(openSslMemory().live_bytes, before.live_bytes);
@@ -532,7 +535,7 @@ TEST(TlsMemory, EachConnectedPairHoldsABoundedAmountOfOpenSslMemory)
     Profiles profiles;
     openDefaults(profiles);
     {
-        TlsPump warm(testPool(), 4096);
+        TlsPump warm(4096);
         connect(warm, profiles);
     }
     OpenSslMemory before = openSslMemory();
@@ -540,7 +543,7 @@ TEST(TlsMemory, EachConnectedPairHoldsABoundedAmountOfOpenSslMemory)
     std::vector<std::unique_ptr<TlsPump>> pumps;
     for (size_t i = 0; i < pairs; ++i)
     {
-        pumps.emplace_back(new TlsPump(testPool(), 4096));
+        pumps.emplace_back(new TlsPump(4096));
         connect(*pumps.back(), profiles);
         EXPECT_EQ(roundTrip(pumps.back()->client, pumps.back()->server, "bounded", 64), "bounded");
     }
@@ -560,14 +563,14 @@ TEST(TlsEngine, DecodeDrainsPlaintextLeftInSslAcrossCalls)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool(), 32768);
+    TlsPump pump;
     connect(pump, profiles);
-    std::string text = pattern(16384);
+    std::string text = pattern(3 * 4096);
     pump.client.encode(spanOf(text));
     move(pump.client, pump.server);
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     std::string received;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 3; ++i)
     {
         DecodeResult result = pump.server.decode(plain);
         ASSERT_TRUE(result.isOk());
@@ -585,14 +588,14 @@ TEST(TlsEngine, DecodeCompactsCipherReceive)
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool());
+    TlsPump pump;
     connect(pump, profiles);
     pump.client.encode(spanOf(pattern(2000)));
     move(pump.client, pump.server);
-    Stage plain(testPool(), 4096);
+    Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result.isOk());
-    Stage& cipher = pump.server.cipherReceive();
+    StageBase& cipher = pump.server.cipherReceive();
     EXPECT_EQ(cipher.consumer().readable(), 0u);
     EXPECT_EQ(cipher.provider().writable(), cipher.capacity());
 }
@@ -601,7 +604,7 @@ TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
 {
     REQUIRE_TLS();
     const uint32_t versions[] = { KIOTTY_TLS_V12, KIOTTY_TLS_V13 };
-    const size_t capacities[] = { 4096, 16384, 65536 };
+    const size_t capacities[] = { 4096, MemoryLimits::SEND_CAPACITY };
     for (uint32_t version : versions)
     {
         KiottyNetTlsServerConfig server_config = serverConfig();
@@ -613,11 +616,11 @@ TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
         ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
         for (size_t capacity : capacities)
         {
-            TlsPump pump(testPool(), capacity);
+            TlsPump pump(capacity);
             ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
             pump.handshake();
             ASSERT_TRUE(pump.done());
-            Stage plain(testPool(), 16);
+            Stage<16> plain;
             ASSERT_TRUE(pump.client.decode(plain).isOk());
             std::string text = pattern(capacity);
             pump.server.encode(spanOf(text));
@@ -632,7 +635,7 @@ TEST(TlsEngine, EncodeIntoAFullCipherSendAssertsInDebugAndWritesNothingInRelease
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    TlsPump pump(testPool(), 4096);
+    TlsPump pump(4096);
     connect(pump, profiles);
     std::string text = pattern(4096);
     pump.client.encode(spanOf(text));
@@ -644,8 +647,9 @@ TEST(TlsEngine, EncodeIntoAFullCipherSendAssertsInDebugAndWritesNothingInRelease
 TEST(TlsEngine, EncodeOrDecodeOnInactiveEngineIsRejected)
 {
     REQUIRE_TLS();
-    TlsEngine engine(testPool(), 4096, 4096);
-    Stage plain(testPool(), 64);
+    TlsEngine engine;
+    engine.limit(4096, 4096);
+    Stage<64> plain;
     DecodeResult result = engine.decode(plain);
     ASSERT_FALSE(result.isOk());
     EXPECT_EQ(result.code(), KIOTTY_INVALID_ARGUMENT);
