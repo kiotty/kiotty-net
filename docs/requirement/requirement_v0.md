@@ -105,7 +105,7 @@ naming 규약 (C, C++ 공통)
    정리하면 **`KiottyNet_` 는 함수 또는 C++ 래퍼 클래스, `KiottyNet` 바로 뒤에 이름이 붙으면 C / C++ 공용 데이터 타입**이다.
 8. handle 은 두 종류이며 둘 다 공용 타입이다.
    - **소유 handle.** 사용자가 `KiottyNet_createX` 로 만들고 `KiottyNet_destroyX` 로 없애는 객체. StreamClient, EventClient, Server, HttpServer, WebSocketServer, HttpClient, WebSocketClient 가 여기에 속한다. `typedef struct KiottyNetServer* KiottyNetServerHandle;` 처럼 불투명 포인터다. C++ 래퍼는 생성자에서 create, 소멸자에서 destroy 를 부르고, 복사는 없고 이동만 있다.
-   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse 가 여기에 속한다. 외부에서는 `int64_t` 이고 (`typedef int64_t KiottyNetConnectionHandle;`), 내부에서는 `{ int32_t generation; int32_t index; }` 로 해석한다. 0 은 무효. 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 값이 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_PEER_CLOSED`). C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만든다. 예외는 `KiottyNet_ConnectionStream` 하나다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_SUCCESS))` 로 닫는다 (5절).
+   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse 가 여기에 속한다. 외부에서는 소유자 포인터와 정수 id 를 나란히 둔 struct 다 (`KiottyNetConnectionHandle { KiottyNetConnectionOwner* owner; int64_t id; }`). `owner` 는 그 연결을 가진 Server / EventClient 의 불투명 포인터이고 `id` 는 내부에서 `{ int32_t generation; int32_t index; }` 로 해석한다. `owner == NULL` 또는 `id == 0` 은 무효 (`KIOTTY_INVALID_ARGUMENT`). 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 id 가 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_PEER_CLOSED`). 소유자를 destroy 해도 `owner` 포인터는 `releaseContext` 전까지 유효하다 (은퇴할 뿐 해제되지 않는다). 그래서 handle 은 복사해 두어도 되고 다른 thread 에 넘겨도 된다. C 에서 두 handle 이 같은지는 `owner` 와 `id` 둘을 비교한다. C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만들고 `operator==` / `operator<` 가 있어 map 의 key 가 된다. HttpResponse 와 WebSocket 의 handle 은 그 절의 모양 (`int64_t`) 그대로이고, base 가 끝난 뒤 같은 struct 모양으로 맞춘다. 예외는 `KiottyNet_ConnectionStream` 하나다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_SUCCESS))` 로 닫는다 (5절).
 
 공통 타입
 
@@ -115,7 +115,11 @@ typedef struct KiottyNetSpan {        /* 읽기 전용 바이트 범위. 텍스�
     size_t      length;
 } KiottyNetSpan;
 
-typedef int64_t KiottyNetConnectionHandle;   /* pool handle (규약 8). 다른 thread 에 넘겨도 되는 유일한 Connection 표현 */
+typedef struct KiottyNetConnectionOwner KiottyNetConnectionOwner;   /* 불투명. 연결을 가진 Server / EventClient */
+typedef struct KiottyNetConnectionHandle {   /* pool handle (규약 8). 다른 thread 에 넘겨도 되는 유일한 Connection 표현 */
+    KiottyNetConnectionOwner* owner;         /* NULL 이면 무효 */
+    int64_t                   id;            /* 상위 32 generation, 하위 16 slot. 0 이면 무효 */
+} KiottyNetConnectionHandle;
 
 /* 설정 struct 안 문자열 버퍼의 크기 (NUL 포함). struct 크기가 곧 ABI 이므로 사용자가 바꿀 수 없다 */
 #define KIOTTY_MAX_HOST_LENGTH     256   /* hostname (DNS 최대 253), Windows pipe 이름 (최대 256), Unix domain 경로 (sun_path 104~108) */
@@ -125,7 +129,7 @@ typedef int64_t KiottyNetConnectionHandle;   /* pool handle (규약 8). 다른 t
 
 ```cpp
 namespace kiotty { namespace net {
-struct PoolHandle {                   // pool handle 의 내부 해석. 외부 int64_t 와 같은 크기. 소유자 pool 을 찾는 방법은 구현 가이드
+struct PoolHandle {                   // handle 의 id 의 내부 해석. int64_t 와 같은 크기. 소유자는 handle 의 owner 포인터가 곧 가리킨다 (설계 v4 13절)
     int32_t generation;
     int32_t index;
 };
@@ -162,7 +166,7 @@ typedef enum KiottyNetCode {
     KIOTTY_TLS_HANDSHAKE_FAILED,       /* handshake : 버전 / cipher 불일치, alert, 평문 상대 */
     KIOTTY_TLS_HANDSHAKE_TIMEOUT,
     KIOTTY_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
-    KIOTTY_OUT_OF_MEMORY               /* initializeContext : compile time 상한 (KIOTTY_NET_MAX_*) 만큼의 Pool 을 잡지 못함. 그 뒤에는 나오지 않는다 */
+    KIOTTY_OUT_OF_MEMORY               /* create* (또는 initializeContext 의 미리 만들기) : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
 } KiottyNetCode;
 ```
 
@@ -172,7 +176,8 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- `KiottyNet_initializeContext` 는 그 Context 가 쓸 메모리 (compile time 상한 `KIOTTY_NET_MAX_*` 의 최악, 즉 Owner 16 개가 모두 서버이고 각자 연결 상한만큼 가진 경우) 를 한 번에 잡는다. 실패하면 `KIOTTY_OUT_OF_MEMORY` 이고, 성공하면 그 뒤 실행 중에 메모리 부족은 생기지 않는다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다.
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (연결 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 만큼의 연결, 버퍼, TLS 메모리) 을 한 번에 잡는다. 못 잡으면 `KIOTTY_OUT_OF_MEMORY` 이고, 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. `KiottyNet_initializeContext` 의 config 로 타입별 개수를 주면 그때 미리 만든다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용하며, `KiottyNet_releaseContext` 가 한 번에 해제한다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춰 빌드한다).
+- Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
 
@@ -484,7 +489,7 @@ private:
 - Pipe, TLS, TCP 에 따라 read / write 의 내부가 달라지지만 인터페이스는 같다.
 - **콜백이 다음 일을 return 한다.** `onReady`, `onRead`, `onWritten`, `onTimeout` 은 다음 IO 요청 하나를 `KiottyNetConnectionAction` 값으로 돌려준다. handle 을 받아 IO 를 거는 함수는 없다. 그래서 콜백 안에서 같은 연결에 재진입하는 길이 없고, 한 연결에 걸린 요청은 언제나 하나다.
 - action 은 값이다. `KiottyNet_thenRead` 같은 action 함수는 struct 를 채워 돌려줄 뿐 검사하지 않는다. 검사는 Connection 이 action 을 받을 때 한 번 한다.
-- 콜백 안에서 handle 로 할 수 있는 것은 `KiottyNet_getConnectionInfo` 와 `KiottyNet_notifyConnection` 둘뿐이다. handle 은 정수라서 복사해 두어도 dangling 이 없다.
+- 콜백 안에서 handle 로 할 수 있는 것은 `KiottyNet_getConnectionInfo` 와 `KiottyNet_notifyConnection` 둘뿐이다. handle 은 소유자 포인터와 정수 id 의 값이라 복사해 두어도 `releaseContext` 전까지 dangling 이 없다 (규약 8).
 
 **action 여섯 가지.** `timeout_ms` 는 그 action 이 시작한 기다림의 한도이고 0 이면 없다. 지나면 `onTimeout` 이 한 번 오고 그 return 이 다음 action 이다.
 
@@ -537,7 +542,7 @@ HOLD 뒤의 timeout 처럼 걸린 요청이 없으면 return 은 보통의 actio
 | close 한 뒤, 또는 Work 가 아닌 연결의 Stream | `KIOTTY_BUSY` |
 | 연결이 닫히고 slot 이 재사용됨 | `KIOTTY_PEER_CLOSED` |
 | 소유자가 Work 중에 close | read / write 는 socket 의 끊김을 그대로 (`KIOTTY_PEER_CLOSED` / `KIOTTY_SOCKET_ERROR`). `isConnectionStreamOpen` 은 false. `closeConnectionStream` 은 `KIOTTY_CLOSED` 를 돌려주되 Work 는 끝난다 |
-| Stream 이 아닌 값 (0, Connection handle) | `KIOTTY_INVALID_ARGUMENT` |
+| `owner` 가 NULL 이거나 `id` 가 0 인 Stream | `KIOTTY_INVALID_ARGUMENT`. Connection handle 을 Stream 함수에 넘기는 것은 타입이 달라 compile 되지 않는다 |
 | `closeConnectionStream(stream, thenWork())` | `KIOTTY_INVALID_ARGUMENT`. Stream 은 유효하게 남는다 |
 | `closeConnectionStream(stream, thenWrite(data))` 의 data 가 `send_capacity` 초과 | `KIOTTY_BUFFER_FULL`. Stream 은 유효하게 남는다. 다른 action 으로 다시 close 해야 한다 |
 
@@ -560,7 +565,10 @@ typedef struct KiottyNetConnectionInfo {
     int32_t port;
 } KiottyNetConnectionInfo;
 
-typedef int64_t KiottyNetConnectionStream;   /* pool handle. onWorkStarted 가 준다. closeConnectionStream 까지 유효. 그 연결의 handle 과 다른 값이다 */
+typedef struct KiottyNetConnectionStream {   /* pool handle. onWorkStarted 가 준다. closeConnectionStream 까지 유효. 그 연결의 handle 과 같은 owner / id 의 다른 타입이다 */
+    KiottyNetConnectionOwner* owner;
+    int64_t                   id;
+} KiottyNetConnectionStream;
 
 /* handler 는 함수 표만 담는다. 그래서 static const 로 두고 여러 객체가 같이 쓸 수 있다.
    handler 와 app_context 는 create 가 아니라 run 에 따로 넘긴다 (7절). 둘 다 run 이 return 할 때까지만 살아 있으면 되므로 run 을 부른 함수의 stack 에 두어도 된다.
@@ -638,6 +646,8 @@ public:
     KiottyNetConnectionHandle handle() const;      // 다른 thread 에 넘길 값. Session 에 저장해 둔다
     KiottyNetConnectionInfo   info() const;
     KiottyNetCode             notify(KiottyNetSpan data);
+    bool operator==(const KiottyNet_Connection& other) const;   // owner 와 id 둘 다 같다
+    bool operator<(const KiottyNet_Connection& other) const;    // owner (std::less), 그 다음 id. std::map 의 key 로 쓴다
 };
 
 class KiottyNet_ConnectionStream {                 // close 의무를 소유한다. 복사 없음, 이동만. worker thread 로 이동해서 넘긴다

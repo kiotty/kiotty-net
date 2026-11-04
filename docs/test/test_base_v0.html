@@ -168,11 +168,11 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td><code>TlsPump</code></td><td>TlsEngine 둘 (서버 profile, 클라이언트 profile) 을 들고 <code>handshake()</code> 의 한 바퀴마다 클라이언트 handshake → 클라이언트 <code>cipherSend</code> 를 서버 <code>cipherReceive</code> 로 → 서버 handshake → 반대로 옮긴다. 걸음은 <code>server_steps</code> / <code>client_steps</code> 에 남는다. 소켓 없이 TLS 전체를 검증한다</td><td>TlsEngine unit</td></tr>
   <tr><td><code>LoopbackPeer</code></td><td>테스트 thread 가 직접 쓰는 blocking 소켓. Server 테스트의 클라이언트, EventClient 테스트의 서버. <code>sendAll</code>, <code>recvExactly(n, timeout)</code>, <code>shutdownWrite</code>, <code>close</code></td><td>integration</td></tr>
   <tr><td><code>waitUntil(pred, ms)</code></td><td>조건 폴링. 고정 sleep 은 금지. 느린 CI 에서 깨지는 테스트를 만들지 않는다</td><td>integration</td></tr>
-  <tr><td><code>NotificationContext</code> 의 <code>listener</code></td><td>Connection::notify 와 closeStream 은 늘 <code>listener-&gt;wake()</code> 를 부른다 (설계 v4 2절). unit 에서는 wake 횟수만 세는 가짜 listener 를 꽂고, wake 자체는 EventListener integration 이 검증한다</td><td>Connection unit</td></tr>
+  <tr><td>Owner 의 wake</td><td>Owner::notify 와 closeStream 은 host 를 부른 뒤 늘 <code>_listener.wake()</code> 를 부른다 (설계 v4 9.8). Connection 과 ConnectionHost 는 listener 를 모르므로 unit 은 wake 를 보지 않고, Owner 의 wake 는 사이클 7 의 integration 이 본다. wake 자체는 EventListener integration 이 검증한다</td><td>Connection unit, Owner integration</td></tr>
 </table>
 
 <h2 id="s5">5. 케이스 : core</h2>
-<p>Stage 와 StageSet 은 버퍼를 <code>core/kiotty_pool.h</code> 의 Pool 에서 받는다 (설계 v4 4절, 19절). 테스트는 <code>tests/unit/support/kiotty_test_pool.h</code> 의 <code>TestPool</code> (넉넉한 등급 일곱) 을 쓴다.</p>
+<p>Stage 는 <code>StageBase</code> (포인터 + capacity + limit) 와 그 위의 <code>Stage&lt;N&gt;</code> (멤버 배열) 둘이다 (설계 v4 4절, 19.9). 버퍼를 밖에서 받지 않는다. <code>limit(capacity)</code> 가 N 아래의 실제 capacity 를 정하고 <code>clear()</code> 가 begin / end 를 0 으로 돌린다. 테스트는 <code>Stage&lt;4096&gt;</code> 같은 작은 N 을 직접 둔다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>Stage</td><td>PrepareThenCommitMakesBytesReadable</td><td><span class="tag ok">정상</span></td><td>provider.prepare(n) 에 쓰고 commit(n) 하면 consumer.readable() == n, prepare 로 같은 바이트</td></tr>
@@ -185,20 +185,26 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Stage</td><td>CommitBeyondPreparedIsClampedToWritable</td><td><span class="tag misuse">오용</span></td><td>commit(writable + 1) 이 capacity 를 넘기지 않는다 (debug 는 assert, release 는 clamp. 둘 중 하나로 확정해 적는다)</td></tr>
   <tr><td>Stage</td><td>ZeroCapacityStageIsValidAndAlwaysFull</td><td><span class="tag edge">엣지</span></td><td>capacity 0 → 할당 없음, writable 0, readable 0, prepare nullptr. StageSet 의 "0 은 잡지 않는다" 가 이 위에 선다</td></tr>
   <tr><td>Stage</td><td>SingleByteCapacityRoundTrips</td><td><span class="tag edge">엣지</span></td><td>capacity 1 에서 쓰고 읽고 compact</td></tr>
-  <tr><td>Stage</td><td>TakesItsBufferFromThePoolAndGivesItBackOnDestruction</td><td><span class="tag edge">엣지</span></td><td>블록 하나짜리 Pool: 첫 Stage 는 valid, 둘째는 invalid (capacity 0, prepare nullptr). 첫 Stage 가 사라지면 다시 valid. failureCount 1</td></tr>
-  <tr><td>StageSet</td><td>EachMemberHasItsOwnCapacity</td><td><span class="tag ok">정상</span></td><td>(a, b, c) 로 만들면 receive / send / notify 의 capacity 가 각각</td></tr>
-  <tr><td>StageSet</td><td>ZeroMembersAllocateNothingAndSetStaysValid</td><td><span class="tag edge">엣지</span></td><td>(0, 0, 0) 도 valid, (n, 0, 0) 도 valid</td></tr>
+  <tr><td>Stage</td><td>LimitBelowCapacityMakesWritableTheLimit</td><td><span class="tag edge">엣지</span></td><td><code>Stage&lt;4096&gt;</code> 에 limit(100) → capacity() 100, writable 100, 101 바이트 prepare 는 nullptr. limit(0) 은 ZeroCapacity 와 같다. limit 은 비어 있을 때만 (debug assert)</td></tr>
+  <tr><td>Stage</td><td>ClearResetsBothPositionsWithoutTouchingTheLimit</td><td><span class="tag ok">정상</span></td><td>쓰고 일부 읽은 뒤 clear → readable 0, writable == capacity, capacity 는 limit 그대로</td></tr>
+  <tr><td>Stage</td><td>StageBaseReferenceSeesTheSameBytesAsTheStage</td><td><span class="tag ok">정상</span></td><td><code>StageBase&amp;</code> 로 넘겨 쓴 바이트를 <code>Stage&lt;N&gt;</code> 으로 읽는다. Sender 와 TlsEngine 이 StageBase 만 받는 근거</td></tr>
+  <tr><td>StageSet</td><td>EachMemberHasItsOwnLimit</td><td><span class="tag ok">정상</span></td><td>limit(a, b, c) 뒤 receive / send / notify 의 capacity 가 각각. N 은 MAX_RECV / SEND / PUSH_CAPACITY</td></tr>
+  <tr><td>StageSet</td><td>ZeroLimitsLeaveEveryMemberAlwaysFull</td><td><span class="tag edge">엣지</span></td><td>limit(0, 0, 0) 뒤 셋 다 writable 0, (n, 0, 0) 은 receive 만 n</td></tr>
   <tr><td>Span</td><td>BeginEndCoverExactlyLengthElements</td><td><span class="tag ok">정상</span></td><td>range for 가 length 번</td></tr>
   <tr><td>Span</td><td>EmptySpanHasNoElementsAndEmptyIsTrue</td><td><span class="tag edge">엣지</span></td><td>length 0, data 가 nullptr 이어도 begin == end</td></tr>
-  <tr><td>PoolHandle</td><td>ToRawFromRawRoundTripsEveryField</td><td><span class="tag ok">정상</span></td><td>generation, context, owner, owner generation, slot 전부 왕복</td></tr>
-  <tr><td>PoolHandle</td><td>ZeroRawIsTheInvalidHandle</td><td><span class="tag edge">엣지</span></td><td>fromRaw(0) 은 generation 0, index 0. 유효 handle 의 toRaw 는 0 이 아니다 (generation 은 1 부터)</td></tr>
-  <tr><td>PoolHandle</td><td>OwnerOfAndSlotOfExtractTheirBits</td><td><span class="tag ok">정상</span></td><td>13.3 의 4 / 4 / 8 / 16 배치. 각 필드 최대값 (15, 15, 255, 65535) 에서도</td></tr>
-  <tr><td>PoolHandle</td><td>GenerationChangeChangesRawOfSameSlot</td><td><span class="tag ok">정상</span></td><td>같은 index, 다른 generation → 다른 raw</td></tr>
+  <tr><td>PoolHandle</td><td>ValueFromValueRoundTripsGenerationAndSlot</td><td><span class="tag ok">정상</span></td><td>generation (32) 과 slot (16) 둘만. 최대값 (INT32_MAX, 65535) 에서도 왕복. type / owner / context 비트는 없다 (설계 19.4)</td></tr>
+  <tr><td>PoolHandle</td><td>ZeroValueIsTheInvalidHandle</td><td><span class="tag edge">엣지</span></td><td>fromValue(0) 은 generation 0, index 0. 유효 handle 의 value 는 0 이 아니고 양수다 (generation 은 1 부터, 부호 비트 0)</td></tr>
+  <tr><td>PoolHandle</td><td>GenerationChangeChangesValueOfSameSlot</td><td><span class="tag ok">정상</span></td><td>같은 index, 다른 generation → 다른 value</td></tr>
+  <tr><td>Parker</td><td>ParkReturnsWhenUnparkMakesReadyTrue</td><td><span class="tag ok">정상</span></td><td>다른 thread 의 unpark(change) 뒤 park 가 true 로 돌아온다. change 가 적은 것이 ready 에 보인다</td></tr>
+  <tr><td>Parker</td><td>ParkWithTimeoutReturnsFalseWhenNothingChanges</td><td><span class="tag edge">엣지</span></td><td>park(ready, 50) 이 50 ~ 100 ms 에 false</td></tr>
+  <tr><td>Parker</td><td>ParkWithTimeoutZeroWaitsUntilUnpark</td><td><span class="tag edge">엣지</span></td><td>0 은 무한. 200 ms 뒤의 unpark 까지 돌아오지 않는다</td></tr>
+  <tr><td>Parker</td><td>UnparkBeforeParkIsNotLost</td><td><span class="tag edge">엣지</span></td><td>ready 가 이미 참이면 park 는 바로 true (조건은 cv 가 아니라 ready 가 든다)</td></tr>
   <tr><td>Clock</td><td>MonotonicMsNeverDecreasesAcrossTenThousandCalls</td><td><span class="tag ok">정상</span></td><td>단조성. 해상도는 측정만 하고 단정하지 않는다</td></tr>
-  <tr><td>Holder, Result</td><td>(있음) 기존 헤더의 계약을 같은 규칙의 이름으로 옮긴다. make / get / 소멸, Result 의 ok / code / value</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만</td></tr>
+  <tr><td>Result</td><td>(있음) ok / code / value, <code>Result&lt;E, T&amp;&gt;</code> 특수화</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만. Holder 는 없어졌다 (설계 19.9)</td></tr>
 </table>
 
-<h3>5.1 pool, context (<code>core</code> 의 Pool / StaticPool, <code>base/pool</code> 의 번역기, <code>base/context</code>)</h3>
+<h3>5.1 pool (<code>core/pool</code> 의 Pool / StaticPool / ReusablePool / LazyReusablePool, <code>base/pool</code> 의 상한과 TLS Layout)</h3>
+<p>풀은 전부 <code>core/pool/</code> 에 있다 (설계 19.2). <code>Pool&lt;Layout&gt;</code> 과 <code>StaticPool</code> 은 바이트 등급 풀 (TLS 서브풀과 전역 arena 전용), <code>ReusablePool&lt;T, N&gt;</code> 과 <code>LazyReusablePool&lt;T, N&gt;</code> 은 객체를 켜고 끄는 풀이다. 뒤의 둘은 <code>is_reusable&lt;T&gt;</code> 를 static_assert 로 요구한다. 테스트의 T 는 <code>support/kiotty_test_tracked.h</code> 의 Tracked (initialize / reset 횟수와 받은 configuration 을 기록. initialize 가 실패하도록 시킬 수 있다).</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>Pool</td><td>AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock</td><td><span class="tag ok">정상</span></td><td>등급 32 / 64 / 256. 20, 33, 200 B 가 각자의 등급에서, 16 B 정렬</td></tr>
@@ -222,13 +228,25 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>StaticPool</td><td>LayoutConstantsDescribeTheArena</td><td><span class="tag ok">정상</span></td><td>CLASS_COUNT, ARENA_BYTES, 범위 밖 usage 는 0</td></tr>
   <tr><td>StaticPool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td></td></tr>
   <tr><td>StaticPool</td><td>AClassWithNoBlocksIsSkipped</td><td><span class="tag edge">엣지</span></td><td>개수 0 등급은 arena 0 B, 다음 등급으로</td></tr>
-  <tr><td>MemoryLimits</td><td>FollowTheBuildConfiguration</td><td><span class="tag ok">정상</span></td><td>CMake 의 KIOTTY_NET_MAX_* 와 같은 값. CONNECTIONS = OWNERS × CONNECTIONS_PER_SERVER</td></tr>
-  <tr><td>ContextPoolLayout</td><td>ReservesEveryStageAsIfEveryOwnerWereAFullServer</td><td><span class="tag ok">정상</span></td><td>등급 다섯: receive / send / notify 는 CONNECTIONS 개, cipher 둘은 TLS 일 때만</td></tr>
-  <tr><td>ContextPoolLayout</td><td>CipherSendBlockHoldsTheLargestPlainMessageWithRecordOverhead</td><td><span class="tag ok">정상</span></td><td>plain + 레코드마다 64 + 512</td></tr>
-  <tr><td>TlsPoolLayout</td><td>GrowsWithOwnersConnectionsAndTlsContexts</td><td><span class="tag ok">정상</span></td><td>tlsBlocks 의 세 항, 모든 등급이 16 B 배수이고 개수 &gt; 0</td></tr>
-  <tr><td>Context</td><td>ReservesTheWholeWorstCaseLayoutWhenItIsCreated</td><td><span class="tag ok">정상</span></td><td>생성 직후 layout 의 블록을 전부 꺼낼 수 있고, 하나 더는 nullptr (failure 1). 실행 중 부족이 없다는 계약</td></tr>
-  <tr><td>Context</td><td>EachContextHasItsOwnPool</td><td><span class="tag ok">정상</span></td><td>한 Context 의 블록을 다른 Context 의 Pool 이 거절</td></tr>
-  <tr><td>Context</td><td>LeavesOpenSslAloneWhenAnotherAllocatorIsAlreadyInstalled</td><td><span class="tag misuse">오용</span></td><td>unit 실행 파일은 세는 hook 이 먼저 걸려 있다 → tlsPooled() false, 그 hook 을 덮지 않는다</td></tr>
+  <tr><td>Pool</td><td>ArenaIsAMemberSoTwoPoolsOfOneLayoutDoNotShareBlocks</td><td><span class="tag ok">정상</span></td><td><code>Pool&lt;Layout&gt;</code> 둘. 한쪽의 블록을 다른 쪽의 release / holds 가 거절. 사이클 4 의 "EachContextHasItsOwnPool" 이 옮겨 온 것</td></tr>
+  <tr><td>Pool</td><td>PoolBaseReferenceAllocatesAndReleasesThroughTheVirtualInterface</td><td><span class="tag ok">정상</span></td><td><code>PoolBase&amp;</code> 로 allocate / release / holds. TlsMemory 가 서브풀과 전역 arena 를 같은 타입으로 드는 근거</td></tr>
+  <tr><td>ReusablePool</td><td>AcquireInitializesAnEmptySlotAndHandsBackAReference</td><td><span class="tag ok">정상</span></td><td>acquire(configuration) → Result 의 value 가 <code>_objects</code> 안의 객체, initialize 1 회, 받은 configuration 그대로, id 의 generation 1 · index 0. count 1</td></tr>
+  <tr><td>ReusablePool</td><td>AcquireWhenInitializeFailsResetsAndReturnsTheCodeAndTheSlotStaysEmpty</td><td><span class="tag edge">엣지</span></td><td>Tracked 가 code 를 돌려주면 Result 는 그 code, reset 1 회, count 0, 같은 slot 이 다음 acquire 에 다시 쓰인다 (generation 은 올라간 채)</td></tr>
+  <tr><td>ReusablePool</td><td>ReleaseResetsAndTheNextAcquireReusesTheSlotWithANewGeneration</td><td><span class="tag ok">정상</span></td><td>release 뒤 reset 1 회, 다음 acquire 의 id 는 같은 index · generation + 1</td></tr>
+  <tr><td>ReusablePool</td><td>FindRejectsAPastGenerationAndAnEmptySlot</td><td><span class="tag ok">정상</span></td><td>옛 id → nullptr, release 된 slot 의 id → nullptr, 범위 밖 index → nullptr, 현재 id → 그 객체</td></tr>
+  <tr><td>ReusablePool</td><td>GenerationNeverReturnsToZeroWhileThePoolLives</td><td><span class="tag edge">엣지</span></td><td>acquire / release 를 1000 번 → generation 이 단조 증가. 설계 13절 ("Owner 의 reset 을 지나도 Connection 의 generation 은 0 으로 돌아가지 않는다") 의 근거</td></tr>
+  <tr><td>ReusablePool</td><td>WhenEverySlotIsActiveAcquireReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>N 개 뒤 N + 1 번째는 TABLE_FULL, initialize 0 회</td></tr>
+  <tr><td>ReusablePool</td><td>IsReusableRejectsCopyableTypesAndTypesWithoutInitializeOrReset</td><td><span class="tag misuse">오용</span></td><td><code>is_reusable&lt;CopyableT&gt;::value</code>, <code>is_reusable&lt;NoReset&gt;::value</code> 가 false, <code>is_reusable&lt;Tracked&gt;::value</code> 가 true. static_assert 가 아니라 값으로 본다</td></tr>
+  <tr><td>LazyReusablePool</td><td>FirstAcquireCreatesTheObjectAndReleaseRetiresItInsteadOfDeletingIt</td><td><span class="tag ok">정상</span></td><td>acquire → Tracked 생성 1 회. release → reset 1 회, 소멸 0 회 (RETIRED)</td></tr>
+  <tr><td>LazyReusablePool</td><td>TheNextAcquireOfASameTypeReusesTheRetiredObject</td><td><span class="tag ok">정상</span></td><td>release 뒤 acquire → 같은 주소, 생성 0 회, initialize 1 회, generation + 1</td></tr>
+  <tr><td>LazyReusablePool</td><td>AFailedInitializeOfANewObjectKeepsItRetired</td><td><span class="tag edge">엣지</span></td><td>첫 acquire 의 initialize 가 실패 → code 를 돌려주되 객체는 지우지 않고 RETIRED. 다음 acquire 가 그 객체를 쓴다</td></tr>
+  <tr><td>LazyReusablePool</td><td>ReserveCreatesThatManyRetiredObjectsUpFront</td><td><span class="tag ok">정상</span></td><td>reserve(3) → 생성 3 회, 전부 RETIRED. 그 뒤 acquire 셋은 생성 0 회</td></tr>
+  <tr><td>LazyReusablePool</td><td>WhenEverySlotIsActiveAcquireReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>N 개 뒤 TABLE_FULL</td></tr>
+  <tr><td>LazyReusablePool</td><td>DestructorDeletesEveryObjectOnceWhetherActiveOrRetired</td><td><span class="tag ok">정상</span></td><td>ACTIVE 둘, RETIRED 하나를 두고 풀을 지우면 소멸 3 회. 설계 19.1 #4 의 "releaseContext 가 한 번에"</td></tr>
+  <tr><td>MemoryLimits</td><td>FollowTheBuildConfiguration</td><td><span class="tag ok">정상</span></td><td>CMake 의 KIOTTY_NET_MAX_* 와 같은 값. SERVERS / STREAM_CLIENTS / EVENT_CLIENTS 는 1 ~ 16, CONNECTIONS_PER_SERVER 는 1 ~ 1024 (static_assert)</td></tr>
+  <tr><td>TlsLayout</td><td>EveryClassIsSixteenByteAlignedAndHasBlocks</td><td><span class="tag ok">정상</span></td><td>GlobalTlsLayout, ServerTlsLayout, ClientTlsLayout 의 모든 등급이 16 B 배수이고 개수 &gt; 0. TLS OFF 면 ARENA_BYTES 0</td></tr>
+  <tr><td>TlsLayout</td><td>ServerLayoutScalesWithConnectionsPerServerAndClientLayoutHoldsOne</td><td><span class="tag ok">정상</span></td><td>연결 등급의 개수가 Server 는 MAX_CONNECTIONS_PER_SERVER 몫, Client 는 1 몫. profile 몫은 둘 다 1</td></tr>
+  <tr><td>TlsLayout</td><td>CipherSendBytesHoldsTheLargestPlainMessageWithRecordOverhead</td><td><span class="tag ok">정상</span></td><td>max(SEND, PUSH) + 레코드 (16 KiB) 마다 64 + 512</td></tr>
 </table>
 
 <h2 id="s6">6. 케이스 : error, socket</h2>
@@ -285,7 +303,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EventListener</td><td>AcceptSubmitCompletesWhenAClientConnects</td><td><span class="tag ok">정상</span></td><td>Acceptor 와 함께. ACCEPT, slot -1</td></tr>
   <tr><td>EventListener</td><td>ImmediateFailureIsDeliveredAsAnErrorCompletionNotAReturnCode</td><td><span class="tag edge">엣지</span></td><td>이미 닫힌 소켓에 submit → submit 은 SUCCESS 류, 다음 wait 에 오류 완료 하나. "요청은 completion 으로만 비워진다"</td></tr>
   <tr><td>EventListener</td><td>SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy</td><td><span class="tag misuse">오용</span></td><td>같은 event 에 두 번. 두 번째는 BUSY 이고 첫 요청은 그대로</td></tr>
-  <tr><td>EventListener</td><td>SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>attach 없는 submit 은 타입으로 막혔다 (event 는 attach 만 만든다). 빈 Holder, detach 된 event, 다른 listener 의 event 는 INVALID_ARGUMENT. 사이클 3b 에서 AttachOnInvalidSocketIsRejected 도 더했다</td></tr>
+  <tr><td>EventListener</td><td>SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>attach 전의 IoEvent (기본 생성 상태), detach 된 event, 다른 listener 의 event 는 INVALID_ARGUMENT. 사이클 3b 에서 AttachOnInvalidSocketIsRejected 도 더했다</td></tr>
   <tr><td>EventListener</td><td>SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>"그 밖의 kind 는 오지 않는다" 를 debug assert 가 아니라 코드로도 막는지 확정</td></tr>
   <tr><td>EventListener</td><td>WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextWait</td><td><span class="tag edge">엣지</span></td><td>capacity 4 에 완료 6 → 4, 2. 유실 없음</td></tr>
   <tr><td>EventListener</td><td>CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused</td><td><span class="tag misuse">오용</span></td><td>shutdown 경로의 안전</td></tr>
@@ -331,12 +349,18 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>TlsMemory</td><td>OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose</td><td><span class="tag ok">정상</span></td><td>두 번 데운 뒤 profile 둘 + 연결 한 쌍을 열고 닫는다 → OpenSSL live bytes / blocks 가 연 전과 같다</td></tr>
   <tr><td>TlsMemory</td><td>EachConnectedPairHoldsABoundedAmountOfOpenSslMemory</td><td><span class="tag ok">정상</span></td><td>profile 하나에 연결 4 쌍 → 쌍당 보유량과 최대치가 128 KiB 미만, 모두 닫으면 원래대로. 수치는 XML 의 held_bytes_per_pair / peak_bytes_per_pair</td></tr>
 </table>
-<h3>정적 TLS Pool (<code>kiotty_net_tls_pool_tests</code>)</h3>
-<p>세는 hook 이 없는 별도 실행 파일이다 (TLS ON, <code>KIOTTY_NET_TLS_STATIC_POOL</code> ON 일 때만). gtest_discover_tests 가 테스트마다 process 를 새로 띄우므로 각 테스트가 OpenSSL 을 부르기 전에 Context 를 만든다.</p>
+<h3>TlsMemory : 전역 arena 와 Owner 서브풀 (<code>kiotty_net_tls_pool_tests</code>)</h3>
+<p>세는 hook 이 없는 별도 실행 파일이다 (TLS ON, <code>KIOTTY_NET_TLS_STATIC_POOL</code> ON 일 때만). gtest_discover_tests 가 테스트마다 process 를 새로 띄우므로 각 테스트가 OpenSSL 을 부르기 전에 <code>TlsMemory::functions()</code> 를 건다 (설계 19.5. 사이클 7 전에는 테스트가 직접, 그 뒤에는 <code>Context::open</code> 이). 서브풀은 테스트의 <code>OwnerTlsMemory&lt;ServerTlsLayout&gt;</code> 지역 변수이고 <code>TlsMemory::Scope</code> 가 그 thread 의 할당을 거기로 보낸다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>TlsStaticPool</td><td>ContextRoutesOpenSslIntoTheStaticPoolBeforeAnyTlsObjectExists</td><td><span class="tag ok">정상</span></td><td>첫 Context 가 hook 을 걸고 (tlsPooled true), 둘째 Context 도 true</td></tr>
-  <tr><td>TlsStaticPool</td><td>HandshakeTakesBlocksFromTheStaticPoolAndClosingGivesThemBack</td><td><span class="tag ok">정상</span></td><td>데운 뒤 연결 4 쌍 → 정적 Pool 의 live 가 늘고, 닫으면 원래 live 로. failure 0</td></tr>
+  <tr><td>TlsMemory</td><td>InstalledIsTrueAfterFunctionsAreSetAndFalseWhenAnotherAllocatorIsAlreadyThere</td><td><span class="tag ok">정상</span></td><td>이 실행 파일에서는 true. unit 실행 파일 (세는 hook 이 먼저) 에서는 false 이고 그 hook 을 덮지 않는다 (사이클 4 의 Context 케이스가 옮겨 온 것)</td></tr>
+  <tr><td>TlsMemory</td><td>HandshakeInsideAScopeTakesBlocksFromThatOwnersSubpoolOnly</td><td><span class="tag ok">정상</span></td><td>Scope 안에서 profile + 연결 4 쌍 → 그 서브풀의 live 가 늘고 전역 arena 의 live 는 attachThread 뒤 값 그대로. 닫으면 서브풀이 원래 live 로. failures 0</td></tr>
+  <tr><td>TlsMemory</td><td>GlobalStateStaysInTheGlobalArenaAfterAttachThread</td><td><span class="tag ok">정상</span></td><td>Scope 생성 (attachThread 포함) 뒤 전역 arena 의 live 가 늘고 서브풀은 0. 전역 꼬리표 (error queue, DRBG) 가 서브풀에 들어오지 않는다 (설계 19.5)</td></tr>
+  <tr><td>TlsMemory</td><td>SubpoolExhaustionFailsOnlyThatHandshakeAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>연결 1 몫의 ClientTlsLayout 서브풀에 연결 둘 → 둘째 handshake 만 FAILED, failures ≥ 1. 전역 arena 와 다른 Owner 의 서브풀은 영향 없음. 서브풀 바닥</td></tr>
+  <tr><td>TlsMemory</td><td>ReleaseOfABlockFromAnotherOwnersSubpoolFindsItThroughTheRegistry</td><td><span class="tag ok">정상</span></td><td>Owner A 의 Scope 에서 할당한 것을 Owner B 의 Scope 에서 free → A 의 live 가 준다, lateFrees 0 (등록표와 last_hit)</td></tr>
+  <tr><td>TlsMemory</td><td>LateFreesAreZeroAfterEveryObjectIsClosed</td><td><span class="tag ok">정상</span></td><td>profile, 연결, Scope 를 전부 닫고 detachThread → lateFrees() 0. 어느 arena 에도 없는 주소의 free 가 없었다</td></tr>
+  <tr><td>TlsMemory</td><td>DetachThreadReturnsCurrentToTheGlobalArena</td><td><span class="tag ok">정상</span></td><td>Scope 밖에서 detachThread → 그 뒤 할당은 전역. 다시 Scope 를 만들면 attachThread 가 한 번 더 (attached 가 false 로 돌아갔다)</td></tr>
+  <tr><td>TlsMemory</td><td>NestedScopesRestoreThePreviousArenaOnExit</td><td><span class="tag edge">엣지</span></td><td>Scope A 안의 Scope B 가 끝나면 current 가 A 의 서브풀로 돌아온다 (IO Thread 의 콜백 안에서 StreamClient 를 부르는 모양)</td></tr>
 </table>
 <h3>OpenSSL 메모리 수치 (BIO pair, 사이클 4 에서 잰 것)</h3>
 <p>unit 실행 파일은 <code>tests/unit/support/kiotty_test_openssl_memory.cpp</code> 에서 <code>CRYPTO_set_mem_functions</code> 로 세는 hook 을 건다 (TlsMemory 두 테스트). 등급별 계측과 번역기 표는 <code>tests/measure/kiotty_measure_tls_memory.cpp</code> 가 낸다 (설계 v4 19.4). OpenSSL 3.6.1, 연결 하나의 최대치는 Stage 4 / 16 / 64 KiB 모두 약 66 ~ 68 KiB, 대기 28 ~ 50 KiB 다 (memory BIO 때는 64 KiB 에서 183 KiB). 표는 설계 v4 19.6.</p>
@@ -376,7 +400,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Sender</td><td>ReleaseConsumesAndAlwaysCompacts</td><td><span class="tag ok">정상</span></td><td>뒤에 바이트가 남은 채 앞을 release → writable == capacity - readable. 비었을 때만이 아니라 늘 compact</td></tr>
   <tr><td>Sender</td><td>ReleaseOfThePeekedLengthKeepsWhatWasStagedBehind</td><td><span class="tag edge">엣지</span></td><td>stage A, peek 길이 a, stage B, release(a) → peek 이 B 만. 완료가 보낸 구간만 치운다</td></tr>
   <tr><td>Sender</td><td>ContinuousAppendWhileReleasingNeverLocksIntoBufferFull</td><td><span class="tag edge">엣지</span></td><td>"peek → 뒤에 stage → release" 1000 회. 늘 compact 하므로 BUFFER_FULL 이 굳지 않는다 (설계 9.3)</td></tr>
-  <tr><td>Sender</td><td>ClearDropsEverything</td><td><span class="tag ok">정상</span></td><td>readable 0, writable == capacity</td></tr>
+  <tr><td>Sender</td><td>StageAndReleaseAreStaticAndTakeAnyStageBase</td><td><span class="tag ok">정상</span></td><td><code>Sender::stage(StageBase&amp;, span)</code> / <code>release(StageBase&amp;, length)</code> 를 send Stage 와 notify Stage 에 번갈아 불러도 서로 섞이지 않는다. Sender 객체는 없다 (설계 9.3). clear 는 <code>StageBase::clear()</code> (5절)</td></tr>
   <tr><td>WorkContext</td><td>RequestStartFinishOnFinishedCyclesIdleRequestedWorkingDoneIdle</td><td><span class="tag ok">정상</span></td><td>네 상태에서 requested (REQUESTED 만), working (REQUESTED / WORKING / DONE), finished (DONE 만). onFinished 가 finish 의 outcome 을 돌려주고 IDLE</td></tr>
   <tr><td>WorkContext</td><td>AbandonTurnsRequestedBackToIdle</td><td><span class="tag ok">정상</span></td><td>시작하지 않은 Work 는 CLOSE 가 거둔다</td></tr>
   <tr><td>WorkContext</td><td>AbandonInWorkingOrDoneDoesNothing</td><td><span class="tag edge">엣지</span></td><td>worker 가 끝낸다. IDLE 의 abandon 도 그대로</td></tr>
@@ -385,10 +409,12 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>WorkContext</td><td>VerifyWithDifferentGenerationIsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>WORKING 이고 generation 다름</td></tr>
   <tr><td>WorkContext</td><td>FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome</td><td><span class="tag ok">정상</span></td><td>1000 회. release / acquire 의 가시성 (outcome 이 찢어지지 않음)</td></tr>
   <tr><td>WorkContext</td><td>ResetReturnsToIdleFromEveryState</td><td><span class="tag ok">정상</span></td><td>release 가 부른다</td></tr>
-  <tr><td>NotificationContext</td><td>IsIoThreadIsTrueOnlyOnTheRecordedThread</td><td><span class="tag ok">정상</span></td><td>io_thread 를 적은 thread 에서 true, 다른 thread 에서 false</td></tr>
+  <tr><td>ConnectionHost</td><td>ReleaseResetsInsideTheNotificationLock</td><td><span class="tag ok">정상</span></td><td>다른 thread 가 notify 를 1000 번 부르는 동안 release / acquire 를 반복 → reset 뒤의 notify Stage 에 바이트가 남지 않는다. TSan job 이 lock 을 본다 (설계 9.8)</td></tr>
+  <tr><td>ConnectionHost</td><td>NotifyWithAPastGenerationReturnsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>release 된 slot 의 옛 id, 범위 밖 slot → PEER_CLOSED, 어느 Stage 도 바뀌지 않는다</td></tr>
+  <tr><td>ConnectionHost</td><td>AcquireFailureResetsTheConnectionAndLeavesTheSlotEmpty</td><td><span class="tag edge">엣지</span></td><td>TLS open 이 실패하는 configuration → Result 의 code, empty() true, 다음 acquire 가 같은 slot</td></tr>
   <tr><td>Connection</td><td>FreshConnectionIsIdleNotAliveWithBothEventsEmpty</td><td><span class="tag ok">정상</span></td><td>phase IDLE, deadline 0, working false, readEvent / writeEvent 둘 다 pending 아님</td></tr>
-  <tr><td>Connection</td><td>OpenRaisesGenerationAndHandleChangesEachOpen</td><td><span class="tag ok">정상</span></td><td>open / release / open → handle 다름, slot 같음</td></tr>
-  <tr><td>Connection</td><td>StreamHandleIsHandleWithTheTypeBit</td><td><span class="tag ok">정상</span></td><td>streamHandle 의 bit 63 을 지우면 handle 과 같다</td></tr>
+  <tr><td>Connection</td><td>InitializeRaisesGenerationAndHandleChangesEachTime</td><td><span class="tag ok">정상</span></td><td>acquire / release / acquire → handle 의 id 다름, slot 같음, owner 같음</td></tr>
+  <tr><td>Connection</td><td>StreamHandleSharesOwnerAndIdWithTheConnectionHandle</td><td><span class="tag ok">정상</span></td><td>streamHandle(handler) 의 owner 와 id 가 handle(handler) 과 같다. 타입만 다르다 (설계 3절)</td></tr>
   <tr><td>Connection</td><td>EventForChoosesByDirection</td><td><span class="tag ok">정상</span></td><td>WRITE (USER / NOTIFY / HANDSHAKE / CONTROL) → write event. READ / READ_UNTIL → read event</td></tr>
   <tr><td>Connection</td><td>OnOpenedPlainCallsOnReadyOnceAndAppliesItsAction</td><td><span class="tag ok">정상</span></td><td>onReady → thenRead(4, 500) → READ, deadline now + 500 (expireDeadline(now + 499) false, (now + 500) true)</td></tr>
   <tr><td>Connection</td><td>AnyCompletionInClosingReturnsNoneAndCallsNothing</td><td><span class="tag ok">정상</span></td><td>RECEIVE / SEND / TIMEOUT / WORK_READY / WORK_DONE 와 CANCELLED. dispatch 첫 줄. 늦은 완료가 콜백을 못 낸다</td></tr>
@@ -504,26 +530,26 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s10">10. 케이스 : io_loop</h2>
-<p>기준은 설계 v4 10절이다. IoLoop 는 Server 를 통하지 않고 직접 조립한다 (ConnectionHost, EventListener, Acceptor, IoLoop). run 은 테스트가 띄운 thread 에서 돌고 LoopbackPeer 가 접속한다. 콜백은 RecordingHandler 가 적는다. runOnce 는 열지 않는다 (13절). 프로세스의 순서는 peer 가 받는 바이트 순서와 콜백 기록의 순서로 관찰한다.</p>
+<p>기준은 설계 v4 10절이다. IoLoop 는 Server 를 통하지 않고 직접 조립한다. IoLoop 의 멤버는 둘 (<code>_stopped</code>, <code>_io_thread</code>) 뿐이고 나머지 (<code>ConnectionHost&lt;N&gt;</code>, EventListener, Acceptor, TlsProfile, Handler) 는 테스트 함수의 지역 변수로 만들어 <code>run</code> 에 참조로 넘긴다. EventClient 모양은 open 하지 않은 Acceptor (<code>listening()</code> 거짓) 와 <code>stop_when_empty</code> 로, 평문은 <code>valid()</code> 가 거짓인 TlsProfile 로 만든다. run 은 테스트가 띄운 thread 에서 <code>TlsMemory::Scope</code> 안에서 돌고 LoopbackPeer 가 접속한다. 콜백은 RecordingHandler 가 적는다. runOnce 는 열지 않는다 (13절). 프로세스의 순서는 peer 가 받는 바이트 순서와 콜백 기록의 순서로 관찰한다.</p>
 
-<h3>한 바퀴의 여섯 프로세스</h3>
-<p class="flow">drain → settle → collectIoEvents → step (OS 완료마다) → collectLocalEvents → step (local completion 마다)</p>
+<h3>한 바퀴의 다섯 프로세스</h3>
+<p class="flow">drain → settle → collectIoEvents → step (OS 완료마다) → stepLocalEvents (slot 마다 local completion 을 만들어 바로 step. 아무것도 만들지 않을 때까지 반복)</p>
 <table>
   <tr><th>프로세스</th><th>input</th><th>output</th><th>그 output 을 보는 케이스</th></tr>
   <tr><td>drain</td><td>연결마다의 Stage (cipherSend / notify / send) 와 write event</td><td>write lane 의 WRITE, 연결당 최대 하나</td><td>ClientHelloIsArmedBeforeFirstWait, DrainSubmitsAtMostOneWritePerConnection, ThenWriteFromHandlerGoesOutBeforeTheNextWait</td></tr>
   <tr><td>settle</td><td>host (phase, 두 event, working)</td><td>slot 반납, ACCEPT 재무장, <code>_stopped</code></td><td>HandlerCloseWhileReadPendingReleasesSlotOnlyAfterCancelledCompletionReturns, WhenHostIsFullAcceptIsNotRearmedAndResumesAfterARelease, StopWhenEmptyEndsRunWhenTheLastConnectionCloses</td></tr>
   <tr><td>collectIoEvents</td><td>가장 가까운 deadline (waitTimeout)</td><td>OS 완료의 <code>Span&lt;IoCompletion&gt;</code></td><td>DeadlineTimeoutFiresOnTimeoutWithinTolerance, HoldWithTimeoutZeroNeverTimesOut, WakeCompletionIsDroppedByStepAndCausesNoCallback</td></tr>
   <tr><td>step (OS 완료)</td><td>IoCompletion 하나</td><td>read lane 의 READ / ACCEPT 하나 또는 lifecycle 변화 (CLOSE 는 detach + shutdown), Stage 에 쌓인 바이트. WRITE 는 없다</td><td>EchoThroughReadWriteReadCompletesTheCycle, IgnoredConnectionIsClosedAtOnceAndTakesNoSlot, PeerCloseWhileReadPendingCallsOnDisconnectedPeerClosedAndFreesTheSlot</td></tr>
-  <tr><td>collectLocalEvents</td><td>step 뒤의 연결 상태 (deadline, _work, 두 event)</td><td>TIMEOUT / WORK_READY / WORK_DONE 의 <code>Span&lt;IoCompletion&gt;</code></td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch, WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle, WorkStartedWaitsForInFlightNotifyThenFires</td></tr>
-  <tr><td>step (local)</td><td>local completion 하나</td><td>위와 같다</td><td>StartWorkThenCloseStreamFromWorkerThreadResumesTheFlow, OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream</td></tr>
+  <tr><td>stepLocalEvents</td><td>step 뒤의 연결 상태 (deadline, _work, 두 event)</td><td>slot 마다 TIMEOUT / WORK_READY / WORK_DONE 을 만들어 바로 step 한 결과 (배열 없음). 하나라도 있었는가 (bool). runOnce 가 false 까지 반복한다</td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch, WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle, WorkStartedWaitsForInFlightNotifyThenFires, WorkRequestedByATimeoutHandlerStartsInTheSameRunOnce, StartWorkThenCloseStreamFromWorkerThreadResumesTheFlow, OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream</td></tr>
 </table>
 
-<h3>네 성질</h3>
+<h3>다섯 성질</h3>
 <table>
   <tr><th>성질 (설계 10절)</th><th>케이스</th></tr>
   <tr><td>wait 전에 Stage 에 걸리지 않은 바이트가 없다</td><td>ClientHelloIsArmedBeforeFirstWait, ThenWriteFromHandlerGoesOutBeforeTheNextWait, NotifyFromInsideAHandlerGoesOutBeforeTheNextWait</td></tr>
   <tr><td>CLOSE 뒤 같은 배치의 TIMEOUT 이 없다</td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch, ReadCompletionInTheSameBatchAsAnExpiredDeadlineRearmsInsteadOfTimingOut</td></tr>
   <tr><td>WORK_READY 는 같은 runOnce 안</td><td>WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle, WorkStartedWaitsForInFlightNotifyThenFires</td></tr>
+  <tr><td>local completion 의 step 이 만든 Work 도 같은 runOnce 안 (반복)</td><td>WorkRequestedByATimeoutHandlerStartsInTheSameRunOnce, StepLocalEventsTerminatesWithinThreeStepsPerSlot</td></tr>
   <tr><td>notify 송신 중 thenWrite 는 두 WRITE 로 순서대로</td><td>NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder</td></tr>
 </table>
 
@@ -548,7 +574,10 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>IoLoop</td><td>WakeCompletionIsDroppedByStepAndCausesNoCallback</td><td><span class="tag ok">정상</span></td><td>notify 없이 listener.wake() 만 → 기록 없음</td></tr>
   <tr><td>IoLoop</td><td>TimeoutIsNotDeliveredAfterCloseInTheSameBatch</td><td><span class="tag edge">엣지</span></td><td>연결 A 에 thenRead(4, 50), A 의 peer 가 FIN. 연결 B 의 onRead 가 IO Thread 를 100 ms 잡아 A 의 deadline 이 지난 채 다음 wait 배치에 RECEIVE(CLOSED) 가 오게 한다 → A 는 onDisconnected(PEER_CLOSED) 1 회, onTimeout 0 회</td></tr>
   <tr><td>IoLoop</td><td>ReadCompletionInTheSameBatchAsAnExpiredDeadlineRearmsInsteadOfTimingOut</td><td><span class="tag edge">엣지</span></td><td>같은 방법으로 A 의 peer 가 4 바이트 → onRead → thenRead(4, 1000) → onTimeout 0 회. 새 deadline 이 미래다</td></tr>
-  <tr><td>IoLoop</td><td>WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle</td><td><span class="tag ok">정상</span></td><td>다른 연결도 deadline 도 없는 상태에서 onRead → thenWork. thenWork 뒤 다음 wait 는 끝없이 막히므로 onWorkStarted 가 온다는 것이 "같은 runOnce 의 collectLocalEvents" 의 증거</td></tr>
+  <tr><td>IoLoop</td><td>WorkStartedFiresInTheSameRunOnceWhenWriteLaneIsIdle</td><td><span class="tag ok">정상</span></td><td>다른 연결도 deadline 도 없는 상태에서 onRead → thenWork. thenWork 뒤 다음 wait 는 끝없이 막히므로 onWorkStarted 가 온다는 것이 "같은 runOnce 의 stepLocalEvents" 의 증거</td></tr>
+  <tr><td>IoLoop</td><td>WorkRequestedByATimeoutHandlerStartsInTheSameRunOnce</td><td><span class="tag edge">엣지</span></td><td>thenHold(50) 뒤 아무 OS 완료가 없는 상태에서 onTimeout → thenWork. TIMEOUT 은 local completion 이라 그 step 이 만든 REQUESTED 는 같은 바퀴의 다음 stepLocalEvents 반복이 WORK_READY 로 만든다. 다음 wait 는 끝없이 막히므로 onWorkStarted 가 온다는 것이 증거 (설계 10절의 반복이 막는 구멍)</td></tr>
+  <tr><td>IoLoop</td><td>StepLocalEventsTerminatesWithinThreeStepsPerSlot</td><td><span class="tag edge">엣지</span></td><td>WORK_DONE(thenWork) 처럼 가장 긴 사슬 (WORK_DONE → drive → REQUESTED → WORK_READY) 을 연결 셋에 동시에 → RecordingHandler 의 한 바퀴 콜백 수가 slot 당 셋을 넘지 않고 IO Thread 가 wait 로 돌아간다 (IdleCpu 로 관찰)</td></tr>
+  <tr><td>IoLoop</td><td>IsIoThreadIsTrueOnlyOnTheRunningThread</td><td><span class="tag ok">정상</span></td><td>콜백 안에서 isIoThread() true, 테스트 thread 에서 false, run 이 돌아온 뒤 run thread 에서도 false</td></tr>
   <tr><td>IoLoop</td><td>WorkStartedWaitsForInFlightNotifyThenFires</td><td><span class="tag edge">엣지</span></td><td>peer 가 천천히 읽는 큰 notify 가 write event 에 걸린 채 onRead → thenWork → onWorkStarted 는 peer 가 notify 를 다 받은 뒤 (SEND(NOTIFY) 완료와 같은 runOnce). worker 의 첫 Stream write 가 notify 뒤에 도착</td></tr>
   <tr><td>IoLoop</td><td>StartWorkThenCloseStreamFromWorkerThreadResumesTheFlow</td><td><span class="tag ok">정상</span></td><td>onRead → thenWork → onWorkStarted(ctx, stream) → worker 가 readConnectionStream / writeConnectionStream 뒤 closeConnectionStream(stream, thenWrite(끝)) → peer 받음 → onWritten</td></tr>
   <tr><td>IoLoop</td><td>NoCallbackIsDeliveredForAConnectionWhileItIsWorking</td><td><span class="tag ok">정상</span></td><td>Work 중 peer 가 보내면 worker 의 Stream read 가 받고 onRead 는 없다. peer 가 끊으면 Stream read 가 0, onDisconnected 는 closeStream 뒤의 WORK_DONE 에서</td></tr>
@@ -577,12 +606,18 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Config</td><td>TlsServerConfigRequiresCertAndKeyPaths</td><td><span class="tag misuse">오용</span></td><td>NULL 경로</td></tr>
   <tr><td>Action</td><td>EachActionFunctionFillsTypeTimeoutAndItsUnionMember</td><td><span class="tag ok">정상</span></td><td>여섯 함수 + accept / ignore</td></tr>
   <tr><td>Action</td><td>ActionFunctionsDoNotValidateSoThatValidationHappensOnceInTheConnection</td><td><span class="tag ok">정상</span></td><td>readConnection(0) 이 struct 를 만든다. 거부는 9절의 Connection 테스트가 맡는다</td></tr>
-  <tr><td>Context</td><td>InitializeReturnsSuccessAndANonZeroHandle</td><td><span class="tag ok">정상</span></td><td></td></tr>
-  <tr><td>Context</td><td>SeventeenthOwnerReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>16 개 create 뒤</td></tr>
-  <tr><td>Context</td><td>SeventeenthContextReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>g_contexts[16]</td></tr>
-  <tr><td>Context</td><td>DestroyedOwnerSlotReusedByANewOwnerDoesNotAnswerOldHandles</td><td><span class="tag ok">정상</span></td><td>owner generation. 옛 Connection handle 의 notify → PEER_CLOSED</td></tr>
+  <tr><td>Context</td><td>InitializeReturnsSuccessAndANonNullHandle</td><td><span class="tag ok">정상</span></td><td></td></tr>
+  <tr><td>Context</td><td>InitializeContextTwiceReturnsTheSameContextAndSuccess</td><td><span class="tag ok">정상</span></td><td>두 번째 initializeContext 는 같은 포인터와 SUCCESS. process 에 Context 는 하나다 (설계 13절)</td></tr>
+  <tr><td>Context</td><td>OneReleaseEndsBothInitializeCalls</td><td><span class="tag edge">엣지</span></td><td>두 번 initialize 뒤 한 번 release → 그 뒤의 create 는 INVALID_ARGUMENT (초기화 안 됨). 두 번째 release 는 아무 일도 하지 않는다</td></tr>
+  <tr><td>Context</td><td>OneMoreServerThanMaxServersReturnsTableFull</td><td><span class="tag edge">엣지</span></td><td>MAX_SERVERS 개 create 뒤. StreamClient 표는 영향 없음 (표가 타입별이다)</td></tr>
+  <tr><td>Context</td><td>ReservedOwnersFromTheConfigAreCreatedAtInitializeAndCreateDoesNotAllocate</td><td><span class="tag ok">정상</span></td><td>config 에 servers 2 → initialize 뒤 createServer 둘은 new 없이 (lateFrees / 할당 수를 세는 hook 또는 주소 비교). 셋째가 new</td></tr>
+  <tr><td>Context</td><td>DestroyedOwnerIsRetiredAndReusedByTheNextCreateOfTheSameType</td><td><span class="tag ok">정상</span></td><td>destroy 뒤 create → 같은 주소 (은퇴한 객체의 재사용. 설계 19.1 #4)</td></tr>
+  <tr><td>Context</td><td>OldConnectionHandlesOfADestroyedOwnerReturnPeerClosed</td><td><span class="tag ok">정상</span></td><td>destroy 전의 handle 로 notify → owner 포인터는 살아 있고 (은퇴) Connection generation 이 거른다 → PEER_CLOSED. 그 Owner 를 재사용한 새 Server 의 연결에도 옛 handle 은 PEER_CLOSED</td></tr>
+  <tr><td>Context</td><td>LateFreesAreZeroAfterDestroyAndAfterRelease</td><td><span class="tag ok">정상</span></td><td>TLS Server 를 돌리고 연결 몇 개를 닫고 destroy → <code>TlsMemory::lateFrees()</code> 0. release 뒤에도 0</td></tr>
+  <tr><td>Context</td><td>ProcessExitWithoutReleaseContextDoesNotCrash</td><td><span class="tag edge">엣지</span></td><td>별도 실행 파일. initialize, create, run 을 끝낸 뒤 release 없이 main 이 return → exit code 0. static Context 의 소멸자가 Owner 들을 지운다 (run 중인 thread 가 없을 때)</td></tr>
   <tr><td>Context</td><td>ReleaseContextShutsDownARunningServerAndItsRunReturnsClosed</td><td><span class="tag ok">정상</span></td><td>run thread 가 CLOSED 로 return</td></tr>
-  <tr><td>Context</td><td>CreateServerWithNullOrUninitializedConfigReturnsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>handle 0</td></tr>
+  <tr><td>Context</td><td>CreateServerWithNullOrUninitializedConfigReturnsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>handle NULL</td></tr>
+  <tr><td>Context</td><td>ServerSubpoolExhaustionFailsOnlyThatServersHandshakes</td><td><span class="tag edge">엣지</span></td><td>TLS Server A 의 서브풀을 테스트 전용 작은 Layout 으로 (KIOTTY_NET_TESTING) 바닥내면 A 의 새 handshake 만 TLS_HANDSHAKE_FAILED. Server B 와 전역 arena 는 그대로. <code>failures()</code> 가 A 에서만 는다</td></tr>
   <tr><td>Context</td><td>CreateWithTlsOnStubBuildReturnsTlsNotSupported</td><td><span class="tag edge">엣지</span></td><td>stub 빌드만</td></tr>
   <tr><td>Context</td><td>CreateWithTlsAndMissingCertReturnsCertificateNotFoundAndNoHandle</td><td><span class="tag misuse">오용</span></td><td>create 의 Result.code 경로</td></tr>
   <tr><td>Context</td><td>ReleaseContextFromInsideACallbackAsserts</td><td><span class="tag misuse">오용</span></td><td>EXPECT_DEATH. debug 빌드만</td></tr>
@@ -671,11 +706,11 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Stage 의 내부 위치 (begin / end)</td><td>private</td><td>writable / readable / capacity 조합으로 유도된다. 추가 필요 없음</td></tr>
   <tr><td>Pool 이 어느 등급에서 fallback 했나</td><td><code>fallbackCount()</code> 합계만</td><td>합계로 충분. 등급별은 벤치마크 때 필요하면 추가</td></tr>
   <tr><td>EventListener 의 완료 배열에 몇 개가 남았나</td><td>없음</td><td>필요 없음. "다음 wait 에 나머지" 를 두 번 wait 로 확인</td></tr>
-  <tr><td>IoLoop 의 한 바퀴를 한 번만 돌리기</td><td><code>runOnce</code> private</td><td>통합 테스트는 run thread + waitUntil 로 충분하다. 바퀴 순서 (v4 10절 : drain → settle → collectIoEvents → step → collectLocalEvents → step) 는 peer 가 받는 바이트 순서와 콜백 순서로 관찰한다. 열지 않는다</td></tr>
-  <tr><td>Connection 생성에 필요한 NotificationContext, Pool</td><td>ConnectionHost 가 만든다</td><td>테스트가 capacity 1 의 ConnectionHost 를 만들고 <code>at(0)</code> 을 쓴다. Connection 생성자를 직접 부르지 않는다</td></tr>
+  <tr><td>IoLoop 의 한 바퀴를 한 번만 돌리기</td><td><code>runOnce</code> private</td><td>통합 테스트는 run thread + waitUntil 로 충분하다. 바퀴 순서 (v4 10절 : drain → settle → collectIoEvents → step → stepLocalEvents 반복) 는 peer 가 받는 바이트 순서와 콜백 순서로 관찰한다. 열지 않는다</td></tr>
+  <tr><td>Connection 하나를 만들기</td><td><code>ConnectionHost&lt;1&gt;</code> 의 <code>acquire</code></td><td>Connection 은 기본 생성자뿐이고 바깥을 가리키는 멤버가 없다 (설계 9.2). 테스트가 <code>ConnectionHost&lt;1&gt;</code> 을 만들어 <code>initialize(limits)</code> 와 <code>acquire(configuration)</code> 으로 켜고 <code>at(0)</code> 을 쓴다. mutex 는 <code>host.notificationMutex()</code> 를 dispatch / pickWrite 에 넘긴다. Handler 는 테스트의 지역 변수 (RecordingHandler 의 콜백 표 + app_context + 더미 Owner)</td></tr>
   <tr><td>TlsEngine 둘을 맞붙이기</td><td>cipher() 가 public</td><td>그대로 된다. TlsPump 는 테스트 support</td></tr>
   <tr><td>KeyUpdate / close_notify 유도</td><td>TlsEngine 에 없음</td><td>테스트 support 가 <code>_ssl</code> 을 꺼낼 수 없다. 테스트 전용 <code>TlsEngine::debugKeyUpdate()</code> / <code>debugShutdown()</code> 를 <code>KIOTTY_NET_TESTING</code> 매크로 아래에 둔다. 이것이 유일한 테스트 훅이다</td></tr>
-  <tr><td>run 을 부른 thread 에서 destroy 하면 assert</td><td>requirement 에 "debug 빌드는 assert"</td><td>EXPECT_DEATH. release 빌드에서는 skip. Context 가 <code>io_thread</code> 를 기억해야 한다 (NotificationContext 에 이미 있다)</td></tr>
+  <tr><td>run 을 부른 thread 에서 destroy 하면 assert</td><td>requirement 에 "debug 빌드는 assert"</td><td>EXPECT_DEATH. release 빌드에서는 skip. Owner 의 <code>_loop.isIoThread()</code> 가 답한다</td></tr>
   <tr><td>onError 의 message 가 static 인가</td><td>포인터만</td><td>테스트가 message 포인터를 저장해 두고 콜백 밖에서 strcmp 한다. dangling 이면 ASan 이 잡는다. CI 의 Linux job 은 ASan + TSan 으로 한 번 더 돈다</td></tr>
 </table>
 
@@ -689,7 +724,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>timeout_ms</td><td>{ 0 (없음), 1, 100, 60000 }</td><td>HOLD / READ 의 deadline, await, StreamClient read</td></tr>
   <tr><td>transport</td><td>{ TCP, PIPE }</td><td>echo 류 전부 두 번</td></tr>
   <tr><td>TLS</td><td>{ 평문, TLS 1.3, TLS 1.2 }</td><td>echo 류, Connection 의 TLS 판</td></tr>
-  <tr><td>handle</td><td>{ 0, 유효, 옛 generation, 옛 owner generation, 범위 밖 slot, 랜덤 }</td><td>C API 의 handle 받는 함수 전부</td></tr>
+  <tr><td>handle (struct { owner, id })</td><td>{ owner NULL, id 0, 유효, 지난 generation, 은퇴한 (destroy 된) Owner 의 handle, 범위 밖 slot, 랜덤 id }</td><td>C API 의 handle 받는 함수 전부. owner NULL / id 0 은 INVALID_ARGUMENT (info 는 빈 값), 나머지 틀린 것은 PEER_CLOSED. Connection handle 을 Stream 함수에 넘기는 것은 타입이 달라 compile 되지 않으므로 케이스가 없다</td></tr>
 </table>
 <p>확인받을 것 (케이스가 전제한 계약인데 설계 / requirement 에 아직 명시되지 않은 것):</p>
 <ol>
@@ -701,17 +736,18 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </ol>
 
 <h2 id="s15">15. 구현 순서와 테스트 순서</h2>
-<p>설계 v4 18절의 ① ~ ⑨ (plan_base_v1 의 사이클) 과 같이 간다. 단계마다 그 단계의 테스트가 전부 통과해야 다음으로 간다. "돌려보지 않은 테스트는 테스트가 아니다."</p>
+<p>설계 v4 18절의 ① ~ ⑨ 와 <code>plan_base_v2.md</code> 의 사이클 (1부 R4 ~ R8 은 끝난 층을 19절에 맞게 고치는 것, 2부 4b ~ 8 은 새 층) 과 같이 간다. 단계마다 그 단계의 테스트가 전부 통과해야 다음으로 간다. "돌려보지 않은 테스트는 테스트가 아니다."</p>
 <table>
   <tr><th>단계</th><th>구현</th><th>테스트</th><th>층</th></tr>
-  <tr><td>①</td><td>base.h 3절 변경, statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
-  <tr><td>②</td><td>core : Stage, StageSet, Span, PoolHandle, Pool, Clock + tests/CMakeLists 골격</td><td>5절 전부, PoolAllocateRelease, StageProvideConsume</td><td>unit, benchmark</td></tr>
-  <tr><td>③</td><td>error, socket, event (IOCP 먼저, 그 다음 epoll)</td><td>6절, 7절. 두 backend 가 같은 테스트를 통과하는 것이 proactor 흉내의 완성 조건</td><td>integration</td></tr>
-  <tr><td>④</td><td>tls : stub, 그 다음 OpenSSL</td><td>8절. TlsPump 로 소켓 없이</td><td>unit</td></tr>
-  <tr><td>⑤</td><td>connection 전부 (사이클 5a 평문, 5b TLS 와 Acceptor)</td><td>9절. 평문 94 (5a), TLS 23 과 Acceptor 3 (5b). 가장 많은 케이스가 여기 있고 Acceptor 말고는 소켓 없이 돈다</td><td>unit, integration (Acceptor)</td></tr>
-  <tr><td>⑥</td><td>io_loop</td><td>10절 32, EchoRoundtrip, IdleCpu, NotifyLatency</td><td>integration, benchmark</td></tr>
-  <tr><td>⑦</td><td>server, client, context, config</td><td>11절의 Config / Action unit, Context / Server / Client integration</td><td>unit, integration</td></tr>
-  <tr><td>⑧</td><td>base.cpp 번역</td><td>11절 전부를 C API 로 다시. 12절 나머지 벤치마크</td><td>integration, benchmark</td></tr>
+  <tr><td>① (R5)</td><td>base.h 3절 변경 (handle struct, ContextConfig), statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
+  <tr><td>② (R6)</td><td>core : StageBase / Stage&lt;N&gt;, StageSet, Span, Clock, Parker, core/pool (PoolHandle, Pool&lt;Layout&gt;, StaticPool, ReusablePool, LazyReusablePool), base/pool (상한, TLS Layout 셋)</td><td>5절 전부</td><td>unit, benchmark</td></tr>
+  <tr><td>③ (끝. R7)</td><td>error, socket, event (IOCP, epoll). R7 은 IoEvent 구체 타입</td><td>6절, 7절. 두 backend 가 같은 테스트를 통과하는 것이 proactor 흉내의 완성 조건</td><td>integration</td></tr>
+  <tr><td>④ (끝. R8)</td><td>tls : stub, OpenSSL. R8 은 TlsEngine 의 Stage&lt;N&gt; 과 TlsMemory</td><td>8절. TlsPump 로 소켓 없이. TlsMemory 는 별도 실행 파일</td><td>unit</td></tr>
+  <tr><td>④b (4b)</td><td>stream : ConnectionStream (참조 넷을 드는 값), 파일 backend</td><td>plan v2 4b 의 10 개</td><td>integration</td></tr>
+  <tr><td>⑤ (5a, 5b)</td><td>connection 전부 (5a 평문, 5b TLS 와 Acceptor)</td><td>9절. 평문 96 (5a), TLS 23 과 Acceptor 3 + 1 (5b). 가장 많은 케이스가 여기 있고 Acceptor 말고는 소켓 없이 돈다</td><td>unit, integration (Acceptor)</td></tr>
+  <tr><td>⑥ (6)</td><td>io_loop</td><td>10절 35, EchoRoundtrip, IdleCpu, NotifyLatency</td><td>integration, benchmark</td></tr>
+  <tr><td>⑦ (7)</td><td>server, client, context, config</td><td>11절의 Config / Action unit, Context / Server / Client integration (19.9 의 여섯 포함)</td><td>unit, integration</td></tr>
+  <tr><td>⑧ (8)</td><td>base.cpp 번역</td><td>11절 전부를 C API 로 다시. 12절 나머지 벤치마크</td><td>integration, benchmark</td></tr>
 </table>
 <p>CI 매트릭스는 Windows MSVC (IOCP) 와 Linux gcc + clang (epoll) 이고, Linux 는 ASan + TSan 으로 한 번 더 돈다. kqueue 와 io_uring 은 backend 가 생길 때 같은 integration 테스트를 그대로 돌린다. 새 backend 에 새 테스트는 없다.</p>
 
