@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -19,120 +18,56 @@ namespace kiotty
 {
     namespace net
     {
+        struct EventListenerState
+        {
+            int           epoll;
+            int           wake;
+            epoll_event*  entries;
+            IoCompletion* completions;
+            size_t        capacity;
+            uint32_t      generation;
+            IoEvent*      ready_head;
+            IoEvent*      ready_tail;
+        };
+
         namespace
         {
-            class EpollEvent;
+            static_assert(sizeof(EventListenerState) <= EventListener::STORAGE_SIZE, "EventListenerState outgrew EventListener::STORAGE_SIZE");
+            static_assert(alignof(EventListenerState) <= EventListener::STORAGE_ALIGN, "EventListenerState needs stricter alignment than EventListener::STORAGE_ALIGN");
 
-            struct ListenerState
+            EventListenerState& stateOf(void* storage)
             {
-                int           epoll;
-                int           wake;
-                epoll_event*  entries;
-                IoCompletion* completions;
-                size_t        capacity;
-                uint32_t      generation;
-                EpollEvent*   ready_head;
-                EpollEvent*   ready_tail;
-            };
-
-            static_assert(sizeof(ListenerState) <= EventListener::STORAGE_SIZE, "ListenerState outgrew EventListener::STORAGE_SIZE");
-            static_assert(alignof(ListenerState) <= EventListener::STORAGE_ALIGN, "ListenerState needs stricter alignment than EventListener::STORAGE_ALIGN");
-
-            void unlinkReady(ListenerState& state, EpollEvent& event);
-
-            class EpollEvent : public IoEvent
-            {
-            public:
-                EpollEvent(ListenerState* owner, int descriptor, int32_t index)
-                    : listener(owner)
-                    , generation(owner->generation)
-                    , fd(descriptor)
-                    , slot(index)
-                    , registered(false)
-                    , queued(false)
-                    , result(SocketCode::SUCCESS)
-                    , payload()
-                    , done(0)
-                    , next(nullptr)
-                {
-                }
-
-                EpollEvent(EpollEvent&& other) noexcept
-                    : IoEvent(other)
-                    , listener(other.listener)
-                    , generation(other.generation)
-                    , fd(other.fd)
-                    , slot(other.slot)
-                    , registered(other.registered)
-                    , queued(false)
-                    , result(other.result)
-                    , payload(other.payload)
-                    , done(other.done)
-                    , next(nullptr)
-                {
-                    assert(!other._pending && "an IoEvent must not move while it is registered for a request");
-                    assert(!other.queued && "an IoEvent must not move while its completion is queued");
-                    other.fd = -1;
-                    other.registered = false;
-                }
-
-                ~EpollEvent()
-                {
-                    if (queued)
-                    {
-                        unlinkReady(*listener, *this);
-                    }
-                    if (fd < 0)
-                    {
-                        return;
-                    }
-                    if (registered && belongsTo(*listener))
-                    {
-                        ::epoll_ctl(listener->epoll, EPOLL_CTL_DEL, fd, nullptr);
-                    }
-                    ::close(fd);
-                }
-
-                void arm(const IoAction& action, IoPayload request)
-                {
-                    _pending = true;
-                    _action = action;
-                    payload = request;
-                    done = 0;
-                    result = SocketCode::SUCCESS;
-                }
-
-                void disarm()
-                {
-                    _pending = false;
-                }
-
-                bool belongsTo(const ListenerState& state) const
-                {
-                    return listener == &state && generation == state.generation && state.epoll >= 0;
-                }
-
-                ListenerState* listener;
-                uint32_t       generation;
-                int            fd;
-                int32_t        slot;
-                bool           registered;
-                bool           queued;
-                SocketCode     result;
-                IoPayload      payload;
-                size_t         done;
-                EpollEvent*    next;
-            };
-
-            ListenerState& stateOf(void* storage)
-            {
-                return *static_cast<ListenerState*>(storage);
+                return *static_cast<EventListenerState*>(storage);
             }
 
-            void unlinkReady(ListenerState& state, EpollEvent& event)
+            void arm(IoEvent& event, const IoAction& action, IoPayload request)
             {
-                EpollEvent* previous = nullptr;
-                EpollEvent* current = state.ready_head;
+                event.pending = true;
+                event.action = action;
+                event.payload = request;
+                event.done = 0;
+                event.result = SocketCode::SUCCESS;
+            }
+
+            void disarm(IoEvent& event)
+            {
+                event.pending = false;
+            }
+
+            bool attached(const IoEvent& event)
+            {
+                return event.fd >= 0;
+            }
+
+            bool belongsTo(const IoEvent& event, const EventListenerState& state)
+            {
+                return event.listener == &state && event.generation == state.generation && state.epoll >= 0;
+            }
+
+            void unlinkReady(EventListenerState& state, IoEvent& event)
+            {
+                IoEvent* previous = nullptr;
+                IoEvent* current = state.ready_head;
                 while (current != nullptr && current != &event)
                 {
                     previous = current;
@@ -158,7 +93,7 @@ namespace kiotty
                 event.queued = false;
             }
 
-            void queueReady(ListenerState& state, EpollEvent& event, SocketCode code)
+            void queueReady(EventListenerState& state, IoEvent& event, SocketCode code)
             {
                 if (event.queued)
                 {
@@ -215,11 +150,11 @@ namespace kiotty
                 return EPOLLIN | EPOLLONESHOT;
             }
 
-            SocketCode watch(ListenerState& state, EpollEvent& event)
+            SocketCode watch(EventListenerState& state, IoEvent& event)
             {
                 epoll_event interest;
                 std::memset(&interest, 0, sizeof(interest));
-                interest.events = interestOf(event.action());
+                interest.events = interestOf(event.action);
                 interest.data.ptr = &event;
                 int operation = EPOLL_CTL_ADD;
                 if (event.registered)
@@ -234,7 +169,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode sendRest(EpollEvent& event)
+            SocketCode sendRest(IoEvent& event)
             {
                 const char* bytes = static_cast<const char*>(event.payload.buffer);
                 while (event.done < event.payload.length)
@@ -259,7 +194,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode receiveOnce(EpollEvent& event)
+            SocketCode receiveOnce(IoEvent& event)
             {
                 for (;;)
                 {
@@ -285,9 +220,9 @@ namespace kiotty
                 }
             }
 
-            SocketCode progress(EpollEvent& event)
+            SocketCode progress(IoEvent& event)
             {
-                switch (event.action().kind)
+                switch (event.action.kind)
                 {
                 case IoActionKind::WRITE:
                     return sendRest(event);
@@ -311,24 +246,24 @@ namespace kiotty
                 }
             }
 
-            IoCompletion completionOf(EpollEvent& event, SocketCode code)
+            IoCompletion completionOf(IoEvent& event, SocketCode code)
             {
                 IoCompletion completion;
-                completion.kind = kindOf(event.action());
+                completion.kind = kindOf(event.action);
                 completion.slot = event.slot;
                 completion.code = code;
                 completion.length = event.done;
-                completion.action = event.action();
-                event.disarm();
+                completion.action = event.action;
+                disarm(event);
                 return completion;
             }
 
-            size_t drainReady(ListenerState& state)
+            size_t drainReady(EventListenerState& state)
             {
                 size_t count = 0;
                 while (state.ready_head != nullptr && count < state.capacity)
                 {
-                    EpollEvent& event = *state.ready_head;
+                    IoEvent& event = *state.ready_head;
                     state.ready_head = event.next;
                     if (state.ready_head == nullptr)
                     {
@@ -342,16 +277,16 @@ namespace kiotty
                 return count;
             }
 
-            void clearWake(ListenerState& state)
+            void clearWake(EventListenerState& state)
             {
                 uint64_t counter = 0;
                 ssize_t consumed = ::read(state.wake, &counter, sizeof(counter));
                 (void)consumed;
             }
 
-            bool handle(ListenerState& state, EpollEvent& event, IoCompletion& completion)
+            bool handle(EventListenerState& state, IoEvent& event, IoCompletion& completion)
             {
-                if (!event.pending() || event.queued)
+                if (!event.pending || event.queued)
                 {
                     return false;
                 }
@@ -388,7 +323,7 @@ namespace kiotty
                 return static_cast<int>(whole.count());
             }
 
-            size_t poll(ListenerState& state, size_t room, uint32_t timeout_ms)
+            size_t poll(EventListenerState& state, size_t room, uint32_t timeout_ms)
             {
                 std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
                 int limit = -1;
@@ -414,7 +349,7 @@ namespace kiotty
                             count += 1;
                             continue;
                         }
-                        EpollEvent& event = *static_cast<EpollEvent*>(tag);
+                        IoEvent& event = *static_cast<IoEvent*>(tag);
                         bool completed = handle(state, event, state.completions[count]);
                         if (completed)
                         {
@@ -438,9 +373,26 @@ namespace kiotty
             }
         }
 
+        IoEvent::~IoEvent()
+        {
+            if (queued)
+            {
+                unlinkReady(*listener, *this);
+            }
+            if (!attached(*this))
+            {
+                return;
+            }
+            if (registered && belongsTo(*this, *listener))
+            {
+                ::epoll_ctl(listener->epoll, EPOLL_CTL_DEL, fd, nullptr);
+            }
+            ::close(fd);
+        }
+
         EventListener::EventListener()
         {
-            ListenerState* state = ::new (static_cast<void*>(_storage)) ListenerState();
+            EventListenerState* state = ::new (static_cast<void*>(_storage)) EventListenerState();
             state->epoll = -1;
             state->wake = -1;
         }
@@ -452,7 +404,7 @@ namespace kiotty
 
         SocketCode EventListener::open(size_t completion_capacity)
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.epoll >= 0)
             {
                 return SocketCode::INVALID_ARGUMENT;
@@ -499,14 +451,14 @@ namespace kiotty
 
         void EventListener::close()
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             while (state.ready_head != nullptr)
             {
-                EpollEvent* event = state.ready_head;
+                IoEvent* event = state.ready_head;
                 state.ready_head = event->next;
                 event->next = nullptr;
                 event->queued = false;
-                event->disarm();
+                disarm(*event);
             }
             state.ready_tail = nullptr;
             if (state.wake >= 0)
@@ -526,42 +478,52 @@ namespace kiotty
             state.capacity = 0;
         }
 
-        AttachResult EventListener::attach(SocketHandle socket, int32_t slot)
+        SocketCode EventListener::attach(IoEvent& event, SocketHandle socket, int32_t slot)
         {
-            ListenerState& state = stateOf(_storage);
-            if (state.epoll < 0)
-            {
-                return AttachResult::failure(SocketCode::CLOSED);
-            }
-            if (socket == INVALID_SOCKET_HANDLE)
-            {
-                return AttachResult::failure(SocketCode::INVALID_ARGUMENT);
-            }
-            int copy = ::fcntl(static_cast<int>(socket), F_DUPFD_CLOEXEC, 0);
-            if (copy < 0)
-            {
-                return AttachResult::failure(lastSocketCode());
-            }
-            return AttachResult::success(Holder<IoEvent>::make<EpollEvent>(&state, copy, slot));
-        }
-
-        SocketCode EventListener::submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload)
-        {
-            ListenerState& state = stateOf(_storage);
-            if (!event)
-            {
-                return SocketCode::INVALID_ARGUMENT;
-            }
+            EventListenerState& state = stateOf(_storage);
             if (state.epoll < 0)
             {
                 return SocketCode::CLOSED;
             }
-            EpollEvent& epoll = static_cast<EpollEvent&>(*event);
-            if (!epoll.belongsTo(state) || epoll.fd < 0)
+            if (socket == INVALID_SOCKET_HANDLE)
             {
                 return SocketCode::INVALID_ARGUMENT;
             }
-            if (epoll.pending())
+            if (event.pending)
+            {
+                return SocketCode::BUSY;
+            }
+            if (attached(event))
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            int copy = ::fcntl(static_cast<int>(socket), F_DUPFD_CLOEXEC, 0);
+            if (copy < 0)
+            {
+                return lastSocketCode();
+            }
+            event.listener = &state;
+            event.generation = state.generation;
+            event.fd = copy;
+            event.slot = slot;
+            event.registered = false;
+            event.result = SocketCode::SUCCESS;
+            event.done = 0;
+            return SocketCode::SUCCESS;
+        }
+
+        SocketCode EventListener::submit(IoEvent& event, const IoAction& action, IoPayload payload)
+        {
+            EventListenerState& state = stateOf(_storage);
+            if (state.epoll < 0)
+            {
+                return SocketCode::CLOSED;
+            }
+            if (!attached(event) || !belongsTo(event, state))
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            if (event.pending)
             {
                 return SocketCode::BUSY;
             }
@@ -570,52 +532,50 @@ namespace kiotty
             {
                 return checked;
             }
-            epoll.arm(action, payload);
+            arm(event, action, payload);
             SocketCode started = SocketCode::WOULD_BLOCK;
             if (action.kind == IoActionKind::WRITE)
             {
-                started = sendRest(epoll);
+                started = sendRest(event);
             }
             if (started == SocketCode::WOULD_BLOCK)
             {
-                started = watch(state, epoll);
+                started = watch(state, event);
                 if (started == SocketCode::SUCCESS)
                 {
                     return SocketCode::SUCCESS;
                 }
             }
-            queueReady(state, epoll, started);
+            queueReady(state, event, started);
             return SocketCode::SUCCESS;
         }
 
-        void EventListener::detach(Holder<IoEvent>& event)
+        void EventListener::detach(IoEvent& event)
         {
-            ListenerState& state = stateOf(_storage);
-            if (!event)
+            EventListenerState& state = stateOf(_storage);
+            if (!attached(event) || event.listener != &state)
             {
                 return;
             }
-            EpollEvent& epoll = static_cast<EpollEvent&>(*event);
-            if (!epoll.belongsTo(state) || epoll.fd < 0)
+            if (belongsTo(event, state))
             {
-                return;
+                if (event.registered)
+                {
+                    ::epoll_ctl(state.epoll, EPOLL_CTL_DEL, event.fd, nullptr);
+                }
+                if (event.pending)
+                {
+                    queueReady(state, event, SocketCode::CANCELLED);
+                }
             }
-            if (epoll.registered)
-            {
-                ::epoll_ctl(state.epoll, EPOLL_CTL_DEL, epoll.fd, nullptr);
-                epoll.registered = false;
-            }
-            if (epoll.pending())
-            {
-                queueReady(state, epoll, SocketCode::CANCELLED);
-            }
-            ::close(epoll.fd);
-            epoll.fd = -1;
+            event.registered = false;
+            ::close(event.fd);
+            event.fd = -1;
         }
 
         Span<const IoCompletion> EventListener::wait(uint32_t timeout_ms)
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             Span<const IoCompletion> completions = { state.completions, 0 };
             if (state.epoll < 0)
             {
@@ -633,7 +593,7 @@ namespace kiotty
 
         SocketCode EventListener::wake()
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.epoll < 0)
             {
                 return SocketCode::CLOSED;

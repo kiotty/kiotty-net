@@ -217,6 +217,10 @@ v2 6절 그대로. 코드가 있다.
 
 v2 7절 그대로 (attach / submit / detach / wait / wake, 3b 의 세부). 더하는 계약 한 줄:
 
+- **IoEvent 는 backend 의 구체 struct 다 (R7).** `backend/kiotty_iocp_event.h` (OVERLAPPED + owner 를 담은 IocpRequest, listener 포인터와 generation, SOCKET, slot, failure, AcceptEx 포인터), `backend/kiotty_epoll_event.h` (복제 fd, registered / queued, payload 와 보낸 길이, ready 목록의 next), 그 밖의 OS 는 `backend/kiotty_no_event.h` (pending 과 action 만). `kiotty_event_listener.h` 가 OS 매크로로 하나를 고른다. 멤버는 전부 public 이고 (MISRA C++:2023 Rule 14.1.1) listener 만 쓴다. 기본 생성자가 있고 복사 / 이동은 없다 (OS 가 주소를 들고 있다). Connection 과 Acceptor 가 멤버로 든다.
+- `SocketCode attach(IoEvent& event, SocketHandle socket, int32_t slot)` 이 제자리에서 채운다. 닫힌 listener 는 CLOSED, 무효 socket 은 INVALID_ARGUMENT, pending (CANCELLED 완료가 아직 wait 로 나오지 않은 것 포함) 이면 BUSY, 이미 attach 된 event 는 INVALID_ARGUMENT. `detach(IoEvent&)` 가 비운다 (epoll 은 DEL 과 복제 fd close, IOCP 는 CancelIoEx). 비운 event 는 다시 attach 할 수 있다. listener 의 상태 struct 는 `EventListenerState` 라는 이름으로 net namespace 에 앞으로 선언되고 backend 의 .cpp 가 정의한다. `Holder` 는 지웠다.
+- epoll 의 IoEvent 소멸자는 attach 된 채로 지워질 때 ready 목록에서 빼고 DEL 과 close 를 한다. listener 보다 먼저 지워져야 한다 (Owner 의 reset 이 detach 를 먼저 한다).
+
 - **WRITE 완료의 length 는 payload 전체다.** IOCP 는 overlapped WSASend 가 그렇게 완료한다. epoll 은 listener 가 send 하고 남으면 `EPOLLOUT | EPOLLONESHOT` 으로 다시 걸어 끝까지 보낸 뒤에 완료 하나를 만든다. 일부만 보낸 완료는 없다. 그래서 Connection 에 "남은 조각을 다시 건다" 는 길이 없다.
 
 epoll backend (사이클 3c) 의 세부:

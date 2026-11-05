@@ -42,22 +42,6 @@ namespace kiotty
             static IoCompletion workDone(int32_t slot, IoAction outcome);
         };
 
-        class IoEvent
-        {
-        public:
-            static const size_t HOLDER_SIZE = 128;
-            static const size_t HOLDER_ALIGN = 8;
-
-            bool            pending() const;
-            const IoAction& action() const;
-
-        protected:
-            IoEvent();
-
-            bool     _pending;
-            IoAction _action;
-        };
-
         inline IoCompletion IoCompletion::wake()
         {
             IoCompletion completion = { IoKind::WAKE, -1, SocketCode::SUCCESS, 0, IoAction::none() };
@@ -80,22 +64,6 @@ namespace kiotty
         {
             IoCompletion completion = { IoKind::WORK_DONE, slot, SocketCode::SUCCESS, 0, outcome };
             return completion;
-        }
-
-        inline IoEvent::IoEvent()
-            : _pending(false)
-            , _action(IoAction::none())
-        {
-        }
-
-        inline bool IoEvent::pending() const
-        {
-            return _pending;
-        }
-
-        inline const IoAction& IoEvent::action() const
-        {
-            return _action;
         }
     }
 }

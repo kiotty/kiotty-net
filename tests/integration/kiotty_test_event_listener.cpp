@@ -21,12 +21,10 @@
 #include <utility>
 #include <vector>
 
-using kiotty::Holder;
 using kiotty::Span;
 using kiotty::net::AcceptBuffer;
 using kiotty::net::ActiveSocket;
 using kiotty::net::ActiveSocketResult;
-using kiotty::net::AttachResult;
 using kiotty::net::IoAction;
 using kiotty::net::IoActionKind;
 using kiotty::net::IoCompletion;
@@ -87,15 +85,11 @@ namespace
         return link.peer.accept(WAIT_MS);
     }
 
-    Holder<IoEvent> attach(net::EventListener& listener, kiotty::net::SocketHandle socket, int32_t slot)
+    bool attach(net::EventListener& listener, IoEvent& event, kiotty::net::SocketHandle socket, int32_t slot)
     {
-        AttachResult attached = listener.attach(socket, slot);
-        EXPECT_TRUE(attached.isOk()) << static_cast<int>(attached.code());
-        if (!attached.isOk())
-        {
-            return Holder<IoEvent>();
-        }
-        return std::move(attached.value());
+        SocketCode attached = listener.attach(event, socket, slot);
+        EXPECT_EQ(attached, SocketCode::SUCCESS) << static_cast<int>(attached);
+        return attached == SocketCode::SUCCESS;
     }
 
     std::vector<IoCompletion> collect(net::EventListener& listener, size_t count, uint32_t timeout_ms)
@@ -127,8 +121,7 @@ namespace
         {
             ASSERT_EQ(listener.open(CAPACITY), SocketCode::SUCCESS);
             ASSERT_TRUE(connect(link));
-            stream = attach(listener, link.socket.handle(), SLOT);
-            ASSERT_TRUE(static_cast<bool>(stream));
+            ASSERT_TRUE(attach(listener, stream, link.socket.handle(), SLOT));
         }
 
         void TearDown() override
@@ -140,7 +133,7 @@ namespace
 
         net::EventListener listener;
         Link               link;
-        Holder<IoEvent>    stream;
+        IoEvent            stream;
     };
 
     class AcceptTarget
@@ -183,10 +176,17 @@ TEST(IoEvent, EventFromAttachIsNotPending)
     ASSERT_EQ(listener.open(CAPACITY), SocketCode::SUCCESS);
     Link link;
     ASSERT_TRUE(connect(link));
-    Holder<IoEvent> event = attach(listener, link.socket.handle(), SLOT);
-    ASSERT_TRUE(static_cast<bool>(event));
-    EXPECT_FALSE(event->pending());
-    EXPECT_EQ(event->action().kind, IoActionKind::NONE);
+    IoEvent event;
+    ASSERT_TRUE(attach(listener, event, link.socket.handle(), SLOT));
+    EXPECT_FALSE(event.pending);
+    EXPECT_EQ(event.action.kind, IoActionKind::NONE);
+}
+
+TEST(IoEvent, DefaultConstructedEventIsNotPendingAndHasNoAction)
+{
+    IoEvent event;
+    EXPECT_FALSE(event.pending);
+    EXPECT_EQ(event.action.kind, IoActionKind::NONE);
 }
 
 TEST_F(EventListener, SubmitReadThenPeerSendCompletesWithLengthAndTheSameAction)
@@ -227,15 +227,15 @@ TEST_F(EventListener, SubmitWriteCompletesWithFullLengthAndPeerReceivesBytes)
 TEST_F(EventListener, PendingIsTrueAfterSubmitAndFalseAfterWaitReturnsIt)
 {
     char buffer[16];
-    EXPECT_FALSE(stream->pending());
+    EXPECT_FALSE(stream.pending);
     ASSERT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
-    EXPECT_TRUE(stream->pending());
+    EXPECT_TRUE(stream.pending);
     ASSERT_TRUE(link.peer.sendAll("x", 1));
     ASSERT_TRUE(link.peer.sendAll("y", 1));
-    EXPECT_TRUE(stream->pending());
+    EXPECT_TRUE(stream.pending);
     std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
     ASSERT_EQ(completions.size(), 1u);
-    EXPECT_FALSE(stream->pending());
+    EXPECT_FALSE(stream.pending);
 }
 
 TEST_F(EventListener, WaitWithTimeoutAndNothingPendingReturnsEmptySpanAfterTimeout)
@@ -320,13 +320,13 @@ TEST_F(EventListener, DetachWithPendingReadDeliversCancelledCompletionBeforeNext
     EXPECT_EQ(waited[0].kind, IoKind::RECEIVE);
     EXPECT_EQ(waited[0].slot, SLOT);
     EXPECT_EQ(waited[0].code, SocketCode::CANCELLED);
-    EXPECT_FALSE(stream->pending());
+    EXPECT_FALSE(stream.pending);
 }
 
 TEST_F(EventListener, DetachWithPendingReadAndWriteDeliversTwoCancelled)
 {
-    Holder<IoEvent> writer = attach(listener, link.socket.handle(), SLOT);
-    ASSERT_TRUE(static_cast<bool>(writer));
+    IoEvent writer;
+    ASSERT_TRUE(attach(listener, writer, link.socket.handle(), SLOT));
     ASSERT_TRUE(kiotty_test::setSendBuffer(link.socket.handle(), 0));
     char buffer[16];
     std::vector<char> flood = pattern(64 * 1024 * 1024);
@@ -342,8 +342,8 @@ TEST_F(EventListener, DetachWithPendingReadAndWriteDeliversTwoCancelled)
     {
         EXPECT_EQ(completion.code, SocketCode::CANCELLED) << static_cast<int>(completion.kind);
     }
-    EXPECT_FALSE(stream->pending());
-    EXPECT_FALSE(writer->pending());
+    EXPECT_FALSE(stream.pending);
+    EXPECT_FALSE(writer.pending);
 }
 
 TEST_F(EventListener, DetachWithNothingPendingDeliversNothing)
@@ -355,8 +355,8 @@ TEST_F(EventListener, DetachWithNothingPendingDeliversNothing)
 
 TEST_F(EventListener, ReadAndWriteOnSeparateEventsCompleteIndependently)
 {
-    Holder<IoEvent> writer = attach(listener, link.socket.handle(), SLOT);
-    ASSERT_TRUE(static_cast<bool>(writer));
+    IoEvent writer;
+    ASSERT_TRUE(attach(listener, writer, link.socket.handle(), SLOT));
     char buffer[16];
     char outgoing[] = "from-socket";
     char incoming[] = "from-peer";
@@ -390,8 +390,8 @@ TEST_F(EventListener, ReadAndWriteOnSeparateEventsCompleteIndependently)
     }
     EXPECT_TRUE(sent);
     EXPECT_TRUE(read);
-    EXPECT_FALSE(stream->pending());
-    EXPECT_FALSE(writer->pending());
+    EXPECT_FALSE(stream.pending);
+    EXPECT_FALSE(writer.pending);
 }
 
 TEST_F(EventListener, WriteLargerThanSocketBufferCompletesOnceWithFullLength)
@@ -433,8 +433,8 @@ TEST_F(EventListener, AcceptSubmitCompletesWhenAClientConnects)
 {
     PassiveSocket passive;
     ASSERT_EQ(passive.open(loopback(0), 4), SocketCode::SUCCESS);
-    Holder<IoEvent> event = attach(listener, passive.handle(), -1);
-    ASSERT_TRUE(static_cast<bool>(event));
+    IoEvent event;
+    ASSERT_TRUE(attach(listener, event, passive.handle(), -1));
     AcceptTarget target;
     ASSERT_EQ(listener.submit(event, IoAction::accept(), target.payload()), SocketCode::SUCCESS);
     LoopbackPeer client;
@@ -456,7 +456,7 @@ TEST_F(EventListener, ImmediateFailureIsDeliveredAsAnErrorCompletionNotAReturnCo
     ASSERT_EQ(completions.size(), 1u);
     EXPECT_EQ(completions[0].kind, IoKind::RECEIVE);
     EXPECT_NE(completions[0].code, SocketCode::SUCCESS);
-    EXPECT_FALSE(stream->pending());
+    EXPECT_FALSE(stream.pending);
 }
 
 TEST_F(EventListener, SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy)
@@ -474,24 +474,66 @@ TEST_F(EventListener, SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy)
 TEST_F(EventListener, SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument)
 {
     char buffer[16];
-    Holder<IoEvent> empty;
+    IoEvent empty;
     EXPECT_EQ(listener.submit(empty, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::INVALID_ARGUMENT);
     listener.detach(stream);
     EXPECT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::INVALID_ARGUMENT);
     net::EventListener other;
     ASSERT_EQ(other.open(CAPACITY), SocketCode::SUCCESS);
-    Holder<IoEvent> foreign = attach(other, link.socket.handle(), SLOT);
+    IoEvent foreign;
+    ASSERT_TRUE(attach(other, foreign, link.socket.handle(), SLOT));
     EXPECT_EQ(listener.submit(foreign, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::INVALID_ARGUMENT);
     EXPECT_TRUE(listener.wait(0).empty());
+    other.detach(foreign);
 }
 
 TEST_F(EventListener, AttachOnInvalidSocketIsRejected)
 {
-    AttachResult invalid = listener.attach(kiotty::net::INVALID_SOCKET_HANDLE, SLOT);
-    EXPECT_EQ(invalid.code(), SocketCode::INVALID_ARGUMENT);
+    IoEvent event;
+    EXPECT_EQ(listener.attach(event, kiotty::net::INVALID_SOCKET_HANDLE, SLOT), SocketCode::INVALID_ARGUMENT);
+    EXPECT_FALSE(event.pending);
     net::EventListener closed;
-    AttachResult unopened = closed.attach(link.socket.handle(), SLOT);
-    EXPECT_EQ(unopened.code(), SocketCode::CLOSED);
+    EXPECT_EQ(closed.attach(event, link.socket.handle(), SLOT), SocketCode::CLOSED);
+}
+
+TEST_F(EventListener, AttachOnAnEventThatIsAlreadyAttachedIsRejected)
+{
+    EXPECT_EQ(listener.attach(stream, link.socket.handle(), SLOT), SocketCode::INVALID_ARGUMENT);
+    char buffer[16];
+    ASSERT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
+    ASSERT_TRUE(link.peer.sendAll("a", 1));
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].slot, SLOT);
+}
+
+TEST_F(EventListener, AttachWhileACancelledCompletionIsStillQueuedIsBusy)
+{
+    char buffer[16];
+    ASSERT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
+    listener.detach(stream);
+    EXPECT_EQ(listener.attach(stream, link.socket.handle(), SLOT), SocketCode::BUSY);
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].code, SocketCode::CANCELLED);
+    EXPECT_FALSE(stream.pending);
+}
+
+TEST_F(EventListener, DetachClearsTheEventSoItCanBeAttachedAgain)
+{
+    listener.detach(stream);
+    const int32_t again = SLOT + 1;
+    ASSERT_EQ(listener.attach(stream, link.socket.handle(), again), SocketCode::SUCCESS);
+    char buffer[16];
+    ASSERT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 2), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
+    ASSERT_TRUE(link.peer.sendAll("ok", 2));
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].kind, IoKind::RECEIVE);
+    EXPECT_EQ(completions[0].slot, again);
+    EXPECT_EQ(completions[0].code, SocketCode::SUCCESS);
+    EXPECT_EQ(completions[0].length, 2u);
+    EXPECT_EQ(std::memcmp(buffer, "ok", 2), 0);
 }
 
 TEST_F(EventListener, SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument)
@@ -508,11 +550,11 @@ TEST_F(EventListener, SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument)
     for (const IoAction& action : rejected)
     {
         EXPECT_EQ(listener.submit(stream, action, payload), SocketCode::INVALID_ARGUMENT) << static_cast<int>(action.kind);
-        EXPECT_FALSE(stream->pending());
+        EXPECT_FALSE(stream.pending);
     }
     EXPECT_EQ(listener.submit(stream, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, 0)), SocketCode::INVALID_ARGUMENT);
     EXPECT_EQ(listener.submit(stream, IoAction::write(IoPurpose::USER, 0, 4), payloadOf(nullptr, 4)), SocketCode::INVALID_ARGUMENT);
-    EXPECT_FALSE(stream->pending());
+    EXPECT_FALSE(stream.pending);
     EXPECT_TRUE(listener.wait(0).empty());
 }
 
@@ -522,16 +564,16 @@ TEST_F(EventListener, WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextW
     net::EventListener narrow;
     ASSERT_EQ(narrow.open(capacity), SocketCode::SUCCESS);
     Link links[3];
-    Holder<IoEvent> events[6];
+    IoEvent events[6];
     char bytes[] = "z";
     for (size_t i = 0; i < 3; ++i)
     {
         ASSERT_TRUE(connect(links[i]));
         int32_t slot = static_cast<int32_t>(i);
-        events[2 * i] = attach(narrow, links[i].socket.handle(), slot);
-        events[2 * i + 1] = attach(narrow, links[i].socket.handle(), slot);
+        ASSERT_TRUE(attach(narrow, events[2 * i], links[i].socket.handle(), slot));
+        ASSERT_TRUE(attach(narrow, events[2 * i + 1], links[i].socket.handle(), slot));
     }
-    for (Holder<IoEvent>& event : events)
+    for (IoEvent& event : events)
     {
         ASSERT_EQ(narrow.submit(event, IoAction::write(IoPurpose::USER, 0, 1), payloadOf(bytes, 1)), SocketCode::SUCCESS);
     }
@@ -557,7 +599,8 @@ TEST_F(EventListener, WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextW
 
 TEST_F(EventListener, CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused)
 {
-    Holder<IoEvent> event = attach(listener, link.socket.handle(), SLOT);
+    IoEvent event;
+    ASSERT_TRUE(attach(listener, event, link.socket.handle(), SLOT));
     char buffer[16];
     ASSERT_EQ(listener.submit(event, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::SUCCESS);
     listener.close();
@@ -579,7 +622,8 @@ TEST_F(EventListener_Iocp, AcceptExBufferReceivesBothAddressesAndUpdateContextSu
 {
     PassiveSocket passive;
     ASSERT_EQ(passive.open(loopback(0), 4), SocketCode::SUCCESS);
-    Holder<IoEvent> event = attach(listener, passive.handle(), -1);
+    IoEvent event;
+    ASSERT_TRUE(attach(listener, event, passive.handle(), -1));
     AcceptTarget target;
     ASSERT_EQ(listener.submit(event, IoAction::accept(), target.payload()), SocketCode::SUCCESS);
     LoopbackPeer client;

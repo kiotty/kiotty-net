@@ -3,9 +3,15 @@
 
 #include "base/event/kiotty_event.h"
 #include "base/socket/kiotty_socket.h"
-#include "core/kiotty_holder.h"
-#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
+
+#if defined(_WIN32)
+#include "base/event/backend/kiotty_iocp_event.h"
+#elif defined(__linux__)
+#include "base/event/backend/kiotty_epoll_event.h"
+#else
+#include "base/event/backend/kiotty_no_event.h"
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -28,8 +34,6 @@ namespace kiotty
             char         addresses[2 * ADDRESS_LENGTH];
         };
 
-        typedef Result<SocketCode, Holder<IoEvent>> AttachResult;
-
         class EventListener
         {
         public:
@@ -45,9 +49,9 @@ namespace kiotty
 
             SocketCode               open(size_t completion_capacity);
             void                     close();
-            AttachResult             attach(SocketHandle socket, int32_t slot);
-            SocketCode               submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload);
-            void                     detach(Holder<IoEvent>& event);
+            SocketCode               attach(IoEvent& event, SocketHandle socket, int32_t slot);
+            SocketCode               submit(IoEvent& event, const IoAction& action, IoPayload payload);
+            void                     detach(IoEvent& event);
             Span<const IoCompletion> wait(uint32_t timeout_ms);
             SocketCode               wake();
 

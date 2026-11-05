@@ -10,11 +10,9 @@
 #endif
 
 #include <winsock2.h>
-#include <mswsock.h>
 #include <windows.h>
 #include <winternl.h>
 
-#include <cassert>
 #include <chrono>
 #include <climits>
 #include <cstring>
@@ -24,87 +22,48 @@ namespace kiotty
 {
     namespace net
     {
+        struct EventListenerState
+        {
+            HANDLE            port;
+            OVERLAPPED_ENTRY* entries;
+            IoCompletion*     completions;
+            size_t            capacity;
+            uint32_t          generation;
+        };
+
         namespace
         {
-            struct ListenerState
-            {
-                HANDLE            port;
-                OVERLAPPED_ENTRY* entries;
-                IoCompletion*     completions;
-                size_t            capacity;
-                uint32_t          generation;
-            };
-
-            class IocpEvent;
-
-            struct Request
-            {
-                OVERLAPPED overlapped;
-                IocpEvent* owner;
-            };
-
-            class IocpEvent : public IoEvent
-            {
-            public:
-                IocpEvent(const ListenerState* owner, SOCKET native, int32_t index)
-                    : listener(owner)
-                    , generation(owner->generation)
-                    , socket(native)
-                    , slot(index)
-                    , failure(SocketCode::SUCCESS)
-                    , request()
-                    , accept_ex(nullptr)
-                {
-                }
-
-                IocpEvent(IocpEvent&& other) noexcept
-                    : IoEvent(other)
-                    , listener(other.listener)
-                    , generation(other.generation)
-                    , socket(other.socket)
-                    , slot(other.slot)
-                    , failure(other.failure)
-                    , request()
-                    , accept_ex(other.accept_ex)
-                {
-                    assert(!other._pending && "an IoEvent must not move while the OS owns its OVERLAPPED");
-                }
-
-                void arm(const IoAction& action)
-                {
-                    _pending = true;
-                    _action = action;
-                    failure = SocketCode::SUCCESS;
-                    std::memset(&request.overlapped, 0, sizeof(request.overlapped));
-                    request.owner = this;
-                }
-
-                void disarm()
-                {
-                    _pending = false;
-                }
-
-                bool belongsTo(const ListenerState& state) const
-                {
-                    return listener == &state && generation == state.generation;
-                }
-
-                const ListenerState* listener;
-                uint32_t             generation;
-                SOCKET               socket;
-                int32_t              slot;
-                SocketCode           failure;
-                Request              request;
-                LPFN_ACCEPTEX        accept_ex;
-            };
-
-            static_assert(sizeof(ListenerState) <= EventListener::STORAGE_SIZE, "ListenerState outgrew EventListener::STORAGE_SIZE");
-            static_assert(alignof(ListenerState) <= EventListener::STORAGE_ALIGN, "ListenerState needs stricter alignment than EventListener::STORAGE_ALIGN");
+            static_assert(sizeof(EventListenerState) <= EventListener::STORAGE_SIZE, "EventListenerState outgrew EventListener::STORAGE_SIZE");
+            static_assert(alignof(EventListenerState) <= EventListener::STORAGE_ALIGN, "EventListenerState needs stricter alignment than EventListener::STORAGE_ALIGN");
             static_assert(sizeof(sockaddr_storage) + 16 == AcceptBuffer::ADDRESS_LENGTH, "AcceptEx needs sizeof(sockaddr_storage) + 16 per address");
 
-            ListenerState& stateOf(void* storage)
+            EventListenerState& stateOf(void* storage)
             {
-                return *static_cast<ListenerState*>(storage);
+                return *static_cast<EventListenerState*>(storage);
+            }
+
+            void arm(IoEvent& event, const IoAction& action)
+            {
+                event.pending = true;
+                event.action = action;
+                event.failure = SocketCode::SUCCESS;
+                std::memset(&event.request.overlapped, 0, sizeof(event.request.overlapped));
+                event.request.owner = &event;
+            }
+
+            void disarm(IoEvent& event)
+            {
+                event.pending = false;
+            }
+
+            bool attached(const IoEvent& event)
+            {
+                return event.socket != INVALID_SOCKET;
+            }
+
+            bool belongsTo(const IoEvent& event, const EventListenerState& state)
+            {
+                return event.listener == &state && event.generation == state.generation;
             }
 
             ULONG clampLength(size_t length)
@@ -152,7 +111,7 @@ namespace kiotty
                 }
             }
 
-            SocketCode loadAcceptEx(IocpEvent& event)
+            SocketCode loadAcceptEx(IoEvent& event)
             {
                 if (event.accept_ex != nullptr)
                 {
@@ -169,7 +128,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode startReceive(IocpEvent& event, IoPayload payload)
+            SocketCode startReceive(IoEvent& event, IoPayload payload)
             {
                 WSABUF buffer;
                 buffer.len = clampLength(payload.length);
@@ -183,7 +142,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode startSend(IocpEvent& event, IoPayload payload)
+            SocketCode startSend(IoEvent& event, IoPayload payload)
             {
                 WSABUF buffer;
                 buffer.len = clampLength(payload.length);
@@ -196,7 +155,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode startAccept(IocpEvent& event, IoPayload payload)
+            SocketCode startAccept(IoEvent& event, IoPayload payload)
             {
                 SocketCode loaded = loadAcceptEx(event);
                 if (loaded != SocketCode::SUCCESS)
@@ -215,7 +174,7 @@ namespace kiotty
                 return SocketCode::SUCCESS;
             }
 
-            SocketCode start(IocpEvent& event, const IoAction& action, IoPayload payload)
+            SocketCode start(IoEvent& event, const IoAction& action, IoPayload payload)
             {
                 switch (action.kind)
                 {
@@ -231,13 +190,13 @@ namespace kiotty
                 }
             }
 
-            SocketCode postFailure(ListenerState& state, IocpEvent& event, SocketCode failure)
+            SocketCode postFailure(EventListenerState& state, IoEvent& event, SocketCode failure)
             {
                 event.failure = failure;
                 BOOL posted = ::PostQueuedCompletionStatus(state.port, 0, 0, &event.request.overlapped);
                 if (posted == FALSE)
                 {
-                    event.disarm();
+                    disarm(event);
                     return failure;
                 }
                 return SocketCode::SUCCESS;
@@ -256,7 +215,7 @@ namespace kiotty
                 }
             }
 
-            SocketCode statusOf(const IocpEvent& event)
+            SocketCode statusOf(const IoEvent& event)
             {
                 if (event.failure != SocketCode::SUCCESS)
                 {
@@ -277,19 +236,19 @@ namespace kiotty
                 {
                     return IoCompletion::wake();
                 }
-                Request* request = reinterpret_cast<Request*>(entry.lpOverlapped);
-                IocpEvent& event = *request->owner;
+                IocpRequest* request = reinterpret_cast<IocpRequest*>(entry.lpOverlapped);
+                IoEvent& event = *request->owner;
                 IoCompletion completion;
-                completion.kind = kindOf(event.action());
+                completion.kind = kindOf(event.action);
                 completion.slot = event.slot;
                 completion.code = statusOf(event);
                 completion.length = entry.dwNumberOfBytesTransferred;
-                completion.action = event.action();
+                completion.action = event.action;
                 if (completion.kind == IoKind::RECEIVE && completion.code == SocketCode::SUCCESS && completion.length == 0)
                 {
                     completion.code = SocketCode::CLOSED;
                 }
-                event.disarm();
+                disarm(event);
                 return completion;
             }
 
@@ -308,7 +267,7 @@ namespace kiotty
                 return static_cast<DWORD>(whole.count());
             }
 
-            bool dequeue(ListenerState& state, uint32_t timeout_ms, ULONG& removed)
+            bool dequeue(EventListenerState& state, uint32_t timeout_ms, ULONG& removed)
             {
                 std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
                 DWORD limit = timeout_ms;
@@ -338,7 +297,7 @@ namespace kiotty
 
         EventListener::EventListener()
         {
-            ::new (static_cast<void*>(_storage)) ListenerState();
+            ::new (static_cast<void*>(_storage)) EventListenerState();
         }
 
         EventListener::~EventListener()
@@ -348,7 +307,7 @@ namespace kiotty
 
         SocketCode EventListener::open(size_t completion_capacity)
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.port != nullptr)
             {
                 return SocketCode::INVALID_ARGUMENT;
@@ -378,7 +337,7 @@ namespace kiotty
 
         void EventListener::close()
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.port != nullptr)
             {
                 ::CloseHandle(state.port);
@@ -391,43 +350,52 @@ namespace kiotty
             state.capacity = 0;
         }
 
-        AttachResult EventListener::attach(SocketHandle socket, int32_t slot)
+        SocketCode EventListener::attach(IoEvent& event, SocketHandle socket, int32_t slot)
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.port == nullptr)
             {
-                return AttachResult::failure(SocketCode::CLOSED);
+                return SocketCode::CLOSED;
             }
             if (socket == INVALID_SOCKET_HANDLE)
             {
-                return AttachResult::failure(SocketCode::INVALID_ARGUMENT);
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            if (event.pending)
+            {
+                return SocketCode::BUSY;
+            }
+            if (attached(event))
+            {
+                return SocketCode::INVALID_ARGUMENT;
             }
             SOCKET native = static_cast<SOCKET>(socket);
             HANDLE associated = ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(native), state.port, 0, 0);
             if (associated == nullptr && ::GetLastError() != ERROR_INVALID_PARAMETER)
             {
-                return AttachResult::failure(lastErrorCode());
+                return lastErrorCode();
             }
-            return AttachResult::success(Holder<IoEvent>::make<IocpEvent>(&state, native, slot));
+            event.listener = &state;
+            event.generation = state.generation;
+            event.socket = native;
+            event.slot = slot;
+            event.failure = SocketCode::SUCCESS;
+            event.accept_ex = nullptr;
+            return SocketCode::SUCCESS;
         }
 
-        SocketCode EventListener::submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload)
+        SocketCode EventListener::submit(IoEvent& event, const IoAction& action, IoPayload payload)
         {
-            ListenerState& state = stateOf(_storage);
-            if (!event)
-            {
-                return SocketCode::INVALID_ARGUMENT;
-            }
+            EventListenerState& state = stateOf(_storage);
             if (state.port == nullptr)
             {
                 return SocketCode::CLOSED;
             }
-            IocpEvent& iocp = static_cast<IocpEvent&>(*event);
-            if (!iocp.belongsTo(state) || iocp.socket == INVALID_SOCKET)
+            if (!attached(event) || !belongsTo(event, state))
             {
                 return SocketCode::INVALID_ARGUMENT;
             }
-            if (iocp.pending())
+            if (event.pending)
             {
                 return SocketCode::BUSY;
             }
@@ -436,37 +404,32 @@ namespace kiotty
             {
                 return checked;
             }
-            iocp.arm(action);
-            SocketCode started = start(iocp, action, payload);
+            arm(event, action);
+            SocketCode started = start(event, action, payload);
             if (started == SocketCode::SUCCESS || started == SocketCode::PENDING)
             {
                 return SocketCode::SUCCESS;
             }
-            return postFailure(state, iocp, started);
+            return postFailure(state, event, started);
         }
 
-        void EventListener::detach(Holder<IoEvent>& event)
+        void EventListener::detach(IoEvent& event)
         {
-            ListenerState& state = stateOf(_storage);
-            if (!event)
+            EventListenerState& state = stateOf(_storage);
+            if (!attached(event) || event.listener != &state)
             {
                 return;
             }
-            IocpEvent& iocp = static_cast<IocpEvent&>(*event);
-            if (!iocp.belongsTo(state) || iocp.socket == INVALID_SOCKET)
+            if (event.pending && belongsTo(event, state))
             {
-                return;
+                ::CancelIoEx(reinterpret_cast<HANDLE>(event.socket), &event.request.overlapped);
             }
-            if (iocp.pending())
-            {
-                ::CancelIoEx(reinterpret_cast<HANDLE>(iocp.socket), &iocp.request.overlapped);
-            }
-            iocp.socket = INVALID_SOCKET;
+            event.socket = INVALID_SOCKET;
         }
 
         Span<const IoCompletion> EventListener::wait(uint32_t timeout_ms)
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             Span<const IoCompletion> completions = { state.completions, 0 };
             if (state.port == nullptr)
             {
@@ -487,7 +450,7 @@ namespace kiotty
 
         SocketCode EventListener::wake()
         {
-            ListenerState& state = stateOf(_storage);
+            EventListenerState& state = stateOf(_storage);
             if (state.port == nullptr)
             {
                 return SocketCode::CLOSED;

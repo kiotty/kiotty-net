@@ -285,7 +285,8 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>IoAction</td><td>FromWriteCarriesNoPointerToUserData</td><td><span class="tag ok">정상</span></td><td>WRITE 의 as 에 span 이 없다. 완료가 사용자 메모리를 가리키지 않는다는 보장</td></tr>
   <tr><td>IoAction</td><td>FromReadUntilCopiesDelimiterOfOneToFourBytesAndZeroScanned</td><td><span class="tag ok">정상</span></td><td>길이 1 ~ 4, scanned 0</td></tr>
   <tr><td>IoAction</td><td>SizeOfStaysUnderSixtyFourBytes</td><td><span class="tag edge">엣지</span></td><td>completion 이 값으로 싣는 비용 상한. static_assert 로도</td></tr>
-  <tr><td>IoEvent</td><td>EventFromAttachIsNotPending</td><td><span class="tag ok">정상</span></td><td>attach 가 돌려준 직후. 사이클 3b 에서 makeIoEvent 를 없애고 attach 가 만든다 (integration)</td></tr>
+  <tr><td>IoEvent</td><td>DefaultConstructedEventIsNotPendingAndHasNoAction</td><td><span class="tag ok">정상</span></td><td>IoEvent 는 backend 의 구체 struct 이고 기본 생성자가 있다 (R7). Connection 의 멤버로 둔다</td></tr>
+  <tr><td>IoEvent</td><td>EventFromAttachIsNotPending</td><td><span class="tag ok">정상</span></td><td><code>attach(event, socket, slot)</code> 가 제자리에서 채운 직후 (R7. Holder 를 돌려주지 않는다) (integration)</td></tr>
   <tr><td>EventListener</td><td>SubmitReadThenPeerSendCompletesWithLengthAndTheSameAction</td><td><span class="tag ok">정상</span></td><td>RECEIVE, length == 보낸 길이, payload 에 바이트, completion.action 이 걸었던 것과 같음 (kind, purpose, timeout, exact)</td></tr>
   <tr><td>EventListener</td><td>SubmitWriteCompletesWithFullLengthAndPeerReceivesBytes</td><td><span class="tag ok">정상</span></td><td>4 KiB 하나</td></tr>
   <tr><td>EventListener</td><td>PendingIsTrueAfterSubmitAndFalseAfterWaitReturnsIt</td><td><span class="tag ok">정상</span></td><td>pending 의 두 전환. wait 가 돌려준 뒤에만 내려간다</td></tr>
@@ -304,6 +305,10 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EventListener</td><td>ImmediateFailureIsDeliveredAsAnErrorCompletionNotAReturnCode</td><td><span class="tag edge">엣지</span></td><td>이미 닫힌 소켓에 submit → submit 은 SUCCESS 류, 다음 wait 에 오류 완료 하나. "요청은 completion 으로만 비워진다"</td></tr>
   <tr><td>EventListener</td><td>SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy</td><td><span class="tag misuse">오용</span></td><td>같은 event 에 두 번. 두 번째는 BUSY 이고 첫 요청은 그대로</td></tr>
   <tr><td>EventListener</td><td>SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>attach 전의 IoEvent (기본 생성 상태), detach 된 event, 다른 listener 의 event 는 INVALID_ARGUMENT. 사이클 3b 에서 AttachOnInvalidSocketIsRejected 도 더했다</td></tr>
+  <tr><td>EventListener</td><td>AttachOnInvalidSocketIsRejected</td><td><span class="tag misuse">오용</span></td><td>INVALID_SOCKET_HANDLE 은 INVALID_ARGUMENT, 열지 않은 listener 는 CLOSED. event 는 그대로</td></tr>
+  <tr><td>EventListener</td><td>AttachOnAnEventThatIsAlreadyAttachedIsRejected</td><td><span class="tag misuse">오용</span></td><td>attach 된 event 에 다시 attach → INVALID_ARGUMENT, 원래 slot 으로 계속 완료한다 (R7)</td></tr>
+  <tr><td>EventListener</td><td>AttachWhileACancelledCompletionIsStillQueuedIsBusy</td><td><span class="tag edge">엣지</span></td><td>pending 인 채 detach → CANCELLED 완료가 wait 로 나오기 전의 attach 는 BUSY (R7)</td></tr>
+  <tr><td>EventListener</td><td>DetachClearsTheEventSoItCanBeAttachedAgain</td><td><span class="tag ok">정상</span></td><td>detach 뒤 같은 event 를 새 slot 으로 다시 attach → READ 가 새 slot 으로 완료 (R7)</td></tr>
   <tr><td>EventListener</td><td>SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>"그 밖의 kind 는 오지 않는다" 를 debug assert 가 아니라 코드로도 막는지 확정</td></tr>
   <tr><td>EventListener</td><td>WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextWait</td><td><span class="tag edge">엣지</span></td><td>capacity 4 에 완료 6 → 4, 2. 유실 없음</td></tr>
   <tr><td>EventListener</td><td>CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused</td><td><span class="tag misuse">오용</span></td><td>shutdown 경로의 안전</td></tr>
