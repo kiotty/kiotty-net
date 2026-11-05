@@ -1,6 +1,8 @@
 #if !defined(KIOTTY_INPUT_FILE_H)
 #define KIOTTY_INPUT_FILE_H
 
+#include "base/socket/kiotty_socket.h"
+#include "core/kiotty_clock.h"
 #include "core/kiotty_result.h"
 #include "kiotty_net_base.h"
 
@@ -28,11 +30,14 @@ namespace kiotty
 
             bool     valid() const;
             uint64_t size() const;
+            intptr_t handle() const;
 
         private:
             intptr_t _handle;
             uint64_t _size;
         };
+
+        SocketCode sendFile(ActiveSocket& socket, InputFile& file, uint64_t offset, uint64_t length, const Deadline& deadline, uint64_t& sent);
     }
 }
 

@@ -35,6 +35,7 @@ namespace
     const uint32_t WAIT_MS = 5000;
     const size_t   CAPACITY = 4096;
     const size_t   TLS_CHUNK = 1024;
+    const size_t   TLS_RECORD = 16384;
     const char     TLS_APPLICATION_DATA = 0x17;
     const size_t   TLS_HEADER_BYTES = 5;
 
@@ -213,6 +214,32 @@ namespace
             bytes.append(buffer, received.value());
         }
         return bytes;
+    }
+
+    std::string decodeAll(TlsEngine& engine, const std::string& cipher)
+    {
+        std::string plain;
+        char buffer[CAPACITY];
+        size_t at = 0;
+        for (;;)
+        {
+            StageBase& incoming = engine.cipherReceive();
+            size_t room = incoming.provider().writable();
+            size_t piece = cipher.size() - at < room ? cipher.size() - at : room;
+            kiotty_test::put(incoming, cipher.substr(at, piece));
+            at += piece;
+            DecodeResult decoded = engine.decode(buffer, sizeof(buffer));
+            if (!decoded.isOk())
+            {
+                break;
+            }
+            plain.append(buffer, decoded.value());
+            if (decoded.value() == 0 && at == cipher.size())
+            {
+                break;
+            }
+        }
+        return plain;
     }
 
     size_t applicationRecords(const std::string& bytes)
@@ -415,23 +442,77 @@ TEST(ConnectionStream, HandshakeWithoutAnOpenEngineIsInvalidArgument)
     EXPECT_EQ(side.stream().handshake(WAIT_MS), KIOTTY_INVALID_ARGUMENT);
 }
 
-TEST(ConnectionStream, WriteTlsEncodesInSendCapacityChunks)
+TEST(ConnectionStream, WriteTlsSendsFullRecordsStraightFromTheEngine)
 {
     REQUIRE_TLS();
     Profiles profiles;
     std::unique_ptr<Side> server(new Side(KIOTTY_NET_MAX_RECV_CAPACITY));
     std::unique_ptr<Side> client(new Side(TLS_CHUNK));
     ASSERT_TRUE(handshake(profiles, *server, *client));
-    std::string data = pattern(5000);
+    std::string data = pattern(40000);
+    std::string cipher;
+    std::thread receiver([&]() {
+        cipher = readRaw(server->socket, 300);
+    });
     KiottyNetResult sent = client->stream().write(spanOf(data), WAIT_MS);
+    receiver.join();
     ASSERT_EQ(sent.code, KIOTTY_SUCCESS);
     EXPECT_EQ(static_cast<size_t>(sent.bytes), data.size());
-    std::string cipher = readRaw(server->socket, 200);
-    EXPECT_EQ(applicationRecords(cipher), (data.size() + TLS_CHUNK - 1) / TLS_CHUNK);
-    kiotty_test::put(server->engine.cipherReceive(), cipher);
-    DecodeResult decoded = server->engine.decode(server->receive);
-    ASSERT_TRUE(decoded.isOk());
-    EXPECT_EQ(kiotty_test::take(server->receive), data);
+    EXPECT_EQ(applicationRecords(cipher), (data.size() + TLS_RECORD - 1) / TLS_RECORD);
+    EXPECT_EQ(client->engine.cipherSend().consumer().readable(), 0u);
+    EXPECT_EQ(client->send.consumer().readable(), 0u);
+    EXPECT_EQ(decodeAll(server->engine, cipher), data);
+}
+
+TEST(ConnectionStream, ReadTlsDecodesStraightIntoTheCallersBuffer)
+{
+    REQUIRE_TLS();
+    Profiles profiles;
+    std::unique_ptr<Side> server(new Side());
+    std::unique_ptr<Side> client(new Side());
+    ASSERT_TRUE(handshake(profiles, *server, *client));
+    std::string data = pattern(20000);
+    std::thread sender([&]() {
+        server->stream().write(spanOf(data), WAIT_MS);
+    });
+    std::string received;
+    std::string buffer(data.size(), '\0');
+    bool staged = false;
+    while (received.size() < data.size())
+    {
+        KiottyNetResult result = client->stream().read(&buffer[0], buffer.size(), WAIT_MS);
+        if (result.code != KIOTTY_SUCCESS)
+        {
+            break;
+        }
+        received.append(buffer.data(), static_cast<size_t>(result.bytes));
+        staged = staged || client->receive.consumer().readable() > 0;
+    }
+    sender.join();
+    EXPECT_EQ(received, data);
+    EXPECT_FALSE(staged);
+    EXPECT_EQ(client->engine.cipherReceive().consumer().readable(), 0u);
+}
+
+TEST(ConnectionStream, WriteFileOverTlsSendsExactRange)
+{
+    REQUIRE_TLS();
+    Profiles profiles;
+    std::unique_ptr<Side> server(new Side());
+    std::unique_ptr<Side> client(new Side(TLS_CHUNK));
+    ASSERT_TRUE(handshake(profiles, *server, *client));
+    std::string content = pattern(10000);
+    std::string path = writeFileWith(content);
+    std::string received;
+    std::thread receiver([&]() {
+        received = readExactly(server->stream(), 5000);
+    });
+    KiottyNetCode code = client->stream().writeFile(path.c_str(), 1000, 5000, WAIT_MS);
+    receiver.join();
+    kiotty_test::removeFile(path.c_str());
+    EXPECT_EQ(code, KIOTTY_SUCCESS);
+    EXPECT_EQ(received, content.substr(1000, 5000));
+    EXPECT_EQ(client->send.consumer().readable(), 0u);
 }
 
 TEST(ConnectionStream, FlushSendsLeftoverCipherSendFirst)

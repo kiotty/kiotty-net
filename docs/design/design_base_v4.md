@@ -794,9 +794,9 @@ class ConnectionStream                          // stream/kiotty_connection_stre
 {
 public:
     ConnectionStream(ActiveSocket& socket, TlsEngine& tls, StageBase& receive, StageBase& send);
-    KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);      // flush → receive Stage 에 남은 것 먼저 → 비면 poll + recv (+ decode) 반복
-    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);              // flush → 평문 : 사용자 버퍼에서 바로 sendAll. TLS : send_capacity 씩 encode → cipherSend → sendAll
-    KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);   // 파일을 send_capacity 씩 읽어 write 와 같은 길. 플랫폼 공통. zero-copy 는 두지 않는다
+    KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);      // flush → receive Stage 에 남은 것 먼저 → 비면 poll + recv. 평문은 사용자 버퍼로, TLS 는 BIO 안으로 recv 하고 SSL_read 가 사용자 버퍼로
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);              // flush → 평문 : 사용자 버퍼에서 바로 sendAll. TLS : SSL_write → BIO 안의 암호문을 바로 send
+    KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);   // 평문 : sendfile (Linux) / TransmitFile (Windows). TLS : send Stage 로 읽어 write 와 같은 길
     bool            connected() const;                                           // non-blocking recv(MSG_PEEK). 0 이면 false
     KiottyNetCode   handshake(uint32_t timeout_ms);                              // StreamClient 용. SEND 면 sendAll(cipherSend), RECEIVE 면 receiveSome(cipherReceive)
 private:
@@ -858,9 +858,20 @@ ConnectionStream 의 세부 (4b):
 
 - **timeout.** `timeout_ms` 는 그 함수 호출 전체의 한도이고 0 이면 없다. 시작할 때 `Deadline` (core/kiotty_clock.h) 을 하나 만들고, 기다리는 자리마다 남은 시간으로 기다린다. 남은 시간이 없으면 `KIOTTY_TIMEOUT` 이다. handshake 의 timeout 은 `KIOTTY_TLS_HANDSHAKE_TIMEOUT`.
 - **기다림.** socket 은 non-blocking 그대로다. `ActiveSocket` 에 `waitReadable(timeout_ms)` / `waitWritable(timeout_ms)` (POSIX 는 poll, Windows 는 select) 와 `peek` (`recv(MSG_PEEK)`) 을 더했다. send / receive 가 WOULD_BLOCK 이면 기다린 뒤 다시 한다. IOCP 에 묶인 socket 이어도 WORKING 동안에는 걸린 overlapped 요청이 없으므로 동기 호출을 섞지 않는다.
-- **read.** buffer 가 nullptr 이거나 length 0 이면 INVALID_ARGUMENT. flush → receive Stage 에 남은 것을 최대 length 만큼 → (TLS) cipherReceive 에 남은 것을 decode → socket. 평문은 socket 에서 사용자 buffer 로 바로 recv 한다 (복사 0). TLS 는 cipherReceive 로 recv 하고 receive Stage 로 decode 한 뒤 복사한다. decode 가 KeyUpdate 답장을 만들면 그 자리에서 flush 한다. 결과는 바이트가 있으면 SUCCESS, peer 가 닫으면 `PEER_CLOSED` (0 바이트), TLS 레코드가 틀리면 `TLS_RECORD_ERROR`. length 는 `INT32_MAX` 로 자른다 (`KiottyNetResult::bytes`).
-- **write.** 전부 보내야 SUCCESS 다. timeout 이나 오류면 `bytes` 가 그때까지 보낸 평문 바이트 수다. TLS 는 send Stage 의 capacity 씩 encode 하고 매번 cipherSend 를 다 보낸다 (TlsEngine 의 send capacity 와 같아야 한다).
-- **writeFile.** `InputFile` (stream/kiotty_input_file.h, backend 는 POSIX `open` / `fstat` / `pread`, Windows `CreateFileW` (UTF-8 → UTF-16, 경로는 `KIOTTY_MAX_PATH_LENGTH` 안) / `GetFileSizeEx` / `ReadFile` 의 offset) 로 열고, `[offset, offset + length)` 가 파일 안이 아니면 INVALID_ARGUMENT. 파일이 없거나 일반 파일이 아니거나 읽다가 짧아져도 INVALID_ARGUMENT. send Stage 를 capacity 씩의 읽기 버퍼로 쓰고 write 와 같은 길로 보낸 뒤 비운다. 그래서 send Stage 에 데이터가 남아 있으면 `BUSY` 다 (WORKING 동안 send Stage 는 worker 의 것이고 closeStream(WRITE) 만 거기에 쓴다).
+- **복사.** Stream 의 바이트는 사용자 공간에서 될 수 있는 한 적게 옮긴다.
+
+| | 평문 | TLS |
+|---|---|---|
+| read | socket → 사용자 buffer (recv 하나) | socket → BIO pair 안 (`receiveRoom` / `received`, BIO_nwrite0) → 사용자 buffer (`decode(char*, length)`, SSL_read). cipherReceive 에 IO Thread 가 남긴 것이 있으면 그것을 먼저 BIO 로 옮긴다 |
+| write | 사용자 buffer → socket | 사용자 buffer → BIO pair 안 (`write`, SSL_write) → socket (`outgoing` / `sent`, BIO_nread0). cipherSend Stage 는 IO Thread 와 handshake 가 남긴 것만 먼저 보낸다 |
+| writeFile | 파일 → socket, 커널 안 (Linux `sendfile`, Windows `TransmitFile`) | 파일 → send Stage → BIO → socket. 커널은 암호화를 못 하므로 읽는 복사 하나가 남는다 |
+
+- **read.** buffer 가 nullptr 이거나 length 0 이면 INVALID_ARGUMENT. receive Stage 에 남은 것 (WORKING 전에 IO Thread 가 decode 해 둔 것) 이 있으면 그것을 먼저 최대 length 만큼 복사한다. 없으면 TLS 는 BIO 에 남은 레코드를 사용자 buffer 로 decode 해 보고, 그래도 없으면 기다렸다가 recv 한다. decode 가 KeyUpdate 답장을 만들면 그 자리에서 flush 한다. 결과는 바이트가 있으면 SUCCESS, peer 가 닫으면 `PEER_CLOSED` (0 바이트), TLS 레코드가 틀리면 `TLS_RECORD_ERROR`. length 는 `INT32_MAX` 로 자른다 (`KiottyNetResult::bytes`).
+- **write.** 전부 보내야 SUCCESS 다. timeout 이나 오류면 `bytes` 가 그때까지 보낸 평문 바이트 수다. TLS 는 16 KiB (레코드 하나) 씩 `SSL_write` 하고, BIO 가 차면 (`TlsStep::SEND`) BIO 의 암호문을 보낸 뒤 같은 인자로 다시 부른다.
+- **flush.** cipherSend Stage 를 먼저 다 보내고, 그다음 BIO 에 남은 암호문을 보낸다. TlsEngine 의 다른 함수 (handshake, decode 의 KeyUpdate, encode) 는 BIO 의 암호문을 cipherSend 로 옮기므로 cipherSend 가 늘 더 오래된 쪽이다.
+- **writeFile.** `InputFile` (stream/kiotty_input_file.h) 로 열고, `[offset, offset + length)` 가 파일 안이 아니면 INVALID_ARGUMENT. 파일이 없거나 일반 파일이 아니거나 보내다가 짧아져도 INVALID_ARGUMENT.
+  - 평문: `sendFile(socket, file, offset, length, deadline, sent)`. Linux 는 `sendfile` 이고 non-blocking 이라 EAGAIN 이면 `waitWritable` 뒤 이어서 보낸다. 상대가 닫은 socket 에 대한 SIGPIPE 는 그동안 그 thread 에서만 막고 나올 때 비운다. 그 밖의 POSIX 는 4 KiB 씩 pread + send. Windows 는 `TransmitFile` (WSAIoctl 로 얻는다) 이고, OVERLAPPED 의 `hEvent` 하위 비트를 세워 완료가 IOCP 로 가지 않게 한 뒤 그 event 를 남은 시간만큼 기다린다. 시간이 지나면 `CancelIoEx` 하고 끝날 때까지 기다린 뒤 TIMEOUT.
+  - TLS: send Stage 를 capacity 씩의 읽기 버퍼로 쓰고 write 와 같은 길로 보낸 뒤 비운다. send Stage 에 데이터가 남아 있으면 `BUSY` 다 (WORKING 동안 send Stage 는 worker 의 것이고 closeStream(WRITE) 만 거기에 쓴다).
 - **connected.** receive Stage 에 남은 것이 있으면 true. 아니면 1 바이트 peek: 데이터가 있거나 WOULD_BLOCK 이면 true, 0 (FIN) 이나 오류면 false.
 - **handshake.** engine 이 open 되어 있지 않으면 INVALID_ARGUMENT. SEND 면 flush, RECEIVE 면 기다렸다가 cipherReceive 로 recv, DONE 이면 SUCCESS, FAILED 면 engine 의 lastCode.
 

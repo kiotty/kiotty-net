@@ -91,9 +91,44 @@ namespace kiotty
             return DecodeResult::failure(KIOTTY_TLS_NOT_SUPPORTED);
         }
 
+        DecodeResult TlsEngine::decode(char* buffer, size_t length)
+        {
+            (void)buffer;
+            (void)length;
+            return DecodeResult::failure(KIOTTY_TLS_NOT_SUPPORTED);
+        }
+
         void TlsEngine::encode(KiottyNetSpan plain)
         {
             (void)plain;
+        }
+
+        TlsStep TlsEngine::write(KiottyNetSpan plain)
+        {
+            (void)plain;
+            return fail(KIOTTY_TLS_NOT_SUPPORTED, "tls: not supported");
+        }
+
+        Span<char> TlsEngine::receiveRoom()
+        {
+            Span<char> room = { nullptr, 0 };
+            return room;
+        }
+
+        void TlsEngine::received(size_t length)
+        {
+            (void)length;
+        }
+
+        Span<const char> TlsEngine::outgoing()
+        {
+            Span<const char> waiting = { nullptr, 0 };
+            return waiting;
+        }
+
+        void TlsEngine::sent(size_t length)
+        {
+            (void)length;
         }
 
 #if defined(KIOTTY_NET_TESTING)

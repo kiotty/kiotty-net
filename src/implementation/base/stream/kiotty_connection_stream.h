@@ -33,6 +33,7 @@ namespace kiotty
             SocketCode      sendAll(const char* data, size_t length, const Deadline& deadline, size_t& sent);
             SocketCode      waitReadable(const Deadline& deadline);
             SocketCode      receiveCipher();
+            SocketCode      receiveIntoStage();
             size_t          takeReceived(void* buffer, size_t length);
 
             ActiveSocket& _socket;

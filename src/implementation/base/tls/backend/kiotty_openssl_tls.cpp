@@ -513,6 +513,19 @@ namespace kiotty
 
         DecodeResult TlsEngine::decode(StageBase& plain)
         {
+            StageBase::Provider provider = plain.provider();
+            size_t room = provider.writable();
+            char* target = provider.prepare(room);
+            DecodeResult decoded = decode(target, room);
+            if (decoded.isOk())
+            {
+                provider.commit(decoded.value());
+            }
+            return decoded;
+        }
+
+        DecodeResult TlsEngine::decode(char* buffer, size_t length)
+        {
             if (!_active || _failed)
             {
                 _last_code = KIOTTY_INVALID_ARGUMENT;
@@ -522,17 +535,13 @@ namespace kiotty
             feed();
             size_t total = 0;
             KiottyNetCode code = KIOTTY_SUCCESS;
-            StageBase::Provider provider = plain.provider();
-            while (provider.writable() > 0)
+            while (total < length)
             {
-                size_t room = provider.writable();
-                char* target = provider.prepare(room);
                 size_t read = 0;
                 ERR_clear_error();
-                int result = SSL_read_ex(_ssl, target, room, &read);
+                int result = SSL_read_ex(_ssl, buffer + total, length - total, &read);
                 if (result == 1)
                 {
-                    provider.commit(read);
                     total += read;
                     continue;
                 }
@@ -625,6 +634,93 @@ namespace kiotty
                 ERR_clear_error();
             }
             flush();
+        }
+
+        TlsStep TlsEngine::write(KiottyNetSpan plain)
+        {
+            if (!_active || _failed)
+            {
+                return fail(KIOTTY_INVALID_ARGUMENT, "tls: engine is not open");
+            }
+            if (plain.length == 0)
+            {
+                return TlsStep::DONE;
+            }
+            size_t written = 0;
+            ERR_clear_error();
+            int result = SSL_write_ex(_ssl, plain.data, plain.length, &written);
+            if (result == 1)
+            {
+                return TlsStep::DONE;
+            }
+            int reason = SSL_get_error(_ssl, result);
+            if (reason == SSL_ERROR_WANT_WRITE)
+            {
+                return TlsStep::SEND;
+            }
+            return fail(KIOTTY_TLS_RECORD_ERROR, lastErrorMessage());
+        }
+
+        Span<char> TlsEngine::receiveRoom()
+        {
+            Span<char> room = { nullptr, 0 };
+            if (!_active)
+            {
+                return room;
+            }
+            feed();
+            StageBase::Consumer waiting = _cipher_receive.consumer();
+            if (waiting.readable() > 0)
+            {
+                return room;
+            }
+            char* target = nullptr;
+            ossl_ssize_t available = BIO_nwrite0(_network, &target);
+            if (available <= 0)
+            {
+                return room;
+            }
+            room.data = target;
+            room.length = static_cast<size_t>(available);
+            return room;
+        }
+
+        void TlsEngine::received(size_t length)
+        {
+            if (length == 0)
+            {
+                return;
+            }
+            char* target = nullptr;
+            BIO_nwrite(_network, &target, static_cast<int>(length));
+        }
+
+        Span<const char> TlsEngine::outgoing()
+        {
+            Span<const char> waiting = { nullptr, 0 };
+            if (!_active)
+            {
+                return waiting;
+            }
+            char* source = nullptr;
+            ossl_ssize_t available = BIO_nread0(_network, &source);
+            if (available <= 0)
+            {
+                return waiting;
+            }
+            waiting.data = source;
+            waiting.length = static_cast<size_t>(available);
+            return waiting;
+        }
+
+        void TlsEngine::sent(size_t length)
+        {
+            if (length == 0)
+            {
+                return;
+            }
+            char* source = nullptr;
+            BIO_nread(_network, &source, static_cast<int>(length));
         }
 
 #if defined(KIOTTY_NET_TESTING)

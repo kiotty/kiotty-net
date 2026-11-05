@@ -506,12 +506,14 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>ConnectionStream</td><td>ReadReturnsPeerClosedWhenThePeerShutsDown</td><td><span class="tag edge">엣지</span></td><td>peer 의 FIN → PEER_CLOSED, 0 바이트</td></tr>
   <tr><td>ConnectionStream</td><td>ReadAndWriteRejectEmptyOrMissingBuffers</td><td><span class="tag misuse">오용</span></td><td>read(nullptr) / read(length 0) / write(nullptr, 4) → INVALID_ARGUMENT</td></tr>
   <tr><td>ConnectionStream</td><td>WritePlaintextSendsAllWithoutCopy</td><td><span class="tag ok">정상</span></td><td>send buffer 4 KiB 의 socket 으로 1 MiB → 전부, bytes = 1 MiB, send Stage 는 비어 있다 (사용자 buffer 에서 바로)</td></tr>
-  <tr><td>ConnectionStream</td><td>WriteFileSendsExactRange</td><td><span class="tag ok">정상</span></td><td>10000 B 파일의 [1000, 6000) 를 send capacity 1024 로 → peer 가 정확히 그 5000 B, 그 뒤 더 없음. send Stage 는 비워진다</td></tr>
+  <tr><td>ConnectionStream</td><td>WriteFileSendsExactRange</td><td><span class="tag ok">정상</span></td><td>평문. 10000 B 파일의 [1000, 6000) 를 sendfile / TransmitFile 로 → peer 가 정확히 그 5000 B, 그 뒤 더 없음. send Stage 는 쓰지 않는다</td></tr>
   <tr><td>ConnectionStream</td><td>WriteFileMissingPathIsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>없는 경로, nullptr, 범위가 넘는 offset / length → INVALID_ARGUMENT, 아무것도 보내지 않는다</td></tr>
   <tr><td>ConnectionStream</td><td>ConnectedIsFalseAfterPeerClose</td><td><span class="tag ok">정상</span></td><td>처음 true, peer 가 닫으면 false</td></tr>
   <tr><td>ConnectionStream</td><td>HandshakeCompletesAgainstBlockingPeer</td><td><span class="tag ok">정상</span></td><td>TLS. 양쪽 handshake SUCCESS, ping / pong 왕복</td></tr>
   <tr><td>ConnectionStream</td><td>HandshakeWithoutAnOpenEngineIsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>open 하지 않은 engine → INVALID_ARGUMENT</td></tr>
-  <tr><td>ConnectionStream</td><td>WriteTlsEncodesInSendCapacityChunks</td><td><span class="tag ok">정상</span></td><td>TLS. send capacity 1024 로 5000 B → 상대 socket 의 암호문에 application data 레코드 다섯, decode 하면 원문</td></tr>
+  <tr><td>ConnectionStream</td><td>WriteTlsSendsFullRecordsStraightFromTheEngine</td><td><span class="tag ok">정상</span></td><td>TLS. 40000 B → 상대 socket 의 암호문에 16 KiB 레코드 셋, decode 하면 원문. cipherSend 와 send Stage 는 쓰지 않는다 (BIO 에서 바로)</td></tr>
+  <tr><td>ConnectionStream</td><td>ReadTlsDecodesStraightIntoTheCallersBuffer</td><td><span class="tag ok">정상</span></td><td>TLS. 상대가 20000 B → read 를 되풀이해 원문. 그동안 receive Stage 와 cipherReceive 는 비어 있다 (BIO 와 사용자 buffer 만)</td></tr>
+  <tr><td>ConnectionStream</td><td>WriteFileOverTlsSendsExactRange</td><td><span class="tag ok">정상</span></td><td>TLS. 10000 B 파일의 [1000, 6000) 을 send capacity 1024 로 → 상대 read 가 정확히 그 5000 B, send Stage 는 비워진다</td></tr>
   <tr><td>ConnectionStream</td><td>FlushSendsLeftoverCipherSendFirst</td><td><span class="tag ok">정상</span></td><td>TLS. cipherSend 에 남긴 "first" 가 write("second") 앞에 나간다. 상대 read 가 "firstsecond"</td></tr>
 </table>
 

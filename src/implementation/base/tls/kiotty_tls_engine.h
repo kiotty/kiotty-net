@@ -3,6 +3,7 @@
 
 #include "base/tls/kiotty_tls_profile.h"
 #include "core/kiotty_result.h"
+#include "core/kiotty_span.h"
 #include "base/pool/kiotty_memory_layout.h"
 #include "core/kiotty_stage.h"
 #include "kiotty_net_base.h"
@@ -49,7 +50,14 @@ namespace kiotty
 
             TlsStep      handshake();
             DecodeResult decode(StageBase& plain);
+            DecodeResult decode(char* buffer, size_t length);
             void         encode(KiottyNetSpan plain);
+            TlsStep      write(KiottyNetSpan plain);
+
+            Span<char>       receiveRoom();
+            void             received(size_t length);
+            Span<const char> outgoing();
+            void             sent(size_t length);
 
             KiottyNetCode lastCode() const;
             const char*   lastMessage() const;

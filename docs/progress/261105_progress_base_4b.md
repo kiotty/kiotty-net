@@ -32,6 +32,15 @@
 - MSVC Debug: TLS ON / OFF 183/183. ConnectionStream 13 개 10 회 반복 초록.
 - WSL: gcc / clang TLS ON / OFF, clang ASan+UBSan, TSan 184/184, clang Release TLS 183/183. ConnectionStream 13 개를 gcc / ASan / TSan 에서 각 10 회 반복 초록.
 
+## 고친 것 (같은 날): 복사 줄이기, writeFile 은 sendfile / TransmitFile
+
+- TLS read: socket 에서 BIO pair 안으로 바로 recv 한다 (`TlsEngine::receiveRoom` / `received`, BIO_nwrite0). 그다음 `TlsEngine::decode(char*, length)` 가 SSL_read 로 사용자 buffer 에 바로 쓴다. cipherReceive 와 receive Stage 를 거치지 않는다.
+- TLS write: `TlsEngine::write` (SSL_write) 가 BIO 에 암호문을 만들고, `outgoing` / `sent` (BIO_nread0) 로 BIO 안에서 바로 send 한다. cipherSend 를 거치지 않는다. 16 KiB 씩 쓴다 (send capacity 와 무관).
+- 평문 writeFile: Linux `sendfile` (EAGAIN 이면 waitWritable. 그동안 그 thread 의 SIGPIPE 를 막는다), Windows `TransmitFile` (WSAIoctl 로 얻는다. hEvent 하위 비트로 IOCP 를 피하고 event 를 기다린다. 시간이 지나면 CancelIoEx). 그 밖의 POSIX 는 4 KiB pread + send.
+- TLS writeFile 은 그대로 send Stage 로 읽어 보낸다. 커널이 암호화를 못 하므로 복사 하나는 남는다.
+- 테스트: `WriteTlsEncodesInSendCapacityChunks` → `WriteTlsSendsFullRecordsStraightFromTheEngine` (40000 B → 레코드 셋). 더한 것: `ReadTlsDecodesStraightIntoTheCallersBuffer`, `WriteFileOverTlsSendsExactRange`. 모두 15 개.
+- 로컬: MSVC Debug TLS ON / OFF 185/185, WSL gcc / clang TLS ON / OFF, ASan+UBSan, TSan 186/186, clang Release TLS 185/185. ConnectionStream 15 개를 MSVC / gcc / ASan / TSan 에서 각 10 회 반복 초록.
+
 ## 다음 할 일
 
 5a (Sender, WorkContext, IoSource, Connection 평문, ConnectionHost).

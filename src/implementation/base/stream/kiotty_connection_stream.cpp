@@ -11,6 +11,7 @@ namespace kiotty
         namespace
         {
             const size_t RESULT_MAXIMUM_BYTES = 0x7FFFFFFF;
+            const size_t TLS_WRITE_PIECE_BYTES = TLS_RECORD_PLAIN_BYTES;
 
             KiottyNetResult resultOf(size_t bytes, KiottyNetCode code)
             {
@@ -56,7 +57,8 @@ namespace kiotty
                 }
                 if (_tls.active())
                 {
-                    DecodeResult decoded = _tls.decode(_receive);
+                    char* target = static_cast<char*>(buffer);
+                    DecodeResult decoded = _tls.decode(target, limit);
                     KiottyNetCode replied = flush(deadline);
                     if (!decoded.isOk())
                     {
@@ -68,7 +70,7 @@ namespace kiotty
                     }
                     if (decoded.value() > 0)
                     {
-                        continue;
+                        return resultOf(decoded.value(), KIOTTY_SUCCESS);
                     }
                 }
                 SocketCode waited = waitReadable(deadline);
@@ -125,16 +127,26 @@ namespace kiotty
             {
                 return KIOTTY_INVALID_ARGUMENT;
             }
-            size_t chunk = _send.capacity();
-            if (chunk == 0 || _send.consumer().readable() > 0)
-            {
-                return KIOTTY_BUSY;
-            }
             Deadline deadline(timeout_ms);
             KiottyNetCode flushed = flush(deadline);
             if (flushed != KIOTTY_SUCCESS)
             {
                 return flushed;
+            }
+            if (!_tls.active())
+            {
+                uint64_t sent = 0;
+                SocketCode code = sendFile(_socket, file, offset, length, deadline, sent);
+                if (code == SocketCode::INVALID_ARGUMENT)
+                {
+                    return KIOTTY_INVALID_ARGUMENT;
+                }
+                return toNetCode(code);
+            }
+            size_t chunk = _send.capacity();
+            if (chunk == 0 || _send.consumer().readable() > 0)
+            {
+                return KIOTTY_BUSY;
             }
             uint64_t done = 0;
             while (done < length)
@@ -239,15 +251,30 @@ namespace kiotty
             StageBase& cipher = _tls.cipherSend();
             StageBase::Consumer waiting = cipher.consumer();
             size_t readable = waiting.readable();
-            if (readable == 0)
+            if (readable > 0)
             {
-                return KIOTTY_SUCCESS;
+                size_t sent = 0;
+                SocketCode code = sendAll(waiting.peek(), readable, deadline, sent);
+                waiting.commit(sent);
+                cipher.compact();
+                if (code != SocketCode::SUCCESS)
+                {
+                    return toNetCode(code);
+                }
             }
-            size_t sent = 0;
-            SocketCode code = sendAll(waiting.peek(), readable, deadline, sent);
-            waiting.commit(sent);
-            cipher.compact();
-            return toNetCode(code);
+            Span<const char> outgoing = _tls.outgoing();
+            while (!outgoing.empty())
+            {
+                size_t sent = 0;
+                SocketCode code = sendAll(outgoing.data, outgoing.length, deadline, sent);
+                _tls.sent(sent);
+                if (code != SocketCode::SUCCESS)
+                {
+                    return toNetCode(code);
+                }
+                outgoing = _tls.outgoing();
+            }
+            return KIOTTY_SUCCESS;
         }
 
         KiottyNetResult ConnectionStream::send(KiottyNetSpan data, const Deadline& deadline)
@@ -258,21 +285,24 @@ namespace kiotty
                 SocketCode code = sendAll(data.data, data.length, deadline, sent);
                 return resultOf(sent, toNetCode(code));
             }
-            size_t chunk = _send.capacity();
-            if (chunk == 0)
-            {
-                return resultOf(0, KIOTTY_INVALID_ARGUMENT);
-            }
             size_t done = 0;
             while (done < data.length)
             {
-                size_t piece = smallerOf(chunk, data.length - done);
+                size_t piece = smallerOf(TLS_WRITE_PIECE_BYTES, data.length - done);
                 KiottyNetSpan part = { data.data + done, piece };
-                _tls.encode(part);
-                KiottyNetCode flushed = flush(deadline);
-                if (flushed != KIOTTY_SUCCESS)
+                TlsStep step = TlsStep::SEND;
+                while (step == TlsStep::SEND)
                 {
-                    return resultOf(done, flushed);
+                    step = _tls.write(part);
+                    KiottyNetCode flushed = flush(deadline);
+                    if (step == TlsStep::FAILED)
+                    {
+                        return resultOf(done, _tls.lastCode());
+                    }
+                    if (flushed != KIOTTY_SUCCESS)
+                    {
+                        return resultOf(done, flushed);
+                    }
                 }
                 done += piece;
             }
@@ -317,6 +347,22 @@ namespace kiotty
         }
 
         SocketCode ConnectionStream::receiveCipher()
+        {
+            Span<char> room = _tls.receiveRoom();
+            if (room.empty())
+            {
+                return receiveIntoStage();
+            }
+            TransferResult received = _socket.receive(room.data, room.length);
+            if (!received.isOk())
+            {
+                return received.code();
+            }
+            _tls.received(received.value());
+            return SocketCode::SUCCESS;
+        }
+
+        SocketCode ConnectionStream::receiveIntoStage()
         {
             StageBase& cipher = _tls.cipherReceive();
             cipher.compact();
