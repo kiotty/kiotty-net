@@ -4,7 +4,6 @@ project(kiotty_net LANGUAGES C CXX)
 
 option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF builds the stub backend without OpenSSL" ON)
 option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
-option(KIOTTY_NET_USES_TLS_STATIC_LIBRARY "OpenSSL is a static library owned by kiotty_net. Route its allocations into GlobalPool and MemberPool" ON)
 set(KIOTTY_NET_MAX_SERVERS "4" CACHE STRING "Servers a process can hold at once, 1 to 16")
 set(KIOTTY_NET_MAX_STREAM_CLIENTS "8" CACHE STRING "Stream clients a process can hold at once, 1 to 16")
 set(KIOTTY_NET_MAX_EVENT_CLIENTS "4" CACHE STRING "Event clients a process can hold at once, 1 to 16")
@@ -35,7 +34,6 @@ set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_stage.cpp
-    src/implementation/core/pool/kiotty_member_pool.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
     src/implementation/base/error/backend/kiotty_posix_error.cpp
     src/implementation/base/error/backend/kiotty_windows_error.cpp
@@ -46,7 +44,6 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
     src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
     src/implementation/base/tls/kiotty_tls_engine.cpp
-    src/implementation/base/tls/kiotty_tls_memory.cpp
     src/implementation/base/tls/backend/kiotty_openssl_tls.cpp
     src/implementation/base/tls/backend/kiotty_stub_tls.cpp
 )
@@ -88,13 +85,8 @@ if(KIOTTY_NET_USE_TLS)
     FetchContent_MakeAvailable(openssl-cmake)
     target_link_libraries(kiotty_net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USE_TLS=1)
-    if(KIOTTY_NET_USES_TLS_STATIC_LIBRARY)
-        target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USES_TLS_STATIC_LIBRARY=1)
-    else()
-        target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USES_TLS_STATIC_LIBRARY=0)
-    endif()
 else()
-    target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USE_TLS=0 KIOTTY_NET_USES_TLS_STATIC_LIBRARY=0)
+    target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_USE_TLS=0)
 endif()
 
 if(WIN32)

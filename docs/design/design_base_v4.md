@@ -19,15 +19,15 @@
 kiotty_net_base.cpp ── 번역. 받은 것 (Context, Owner 포인터, handle 의 owner) 을 통해서만 간다. static 에 닿는 함수는 initializeContext 하나
     ├── Context ───── static 객체 하나 (13절). 타입별 LazyReusablePool 셋 (19.3)
     ├── Server ──────┐
-    ├── EventClient ─┼── Owner (= KiottyNetConnectionOwner) ── ConnectionHost + EventListener + IoLoop + Acceptor + TlsProfile + OwnerTlsMemory + Parker
+    ├── EventClient ─┼── Owner (= KiottyNetConnectionOwner) ── ConnectionHost + EventListener + IoLoop + Acceptor + TlsProfile + Parker
     └── StreamClient ┘               IoLoop ── 멤버 둘. run(host, listener, acceptor, profile, handler) : drain (pick → submit) → settle → collectIoEvents → step (dispatch → apply → submit) → stepLocalEvents (반복)
                                      Connection ── StageSet (receive, send, notify), TlsEngine, WorkContext, IoEvent 둘 (read, write). 자기 바깥을 가리키지 않는다
                                      Acceptor ──── PassiveSocket, IoEvent 하나
                                      EventListener + IoEvent ── IOCP (있음) / epoll / kqueue / io_uring
                                      ActiveSocket / PassiveSocket (있음), TlsProfile / TlsEngine
 core/       : StageBase / Stage<N>, StageSet, Span, Result, Clock, Parker
-core/pool/  : PoolHandle, PoolLayout, MemberPool<Layout>, GlobalPool, is_reusable, ReusablePool, LazyReusablePool (19절. Holder 는 지운다)
-base/pool/  : MemoryLimits, GlobalTlsLayout / ServerTlsLayout / ClientTlsLayout (19절)
+core/pool/  : PoolHandle, is_reusable, ReusablePool, LazyReusablePool (19절. Holder 는 지운다)
+base/pool/  : MemoryLimits, cipher Stage 의 N (19절)
 ```
 
 ## 1. 폴더
@@ -39,8 +39,7 @@ src/
         core/                       namespace kiotty                        (있음. 무엇에도 의존하지 않는다)
                     kiotty_stage.h (StageBase, Stage<N>, StageSet), kiotty_span.h, kiotty_result.h, kiotty_clock.h,
                     kiotty_parker.h (12절. mutex + condition_variable 이 있는 유일한 자리)
-            pool/   kiotty_pool_handle.h (PoolHandle { generation, index }), kiotty_pool_layout.h (PoolClass, BlockClass, PoolLayout),
-                    kiotty_member_pool.h (MemberPool<Layout>. Layout 이 정한 멤버 배열 위의 등급 표. TLS 서브풀 전용), kiotty_global_pool.h (전역 TLS arena),
+            pool/   kiotty_pool_handle.h (PoolHandle { generation, index }),
                     kiotty_reusable.h (is_reusable), kiotty_reusable_pool.h (ReusablePool<T, N> : 멤버 배열), kiotty_lazy_reusable_pool.h (LazyReusablePool<T, N> : unique_ptr, 은퇴)
         base/                       namespace kiotty::net
             pool/       kiotty_memory_limits.h (compile time 상한), kiotty_memory_layout.h (TLS Layout 셋). kiotty-net 의 크기를 아는 것만 여기 (19절)
@@ -48,7 +47,7 @@ src/
             socket/     (있음)
             event/      kiotty_io_action.h (as.write.length 추가), kiotty_event.h (IoKind::WORK_READY 추가), kiotty_event_listener.h (그대로),
                         backend/kiotty_iocp_event_listener.cpp (있음), kiotty_epoll_event_listener.cpp, kiotty_kqueue_*, kiotty_io_uring_*
-            tls/        kiotty_tls_profile.h, kiotty_tls_engine.h, kiotty_tls_memory.h (TlsMemory, OwnerTlsMemory<Layout>, 19.5), backend/kiotty_openssl_tls.cpp | kiotty_stub_tls.cpp
+            tls/        kiotty_tls_profile.h, kiotty_tls_engine.h, backend/kiotty_openssl_tls.cpp | kiotty_stub_tls.cpp
             stream/     kiotty_connection_stream.h/.cpp                 동기 통로. 참조 넷을 드는 값. Connection (WORKING) 과 StreamClient 가 쓰는 자리에서 만든다
                         backend/kiotty_posix_file.cpp, kiotty_windows_file.cpp   writeFile 의 파일 열기 / 읽기
             connection/ kiotty_io_source.h, kiotty_sender.h (static 함수 둘), kiotty_work_context.h,
@@ -130,7 +129,7 @@ size_t KiottyNet_clientMemorySize(void);       /* StreamClient / EventClient 중
 | `max_clients` 의 compile time 상한 | `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` (기본 128, 최대 1024). runtime 값이 넘으면 `KIOTTY_INVALID_ARGUMENT` |
 | recv / send / push capacity 의 상한 | `KIOTTY_NET_MAX_RECV / SEND / PUSH_CAPACITY` (기본 16 KiB) |
 | `KIOTTY_OUT_OF_MEMORY` | enum 끝에 더한다. `create*` 가 돌려준다 (Owner 하나를 만들 메모리가 없을 때) |
-| `initializeContextWithTlsPool(bytes)` | 지운다. TLS 메모리는 19.5 의 arena 다 |
+| `initializeContextWithTlsPool(bytes)` | 지운다. OpenSSL 은 자기 malloc 을 쓴다 (19.5) |
 
 지우는 것: `KiottyNetWorkHandle`, `KiottyNet_finishWork`, `KiottyNet_isWorkConnected`, 옛 이름의 action 함수 여섯 (`holdCommunication`, `readConnection`, `readConnectionUntil`, `writeConnection`, `startWork`, `closeConnection`). C++ 의 `KiottyNet_Work` 는 `KiottyNet_ConnectionStream` 으로 이름을 바꾸고 `read / write / writeFile / open / close(action)` 을 가진다. 소멸자는 close 하지 않은 Stream 을 `thenClose(KIOTTY_SUCCESS)` 로 닫는다. `KiottyNet_Connection` 은 `operator==` 와 `operator<` 를 가진다 (15절).
 
@@ -265,7 +264,7 @@ public:
 - decode 가 끝날 때 상대의 KeyUpdate 가 답장을 기다리면 (`SSL_get_key_update_type` 이 NONE 이 아니면) `SSL_key_update(NOT_REQUESTED)` + `SSL_do_handshake` 로 그 답장을 cipherSend 에 꺼내 둔다. SSL_read 만으로는 다음 SSL_write 전까지 나오지 않기 때문이다.
 - handshake 가 DONE 을 돌려준 뒤에도 rbio 에 상대의 첫 응용 레코드나 NewSessionTicket 이 남아 있을 수 있다. 9.5 의 첫 READ 전에 decode 를 한 번 불러 소화한다 (사이클 5b).
 - **SSL 과 cipher Stage 사이는 BIO pair 하나다** (`BIO_new_bio_pair`, 양쪽 버퍼 4 KiB 고정). SSL 은 안쪽 BIO 를 읽고 쓰고, engine 은 바깥쪽 BIO 하나 (`_network`) 만 든다. `feed()` 는 cipherReceive 에서 pair 에 들어갈 만큼만 넣고, `flush()` 는 pair 에서 cipherSend 에 들어갈 만큼만 꺼낸다. 둘 다 옮긴 길이를 돌려준다. handshake / decode / encode 는 OpenSSL 이 WANT_READ / WANT_WRITE 를 주면 feed / flush 로 자리를 만들고 다시 부르며, 아무것도 옮기지 못하면 멈춘다. 그래서 cipherReceive 에 레코드가 남은 채 decode 가 끝날 수 있고 (다음 decode 가 이어 넣는다), handshake 는 WANT_WRITE 도 SEND / RECEIVE 로 본다. memory BIO 는 메시지 크기만큼 자라고 줄지 않아 연결당 OpenSSL 메모리가 Stage 크기를 따라갔다 (64 KiB 에서 183 KiB). pair 로 바꾼 뒤에는 Stage 크기와 무관하게 약 68 KiB 다 (19절).
-- **OpenSSL 의 메모리는 19.5 의 두 arena (전역 + Owner 서브풀) 다** (kiotty 가 OpenSSL 사본을 혼자 쓰는 build). 시스템 OpenSSL 을 공유하면 OpenSSL 의 malloc 그대로다.
+- **OpenSSL 의 메모리는 OpenSSL 의 기본 allocator (malloc) 다** (19.5). kiotty 는 hook 을 걸지 않는다.
 - IO thread 가 끝날 때 `OPENSSL_thread_stop` 을 부른다 (사이클 6). Windows 정적 링크에서는 OpenSSL 이 thread 종료를 스스로 알지 못한다.
 
 ## 9. connection
@@ -1193,11 +1192,7 @@ KiottyNetCode Server::run(const KiottyNetConnectionHandler& callbacks, KiottyNet
 {
     Handler handler(callbacks, app_context, *this);
     KiottyNetCode code = KIOTTY_SUCCESS;
-    {
-        TlsMemory::Scope scope(_tls_memory);            // attachThread 포함 (19.5). 이 thread 의 OpenSSL 할당을 이 Owner 의 서브풀로
-        code = _loop.run(_host, _listener, _acceptor, _profile, handler, false);
-    }
-    TlsMemory::detachThread();                          // IO Thread 가 끝나는 자리 둘 (Server, EventClient) 에만
+    code = _loop.run(_host, _listener, _acceptor, _profile, handler, false);
     _parker.unpark([this, code]() { _code = code; _finished = true; });
     return code;
 }
@@ -1222,7 +1217,7 @@ v2 13절 그대로. 바뀌는 것:
 
 - Context 는 process 에 하나인 static 객체다. heap 을 쓰지 않고, DLL 사본마다 하나다. 그것에 닿는 함수는 `Context::open()` 하나이고 그것을 부르는 자리는 `KiottyNet_initializeContext` 하나다. 라이브러리 안의 어느 코드도 static 객체를 직접 찾지 않는다 (singleton 접근 없음). 그 뒤의 모든 C 함수는 받은 것 (context, Owner 포인터, handle 의 owner) 을 통해 간다 (15절).
 - `initializeContext` 를 두 번 부르면 같은 객체와 `KIOTTY_SUCCESS` 다. release 는 한 번으로 끝난다. 두 모듈이 각자 release 하면 첫 release 가 둘 다 끝내는데, 그것이 "Context 둘은 없다" 의 뜻이다.
-- OpenSSL 초기화 (`OPENSSL_INIT_NO_ATEXIT`, process 첫 번째만), hook (`TlsMemory::functions()`), 예열 handshake 가 `open` 에서 돈다 (19.5). Owner 는 `create*` 가 만들고, `KIOTTY_OUT_OF_MEMORY` 는 `create*` 가 돌려준다. `KiottyNet_initializeContext(void)` 는 인자를 받지 않는다. `open` 이 받는 `ContextConfiguration` 은 라이브러리 안의 struct 이고 base.cpp 가 기본값 (타입별 미리 만들 개수 0) 으로 넘긴다. 공개 config 는 필요해지면 그때 base.h 에 더한다.
+- OpenSSL 초기화 (`OPENSSL_INIT_NO_ATEXIT`, process 첫 번째만) 가 `open` 에서 돈다 (19.5). Owner 는 `create*` 가 만들고, `KIOTTY_OUT_OF_MEMORY` 는 `create*` 가 돌려준다. `KiottyNet_initializeContext(void)` 는 인자를 받지 않는다. `open` 이 받는 `ContextConfiguration` 은 라이브러리 안의 struct 이고 base.cpp 가 기본값 (타입별 미리 만들 개수 0) 으로 넘긴다. 공개 config 는 필요해지면 그때 base.h 에 더한다.
 - `config::configureServerMaxClients` 가 `[1, KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER]` 를 검사한다. 기본 128. buffer capacity 는 `[1, KIOTTY_NET_MAX_*_CAPACITY]`.
 - base.h 의 불투명 struct 는 C++ 클래스 그 자체다 (cast 없음): `KiottyNetContextImpl` 은 Context, `KiottyNetConnectionOwner` 는 Owner, `KiottyNetServer` / `KiottyNetEventClient` / `KiottyNetStreamClient` 는 Owner 셋. 전역 namespace 의 그 이름으로 정의하고 `kiotty::net` 안에서는 typedef 로 부른다.
 
@@ -1245,7 +1240,7 @@ namespace kiotty { namespace net { typedef ::KiottyNetConnectionOwner Owner; } }
 struct KiottyNetContextImpl                     // = Context. 복사 / 이동 없음
 {
     static Result<KiottyNetCode, Context&> open(const ContextConfiguration& configuration);   // 유일한 static 함수. 함수 안의 static 객체 하나를 initialize 하고 돌려준다 (C++11 의 thread-safe static init)
-    void release();                             // 남은 Owner destroy → 세 풀 비움 → TlsMemory 의 등록표 지움. OPENSSL_cleanup 은 부르지 않는다
+    void release();                             // 남은 Owner destroy → 세 풀 비움. OPENSSL_cleanup 은 부르지 않는다
 
     Result<KiottyNetCode, Server&>       createServer(const KiottyNetServerConfig& config, const KiottyNetTlsServerConfig* tls);
     Result<KiottyNetCode, StreamClient&> createStreamClient(const KiottyNetClientConfig& config, const KiottyNetTlsClientConfig* tls);
@@ -1278,7 +1273,7 @@ private:
 | Sender::stage / release (notify Stage) | stage 는 아무 thread, release 는 IO Thread. 전부 host 의 mutex 안 |
 | TlsEngine, socket | WORKING 이 아닌 동안 IO Thread, WORKING 동안 worker. `SSL*` 도 같다 |
 | ConnectionStream | Connection 의 것은 worker 하나, StreamClient 의 것은 한 번에 한 thread. 쓰는 함수가 만든다 |
-| TlsMemory | `Scope` 는 그 thread 의 할당 경로. attach 는 Scope 가, `detachThread` 는 IO Thread 가 끝나는 run 의 끝이 (19.5) |
+
 | Parker | `park` 는 await 를 부른 thread, `unpark` 는 run 의 끝 |
 | EventListener | `wake` 만 아무 thread |
 
@@ -1310,7 +1305,7 @@ StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다. C++ 
 | 객체 | 잡는 것 | 크기 |
 |---|---|---|
 | Connection (평문) | 객체 + StageSet (recv + send + push) + IoEvent 둘 | 약 12 KiB |
-| Connection (TLS) | 위 + cipherReceive (recv) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (Owner 의 TLS 서브풀, SSL_clear 재사용) | 약 21 KiB + SSL 대기 약 30 ~ 50 KiB, handshake 중 최대 약 68 KiB |
+| Connection (TLS) | 위 + cipherReceive (recv) + cipherSend (max(send, push) + 레코드 오버헤드 + 512) + SSL (OpenSSL 의 malloc, SSL_clear 재사용) | 약 21 KiB + SSL 대기 약 30 ~ 50 KiB, handshake 중 최대 약 68 KiB |
 | ConnectionHost | Connection[128] + mutex | 평문 약 1.5 MiB, TLS 약 4.3 MiB |
 | IoLoop | 멤버 둘. local completion 배열 없음 (OS 완료는 listener 의 배열) | 수십 B |
 | EventClient | capacity 1 + open 하지 않은 Acceptor | 평문 약 13 KiB |
@@ -1328,7 +1323,7 @@ StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다. C++ 
 
 ## 18. 구현 순서
 
-① base.h 를 3절대로 고치고 statemachine.h / requirement 를 맞춘다 (사이클 1 재방문) ② core/pool (ReusablePool, LazyReusablePool), Parker, event 의 세 줄 (사이클 3b 재방문) ③ epoll backend (사이클 3c) ④ tls (stub 먼저, TlsMemory) ⑤ stream (ConnectionStream, 파일 backend) ⑥ connection (IoSource, Sender, WorkContext, Connection, Acceptor, ConnectionHost) ⑦ io_loop ⑧ server / client / context / config ⑨ base.cpp 번역.
+① base.h 를 3절대로 고치고 statemachine.h / requirement 를 맞춘다 (사이클 1 재방문) ② core/pool (ReusablePool, LazyReusablePool), Parker, event 의 세 줄 (사이클 3b 재방문) ③ epoll backend (사이클 3c) ④ tls (stub 먼저) ⑤ stream (ConnectionStream, 파일 backend) ⑥ connection (IoSource, Sender, WorkContext, Connection, Acceptor, ConnectionHost) ⑦ io_loop ⑧ server / client / context / config ⑨ base.cpp 번역.
 
 ## 19. 메모리 할당
 
@@ -1336,13 +1331,13 @@ StateMachine 은 `Connection::state() / setState() / context()` 를 쓴다. C++ 
 
 ### 19.1 원칙
 
-1. **객체는 한 번 만들고, 실행 중에는 켜고 끈다.** Context 는 static 객체 하나, Owner 는 `create*` 의 `unique_ptr` 하나, 그 아래 (Connection, IoEvent, Stage, TLS 서브풀, Acceptor, listener 의 완료 배열) 는 전부 Owner 의 멤버거나 Owner 의 create 때 잡은 것이다. run 중에는 생성자도 malloc 도 free 도 돌지 않는다. OpenSSL 의 할당은 19.5 의 arena 로 간다.
+1. **객체는 한 번 만들고, 실행 중에는 켜고 끈다.** Context 는 static 객체 하나, Owner 는 `create*` 의 `unique_ptr` 하나, 그 아래 (Connection, IoEvent, Stage, Acceptor, listener 의 완료 배열) 는 전부 Owner 의 멤버거나 Owner 의 create 때 잡은 것이다. run 중에는 생성자도 malloc 도 free 도 돌지 않는다. 예외는 OpenSSL 하나다 (자기 malloc, 19.5).
 2. **메모리가 보장되는 시점은 `create*` 다.** Owner (Server / StreamClient / EventClient) 하나를 `new (std::nothrow)` 로 한 번 만든다. 못 만들면 `KIOTTY_OUT_OF_MEMORY`, 만들었으면 그 Owner 의 run 중에 메모리 부족은 없다. `initializeContext` 의 config 로 개수를 주면 그때 미리 만든다. Context 자체는 heap 을 쓰지 않는다.
 3. **상한 곱셈을 하지 않는다.** Context 는 타입별 포인터 표만 가진다. 메모리는 실제로 만든 Owner 에 비례한다. Owner 하나의 크기는 compile time 상한 (19.4) 으로 정해지고 config 와 무관하다.
 4. **은퇴한 Owner 는 OS 에 돌려주지 않는다.** destroy 는 은퇴 상태로 두고, 같은 타입의 다음 create 가 재사용하며, `releaseContext` 가 한 번에 해제한다. 표가 타입별이라 다른 타입에 자리를 내주는 free 가 없다. 그래서 handle 의 `owner` 포인터는 releaseContext 전까지 늘 유효하다 (13절).
 5. **잡아 둔 메모리는 쓰기 전까지 RAM 에 올라가지 않는다.** 큰 배열은 default-init 으로 두고 생성자에서 0 으로 채우지 않는다. Linux, macOS, Android 는 처음 쓰는 page 만 RAM 에 올리고, Windows 는 commit 을 전부 센다 (19.8).
 6. **Pool 은 소비의 상한이고 손상의 방어가 아니다.** 문서와 인허가 자료에서 둘을 구분해 적는다.
-7. **MISRA C++:2023.** 할당은 `std::unique_ptr` 가 관리한다. raw storage 위의 placement new, `union`, 포인터 ↔ 정수 변환, 소유하는 raw 포인터를 쓰지 않는다. 소유하지 않는 raw 포인터는 쓴다. C API 의 handle 은 포인터와 정수를 나란히 둔 struct 라 변환이 없다. 동적 메모리의 advisory 규칙은 "`create*` 는 초기화 단계" 로, static 객체 하나 (Context) 와 .bss 의 전역 TLS arena 는 deviation 하나로 재분류한다. 코드는 C++11 부분집합으로 쓰고 정적 분석 job 은 C++17 모드로 돈다.
+7. **MISRA C++:2023.** 할당은 `std::unique_ptr` 가 관리한다. raw storage 위의 placement new, `union`, 포인터 ↔ 정수 변환, 소유하는 raw 포인터를 쓰지 않는다. 소유하지 않는 raw 포인터는 쓴다. C API 의 handle 은 포인터와 정수를 나란히 둔 struct 라 변환이 없다. 동적 메모리의 advisory 규칙은 "`create*` 는 초기화 단계" 로, static 객체 하나 (Context) 는 deviation 하나로 재분류한다. OpenSSL 의 malloc 은 OpenSSL 의 것이다 (19.5). 코드는 C++11 부분집합으로 쓰고 정적 분석 job 은 C++17 모드로 돈다.
 8. **멤버는 run 보다 오래 사는 상태뿐이다.** 한 함수가 쓰고 버리는 것은 그 함수의 참조 인자다. 풀 안의 객체 (Connection, Owner 셋) 는 자기 바깥을 가리키는 멤버를 갖지 않는다 (예외는 backend 의 IoEvent 가 attach 때 적는 listener 포인터 하나). 생성자에서 받는 소유하지 않는 의존은 포인터가 아니라 참조 멤버다 (ConnectionStream, Handler, TlsMemory::Scope). 포인터로 남는 것은 생성자 없이 바뀌는 값 (thread 의 current arena) 과 C 문자열이다.
 
 ### 19.2 풀 계약
@@ -1389,7 +1384,7 @@ class LazyReusablePool                          // core/pool/kiotty_lazy_reusabl
 };
 ```
 
-이름의 뜻: `MemberPool` 은 "저장 공간이 그 객체의 멤버 (heap 에 따로 잡지 않는다)", `GlobalPool` 은 "멤버가 전부 static (.bss)" 이고, `ReusablePool` 은 "객체가 멤버 배열에 있고 켜고 끈다", `LazyReusablePool` 은 "객체를 heap 에 늦게 하나씩 만들고 은퇴시킨다" 다.
+이름의 뜻: `ReusablePool` 은 "객체가 멤버 배열에 있고 켜고 끈다", `LazyReusablePool` 은 "객체를 heap 에 늦게 하나씩 만들고 은퇴시킨다" 다.
 
 ### 19.3 멤버 (Context 부터 아래로. 기능은 각 절)
 
@@ -1410,7 +1405,6 @@ class Context
 class Server : public Owner                     // configuration_type = ServerConfiguration { KiottyNetServerConfig config; const KiottyNetTlsServerConfig* tls; }
 {
     KiottyNetServerConfig              _config;
-    OwnerTlsMemory<ServerTlsLayout>    _tls_memory;   // 19.5. profile 1 + 연결 MAX_CONNECTIONS 몫. TLS OFF 면 0 바이트
     TlsProfile                         _profile;      // valid() 가 거짓이면 평문
     ConnectionHost<MAX_CONNECTIONS>    _host;
     EventListener                      _listener;     // open(LISTENER_CAPACITY) 이 완료 배열을 heap 에 (create 때)
@@ -1425,7 +1419,6 @@ class Server : public Owner                     // configuration_type = ServerCo
 class EventClient : public Owner                // configuration_type = ClientConfiguration { KiottyNetClientConfig config; const KiottyNetTlsClientConfig* tls; }
 {
     KiottyNetClientConfig              _config;       // hostname 은 여기 (char 배열). admit 이 빌려 준다
-    OwnerTlsMemory<ClientTlsLayout>    _tls_memory;   // profile 1 + 연결 1 몫
     TlsProfile                         _profile;
     ConnectionHost<1>                  _host;
     EventListener                      _listener;
@@ -1441,7 +1434,6 @@ class EventClient : public Owner                // configuration_type = ClientCo
 class StreamClient : public Owner               // configuration_type = ClientConfiguration. 연결 handle 을 내지 않으므로 Owner 의 일곱은 전부 INVALID_ARGUMENT
 {
     KiottyNetClientConfig              _config;
-    OwnerTlsMemory<ClientTlsLayout>    _tls_memory;
     TlsProfile                         _profile;
     ActiveSocket                       _socket;
     TlsEngine                          _tls;
@@ -1579,33 +1571,6 @@ class TlsEngine
     bool          _failed;
     KiottyNetCode _last_code;
 };
-
-// core/pool/kiotty_member_pool.h : 등급 풀. Layout 이 크기를 정하므로 저장 공간이 멤버다
-class PoolBase { public: virtual unsigned char* allocate(size_t) = 0; virtual unsigned char* reallocate(unsigned char*, size_t) = 0; virtual bool release(unsigned char*) = 0; virtual bool contains(const unsigned char*) const = 0; };
-template <class Layout>
-class MemberPool : public PoolBase
-{
-    struct ClassState { size_t untouched; uint32_t free_head; size_t failures; };
-    alignas(16) std::array<unsigned char, Layout::ARENA_BYTES> _arena;    // default-init. 쓰기 전까지 RAM 에 없다
-    std::array<uint32_t, Layout::BLOCK_COUNT>                  _next;     // free list. 블록 안에 쓰지 않는다
-    std::array<ClassState, Layout::CLASS_COUNT>                _classes;
-    std::atomic_flag                                           _lock = ATOMIC_FLAG_INIT;
-};
-template <class Tag, class Layout>
-class GlobalPool { /* 같은 알고리즘. 멤버가 전부 static (.bss, 상수 초기화, 파괴자 없음) */ };
-
-// tls/kiotty_tls_memory.h : 19.5. 전역은 static, thread 는 thread() 하나, Owner 는 멤버
-class TlsMemory
-{
-    PoolBase&               _pool;              // 파생의 서브풀 (먼저 만들어진 base). 생성자에서 묶는다
-    Range*                  _range;             // 등록표의 내 칸. 생성자가 채우고 소멸자가 비운다
-    static GlobalArena      s_global;           // GlobalPool<GlobalTlsTag, GlobalTlsLayout> 을 PoolBase 로 감싼 객체 하나
-    static Range            s_ranges[Limits::OWNERS];   // 등록표
-    static std::atomic_flag s_ranges_lock;
-    struct Thread { PoolBase* current; const Range* last_hit; bool attached; };   // thread_local 하나. thread() 만 돌려준다
-};
-template <class Layout>
-class OwnerTlsMemory : private OwnerTlsPool<Layout>, public TlsMemory { };   // 서브풀 MemberPool<Layout> 은 OwnerTlsPool 의 멤버
 ```
 
 Connection 의 함수가 받는 것 (10번째 규칙의 "이 함수 호출 때 이 인자들이 필요하다"):
@@ -1622,16 +1587,16 @@ Connection 의 함수가 받는 것 (10번째 규칙의 "이 함수 호출 때 �
 
 켜고 끄는 순서.
 
-- `initializeContext()`: `Context::open(ContextConfiguration())` (기본값) → static 객체의 `initialize` 가 OpenSSL 을 `OPENSSL_INIT_NO_ATEXIT` 로 초기화하고 (process 첫 번째만) `TlsMemory::functions()` 로 hook 을 걸고 예열한다 → configuration 의 개수만큼 `LazyReusablePool::reserve` (기본 0 이라 아무것도 만들지 않는다). 두 번째 호출은 같은 객체와 SUCCESS.
-- `create*`: `_mutex` 안에서 `LazyReusablePool::acquire({ config, tls })` → Owner 의 `initialize` 가 `TlsMemory::Scope` 안에서 `_profile` 을 만들고 `_host.initialize(limits)`, `_listener.open(LISTENER_CAPACITY)` 를 한다. 서브풀의 등록표 발행은 `OwnerTlsMemory` 의 생성자가 한 번 (19.5).
+- `initializeContext()`: `Context::open(ContextConfiguration())` (기본값) → static 객체의 `initialize` 가 OpenSSL 을 `OPENSSL_INIT_NO_ATEXIT` 로 초기화하고 (process 첫 번째만) → configuration 의 개수만큼 `LazyReusablePool::reserve` (기본 0 이라 아무것도 만들지 않는다). 두 번째 호출은 같은 객체와 SUCCESS.
+- `create*`: `_mutex` 안에서 `LazyReusablePool::acquire({ config, tls })` → Owner 의 `initialize` 가 자기 `_profile` 을 만들고 `_host.initialize(limits)`, `_listener.open(LISTENER_CAPACITY)` 를 한다.
 - accept / admit: `host.acquire({ socket, context, hostname, host.limits(), profile })` → `Connection::initialize(id, configuration)` → `onOpened(handler)`.
-- `run`: `Handler handler(callbacks, app_context, *this)` → `TlsMemory::Scope` 안에서 `_loop.run(_host, _listener, _acceptor, _profile, handler, stop_when_empty)` → `TlsMemory::detachThread()` → `_parker.unpark` (12절).
-- `destroy*`: shutdown (close + run 의 return 대기) 이 끝난 뒤 `_mutex` 안에서 `LazyReusablePool::release` → Owner 의 `reset` (`SSL_CTX_free` 는 Scope 안). 등록표는 그대로다.
-- `releaseContext`: 남은 Owner 를 전부 destroy 한 뒤 세 풀을 비우고 (`unique_ptr` 해제) 등록표를 지운다. `OPENSSL_cleanup` 은 부르지 않는다. 전역 arena 는 .bss 라 돌려줄 것이 없고, 정리 뒤에는 OpenSSL 을 다시 초기화할 수 없기 때문이다. static Context 의 소멸자는 process 종료 때 빈 풀을 지우고 끝난다. releaseContext 없이 종료하면 그때 Owner 들이 지워진다 (run 중인 thread 가 있으면 사용자 오류다. 19.9 의 테스트).
+- `run`: `Handler handler(callbacks, app_context, *this)` → `_loop.run(_host, _listener, _acceptor, _profile, handler, stop_when_empty)` → `_parker.unpark` (12절).
+- `destroy*`: shutdown (close + run 의 return 대기) 이 끝난 뒤 `_mutex` 안에서 `LazyReusablePool::release` → Owner 의 `reset` (`SSL_CTX_free`).
+- `releaseContext`: 남은 Owner 를 전부 destroy 한 뒤 세 풀을 비우고 (`unique_ptr` 해제) `OPENSSL_cleanup` 은 부르지 않는다. 정리 뒤에는 OpenSSL 을 다시 초기화할 수 없기 때문이다. static Context 의 소멸자는 process 종료 때 빈 풀을 지우고 끝난다. releaseContext 없이 종료하면 그때 Owner 들이 지워진다 (run 중인 thread 가 있으면 사용자 오류다. 19.9 의 테스트).
 
 | Owner (TLS ON, 상한 128 연결, 16 KiB) | `sizeof` |
 |---|---|
-| Server | 약 30 MB (Stage 10 MB + TLS 서브풀 19 MB + 객체) |
+| Server | 약 11 MB (Stage 10 MB + 객체). 연결의 SSL 은 OpenSSL 의 heap 이라 이 수에 없다 (19.6) |
 | Server, TLS OFF | 약 7.5 MB |
 | StreamClient / EventClient | 약 0.25 MB |
 | Context | 수 KB. static 객체 하나 |
@@ -1651,119 +1616,19 @@ CMake cache 변수이고 `kiotty_net` 의 PUBLIC 정의다. `base/pool/kiotty_me
 | `KIOTTY_NET_MAX_RECV_CAPACITY` | 16384 | 1 ~ | recv Stage 와 cipherReceive 의 N. `recv_capacity` 의 상한 |
 | `KIOTTY_NET_MAX_SEND_CAPACITY` | 16384 | 1 ~ | send Stage 의 N |
 | `KIOTTY_NET_MAX_PUSH_CAPACITY` | 16384 | 1 ~ | push Stage 의 N |
-| `KIOTTY_NET_USE_TLS` | ON | | cipher Stage 의 N, TLS 서브풀, 전역 TLS arena 의 유무 |
-| `KIOTTY_NET_USES_TLS_STATIC_LIBRARY` | ON | | OpenSSL 사본을 kiotty 가 혼자 쓸 때 (정적 링크 + 심볼 숨김). 19.5 의 hook 을 건다. 시스템 OpenSSL 이면 OFF 이고 OpenSSL 의 malloc 그대로 (`TlsMemory::installed()` false) |
+| `KIOTTY_NET_USE_TLS` | ON | | cipher Stage 의 N 과 OpenSSL 의 유무 |
 
 handle: 3절의 struct `{ owner, id }`. `id` 는 `generation (32) << 32 | slot (16)` 으로 unsigned 로 만들어 int64 양수에 넣는다. type, owner slot, owner generation 비트는 없다 (owner 는 포인터다). Owner handle 은 base.h 그대로 포인터다. 비트를 아는 자리는 `core/pool/kiotty_pool_handle.h` 의 `PoolHandle::value()` / `fromValue()` 둘이다.
 
-### 19.5 TLS arena 와 라우팅
+### 19.5 TLS 메모리
 
-OpenSSL 의 allocator 는 process 에 하나 (`CRYPTO_set_mem_functions`) 다. 할당은 thread 의 current arena 로, 해제는 주소로 arena 를 찾는다. 19.5 의 전부가 클래스 하나 (`TlsMemory`) 에 있다: 전역은 static 멤버, thread 는 private `thread()` 하나가 돌려주는 thread_local, Owner 는 멤버. IoLoop 는 TLS 메모리를 모르고 Owner 의 코드만 Scope 를 만든다.
+OpenSSL 은 자기 allocator (malloc) 를 쓴다. kiotty 는 `CRYPTO_set_mem_functions` 를 걸지 않는다. 그래서 19.1 의 "run 중 malloc 없음" 의 예외는 OpenSSL 하나다. 연결의 SSL (대기 약 30 ~ 50 KiB, handshake 중 최대 약 68 KiB) 과 전역 상태 (약 1 MB) 가 OpenSSL 의 heap 에 있다 (19.6).
 
-| | 전역 arena (`TlsMemory::s_global`) | Owner 서브풀 (`OwnerTlsMemory<*TlsLayout>::_pool`) |
-|---|---|---|
-| 담는 것 | OpenSSL 전역 상태 (약 1 MB), thread 별 상태 (error queue, DRBG), 예열 때 생기는 lazy 캐시 | TlsProfile (SSL_CTX, 인증서) 과 그 Owner 의 연결 N 개의 SSL |
-| 저장 공간 | .bss (`GlobalPool`). process 가 끝날 때까지 산다. `GlobalArena : PoolBase` 가 감싼 객체 하나 | Owner 의 멤버 |
-| 수명 | process | Owner 객체 (releaseContext 까지) |
-| 등급 | 계측의 "전역 + thread" 열 | 계측의 "profile × 1 + 연결 × N" 열. Server 는 N = `MAX_CONNECTIONS_PER_SERVER`, client 는 1 |
-| 잠금 | 등급마다 `atomic_flag` | 같다 |
+- R8 에서 OpenSSL 의 할당을 전역 arena (.bss) 와 Owner 서브풀로 나누는 `TlsMemory` 를 만들었다가 뺐다. OpenSSL 은 메모리를 처음 필요해진 순간에 잡는다 (전역 캐시, thread 의 error queue 버퍼와 DRBG, 인증서 객체 안의 키 사본). 그 순간의 arena 와 그것을 쥔 객체의 수명이 맞도록 하는 규칙 (할당 자리의 파일 이름으로 가르기, 예열 handshake, thread attach / detach) 이 OpenSSL 의 내부 동작에 기대며 계속 늘었다. 할당은 OpenSSL 이 책임지는 것으로 둔다. 겪은 것은 `docs/learning/openssl-memory-pitfalls.html` 에 있다.
+- profile 은 Owner 마다 하나다 (19.3). Owner 의 `initialize` 가 열고 `reset` 이 닫는다. 연결은 같은 Owner 의 profile 을 참조로만 쓴다.
+- OpenSSL 초기화는 `Context::open` 의 `OPENSSL_init_ssl(OPENSSL_INIT_NO_ATEXIT)` 하나다 (사이클 7). static Context 의 소멸자가 process 종료 때 남은 Owner 의 `SSL_CTX_free` 를 부르므로, 그 전에 atexit 의 `OPENSSL_cleanup` 이 돌면 안 된다.
 
-```cpp
-// tls/kiotty_tls_memory.h. OpenSSL 헤더를 모른다. 함수 포인터의 시그니처만 OpenSSL 의 것 (size, file, line) 이다
-struct TlsMemoryFunctions                       // CRYPTO_set_mem_functions 에 그대로 넘기는 셋
-{
-    void* (*allocate)(size_t bytes, const char* file, int line);
-    void* (*reallocate)(void* block, size_t bytes, const char* file, int line);
-    void  (*release)(void* block, const char* file, int line);
-};
-
-// backend (kiotty_openssl_tls.cpp / kiotty_stub_tls.cpp) 가 정의한다. stub 은 false 와 빈 함수
-bool installTlsMemory(const TlsMemoryFunctions& functions);   // 기본 malloc 이면 CRYPTO_set_mem_functions, 이미 우리 것이면 true, 다른 hook 이면 false (덮지 않는다). 늘 OPENSSL_init_ssl(OPENSSL_INIT_NO_ATEXIT)
-void warmTlsMemory();                           // RSA 1024 와 P-256 키를 만들어 자기 서명 인증서 → PEM (평문 + aes-256-cbc 암호) 왕복 → 상호 인증 handshake 를 TLS 1.3 / 1.2 로 BIO pair 위에서 한 번씩
-void attachTlsThread();                         // ERR_clear_error + RAND_bytes + RAND_priv_bytes
-void detachTlsThread();                         // OPENSSL_thread_stop
-bool tlsThreadStateFile(const char* file);      // file 이 OpenSSL 의 crypto/err/ 인가
-
-class TlsMemory
-{
-public:
-    static TlsMemoryFunctions functions();
-    static bool               installGlobal();  // 한 번만 돈다 (atomic_flag). installTlsMemory → 걸렸으면 current 를 전역으로 두고 attachThread + warmTlsMemory. 결과를 돌려준다. 사이클 7 의 Context::open 이 부른다
-    static bool               installed();
-    static void               detachThread();   // current 를 전역으로, last_hit 을 비우고, installed 면 detachTlsThread
-    static size_t             lateFrees();      // 어느 arena 에도 없는 주소의 free / realloc. 역참조하지 않고 센다
-    static size_t             globalClassCount();
-    static GlobalPoolUsage    globalUsage(size_t index);
-    static size_t             globalLiveBlocks();
-
-    class Scope                                 // RAII. 이 thread 의 할당을 이 Owner 의 서브풀로. 생성자가 attachThread 도 한다
-    {
-    public:
-        explicit Scope(TlsMemory& owner);       // _previous = 지금 것 → attachThread() → 발행된 Owner 면 current = &owner._pool
-        ~Scope();                               // current = &_previous
-    private:
-        PoolBase& _previous;                    // 늘 있다. 전역 arena 도 PoolBase 객체다
-    };
-
-    bool   published() const;                   // 등록표에 칸을 얻었는가. 못 얻었으면 (표가 가득, assert) Scope 가 current 를 바꾸지 않는다
-    size_t failures() const;                    // 서브풀이 못 준 횟수
-    size_t liveBlocks() const;                  // 서브풀의 살아 있는 블록 수 (PoolBase::liveCount)
-
-protected:
-    TlsMemory(PoolBase& pool, const unsigned char* arena, size_t arena_bytes);   // 묶고 등록표에 (begin, end, &pool) 을 발행. arena_bytes 0 (TLS OFF) 이면 발행하지 않는다
-    ~TlsMemory();                               // 등록표의 칸을 비운다 (pool 먼저 nullptr)
-
-private:
-    struct Range  { std::atomic<const unsigned char*> begin, end; std::atomic<PoolBase*> pool; };   // 쓰기는 s_ranges_lock 안, 읽기는 lock 없이 pool 을 acquire 로 먼저
-    struct Thread { PoolBase* current; const Range* last_hit; bool attached; };   // 처음은 &s_global, nullptr, false. 상수 초기화
-    class GlobalArena : public PoolBase { /* GlobalPool<GlobalTlsTag, GlobalTlsLayout> 의 static 함수로 forward. 파괴자 없음 */ };
-
-    static Thread&  thread();                   // thread_local 을 돌려주는 유일한 자리
-    static void     attachThread();             // installed 이고 attached 가 false 일 때만. current 를 전역으로 둔 채 attachTlsThread
-    static void*    allocate(size_t bytes, const char* file, int line);        // 0 바이트는 nullptr. tlsThreadStateFile(file) 이면 전역, 아니면 thread().current. 못 주면 nullptr (그 pool 이 센다)
-    static void*    reallocate(void* block, size_t bytes, const char* file, int line);   // nullptr 면 allocate. 아니면 block 의 arena 안에서
-    static void     release(void* block, const char* file, int line);          // arenaOf → release. 없으면 lateFrees++
-    static PoolBase* arenaOf(const void* block); // last_hit → 등록표 → 전역. 비교는 std::less<const unsigned char*>
-
-    PoolBase&                  _pool;
-    Range*                     _range;
-    static GlobalArena         s_global;
-    static Range               s_ranges[Limits::OWNERS];
-    static std::atomic_flag    s_ranges_lock;
-    static std::atomic_flag    s_install_lock;
-    static std::atomic<bool>   s_install_tried, s_installed;
-    static std::atomic<size_t> s_late_frees;
-};
-
-template <class Layout>
-struct OwnerTlsPool { MemberPool<Layout> pool; };
-
-template <class Layout>
-class OwnerTlsMemory : private OwnerTlsPool<Layout>, public TlsMemory   // Server 는 ServerTlsLayout, client 둘은 ClientTlsLayout. TLS OFF 면 ARENA_BYTES 0
-{
-public:
-    OwnerTlsMemory() : OwnerTlsPool<Layout>(), TlsMemory(this->pool, this->pool.arena(), MemberPool<Layout>::ARENA_BYTES) {}
-};
-```
-
-- 클래스가 둘인 이유: class template 의 static 멤버는 instantiation 마다 따로 생긴다. Server 와 client 의 Layout 이 다르므로 서브풀은 template 이어야 하고, 전역 arena 와 thread_local 은 하나여야 한다. 그래서 static 전부를 template 이 아닌 `TlsMemory` 에 두고, 서브풀 멤버만 `OwnerTlsMemory<Layout>` 이 든다.
-- 서브풀이 멤버가 아니라 private base (`OwnerTlsPool<Layout>`) 인 이유 (R8): 처음 안의 `OwnerTlsMemory() : TlsMemory(_pool), _pool()` 은 아직 생성이 시작되지 않은 `MemberPool<Layout>` 을 base 인 `PoolBase&` 로 바꾸는데, 이것은 묶기만 해도 정의되지 않은 동작이다 ([class.cdtor]/3). base 는 선언 순서대로 먼저 만들어지므로 서브풀을 앞의 base 에 두면 `TlsMemory` 의 생성자가 받을 때 이미 다 만들어져 있다 (base-from-member). 그래서 발행도 `publish()` 를 따로 부르지 않고 `TlsMemory` 의 생성자가 한다.
-- 등록표의 칸은 `TlsMemory` 의 소멸자가 비운다 (R8. 처음에는 `Context::release` 가 지우기로 했다). Owner 객체가 지워진 뒤 그 주소가 표에 남으면 같은 주소에 새로 잡힌 heap 메모리의 free 가 지워진 서브풀로 간다. 칸은 Owner 객체의 수명과 같다.
-- **OpenSSL 의 error queue 는 전역으로 보낸다 (R8).** thread 의 ERR 상태에는 칸 16 개마다 data 버퍼가 있고, OpenSSL 은 오류가 날 때 그 버퍼를 처음 잡고 (`ERR_vset_error` 의 1 KiB, `ERR_add_error_vdata` 의 81 B) 그 뒤로는 재사용한다. 이것이 Scope 안에서 처음 잡히면 그 Owner 의 서브풀에 남고, Owner 가 지워진 뒤 OpenSSL 이 거기에 쓴다. attachThread 에서 미리 채워도 `ERR_add_error_vdata` 는 칸의 STRING 표시가 없으면 새로 잡으므로 막지 못한다. 그래서 `allocate` 가 할당 자리의 file 을 보고 `crypto/err/` 이면 current 와 관계없이 전역 arena 에서 준다. OpenSSL 은 kiotty 가 혼자 쓰는 고정된 사본이고 (19.7), 다른 lazy thread 상태가 생기면 `GlobalStateStaysInTheGlobalArenaAfterAttachThread` 가 잡는다. file 이 nullptr (OPENSSL_NO_FILENAMES) 이면 current 다.
-- **profile 은 Owner 를 넘어 나누지 않는다.** OpenSSL 은 인증서의 공개키를 provider 쪽으로 처음 내보낼 때 그 사본을 X509 객체 안에 캐시한다. 그 할당은 그때의 current 로 가므로, Owner A 의 profile 을 Owner B 의 Scope 에서 handshake 하면 A 의 객체가 B 의 서브풀을 가리킨다 (B 가 먼저 지워지면 A 의 `SSL_CTX_free` 가 지워진 메모리를 읽는다. R8 의 첫 테스트가 그렇게 죽었다). 19.3 대로 profile 과 그 연결은 같은 Owner 이고 같은 Scope 안에서만 돈다.
-- 전역 arena 는 OpenSSL 전역 상태, 예열, thread 상태만 담는다. 연결은 담지 않는다 (Scope 밖의 handshake 는 전역 arena 를 바닥낸다. 예열의 연결은 하나씩 열고 닫는다).
-- detach 를 Scope 의 소멸자에 넣지 않는 이유: StreamClient 는 호출자 thread 에서 함수마다 Scope 를 만드는데, 소멸자가 `OPENSSL_thread_stop` 을 부르면 호출마다 이 thread 의 오류 큐와 DRBG 를 지우고 다음 호출의 attach 가 OS 의 entropy 를 다시 읽어 다시 만든다. IO Thread 의 콜백 안에서 StreamClient 를 부르면 (Scope 가 겹친다) 안쪽 소멸자가 Server 쪽이 쓰던 thread 상태를 지운다. 틀리지는 않지만 매번 낸다. 그래서 detach 는 "이 thread 의 OpenSSL 이 끝났다" 를 아는 자리, IO Thread 가 끝나는 run 의 끝 둘에만 있다. 사용자 thread 는 언제 끝나는지 라이브러리가 모르므로 detach 할 자리가 없다 (Windows 정적 링크에서는 그 thread 의 상태가 남는다. 사이클 6).
-
-| 자리 | Scope |
-|---|---|
-| Owner 의 `initialize` (TlsProfile 생성) 와 `reset` (`SSL_CTX_free`) | 그 Owner |
-| IO Thread (run 을 부른 thread) | `Server::run` / `EventClient::run` 의 Scope 하나가 run 전체를 감싼다. 끝에 `detachThread()` |
-| 호출자 thread 에서 OpenSSL 을 부르는 API (StreamClient 의 connect / read / write / disconnect) | 함수마다 그 Owner 의 Scope |
-| `Context::open` | 전역 (Scope 없음). memory BIO 쌍으로 loopback handshake 를 한 번 돌려 lazy 전역 캐시를 전역 arena 에 만든다 |
-
-thread 예열 (attachThread) 은 `ERR_clear_error()`, `RAND_bytes()`, `RAND_priv_bytes()` 한 번이다. process 예열 (`warmTlsMemory`) 은 위 선언의 주석대로다. 인증서 파일 없이 lazy 전역 캐시 (provider 의 method store, decoder, RSA / EC / PBKDF2 / AES / ChaCha / HKDF / TLS1-PRF 의 fetch) 를 전역 arena 에 만든다. RSA 는 키 크기가 캐시의 종류를 바꾸지 않으므로 1024 bit 다 (security level 0 은 예열 SSL_CTX 에만). 이전의 free 함수 셋 (`useTlsGlobalPool`, `tlsPoolClassCount`, `tlsPoolUsage`) 과 `ProcessTlsLayout` 은 지웠다.
-
-OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_CACHE_OFF`, `SSL_OP_NO_RENEGOTIATION`, `SSL_OP_NO_COMPRESSION` (있음), `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list(16 KiB)`, `SSL_CTX_set_verify_depth` (config). 상대가 보내는 양의 상한이 계측의 전제다.
+OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_CACHE_OFF`, `SSL_OP_NO_RENEGOTIATION`, `SSL_OP_NO_COMPRESSION` (있음), `SSL_CTX_set_num_tickets(0)` (세션 재개를 쓰지 않으므로 TLS 1.3 의 NewSessionTicket 을 보내지 않는다. handshake 는 클라이언트 Finished 를 받으면 DONE), `SSL_CTX_set_max_cert_list(16 KiB)`, `SSL_CTX_set_verify_depth` (config).
 
 ### 19.6 OpenSSL 의 사용량 (BIO pair, OpenSSL 3.6.1, 실제 byte)
 
@@ -1773,33 +1638,31 @@ OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_
 | 16 KiB | 66 K / 28 ~ 47 K | 67 K / 33 ~ 50 K |
 | 64 KiB | 68 K / 29 ~ 48 K | 68 K / 33 ~ 50 K |
 
-전역 상태는 처음 한 번 약 1 MB 다. profile 하나는 인증서를 읽는 동안 수십 KB, 열려 있는 동안 수백 B 다. 등급 합산으로 서브풀의 연결당 예약은 약 150 KiB 다.
+전역 상태는 처음 한 번 약 1 MB 다. profile 하나는 인증서를 읽는 동안 수십 KB, 열려 있는 동안 수백 B 다.
 
-등급 목록은 `tests/measure/kiotty_measure_tls_memory.cpp` 의 계측이다. 할당마다 "전역 / thread / profile / 연결" 꼬리표와 크기 등급 (32, 48, 64, 96, … 1.5 배 간격) 을 기록하고, 연결 N 개를 handshake 와 최대 길이 왕복까지 같이 진행시켜 동시 최대를 만든다. 인증서 (RSA 2048 / 4096, ECDSA P-256) × TLS 1.2 / 1.3 × client 인증 여덟 경우와 Stage 4 / 16 / 64 KiB 의 최악이 `GlobalTlsLayout`, `ServerTlsLayout`, `ClientTlsLayout` 이 된다. OpenSSL 을 올리거나 설정 범위를 넓히면 도구를 다시 돌린다. 인증서는 `tests/measure/generate_certs.sh` 가 만든다.
-
-R8 의 계측: 도구가 시작할 때 `installTlsMemory` + `attachTlsThread` + `warmTlsMemory` 를 "warm" 꼬리표로 돌리고, 새 thread 하나에서 attach 와 data 1000 B 의 오류 16 개를 "thread" 꼬리표로 돌린다 (ERR 칸 16 개가 전부 1 KiB 등급을 잡는 최악). 표는 `Blocks::count(global, thread, profile, connection)` 이고 `GlobalTlsBlocks` 는 `global + thread × Limits::OWNERS` (run 을 부르는 IO thread 와 StreamClient 를 부르는 thread 를 Owner 하나에 하나로 본다), `ServerTlsBlocks` 는 `profile + connection × CONNECTIONS_PER_SERVER`, `ClientTlsBlocks` 는 `profile + connection` 이다. 값은 항목마다 R6 표, MSVC (Windows), gcc (Linux) 계측의 최대다. Stage 는 R6 부터 compile time N (기본 16 KiB) 이라 64 KiB 계측은 이 build 에서 돌지 않는다. thread 하나는 약 31 KB 다.
+수치는 사이클 4 와 R6 에서 세는 hook 으로 잰 것이다 (계측 도구 `tests/measure` 는 R8 에서 TlsMemory 와 같이 뺐다). unit 의 `TlsMemory.OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose` 와 `EachConnectedPairHoldsABoundedAmountOfOpenSslMemory` 가 새지 않는 것과 쌍당 128 KiB 미만을 본다.
 
 ### 19.7 OpenSSL 사본
 
-기본 build 는 OpenSSL 정적 링크 + 심볼 숨김 (`-fvisibility=hidden`, `--exclude-libs`) 이다. 시스템 OpenSSL 로 build 하면 `KIOTTY_NET_USES_TLS_STATIC_LIBRARY` OFF 이고 OpenSSL 의 malloc 이며 상한 약속이 빠진다. OpenSSL 을 올릴 때는 "계측 도구 재실행 → 등급 표 갱신 → 풀 바닥 테스트 → build" 가 CI 한 번에 돈다.
+기본 build 는 OpenSSL 정적 링크 + 심볼 숨김 (`-fvisibility=hidden`, `--exclude-libs`) 이다. 시스템 OpenSSL 로 build 해도 동작은 같다 (hook 이 없으므로).
 
 ### 19.8 보이는 메모리
 
-작업 관리자의 "메모리" 열, Linux `RES`, Android PSS, macOS footprint 는 쓴 page 만 센다. Windows "커밋 크기", Process Explorer Private Bytes, Linux `VIRT` 는 잡은 크기를 센다. EventClient 하나짜리 application 은 어느 도구로 보아도 수 MB 다. Server 는 `max_clients` 와 무관하게 Windows commit 에 약 30 MB 로 보인다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춘다. 전역 TLS arena (약 1 ~ 2 MB) 가 고정 비용이다.
+작업 관리자의 "메모리" 열, Linux `RES`, Android PSS, macOS footprint 는 쓴 page 만 센다. Windows "커밋 크기", Process Explorer Private Bytes, Linux `VIRT` 는 잡은 크기를 센다. EventClient 하나짜리 application 은 어느 도구로 보아도 수 MB 다. Server 는 `max_clients` 와 무관하게 Windows commit 에 약 11 MB 로 보인다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춘다. OpenSSL 의 전역 상태 (약 1 MB) 와 연결마다의 SSL 은 OpenSSL 의 heap 이라 따로 보인다.
 
 ### 19.9 이 절이 고치는 다른 절 (사이클 5)
 
 | 절 | 고칠 것 |
 |---|---|
-| 1 (구조도), 2 (파일) | `Holder`, Context 의 heap Pool, `ContextPoolLayout`, `TlsPoolLayout`, `MAX_TLS_CONTEXTS`, `kiotty_holder.h`, `kiotty_notification_context.h` 를 지우고 `core/pool/` (`is_reusable`, `ReusablePool`, `LazyReusablePool`), `StageBase` / `Stage<N>`, `Parker`, `TlsMemory` 를 적는다 |
+| 1 (구조도), 2 (파일) | `Holder`, Context 의 heap Pool, `ContextPoolLayout`, `TlsPoolLayout`, `MAX_TLS_CONTEXTS`, `kiotty_holder.h`, `kiotty_notification_context.h` 를 지우고 `core/pool/` (`is_reusable`, `ReusablePool`, `LazyReusablePool`), `StageBase` / `Stage<N>`, `Parker` 를 적는다 |
 | 3 (base.h) | handle 둘을 struct `{ owner, id }` 로, `KiottyNetConnectionOwner` tag, `KiottyNet_*MemorySize`. `initializeContext(void)` 는 그대로 (Context 설정은 안의 기본값). C++ `KiottyNet_Connection` 의 `operator==` / `operator<` |
 | 4 (core) | `Stage(Pool&, capacity)` → `StageBase` + `Stage<N>`, `limit(capacity)`, `clear()`. StageSet 은 `Stage<N>` 셋 |
 | 7 (event) | `IoEvent` → `IoEvent` 구체 타입, 기본 생성자. `attach(event, socket, slot)` 이 제자리에서 채운다. `eventFor` 의 반환형 |
-| 8 (tls) | `TlsEngine(Pool&, ...)` → `Stage<N>` 둘. `decode(StageBase&)`. `open(TlsProfile&, hostname)`. `OPENSSL_INIT_NO_ATEXIT`, `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list`. `kiotty_tls_memory.h` 의 free 함수 셋 → `TlsMemory` |
+| 8 (tls) | `TlsEngine(Pool&, ...)` → `Stage<N>` 둘. `decode(StageBase&)`. `open(TlsProfile&, hostname)`. `OPENSSL_INIT_NO_ATEXIT`, `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list`. `kiotty_tls_memory.h` 와 TLS 풀 함수는 지운다 (19.5) |
 | 9 (Connection) | 생성자 인자 제거. `open` → `initialize(id, ConnectionConfiguration&&)`, `release` → `reset`. `NotificationContext` 삭제 (mutex 는 host, wake 는 Owner, IO thread 는 IoLoop). `Sender` 는 static 함수 둘. `stream()` 은 값. `handle(handler)`. ConnectionHost 를 template 으로, `initialize(limits)`, `release` 가 lock 안에서 `reset` |
 | 10 (io_loop) | 멤버 둘. run 의 참조 인자 다섯. `stepLocalEvents` + 배열 → `stepLocalEvents` 반복. `isIoThread` |
 | 12, 13 (server, client, context, config) | Owner 와 Context 가 `is_reusable` 계약 (`configuration_type`, `initialize`, `reset`). static Context 하나와 `Context::open`. 타입별 `LazyReusablePool`. Context config. `Parker`. EventClient 의 Acceptor. 켜고 끄는 순서 (19.3) |
-| 14 (thread) | IO thread 의 Scope / `detachThread`, 호출자 thread 의 Scope, Parker |
+| 14 (thread) | Parker |
 | 15 (base.cpp) | `handle.owner->` 번역. `Context::open` |
 | 16 (메모리 표) | Owner 별 `sizeof` 로 다시 쓴다 |
-| 테스트 | 서브풀 바닥 (그 Owner 만 실패), 전역 꼬리표 격리, destroy 뒤 늦은 free 0, 은퇴 Owner 의 `initialize` 재사용, `releaseContext` 없이 종료, `initializeContext` 두 번, local completion 의 thenWork 가 같은 바퀴에 시작되는가, 틀린 handle (은퇴한 Owner, 지난 generation) 이 INVALID_ARGUMENT / PEER_CLOSED 인가 |
+| 테스트 | 은퇴 Owner 의 `initialize` 재사용, `releaseContext` 없이 종료, `initializeContext` 두 번, local completion 의 thenWork 가 같은 바퀴에 시작되는가, 틀린 handle (은퇴한 Owner, 지난 generation) 이 INVALID_ARGUMENT / PEER_CLOSED 인가 |

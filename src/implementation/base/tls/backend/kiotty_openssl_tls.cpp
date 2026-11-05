@@ -2,18 +2,10 @@
 
 #include "base/pool/kiotty_memory_layout.h"
 #include "base/tls/kiotty_tls_engine.h"
-#include "base/tls/kiotty_tls_memory.h"
 #include "base/tls/kiotty_tls_profile.h"
 
-#include <openssl/crypto.h>
-#include <openssl/ec.h>
 #include <openssl/err.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/rand.h>
-#include <openssl/rsa.h>
 #include <openssl/ssl.h>
-#include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 
 #include <sys/stat.h>
@@ -54,9 +46,6 @@ namespace kiotty
             const size_t SUITE_LIST_BYTES = 256;
             const size_t BIO_PAIR_BYTES = 4096;
             const long   MAX_CERT_LIST_BYTES = 16 * 1024;
-            const int    WARM_RSA_BITS = 1024;
-            const int    WARM_ROUNDS = 32;
-            const char   WARM_PASSWORD[] = "kiotty warm";
 
             template <size_t N>
             bool terminated(const char (&text)[N])
@@ -257,209 +246,11 @@ namespace kiotty
                 return digits_and_dots;
             }
 
-            int acceptAnyPeer(int verified, X509_STORE_CTX* store)
-            {
-                (void)verified;
-                (void)store;
-                return 1;
-            }
-
-            struct WarmIdentity
-            {
-                EVP_PKEY* key;
-                X509*     certificate;
-            };
-
-            X509* selfSigned(EVP_PKEY* key)
-            {
-                X509* certificate = X509_new();
-                if (certificate == nullptr)
-                {
-                    return nullptr;
-                }
-                X509_set_version(certificate, 2);
-                ASN1_INTEGER_set(X509_get_serialNumber(certificate), 1);
-                X509_gmtime_adj(X509_getm_notBefore(certificate), 0);
-                X509_gmtime_adj(X509_getm_notAfter(certificate), 3600);
-                X509_set_pubkey(certificate, key);
-                X509_NAME* name = X509_get_subject_name(certificate);
-                const unsigned char* common_name = reinterpret_cast<const unsigned char*>("localhost");
-                X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, common_name, -1, -1, 0);
-                X509_set_issuer_name(certificate, name);
-                if (X509_sign(certificate, key, EVP_sha256()) == 0)
-                {
-                    X509_free(certificate);
-                    return nullptr;
-                }
-                return certificate;
-            }
-
-            WarmIdentity throughPem(EVP_PKEY* key, X509* certificate)
-            {
-                WarmIdentity identity = { nullptr, nullptr };
-                BIO* pem = BIO_new(BIO_s_mem());
-                if (pem == nullptr)
-                {
-                    return identity;
-                }
-                void* password = const_cast<char*>(WARM_PASSWORD);
-                PEM_write_bio_X509(pem, certificate);
-                PEM_write_bio_PrivateKey(pem, key, nullptr, nullptr, 0, nullptr, nullptr);
-                PEM_write_bio_PrivateKey(pem, key, EVP_aes_256_cbc(), nullptr, 0, nullptr, password);
-                identity.certificate = PEM_read_bio_X509_AUX(pem, nullptr, nullptr, nullptr);
-                EVP_PKEY* plain = PEM_read_bio_PrivateKey(pem, nullptr, nullptr, nullptr);
-                EVP_PKEY_free(plain);
-                identity.key = PEM_read_bio_PrivateKey(pem, nullptr, nullptr, password);
-                BIO_free(pem);
-                return identity;
-            }
-
-            SSL_CTX* warmContext(const SSL_METHOD* method, const WarmIdentity& identity)
-            {
-                SSL_CTX* context = SSL_CTX_new(method);
-                if (context == nullptr)
-                {
-                    return nullptr;
-                }
-                configureProtocol(context, KIOTTY_TLS_V12 | KIOTTY_TLS_V13, 0, 0);
-                SSL_CTX_set_security_level(context, 0);
-                SSL_CTX_use_certificate(context, identity.certificate);
-                SSL_CTX_use_PrivateKey(context, identity.key);
-                SSL_CTX_check_private_key(context);
-                X509_STORE_add_cert(SSL_CTX_get_cert_store(context), identity.certificate);
-                SSL_CTX_set_verify(context, SSL_VERIFY_PEER, acceptAnyPeer);
-                return context;
-            }
-
-            void warmHandshake(SSL_CTX* server_context, SSL_CTX* client_context, int version)
-            {
-                SSL* server = SSL_new(server_context);
-                SSL* client = SSL_new(client_context);
-                BIO* server_side = nullptr;
-                BIO* client_side = nullptr;
-                int paired = 0;
-                if (server != nullptr && client != nullptr)
-                {
-                    paired = BIO_new_bio_pair(&server_side, BIO_PAIR_BYTES, &client_side, BIO_PAIR_BYTES);
-                }
-                if (paired == 1)
-                {
-                    SSL_set_bio(server, server_side, server_side);
-                    SSL_set_bio(client, client_side, client_side);
-                    SSL_set_min_proto_version(client, version);
-                    SSL_set_max_proto_version(client, version);
-                    SSL_set_tlsext_host_name(client, "localhost");
-                    SSL_set1_host(client, "localhost");
-                    SSL_set_accept_state(server);
-                    SSL_set_connect_state(client);
-                    bool server_done = false;
-                    bool client_done = false;
-                    for (int round = 0; round < WARM_ROUNDS && !(server_done && client_done); ++round)
-                    {
-                        client_done = client_done || SSL_do_handshake(client) == 1;
-                        server_done = server_done || SSL_do_handshake(server) == 1;
-                    }
-                    char byte = 'w';
-                    size_t moved = 0;
-                    SSL_write_ex(client, &byte, 1, &moved);
-                    SSL_read_ex(server, &byte, 1, &moved);
-                    SSL_write_ex(server, &byte, 1, &moved);
-                    SSL_read_ex(client, &byte, 1, &moved);
-                    SSL_shutdown(client);
-                    SSL_shutdown(server);
-                }
-                SSL_free(client);
-                SSL_free(server);
-                ERR_clear_error();
-            }
-
-            void warmWith(EVP_PKEY* key)
-            {
-                if (key == nullptr)
-                {
-                    return;
-                }
-                X509* certificate = selfSigned(key);
-                WarmIdentity identity = { nullptr, nullptr };
-                if (certificate != nullptr)
-                {
-                    identity = throughPem(key, certificate);
-                }
-                if (identity.key != nullptr && identity.certificate != nullptr)
-                {
-                    SSL_CTX* server = warmContext(TLS_server_method(), identity);
-                    SSL_CTX* client = warmContext(TLS_client_method(), identity);
-                    if (server != nullptr && client != nullptr)
-                    {
-                        warmHandshake(server, client, TLS1_3_VERSION);
-                        warmHandshake(server, client, TLS1_2_VERSION);
-                    }
-                    SSL_CTX_free(client);
-                    SSL_CTX_free(server);
-                }
-                EVP_PKEY_free(identity.key);
-                X509_free(identity.certificate);
-                X509_free(certificate);
-                EVP_PKEY_free(key);
-                ERR_clear_error();
-            }
-
         }
 
         bool tlsSupported()
         {
             return true;
-        }
-
-        bool installTlsMemory(const TlsMemoryFunctions& functions)
-        {
-#if KIOTTY_NET_USES_TLS_STATIC_LIBRARY
-            CRYPTO_malloc_fn allocate = nullptr;
-            CRYPTO_realloc_fn reallocate = nullptr;
-            CRYPTO_free_fn release = nullptr;
-            CRYPTO_get_mem_functions(&allocate, &reallocate, &release);
-            bool hooked = allocate == functions.allocate;
-            if (!hooked && allocate == CRYPTO_malloc)
-            {
-                hooked = CRYPTO_set_mem_functions(functions.allocate, functions.reallocate, functions.release) == 1;
-            }
-#else
-            (void)functions;
-            bool hooked = false;
-#endif
-            OPENSSL_init_ssl(OPENSSL_INIT_NO_ATEXIT, nullptr);
-            return hooked;
-        }
-
-        void warmTlsMemory()
-        {
-            warmWith(EVP_RSA_gen(WARM_RSA_BITS));
-            warmWith(EVP_EC_gen("P-256"));
-        }
-
-        void attachTlsThread()
-        {
-            unsigned char bytes[1];
-            ERR_clear_error();
-            RAND_bytes(bytes, sizeof(bytes));
-            RAND_priv_bytes(bytes, sizeof(bytes));
-            ERR_clear_error();
-        }
-
-        void detachTlsThread()
-        {
-            OPENSSL_thread_stop();
-        }
-
-        bool tlsThreadStateFile(const char* file)
-        {
-            if (file == nullptr)
-            {
-                return false;
-            }
-            bool slash = std::strstr(file, "crypto/err/") != nullptr;
-            bool backslash = std::strstr(file, "crypto\\err\\") != nullptr;
-            return slash || backslash;
         }
 
         TlsProfile::TlsProfile()

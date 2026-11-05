@@ -1,7 +1,6 @@
 #if !KIOTTY_NET_USE_TLS
 
 #include "base/tls/kiotty_tls_engine.h"
-#include "base/tls/kiotty_tls_memory.h"
 #include "base/tls/kiotty_tls_profile.h"
 
 namespace kiotty
@@ -10,30 +9,6 @@ namespace kiotty
     {
         bool tlsSupported()
         {
-            return false;
-        }
-
-        bool installTlsMemory(const TlsMemoryFunctions& functions)
-        {
-            (void)functions;
-            return false;
-        }
-
-        void warmTlsMemory()
-        {
-        }
-
-        void attachTlsThread()
-        {
-        }
-
-        void detachTlsThread()
-        {
-        }
-
-        bool tlsThreadStateFile(const char* file)
-        {
-            (void)file;
             return false;
         }
 

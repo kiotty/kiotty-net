@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenSSL 메모리를 고정 arena 에 가둘 때의 함정</title>
+<meta name="description" content="kiotty-net R8 TlsMemory 에서 부딪힌 OpenSSL lazy 할당 (error queue, 인증서 키 캐시, thread 상태) 과 진단 방법">
+<style>
+:root{--bg:#fbfbfa;--fg:#1f2328;--muted:#59636e;--line:#d8dee4;--code-bg:#f3f5f7;--accent:#0b6bcb;--note:#e8f1fb;--tip:#e9f7ee;--warn:#fdf1e1;--th:#eef1f4;--mark:#fff3bf}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}}
+:root[data-theme="dark"]{--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",Roboto,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+main{max-width:1000px;margin:0 auto;padding:32px 16px 96px}
+header.top{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+h1{font-size:1.9rem;line-height:1.3;margin:0 0 10px}
+h2{font-size:1.45rem;margin:56px 0 14px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:34px 0 10px}
+h4{font-size:1rem;margin:24px 0 8px;color:var(--muted)}
+p{margin:10px 0}
+.sub{color:var(--muted);margin:0}
+.meta{color:var(--muted);font-size:.9rem}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:ui-monospace,"Cascadia Code",Consolas,"D2Coding",Menlo,monospace;font-size:.88em;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre.code{position:relative;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:.84rem;line-height:1.55;margin:12px 0}
+pre.code code{background:none;padding:0;font-size:inherit;white-space:pre}
+pre.code::before{content:attr(data-lang);position:absolute;right:10px;top:6px;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;vertical-align:top;text-align:left}
+th{background:var(--th);white-space:nowrap}
+td code{white-space:nowrap}
+.box{border-left:4px solid var(--accent);background:var(--note);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+.box.tip{border-color:#2e9e5b;background:var(--tip)}
+.box.warn{border-color:#d9822b;background:var(--warn)}
+.box>strong:first-child{display:block;margin-bottom:4px}
+nav.toc{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:20px 0}
+nav.toc ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:28px}
+nav.toc li{margin:3px 0;break-inside:avoid}
+@media (max-width:640px){nav.toc ol{columns:1}}
+ul,ol{padding-left:24px}li{margin:4px 0}
+mark{background:var(--mark);color:inherit;padding:0 3px;border-radius:3px}
+figure{margin:18px 0}figcaption{color:var(--muted);font-size:.88rem;text-align:center;margin-top:6px}
+svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:0 8px;font-size:.8rem;color:var(--muted);margin-right:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+footer{margin-top:60px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<main>
+<header class="top">
+<h1>OpenSSL 메모리를 고정 arena 에 가둘 때의 함정</h1>
+<p class="sub">R8 (TlsMemory) 에서 실제로 부딪힌 것과 그 진단 방법</p>
+<p class="meta">작성일 2026-11-05 · OpenSSL 3.6.1 (정적 링크, <code>KIOTTY_NET_USES_TLS_STATIC_LIBRARY</code>) · 관련 문서: <code>docs/design/design_base_v4.md</code> 19.5 ~ 19.7, <code>docs/progress/261105_progress_base_r8.md</code> · 코드: <code>src/implementation/base/tls/kiotty_tls_memory.*</code>, <code>backend/kiotty_openssl_tls.cpp</code></p>
+</header>
+
+<div class="box warn"><strong>이 방식은 버렸다 (2026-11-05)</strong>아래의 <code>TlsMemory</code> (hook, 전역 arena, Owner 서브풀, 예열, Scope 의 attach / detach) 는 R8 에서 만들고 보정까지 한 뒤 뺐다. OpenSSL 의 lazy 할당을 수명이 맞는 arena 로 보내는 규칙이 OpenSSL 내부 동작 (파일 이름, ERR 칸의 표시, provider 키 캐시) 에 기대며 계속 늘었기 때문이다. 지금 kiotty 는 OpenSSL 의 기본 malloc 을 쓴다 (설계 v4 19.5). 이 노트는 다시 hook 을 검토할 때 같은 함정을 다시 밟지 않도록 남긴다.</div>
+
+<nav class="toc">
+<strong>목차</strong>
+<ol start="0">
+<li><a href="#s0">한 줄 요약</a></li>
+<li><a href="#s1">allocator hook 의 계약</a></li>
+<li><a href="#s2">OpenSSL 이 "나중에" 잡는 메모리 세 종류</a></li>
+<li><a href="#s3">함정 1: error queue 의 data 버퍼</a></li>
+<li><a href="#s4">함정 2: 인증서 객체 안의 키 사본</a></li>
+<li><a href="#s5">함정 3: 아직 만들어지지 않은 멤버를 base 로 묶기</a></li>
+<li><a href="#s6">함정 4: thread 개수를 셀 수 없다</a></li>
+<li><a href="#s7">진단 방법</a></li>
+<li><a href="#s8">OpenSSL 을 올릴 때의 점검표</a></li>
+</ol>
+</nav>
+
+<h2 id="s0">0. 한 줄 요약</h2>
+<div class="box warn"><strong>핵심</strong>OpenSSL 은 메모리를 <mark>그 메모리가 쓰일 객체가 생길 때가 아니라, 처음 필요해진 순간에</mark> 잡는다. 할당을 "그 순간 이 thread 의 current arena" 로 보내는 설계에서는, 처음 필요해진 순간이 <em>다른 수명의 arena</em> 의 Scope 안이면 수명이 어긋난다. 어긋나면 crash 가 아니라 <em>나중에, 다른 곳에서</em> 지워진 메모리를 읽거나 쓴다.</div>
+<p>kiotty 의 TLS 메모리는 두 층이다. process 에 하나인 전역 arena (.bss 의 <code>GlobalPool</code>) 와 Owner 마다 하나인 서브풀 (<code>MemberPool</code>) 이다. <code>TlsMemory::Scope</code> 가 "지금 이 thread 의 할당은 이 Owner 로" 를 정하고, 해제는 주소로 arena 를 찾는다. 아래 함정은 전부 "할당한 순간의 arena" 와 "그 메모리를 쥐고 있는 객체의 수명" 이 다른 경우다.</p>
+
+<h2 id="s1">1. allocator hook 의 계약</h2>
+<table>
+<tr><th>항목</th><th>OpenSSL 3.x 의 동작</th><th>kiotty 의 대응</th></tr>
+<tr><td>설치 시점</td><td><code>CRYPTO_set_mem_functions</code> 는 <em>첫 할당 전</em>에만 성공한다. 그 뒤에는 0</td><td><code>installGlobal()</code> 을 OpenSSL 을 부르는 어떤 코드보다 먼저 (사이클 7 의 <code>Context::open</code>)</td></tr>
+<tr><td>이미 다른 hook</td><td>덮어쓸 수 있다</td><td>기본 malloc 일 때만 건다. 다른 hook 이면 false (unit 실행 파일의 세는 hook)</td></tr>
+<tr><td>file / line</td><td>모든 할당에 할당 자리의 <code>__FILE__</code>, <code>__LINE__</code> 이 온다 (<code>OPENSSL_NO_FILENAMES</code> 가 아니면)</td><td>라우팅 (3절) 과 진단 (7절) 에 쓴다</td></tr>
+<tr><td>0 바이트</td><td>사용자 hook 에도 <code>num == 0</code> 이 온다</td><td>nullptr (기본 동작과 같다)</td></tr>
+<tr><td>realloc</td><td>모든 경우가 hook 으로 온다 (nullptr 포함)</td><td>nullptr 면 allocate, 아니면 <em>그 블록의 arena 안에서</em>. 줄이는 realloc 은 같은 블록</td></tr>
+<tr><td>atexit</td><td>기본은 process 종료 때 <code>OPENSSL_cleanup</code></td><td><code>OPENSSL_INIT_NO_ATEXIT</code>. 전역 arena 는 .bss 라 파괴자가 없다</td></tr>
+</table>
+
+<h2 id="s2">2. OpenSSL 이 "나중에" 잡는 메모리 세 종류</h2>
+<table>
+<tr><th>종류</th><th>예</th><th>수명</th><th>가야 할 곳</th><th>막는 법</th></tr>
+<tr><td>전역 lazy 캐시</td><td>provider 의 method store (<code>sparse_array.c</code>), decoder, 알고리즘 fetch 결과</td><td>process</td><td>전역 arena</td><td><code>warmTlsMemory()</code>: RSA / P-256 자기 서명 인증서 → PEM 왕복 (평문, aes-256-cbc) → TLS 1.3 / 1.2 상호 인증 handshake. 예열이 덮지 못한 경로를 쓰면 서브풀에 남는다</td></tr>
+<tr><td>thread 상태</td><td>ERR 상태와 칸 16 개의 data 버퍼 (<code>crypto/err/</code>), thread DRBG 둘</td><td>thread (또는 <code>OPENSSL_thread_stop</code> 까지)</td><td>그 thread 를 attach 한 Owner (6절)</td><td>attach 때 만들고, 나중에 생기는 ERR 버퍼는 file 로 가른다 (3절)</td></tr>
+<tr><td>객체 안 캐시</td><td>X509 의 공개키를 provider 로 내보낸 사본 (<code>evp_keymgmt</code>)</td><td>그 X509 (= 그 profile)</td><td>profile 을 가진 Owner</td><td>profile 과 그 연결을 늘 같은 Owner 의 Scope 안에서만 쓴다 (4절)</td></tr>
+</table>
+
+<h2 id="s3">3. 함정 1: error queue 의 data 버퍼</h2>
+<p>증상: 한 Owner 의 Scope 안에서 profile 과 연결을 열고 전부 닫았는데, 그 서브풀에 블록이 남았다. 할당 자리를 찍어 보니 이것이었다.</p>
+<pre class="code" data-lang="text"><code>TRACE ..\..\external\openssl\crypto\err\err.c:846 81        x5
+TRACE ..\..\external\openssl\crypto\err\err_blocks.c:84 1024 x1</code></pre>
+<p>thread 의 <code>ERR_STATE</code> 에는 오류 칸이 16 개 있고, 칸마다 data 문자열 버퍼가 있다. OpenSSL 은 이 버퍼를 오류가 날 때 처음 잡고, 그 뒤로는 <em>지우지 않고 재사용한다</em>.</p>
+<ul>
+<li><code>ERR_vset_error</code> (<code>err_blocks.c</code>): 칸의 버퍼를 <code>OPENSSL_realloc(buf, 1024)</code> 으로 키워 쓰고 길이만큼 줄인다. 버퍼가 없으면 realloc(nullptr) = 새 할당이다.</li>
+<li><code>ERR_add_error_vdata</code> (<code>err.c</code>): 칸의 표시가 <code>MALLOCED | STRING</code> 둘 다일 때만 재사용하고, 아니면 81 B 를 새로 잡는다.</li>
+<li><code>ERR_clear_error</code> 는 버퍼를 놓지 않는다. 칸을 비우고 표시를 <code>MALLOCED</code> 로만 남긴다. 버퍼를 놓는 것은 <code>OPENSSL_thread_stop</code> 뿐이다.</li>
+</ul>
+<div class="box warn"><strong>왜 위험한가</strong>이 버퍼가 Owner A 의 Scope 안에서 처음 잡히면 A 의 서브풀에 있다. 그런데 그것을 쥔 것은 <em>thread</em> 다. A 가 지워진 뒤 그 thread 에서 오류가 나면 OpenSSL 은 지워진 A 의 메모리에 문자열을 쓴다. 메모리 오염이고, crash 는 엉뚱한 곳에서 난다.</div>
+<div class="box"><strong>미리 채우기로는 안 된다</strong>attach 때 16 칸을 전부 전역 버퍼로 채워도, 평범한 <code>ERR_raise</code> (data 없음) 가 한 번 지나가면 그 칸의 표시가 <code>MALLOCED</code> 만 남는다. 그 칸에 다음 <code>ERR_add_error_data</code> 가 오면 81 B 를 <em>current</em> 에서 새로 잡는다.</div>
+<div class="box tip"><strong>해법</strong>hook 이 받는 file 이 <code>crypto/err/</code> 이면 current 가 아니라 <code>thread().state</code> (그 thread 상태가 있는 arena) 에서 준다. 파일 이름에 기대는 방법이지만, OpenSSL 은 kiotty 가 혼자 쓰는 고정 사본이고 회귀는 격리 테스트가 잡는다 (8절).</div>
+
+<h2 id="s4">4. 함정 2: 인증서 객체 안의 키 사본</h2>
+<p>증상: 서브풀 바닥 테스트가 끝날 때 <code>0xc0000005</code>. cdb 로 본 스택:</p>
+<pre class="code" data-lang="text"><code>kiotty::net::TlsProfile::~TlsProfile
+  SSL_CTX_free
+    X509_STORE_free → X509_OBJECT_free → X509_free
+      ASN1_item_free → ... → EVP_PKEY_free
+        evp_pkey_export_to_provider → evp_keymgmt_freedata   ← 지워진 메모리</code></pre>
+<p>테스트가 profile 은 전역에서 열고, handshake 는 작은 Owner 의 Scope 안에서 돌렸다. handshake 중에 OpenSSL 이 CA 인증서의 공개키를 처음으로 provider 쪽으로 내보내면서 그 사본을 X509 객체 안에 캐시했다. 그 할당은 그때의 current, 즉 작은 Owner 로 갔다. 작은 Owner 가 profile 보다 먼저 지워졌고, profile 의 <code>SSL_CTX_free</code> 가 그 사본을 놓으려다 죽었다.</p>
+<div class="box tip"><strong>규칙</strong>profile 은 Owner 를 넘어 나누지 않는다. 설계 19.3 의 흐름이 원래 그렇다: Owner 의 <code>initialize</code> 가 자기 Scope 안에서 <code>_profile</code> 을 열고, run 의 같은 Owner Scope 안에서 연결이 그것을 참조로 쓰고, <code>reset</code> 이 같은 Scope 안에서 닫는다. 이 사고는 테스트가 그 흐름을 어긴 데서 났다.</div>
+
+<h2 id="s5">5. 함정 3: 아직 만들어지지 않은 멤버를 base 로 묶기</h2>
+<div class="two">
+<div class="box warn"><strong>처음 (UB)</strong>
+<pre class="code" data-lang="cpp"><code>template &lt;class Layout&gt;
+class OwnerTlsMemory : public TlsMemory
+{
+public:
+    OwnerTlsMemory()
+        : TlsMemory(_pool)   // ① base 가 먼저
+        , _pool() {}         // ② 멤버는 나중
+private:
+    MemberPool&lt;Layout&gt; _pool;
+};</code></pre>
+① 에서 <code>MemberPool&amp;</code> 를 <code>PoolBase&amp;</code> 로 바꾼다. 생성이 시작되지 않은 객체를 base 로 변환하면 묶기만 해도 UB 다 ([class.cdtor]/3).</div>
+<div class="box tip"><strong>바꾼 것 (base-from-member)</strong>
+<pre class="code" data-lang="cpp"><code>template &lt;class Layout&gt;
+struct OwnerTlsPool { MemberPool&lt;Layout&gt; pool; };
+
+template &lt;class Layout&gt;
+class OwnerTlsMemory
+    : private OwnerTlsPool&lt;Layout&gt;   // ① 먼저
+    , public TlsMemory               // ② 다 만들어진 pool 을 받는다
+{
+public:
+    OwnerTlsMemory()
+        : OwnerTlsPool&lt;Layout&gt;()
+        , TlsMemory(this-&gt;pool, this-&gt;pool.arena(),
+                    MemberPool&lt;Layout&gt;::ARENA_BYTES) {}
+};</code></pre>
+base 는 선언 순서대로 만들어진다. 그래서 <code>TlsMemory</code> 생성자 안에서 바로 등록표에 발행해도 된다.</div>
+</div>
+
+<h2 id="s6">6. 함정 4: thread 개수를 셀 수 없다</h2>
+<p>처음에는 thread 상태를 전역 arena 에 두고 크기를 <code>global + thread × OWNERS</code> 로 잡았다. 그러나 StreamClient 를 부르는 사용자 thread 는 라이브러리가 셀 수 없다. Windows 정적 링크에서는 끝난 thread 의 상태가 놓이지도 않는다.</p>
+<table>
+<tr><th>검토한 안</th><th>문제</th></tr>
+<tr><td>전역 arena 에 thread 몫 × 상수</td><td>상수가 가정이다. 넘으면 전역 arena 가 바닥나고 모든 Owner 가 영향을 받는다</td></tr>
+<tr><td>thread_local 마다 작은 GlobalPool</td><td>static TLS 는 OpenSSL 을 쓰지 않는 thread 까지 모두가 크기를 낸다. 다른 thread 에서 오는 free 가 어느 arena 인지 찾으려면 개수를 모르는 표가 또 필요하다</td></tr>
+<tr><td>넘치면 시스템 malloc</td><td>"실행 중 heap 할당 없음" 원칙이 깨진다</td></tr>
+<tr><td><mark>attach 한 Owner 가 thread 상태를 갖고, 그 Scope 가 끝날 때 detach</mark></td><td>채택. 아래</td></tr>
+</table>
+<pre class="code" data-lang="text"><code>Scope(owner) 생성:  이 thread 가 attach 되어 있지 않으면
+                       state = current = owner 의 서브풀, attachTlsThread()  (ERR 상태, thread DRBG)
+                       attacher = this
+                    current = owner 의 서브풀
+allocate(file):     crypto/err/ 면 state, 아니면 current
+~Scope():           attacher == this 면 OPENSSL_thread_stop, state = 전역
+                    current = 이전 것</code></pre>
+<ul>
+<li>Scope 는 Owner 의 함수 안에서만 산다. 그래서 thread 상태가 Owner 보다 오래 남지 않는다.</li>
+<li>안쪽 Scope (IO Thread 의 콜백 안에서 부른 StreamClient) 는 attach 도 detach 도 하지 않는다. 그 사이의 ERR 버퍼는 바깥 Owner 로 간다.</li>
+<li>Owner Layout 마다 thread 하나 몫 (약 31 KB) 을 더하고, 전역 arena 에서는 thread 몫을 뺐다.</li>
+<li>값: StreamClient 호출마다 attach + detach 한 번. Linux clang Release 9.4 µs, MSVC Debug 38 µs. thread DRBG 는 process 안의 primary DRBG 에서 seed 를 받으므로 OS 를 부르지 않는다.</li>
+</ul>
+
+<h2 id="s7">7. 진단 방법</h2>
+<h3>할당 자리 추적</h3>
+<p>hook 이 file / line 을 받으므로, 임시로 "current 가 전역이 아닐 때의 할당" 을 (주소, file, line, 크기) 표에 넣고 free 에서 지운다. 테스트 끝에 그 Owner 의 주소 범위에 남은 것을 찍으면 무엇이 새는지 바로 보인다. 3절의 출력이 이것이다. 추적 코드는 확인 뒤 지웠다.</p>
+<h3>Windows 에서 접근 위반의 스택</h3>
+<pre class="code" data-lang="bash"><code>MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe" \
+    -g -G -c "kn 30; q" "D:\repo\kiotty-net\build\msvc\tests\unit\kiotty_net_tls_pool_tests.exe" \
+    --gtest_filter=*Exhaustion* --gtest_catch_exceptions=0</code></pre>
+<p><code>--gtest_catch_exceptions=0</code> 이 없으면 gtest 가 SEH 를 삼켜 "SEH exception 0xc0000005" 한 줄만 남는다.</p>
+<h3>등급 계측</h3>
+<p><code>tests/measure/kiotty_measure_tls_memory.cpp</code> 는 할당마다 꼬리표 (global / warm / thread / profile / connection) 를 붙여 등급별 동시 최대를 잰다. 인증서는 <code>tests/measure/generate_certs.sh</code> (Git Bash 에서는 <code>MSYS_NO_PATHCONV=1</code>. 아니면 <code>/CN=</code> 이 경로로 바뀐다). 출력의 <code>Blocks::count(global, thread, profile, connection)</code> 줄을 MSVC 와 gcc 둘 다 돌려 항목별 최대로 <code>kiotty_memory_layout.h</code> 에 넣는다.</p>
+
+<h2 id="s8">8. OpenSSL 을 올릴 때의 점검표</h2>
+<ol>
+<li>계측 도구를 Windows 와 Linux 에서 다시 돌리고 <code>TlsLayoutOf</code> 를 갱신한다.</li>
+<li><code>kiotty_net_tls_pool_tests</code> 를 돌린다. 특히 이 셋이 새 lazy 할당을 잡는다:
+<ul>
+<li><code>HandshakeInsideAScopeTakesBlocksFromThatOwnersSubpoolOnly</code> (Scope 를 닫으면 서브풀 0)</li>
+<li><code>ThreadStateLivesInTheOwnerWhoseScopeAttachedItAndLeavesWithThatScope</code> (thread 상태가 그 Scope 와 같이 끝난다)</li>
+<li><code>LateFreesAreZeroAfterEveryObjectIsClosed</code></li>
+</ul></li>
+<li>실패하면 7절의 할당 자리 추적으로 file / line 을 본다. 새 thread 상태 파일이면 <code>tlsThreadStateFile</code> 에 더하고, 새 전역 캐시면 <code>warmTlsMemory</code> 가 그 경로를 지나가게 한다.</li>
+<li>ERR 의 파일 경로 (<code>crypto/err/</code>) 가 그대로인지 확인한다.</li>
+</ol>
+<footer>OpenSSL 의 내부 동작 (ERR 칸의 표시, provider 키 캐시) 은 3.6.1 에서 관찰한 것이다. 버전이 바뀌면 8절의 점검표로 다시 확인한다.</footer>
+</main>
+</body>
+</html>

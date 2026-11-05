@@ -1,4 +1,3 @@
-#include "base/tls/kiotty_tls_memory.h"
 #include "support/kiotty_test_openssl_memory.h"
 #include "support/kiotty_test_tls.h"
 
@@ -13,7 +12,6 @@ using kiotty::StageBase;
 using kiotty::net::MemoryLimits;
 using kiotty::net::DecodeResult;
 using kiotty::net::TlsEngine;
-using kiotty::net::TlsMemory;
 using kiotty::net::TlsProfile;
 using kiotty::net::TlsStep;
 using kiotty_test::OpenSslMemory;
@@ -494,20 +492,6 @@ TEST(TlsEngine, CloseThenOpenReusesTheSslObjectAndHandshakesAgain)
     EXPECT_FALSE(pump.server.active());
     connect(pump, profiles);
     EXPECT_EQ(roundTrip(pump.client, pump.server, "second", 64), "second");
-}
-
-TEST(TlsMemory, InstalledIsFalseWhenAnotherAllocatorIsAlreadyThere)
-{
-    EXPECT_FALSE(TlsMemory::installGlobal());
-    EXPECT_FALSE(TlsMemory::installed());
-    EXPECT_EQ(TlsMemory::globalLiveBlocks(), 0u);
-    Profiles profiles;
-    if (kiotty::net::tlsSupported())
-    {
-        openDefaults(profiles);
-    }
-    EXPECT_EQ(TlsMemory::globalLiveBlocks(), 0u);
-    EXPECT_EQ(TlsMemory::lateFrees(), 0u);
 }
 
 TEST(TlsMemory, OpenSslMemoryOfProfilesAndConnectionsIsReturnedWhenTheyClose)

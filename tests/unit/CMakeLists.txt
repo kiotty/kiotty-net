@@ -8,8 +8,6 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_stage_set.cpp
     kiotty_test_span.cpp
     kiotty_test_pool_handle.cpp
-    kiotty_test_member_pool.cpp
-    kiotty_test_global_pool.cpp
     kiotty_test_memory_layout.cpp
     kiotty_test_reusable_pool.cpp
     kiotty_test_lazy_reusable_pool.cpp
@@ -30,7 +28,3 @@ else()
     target_compile_definitions(kiotty_net_unit_tests PRIVATE KIOTTY_TEST_OPENSSL=0)
 endif()
 
-if(KIOTTY_NET_USE_TLS AND KIOTTY_NET_USES_TLS_STATIC_LIBRARY)
-    kiotty_net_add_test_target(kiotty_net_tls_pool_tests unit kiotty_test_tls_memory.cpp)
-    target_compile_definitions(kiotty_net_tls_pool_tests PRIVATE KIOTTY_TEST_CERT_DIR="${PROJECT_SOURCE_DIR}/tests/certs")
-endif()

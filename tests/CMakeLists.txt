@@ -39,10 +39,6 @@ endfunction()
 add_subdirectory(unit)
 add_subdirectory(integration)
 
-if(KIOTTY_NET_USE_TLS)
-    add_subdirectory(measure)
-endif()
-
 if(KIOTTY_NET_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
 endif()

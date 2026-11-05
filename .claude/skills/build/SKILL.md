@@ -5,7 +5,7 @@ description: kiotty-net 을 로컬 (Windows MSVC, WSL Ubuntu gcc / clang) 에서
 
 # kiotty-net 빌드
 
-CMake 프로젝트다. 옵션은 `KIOTTY_NET_USE_TLS` (기본 ON. ON 이면 configure 때 openssl-cmake 로 OpenSSL 3.6 static 을 받는다, OFF 면 stub), `KIOTTY_NET_OPENSSL_PREBUILT` (기본 ON. OFF 면 OpenSSL 을 소스에서 빌드, 10 ~ 30 분), `KIOTTY_NET_BUILD_TESTS`, `KIOTTY_NET_BUILD_BENCHMARKS`, `KIOTTY_NET_SANITIZER` (address, thread, undefined 또는 콤마 목록), `KIOTTY_NET_USES_TLS_STATIC_LIBRARY` (기본 ON. OpenSSL 을 kiotty 가 정적 라이브러리로 혼자 쓸 때, 그 할당을 GlobalPool / MemberPool 로), 메모리 상한 `KIOTTY_NET_MAX_OWNERS` / `_CONNECTIONS_PER_SERVER` / `_RECV_CAPACITY` / `_SEND_CAPACITY` / `_PUSH_CAPACITY` / `_TLS_CONTEXTS` (설계 v4 19.3). 빌드 디렉터리는 `build/<이름>` 이고 `.gitignore` 에 있다. ctest 라벨은 `unit` 과 `integration` 이다.
+CMake 프로젝트다. 옵션은 `KIOTTY_NET_USE_TLS` (기본 ON. ON 이면 configure 때 openssl-cmake 로 OpenSSL 3.6 static 을 받는다, OFF 면 stub), `KIOTTY_NET_OPENSSL_PREBUILT` (기본 ON. OFF 면 OpenSSL 을 소스에서 빌드, 10 ~ 30 분), `KIOTTY_NET_BUILD_TESTS`, `KIOTTY_NET_BUILD_BENCHMARKS`, `KIOTTY_NET_SANITIZER` (address, thread, undefined 또는 콤마 목록), 메모리 상한 `KIOTTY_NET_MAX_OWNERS` / `_CONNECTIONS_PER_SERVER` / `_RECV_CAPACITY` / `_SEND_CAPACITY` / `_PUSH_CAPACITY` / `_TLS_CONTEXTS` (설계 v4 19.3). 빌드 디렉터리는 `build/<이름>` 이고 `.gitignore` 에 있다. ctest 라벨은 `unit` 과 `integration` 이다.
 
 ## Windows (MSVC, IOCP)
 

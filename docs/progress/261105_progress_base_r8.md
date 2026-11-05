@@ -52,6 +52,37 @@
 - 예열이 덮지 못한 lazy 전역 캐시가 생기면 서브풀에 남는다 (예: 다른 키 형식이나 PKCS#12). `GlobalStateStaysInTheGlobalArenaAfterAttachThread` 와 `HandshakeInsideAScopeTakesBlocksFromThatOwnersSubpoolOnly` 가 지금의 RSA / EC 인증서에서 지키고 있다. 설정 범위가 넓어지면 예열도 같이 넓힌다.
 - 사이클 6: `TlsEchoWithTicketAndNotify...` 의 이름과 설계 10절의 ticket 줄.
 
+## R8 보정 (같은 날): thread 상태는 attach 한 Owner 의 것
+
+- 문제: thread 상태 (ERR 상태와 버퍼, thread DRBG) 를 전역 arena 에 두고 `thread × OWNERS` 로 잡았는데, StreamClient 를 부르는 사용자 thread 는 셀 수 없다. Windows 정적 링크에서는 끝난 thread 의 상태가 놓이지도 않는다.
+- 바꾼 것:
+  - thread 의 가장 바깥 Scope 가 attach 한다. thread 상태를 그 Owner 의 서브풀에 만들고, 그 Scope 가 끝날 때 `OPENSSL_thread_stop` 으로 놓는다.
+  - 안쪽 Scope 는 attach 도 detach 도 하지 않는다.
+  - `crypto/err/` 할당은 `thread().state` 로 간다.
+  - 공개 `detachThread()` 를 지웠다.
+  - Layout 의 thread 열을 전역에서 Owner (Server, Client) 쪽으로 옮겼다.
+  - `installGlobal` 을 부른 thread 만 thread 상태가 전역에 있고 detach 하지 않는다.
+- 값: attach + detach 한 번이 Linux clang Release 9.35 µs, MSVC Debug 38 µs (2000 회 평균, 임시 bench).
+- 버린 안: thread_local GlobalPool (모든 thread 가 크기를 내고, 다른 thread 의 free 를 찾을 표가 다시 필요), 넘치면 malloc (원칙 위반).
+- 테스트 (tls_pool_tests 10 개): `GlobalStateStays...` → `ThreadStateLivesInTheOwnerWhoseScopeAttachedItAndLeavesWithThatScope`, `DetachThread...` → `TheScopeThatAttachedDetachesAtItsEndAndTheNextScopeAttachesAgain`. 더한 것: `AnInnerScopeOfAnotherOwnerNeitherAttachesNorDetaches`, `ErrorQueueAllocationsOnTheThreadThatInstalledGoToTheGlobalArena`. `LateFrees...` 는 새 thread 에서. `TlsLayout` 케이스는 `OwnerLayoutsHoldOneThreadState...`.
+- 기록: `docs/learning/openssl-memory-pitfalls.html` (lazy 할당 세 종류, 함정 넷, 진단 방법, OpenSSL 을 올릴 때의 점검표).
+- 로컬: MSVC Debug TLS ON 205/205, OFF 195/195. WSL TLS ON 206/206 (gcc, clang, ASan+UBSan, TSan), TLS OFF 196/196, clang Release TLS 205/205.
+
+## R8 철회 (같은 날): TlsMemory 를 뺐다
+
+- 결정: OpenSSL 은 자기 malloc 을 쓴다. kiotty 는 hook 을 걸지 않는다. 할당의 정확함은 OpenSSL 이 책임지는 것으로 둔다.
+- 이유: lazy 할당 (전역 캐시, thread 의 ERR 상태와 버퍼, 인증서 안의 키 사본) 을 수명이 맞는 arena 로 보내려고 더한 규칙이 OpenSSL 내부 동작에 기댔다. 파일 이름으로 가르기, 예열 handshake, thread attach / detach 가 그것이고, 계속 늘었다.
+- 지운 코드: `kiotty_tls_memory.h/.cpp`, backend 의 hook / 예열 / attach / detach / `tlsThreadStateFile`, `GlobalTlsLayout` / `ServerTlsLayout` / `ClientTlsLayout`, CMake option `KIOTTY_NET_USES_TLS_STATIC_LIBRARY`, `tests/measure`.
+- 지운 테스트: `kiotty_net_tls_pool_tests` 10 개, unit 의 `TlsMemory.InstalledIsFalse...`, `TlsLayout` 둘. 테스트 계획 11절의 Context 두 케이스 (`LateFreesAreZero...`, `ServerSubpoolExhaustion...`) 도 지웠다.
+- 남긴 것:
+  - `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list(16 KiB)`.
+  - `CIPHER_*_BYTES`.
+  - 세는 hook 의 unit 두 테스트 (새지 않음, 쌍당 128 KiB 미만).
+- 같이 지운 것: `MemberPool` / `ArenaPool` / `PoolBase`, `GlobalPool`, `kiotty_pool_layout.h` (TLS 말고 쓰는 곳이 없었다) 와 그 테스트 (MemberPool, GlobalPool 케이스), benchmark 의 `PoolAllocateRelease`. `alignBlock` 은 `kiotty_memory_layout.h` 의 `alignStage` 로 옮겼다 (cipherSend 의 N).
+- 남은 일: `OPENSSL_init_ssl(OPENSSL_INIT_NO_ATEXIT)` 은 hook 설치와 같이 있었으므로 지금은 부르는 곳이 없다. 사이클 7 의 `Context::open` 이 부른다 (설계 19.5).
+- 기록: `docs/learning/openssl-memory-pitfalls.html` 맨 앞에 "버렸다" 상자를 달았다.
+- 로컬 (풀까지 지운 뒤): MSVC Debug TLS ON / OFF 170/170. WSL gcc / clang TLS ON / OFF, ASan+UBSan, TSan 171/171, clang Release TLS 170/170. MSVC Release benchmark 빌드와 실행 (StageProvideConsume) 확인.
+
 ## 다음 할 일
 
 push 뒤 4b (ConnectionStream).

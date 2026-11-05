@@ -1,23 +1,8 @@
-#include "core/pool/kiotty_member_pool.h"
 #include "core/kiotty_stage.h"
 
 #include <benchmark/benchmark.h>
 
 #include <cstring>
-
-typedef kiotty::PoolLayout<kiotty::BlockClass<64, 1024>, kiotty::BlockClass<4096, 64>> BenchLayout;
-
-static void PoolAllocateRelease(benchmark::State& state)
-{
-    static kiotty::MemberPool<BenchLayout> pool;
-    for (auto _ : state)
-    {
-        void* block = pool.allocate(64);
-        benchmark::DoNotOptimize(block);
-        pool.release(block);
-    }
-}
-BENCHMARK(PoolAllocateRelease);
 
 static void StageProvideConsume(benchmark::State& state)
 {
