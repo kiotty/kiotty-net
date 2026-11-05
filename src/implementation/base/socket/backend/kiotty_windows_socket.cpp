@@ -228,15 +228,15 @@ namespace kiotty
             SOCKET created = createSocket(transport);
             if (created == INVALID_SOCKET)
             {
-                return error(lastSocketCode());
+                return ActiveSocketResult::failure(lastSocketCode());
             }
             ActiveSocket socket(static_cast<SocketHandle>(created), transport);
             SocketCode prepared = prepare(created);
             if (prepared != SocketCode::SUCCESS)
             {
-                return error(prepared);
+                return ActiveSocketResult::failure(prepared);
             }
-            return ActiveSocketResult(ActiveSocketResult::Success(), std::move(socket));
+            return ActiveSocketResult::success(std::move(socket));
         }
 
         SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
@@ -293,34 +293,34 @@ namespace kiotty
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             const char* bytes = static_cast<const char*>(data);
             int sent = ::send(socketOf(_handle), bytes, clampLength(length), 0);
             if (sent == SOCKET_ERROR)
             {
-                return error(lastSocketCode());
+                return TransferResult::failure(lastSocketCode());
             }
-            return ok(static_cast<size_t>(sent));
+            return TransferResult::success(static_cast<size_t>(sent));
         }
 
         TransferResult ActiveSocket::receive(void* data, size_t length)
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             char* bytes = static_cast<char*>(data);
             int received = ::recv(socketOf(_handle), bytes, clampLength(length), 0);
             if (received == SOCKET_ERROR)
             {
-                return error(lastSocketCode());
+                return TransferResult::failure(lastSocketCode());
             }
             if (received == 0 && length > 0)
             {
-                return error(SocketCode::CLOSED);
+                return TransferResult::failure(SocketCode::CLOSED);
             }
-            return ok(static_cast<size_t>(received));
+            return TransferResult::success(static_cast<size_t>(received));
         }
 
         SocketCode ActiveSocket::shutdown()
@@ -434,7 +434,7 @@ namespace kiotty
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             sockaddr_storage peer;
             int length = sizeof(peer);
@@ -442,16 +442,16 @@ namespace kiotty
             SOCKET accepted = ::accept(socketOf(_handle), reinterpret_cast<sockaddr*>(&peer), &length);
             if (accepted == INVALID_SOCKET)
             {
-                return error(lastSocketCode());
+                return ActiveSocketResult::failure(lastSocketCode());
             }
             ActiveSocket socket(static_cast<SocketHandle>(accepted), _transport);
             SocketCode prepared = prepare(accepted);
             if (prepared != SocketCode::SUCCESS)
             {
-                return error(prepared);
+                return ActiveSocketResult::failure(prepared);
             }
             socket._peer = infoOf(peer);
-            return ActiveSocketResult(ActiveSocketResult::Success(), std::move(socket));
+            return ActiveSocketResult::success(std::move(socket));
         }
 
         void PassiveSocket::close()

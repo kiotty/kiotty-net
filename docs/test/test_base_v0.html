@@ -200,36 +200,36 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Parker</td><td>ParkWithTimeoutZeroWaitsUntilUnpark</td><td><span class="tag edge">엣지</span></td><td>0 은 무한. 200 ms 뒤의 unpark 까지 돌아오지 않는다</td></tr>
   <tr><td>Parker</td><td>UnparkBeforeParkIsNotLost</td><td><span class="tag edge">엣지</span></td><td>ready 가 이미 참이면 park 는 바로 true (조건은 cv 가 아니라 ready 가 든다)</td></tr>
   <tr><td>Clock</td><td>MonotonicMsNeverDecreasesAcrossTenThousandCalls</td><td><span class="tag ok">정상</span></td><td>단조성. 해상도는 측정만 하고 단정하지 않는다</td></tr>
-  <tr><td>Result</td><td>(있음) ok / code / value, <code>Result&lt;E, T&amp;&gt;</code> 특수화</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만. Holder 는 없어졌다 (설계 19.9)</td></tr>
+  <tr><td>Result</td><td>(있음) success / failure / isOk / code / value, <code>Result&lt;E, T&amp;&gt;</code> 특수화. 실패는 기본 생성한 Value 를 들고, operator bool 은 없다 (static_assert)</td><td><span class="tag ok">정상</span></td><td>이미 짜인 것이라 여기서는 목록만. MISRA C++:2023 에 맞춰 union, placement new, 암시 변환을 뺐다. Holder 는 없어졌다 (설계 19.9)</td></tr>
 </table>
 
-<h3>5.1 pool (<code>core/pool</code> 의 Pool / StaticPool / ReusablePool / LazyReusablePool, <code>base/pool</code> 의 상한과 TLS Layout)</h3>
-<p>풀은 전부 <code>core/pool/</code> 에 있다 (설계 19.2). <code>Pool&lt;Layout&gt;</code> 과 <code>StaticPool</code> 은 바이트 등급 풀 (TLS 서브풀과 전역 arena 전용), <code>ReusablePool&lt;T, N&gt;</code> 과 <code>LazyReusablePool&lt;T, N&gt;</code> 은 객체를 켜고 끄는 풀이다. 뒤의 둘은 <code>is_reusable&lt;T&gt;</code> 를 static_assert 로 요구한다. 테스트의 T 는 <code>support/kiotty_test_tracked.h</code> 의 Tracked (initialize / reset 횟수와 받은 configuration 을 기록. initialize 가 실패하도록 시킬 수 있다).</p>
+<h3>5.1 pool (<code>core/pool</code> 의 MemberPool / GlobalPool / ReusablePool / LazyReusablePool, <code>base/pool</code> 의 상한과 TLS Layout)</h3>
+<p>풀은 전부 <code>core/pool/</code> 에 있다 (설계 19.2). <code>MemberPool&lt;Layout&gt;</code> 과 <code>GlobalPool</code> 은 바이트 등급 풀 (TLS 서브풀과 전역 arena 전용), <code>ReusablePool&lt;T, N&gt;</code> 과 <code>LazyReusablePool&lt;T, N&gt;</code> 은 객체를 켜고 끄는 풀이다. 뒤의 둘은 <code>is_reusable&lt;T&gt;</code> 를 static_assert 로 요구한다. 테스트의 T 는 <code>support/kiotty_test_tracked.h</code> 의 Tracked (initialize / reset 횟수와 받은 configuration 을 기록. initialize 가 실패하도록 시킬 수 있다).</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>Pool</td><td>AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock</td><td><span class="tag ok">정상</span></td><td>등급 32 / 64 / 256. 20, 33, 200 B 가 각자의 등급에서, 16 B 정렬</td></tr>
-  <tr><td>Pool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>free list 가 LIFO 라 방금 놓은 블록이 다음 allocate</td></tr>
-  <tr><td>Pool</td><td>UntouchedBlocksAreHandedOutInAddressOrder</td><td><span class="tag ok">정상</span></td><td>free list 가 비었을 때만 bump index. 연속 주소</td></tr>
-  <tr><td>Pool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td>32 B 등급 넷을 다 쓰면 다섯째는 64 B 등급. failure 0</td></tr>
-  <tr><td>Pool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>heap 으로 넘어가지 않는다. nullptr, failureCount 가 1 씩. 놓으면 다시 준다</td></tr>
-  <tr><td>Pool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td>4096 / 64 / 1024 순서로 줘도 가장 작은 등급부터</td></tr>
-  <tr><td>Pool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>arena 밖, 블록 경계가 아닌 주소는 false. nullptr 은 true</td></tr>
-  <tr><td>Pool</td><td>ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero</td><td><span class="tag ok">정상</span></td><td>등급 안이면 그 자리, 넘으면 옮기며 보존. 0 은 release. 남의 포인터는 nullptr</td></tr>
-  <tr><td>Pool</td><td>(삭제) ALayoutThatCannotBeReservedLeavesThePoolInvalid</td><td><span class="tag misuse">오용</span></td><td>Layout 이 compile time 이라 static_assert 가 막는다 (BlockClass 의 overflow, PoolLayout 의 합 overflow, 등급 32 개 초과). 실행 시 invalid 인 Pool 이 없다</td></tr>
-  <tr><td>Pool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>4 thread × 2000 회. 블록을 thread 번호로 채우고 다시 읽어 겹침 0</td></tr>
-  <tr><td>StaticPool</td><td>AllocatesFromTheSmallestClassThatFits</td><td><span class="tag ok">정상</span></td><td>Pool 과 같은 규칙. 등급마다 live 0 으로 돌아온다</td></tr>
-  <tr><td>StaticPool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>LIFO</td></tr>
-  <tr><td>StaticPool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td></td></tr>
-  <tr><td>StaticPool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>failure 는 맞는 가장 작은 등급에 센다</td></tr>
-  <tr><td>StaticPool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>holds() 도 false</td></tr>
-  <tr><td>StaticPool</td><td>ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows</td><td><span class="tag ok">정상</span></td><td></td></tr>
-  <tr><td>StaticPool</td><td>PeakIsTheMostBlocksLiveAtOnce</td><td><span class="tag ok">정상</span></td><td>usage(): block_bytes, block_count, live, peak</td></tr>
-  <tr><td>StaticPool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>spinlock. TSan 에서도</td></tr>
-  <tr><td>StaticPool</td><td>LayoutConstantsDescribeTheArena</td><td><span class="tag ok">정상</span></td><td>CLASS_COUNT, ARENA_BYTES, 범위 밖 usage 는 0</td></tr>
-  <tr><td>StaticPool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td></td></tr>
-  <tr><td>StaticPool</td><td>AClassWithNoBlocksIsSkipped</td><td><span class="tag edge">엣지</span></td><td>개수 0 등급은 arena 0 B, 다음 등급으로</td></tr>
-  <tr><td>Pool</td><td>ArenaIsAMemberSoTwoPoolsOfOneLayoutDoNotShareBlocks</td><td><span class="tag ok">정상</span></td><td><code>Pool&lt;Layout&gt;</code> 둘. 한쪽의 블록을 다른 쪽의 release / holds 가 거절. 사이클 4 의 "EachContextHasItsOwnPool" 이 옮겨 온 것</td></tr>
-  <tr><td>Pool</td><td>PoolBaseReferenceAllocatesAndReleasesThroughTheVirtualInterface</td><td><span class="tag ok">정상</span></td><td><code>PoolBase&amp;</code> 로 allocate / release / holds. TlsMemory 가 서브풀과 전역 arena 를 같은 타입으로 드는 근거</td></tr>
+  <tr><td>MemberPool</td><td>AllocatesFromTheSmallestClassThatFitsAndAlignsEveryBlock</td><td><span class="tag ok">정상</span></td><td>등급 32 / 64 / 256. 20, 33, 200 B 가 각자의 등급에서, 16 B 정렬</td></tr>
+  <tr><td>MemberPool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>free list 가 LIFO 라 방금 놓은 블록이 다음 allocate</td></tr>
+  <tr><td>MemberPool</td><td>UntouchedBlocksAreHandedOutInAddressOrder</td><td><span class="tag ok">정상</span></td><td>free list 가 비었을 때만 bump index. 연속 주소</td></tr>
+  <tr><td>MemberPool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td>32 B 등급 넷을 다 쓰면 다섯째는 64 B 등급. failure 0</td></tr>
+  <tr><td>MemberPool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>heap 으로 넘어가지 않는다. nullptr, failureCount 가 1 씩. 놓으면 다시 준다</td></tr>
+  <tr><td>MemberPool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td>4096 / 64 / 1024 순서로 줘도 가장 작은 등급부터</td></tr>
+  <tr><td>MemberPool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>arena 밖, 블록 경계가 아닌 주소는 false. nullptr 은 true</td></tr>
+  <tr><td>MemberPool</td><td>ReallocateMovesTheBytesWhenItGrowsAndReleasesOnZero</td><td><span class="tag ok">정상</span></td><td>등급 안이면 그 자리, 넘으면 옮기며 보존. 0 은 release. 남의 포인터는 nullptr</td></tr>
+  <tr><td>MemberPool</td><td>(삭제) ALayoutThatCannotBeReservedLeavesThePoolInvalid</td><td><span class="tag misuse">오용</span></td><td>Layout 이 compile time 이라 static_assert 가 막는다 (BlockClass 의 overflow, PoolLayout 의 합 overflow, 등급 32 개 초과). 실행 시 invalid 인 Pool 이 없다</td></tr>
+  <tr><td>MemberPool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>4 thread × 2000 회. 블록을 thread 번호로 채우고 다시 읽어 겹침 0</td></tr>
+  <tr><td>GlobalPool</td><td>AllocatesFromTheSmallestClassThatFits</td><td><span class="tag ok">정상</span></td><td>MemberPool 과 같은 규칙. 등급마다 live 0 으로 돌아온다</td></tr>
+  <tr><td>GlobalPool</td><td>AReleasedBlockIsTheNextOneHandedOut</td><td><span class="tag ok">정상</span></td><td>LIFO</td></tr>
+  <tr><td>GlobalPool</td><td>AFullClassSpillsIntoTheNextLargerClass</td><td><span class="tag edge">엣지</span></td><td></td></tr>
+  <tr><td>GlobalPool</td><td>WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure</td><td><span class="tag edge">엣지</span></td><td>failure 는 맞는 가장 작은 등급에 센다</td></tr>
+  <tr><td>GlobalPool</td><td>ReleaseRejectsPointersItDidNotHandOut</td><td><span class="tag misuse">오용</span></td><td>holds() 도 false</td></tr>
+  <tr><td>GlobalPool</td><td>ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows</td><td><span class="tag ok">정상</span></td><td></td></tr>
+  <tr><td>GlobalPool</td><td>PeakIsTheMostBlocksLiveAtOnce</td><td><span class="tag ok">정상</span></td><td>usage(): block_bytes, block_count, live, peak</td></tr>
+  <tr><td>GlobalPool</td><td>ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice</td><td><span class="tag ok">정상</span></td><td>spinlock. TSan 에서도</td></tr>
+  <tr><td>GlobalPool</td><td>LayoutConstantsDescribeTheArena</td><td><span class="tag ok">정상</span></td><td>CLASS_COUNT, ARENA_BYTES, 범위 밖 usage 는 0</td></tr>
+  <tr><td>GlobalPool</td><td>ClassesMayBeListedInAnyOrder</td><td><span class="tag edge">엣지</span></td><td></td></tr>
+  <tr><td>GlobalPool</td><td>AClassWithNoBlocksIsSkipped</td><td><span class="tag edge">엣지</span></td><td>개수 0 등급은 arena 0 B, 다음 등급으로</td></tr>
+  <tr><td>MemberPool</td><td>ArenaIsAMemberSoTwoPoolsOfOneLayoutDoNotShareBlocks</td><td><span class="tag ok">정상</span></td><td><code>MemberPool&lt;Layout&gt;</code> 둘. 한쪽의 블록을 다른 쪽의 release / holds 가 거절. 사이클 4 의 "EachContextHasItsOwnPool" 이 옮겨 온 것</td></tr>
+  <tr><td>MemberPool</td><td>PoolBaseReferenceAllocatesAndReleasesThroughTheVirtualInterface</td><td><span class="tag ok">정상</span></td><td><code>PoolBase&amp;</code> 로 allocate / release / holds. TlsMemory 가 서브풀과 전역 arena 를 같은 타입으로 드는 근거</td></tr>
   <tr><td>ReusablePool</td><td>AcquireInitializesAnEmptySlotAndHandsBackAReference</td><td><span class="tag ok">정상</span></td><td>acquire(configuration) → Result 의 value 가 <code>_objects</code> 안의 객체, initialize 1 회, 받은 configuration 그대로, id 의 generation 1 · index 0. count 1</td></tr>
   <tr><td>ReusablePool</td><td>AcquireWhenInitializeFailsResetsAndReturnsTheCodeAndTheSlotStaysEmpty</td><td><span class="tag edge">엣지</span></td><td>Tracked 가 code 를 돌려주면 Result 는 그 code, reset 1 회, count 0, 같은 slot 이 다음 acquire 에 다시 쓰인다 (generation 은 올라간 채)</td></tr>
   <tr><td>ReusablePool</td><td>ReleaseResetsAndTheNextAcquireReusesTheSlotWithANewGeneration</td><td><span class="tag ok">정상</span></td><td>release 뒤 reset 1 회, 다음 acquire 의 id 는 같은 index · generation + 1</td></tr>
@@ -350,7 +350,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>TlsMemory</td><td>EachConnectedPairHoldsABoundedAmountOfOpenSslMemory</td><td><span class="tag ok">정상</span></td><td>profile 하나에 연결 4 쌍 → 쌍당 보유량과 최대치가 128 KiB 미만, 모두 닫으면 원래대로. 수치는 XML 의 held_bytes_per_pair / peak_bytes_per_pair</td></tr>
 </table>
 <h3>TlsMemory : 전역 arena 와 Owner 서브풀 (<code>kiotty_net_tls_pool_tests</code>)</h3>
-<p>세는 hook 이 없는 별도 실행 파일이다 (TLS ON, <code>KIOTTY_NET_TLS_STATIC_POOL</code> ON 일 때만). gtest_discover_tests 가 테스트마다 process 를 새로 띄우므로 각 테스트가 OpenSSL 을 부르기 전에 <code>TlsMemory::functions()</code> 를 건다 (설계 19.5. 사이클 7 전에는 테스트가 직접, 그 뒤에는 <code>Context::open</code> 이). 서브풀은 테스트의 <code>OwnerTlsMemory&lt;ServerTlsLayout&gt;</code> 지역 변수이고 <code>TlsMemory::Scope</code> 가 그 thread 의 할당을 거기로 보낸다.</p>
+<p>세는 hook 이 없는 별도 실행 파일이다 (TLS ON, <code>KIOTTY_NET_USES_TLS_STATIC_LIBRARY</code> ON 일 때만). gtest_discover_tests 가 테스트마다 process 를 새로 띄우므로 각 테스트가 OpenSSL 을 부르기 전에 <code>TlsMemory::functions()</code> 를 건다 (설계 19.5. 사이클 7 전에는 테스트가 직접, 그 뒤에는 <code>Context::open</code> 이). 서브풀은 테스트의 <code>OwnerTlsMemory&lt;ServerTlsLayout&gt;</code> 지역 변수이고 <code>TlsMemory::Scope</code> 가 그 thread 의 할당을 거기로 보낸다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>TlsMemory</td><td>InstalledIsTrueAfterFunctionsAreSetAndFalseWhenAnotherAllocatorIsAlreadyThere</td><td><span class="tag ok">정상</span></td><td>이 실행 파일에서는 true. unit 실행 파일 (세는 hook 이 먼저) 에서는 false 이고 그 hook 을 덮지 않는다 (사이클 4 의 Context 케이스가 옮겨 온 것)</td></tr>
@@ -739,7 +739,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <table>
   <tr><th>단계</th><th>구현</th><th>테스트</th><th>층</th></tr>
   <tr><td>① (R5)</td><td>base.h 3절 변경 (handle struct, MemorySize), statemachine.h</td><td>헤더 컴파일 검사 (MSVC C++14 / C11, clang C++11 / C99). Config, Action 의 unit 은 ⑦ 에서</td><td>—</td></tr>
-  <tr><td>② (R6)</td><td>core : StageBase / Stage&lt;N&gt;, StageSet, Span, Clock, Parker, core/pool (PoolHandle, Pool&lt;Layout&gt;, StaticPool, ReusablePool, LazyReusablePool), base/pool (상한, TLS Layout 셋)</td><td>5절 전부</td><td>unit, benchmark</td></tr>
+  <tr><td>② (R6)</td><td>core : StageBase / Stage&lt;N&gt;, StageSet, Span, Clock, Parker, core/pool (PoolHandle, MemberPool&lt;Layout&gt;, GlobalPool, ReusablePool, LazyReusablePool), base/pool (상한, TLS Layout 셋)</td><td>5절 전부</td><td>unit, benchmark</td></tr>
   <tr><td>③ (끝. R7)</td><td>error, socket, event (IOCP, epoll). R7 은 IoEvent 구체 타입</td><td>6절, 7절. 두 backend 가 같은 테스트를 통과하는 것이 proactor 흉내의 완성 조건</td><td>integration</td></tr>
   <tr><td>④ (끝. R8)</td><td>tls : stub, OpenSSL. R8 은 TlsEngine 의 Stage&lt;N&gt; 과 TlsMemory</td><td>8절. TlsPump 로 소켓 없이. TlsMemory 는 별도 실행 파일</td><td>unit</td></tr>
   <tr><td>④b (4b)</td><td>stream : ConnectionStream (참조 넷을 드는 값), 파일 backend</td><td>plan v2 4b 의 10 개</td><td>integration</td></tr>

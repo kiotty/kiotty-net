@@ -1,5 +1,5 @@
-#if !defined(KIOTTY_STATIC_POOL_H)
-#define KIOTTY_STATIC_POOL_H
+#if !defined(KIOTTY_GLOBAL_POOL_H)
+#define KIOTTY_GLOBAL_POOL_H
 
 #include "core/pool/kiotty_pool_layout.h"
 
@@ -11,7 +11,7 @@
 
 namespace kiotty
 {
-    struct StaticPoolUsage
+    struct GlobalPoolUsage
     {
         size_t block_bytes;
         size_t block_count;
@@ -21,12 +21,12 @@ namespace kiotty
     };
 
     template <class Tag, size_t Index, class Class>
-    class StaticClassStorage
+    class GlobalClassStorage
     {
     public:
         static const size_t ARENA_BYTES = Class::BLOCK_BYTES * Class::BLOCK_COUNT;
 
-        StaticClassStorage() = delete;
+        GlobalClassStorage() = delete;
 
         static void* take()
         {
@@ -69,9 +69,9 @@ namespace kiotty
             unlock();
         }
 
-        static StaticPoolUsage usage()
+        static GlobalPoolUsage usage()
         {
-            StaticPoolUsage result;
+            GlobalPoolUsage result;
             result.block_bytes = Class::BLOCK_BYTES;
             result.block_count = Class::BLOCK_COUNT;
             lock();
@@ -146,31 +146,31 @@ namespace kiotty
     };
 
     template <class Tag, size_t Index, class Class>
-    alignas(POOL_ALIGNMENT) unsigned char StaticClassStorage<Tag, Index, Class>::s_arena[ARENA_BYTES > 0 ? ARENA_BYTES : POOL_ALIGNMENT];
+    alignas(POOL_ALIGNMENT) unsigned char GlobalClassStorage<Tag, Index, Class>::s_arena[ARENA_BYTES > 0 ? ARENA_BYTES : POOL_ALIGNMENT];
 
     template <class Tag, size_t Index, class Class>
-    std::atomic_flag StaticClassStorage<Tag, Index, Class>::s_lock = ATOMIC_FLAG_INIT;
+    std::atomic_flag GlobalClassStorage<Tag, Index, Class>::s_lock = ATOMIC_FLAG_INIT;
 
     template <class Tag, size_t Index, class Class>
-    size_t StaticClassStorage<Tag, Index, Class>::s_free_next = 0;
+    size_t GlobalClassStorage<Tag, Index, Class>::s_free_next = 0;
 
     template <class Tag, size_t Index, class Class>
-    size_t StaticClassStorage<Tag, Index, Class>::s_untouched = 0;
+    size_t GlobalClassStorage<Tag, Index, Class>::s_untouched = 0;
 
     template <class Tag, size_t Index, class Class>
-    size_t StaticClassStorage<Tag, Index, Class>::s_live = 0;
+    size_t GlobalClassStorage<Tag, Index, Class>::s_live = 0;
 
     template <class Tag, size_t Index, class Class>
-    size_t StaticClassStorage<Tag, Index, Class>::s_peak = 0;
+    size_t GlobalClassStorage<Tag, Index, Class>::s_peak = 0;
 
     template <class Tag, size_t Index, class Class>
-    size_t StaticClassStorage<Tag, Index, Class>::s_failures = 0;
+    size_t GlobalClassStorage<Tag, Index, Class>::s_failures = 0;
 
     template <class Tag, size_t Index, class... Classes>
-    class StaticPoolLevel;
+    class GlobalPoolLevel;
 
     template <class Tag, size_t Index>
-    class StaticPoolLevel<Tag, Index>
+    class GlobalPoolLevel<Tag, Index>
     {
     public:
         static const size_t ARENA_BYTES = 0;
@@ -205,20 +205,20 @@ namespace kiotty
             return false;
         }
 
-        static StaticPoolUsage usage(size_t index)
+        static GlobalPoolUsage usage(size_t index)
         {
             (void)index;
-            StaticPoolUsage result = { 0, 0, 0, 0, 0 };
+            GlobalPoolUsage result = { 0, 0, 0, 0, 0 };
             return result;
         }
     };
 
     template <class Tag, size_t Index, class Class, class... Rest>
-    class StaticPoolLevel<Tag, Index, Class, Rest...>
+    class GlobalPoolLevel<Tag, Index, Class, Rest...>
     {
     public:
-        typedef StaticClassStorage<Tag, Index, Class> Storage;
-        typedef StaticPoolLevel<Tag, Index + 1, Rest...> Next;
+        typedef GlobalClassStorage<Tag, Index, Class> Storage;
+        typedef GlobalPoolLevel<Tag, Index + 1, Rest...> Next;
 
         static const size_t ARENA_BYTES = Storage::ARENA_BYTES + Next::ARENA_BYTES;
 
@@ -283,7 +283,7 @@ namespace kiotty
             return true;
         }
 
-        static StaticPoolUsage usage(size_t index)
+        static GlobalPoolUsage usage(size_t index)
         {
             if (index == 0)
             {
@@ -294,18 +294,18 @@ namespace kiotty
     };
 
     template <class Tag, class Layout>
-    class StaticPool;
+    class GlobalPool;
 
     template <class Tag, class... Classes>
-    class StaticPool<Tag, PoolLayout<Classes...>>
+    class GlobalPool<Tag, PoolLayout<Classes...>>
     {
     public:
-        typedef StaticPoolLevel<Tag, 0, Classes...> Levels;
+        typedef GlobalPoolLevel<Tag, 0, Classes...> Levels;
 
         static const size_t CLASS_COUNT = sizeof...(Classes);
         static const size_t ARENA_BYTES = Levels::ARENA_BYTES;
 
-        StaticPool() = delete;
+        GlobalPool() = delete;
 
         static void* allocate(size_t bytes)
         {
@@ -375,7 +375,7 @@ namespace kiotty
             return Levels::blockBytes(block);
         }
 
-        static StaticPoolUsage usage(size_t index)
+        static GlobalPoolUsage usage(size_t index)
         {
             return Levels::usage(index);
         }

@@ -239,15 +239,15 @@ namespace kiotty
             int descriptor = ::socket(familyOf(transport), SOCK_STREAM, 0);
             if (descriptor < 0)
             {
-                return error(lastSocketCode());
+                return ActiveSocketResult::failure(lastSocketCode());
             }
             ActiveSocket socket(descriptor, transport);
             SocketCode prepared = prepare(descriptor);
             if (prepared != SocketCode::SUCCESS)
             {
-                return error(prepared);
+                return ActiveSocketResult::failure(prepared);
             }
-            return ActiveSocketResult(ActiveSocketResult::Success(), std::move(socket));
+            return ActiveSocketResult::success(std::move(socket));
         }
 
         SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
@@ -308,18 +308,18 @@ namespace kiotty
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             for (;;)
             {
                 ssize_t sent = ::send(descriptorOf(_handle), data, length, sendFlags());
                 if (sent >= 0)
                 {
-                    return ok(static_cast<size_t>(sent));
+                    return TransferResult::success(static_cast<size_t>(sent));
                 }
                 if (errno != EINTR)
                 {
-                    return error(lastSocketCode());
+                    return TransferResult::failure(lastSocketCode());
                 }
             }
         }
@@ -328,26 +328,26 @@ namespace kiotty
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             for (;;)
             {
                 ssize_t received = ::recv(descriptorOf(_handle), data, length, 0);
                 if (received > 0)
                 {
-                    return ok(static_cast<size_t>(received));
+                    return TransferResult::success(static_cast<size_t>(received));
                 }
                 if (received == 0 && length > 0)
                 {
-                    return error(SocketCode::CLOSED);
+                    return TransferResult::failure(SocketCode::CLOSED);
                 }
                 if (received == 0)
                 {
-                    return ok(static_cast<size_t>(0));
+                    return TransferResult::success(static_cast<size_t>(0));
                 }
                 if (errno != EINTR)
                 {
-                    return error(lastSocketCode());
+                    return TransferResult::failure(lastSocketCode());
                 }
             }
         }
@@ -462,7 +462,7 @@ namespace kiotty
         {
             if (!valid())
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             sockaddr_storage peer;
             socklen_t length = sizeof(peer);
@@ -478,16 +478,16 @@ namespace kiotty
             }
             if (descriptor < 0)
             {
-                return error(lastSocketCode());
+                return ActiveSocketResult::failure(lastSocketCode());
             }
             ActiveSocket socket(descriptor, _transport);
             SocketCode prepared = prepare(descriptor);
             if (prepared != SocketCode::SUCCESS)
             {
-                return error(prepared);
+                return ActiveSocketResult::failure(prepared);
             }
             socket._peer = infoOf(peer);
-            return ActiveSocketResult(ActiveSocketResult::Success(), std::move(socket));
+            return ActiveSocketResult::success(std::move(socket));
         }
 
         void PassiveSocket::close()

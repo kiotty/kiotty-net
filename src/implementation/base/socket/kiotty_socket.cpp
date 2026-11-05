@@ -49,12 +49,12 @@ namespace kiotty
                     bool waited = waitInterval(config.trial_interval_ms, stop);
                     if (!waited)
                     {
-                        return error(KIOTTY_CLOSED);
+                        return Connected::failure(KIOTTY_CLOSED);
                     }
                 }
                 if (stop.load())
                 {
-                    return error(KIOTTY_CLOSED);
+                    return Connected::failure(KIOTTY_CLOSED);
                 }
                 ActiveSocketResult opened = ActiveSocket::open(config.endpoint.transport);
                 if (!opened.isOk())
@@ -75,9 +75,9 @@ namespace kiotty
                     last = tuned;
                     continue;
                 }
-                return Connected(Connected::Success(), std::move(socket));
+                return Connected::success(std::move(socket));
             }
-            return error(toNetCode(last));
+            return Connected::failure(toNetCode(last));
         }
     }
 }

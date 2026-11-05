@@ -5,7 +5,9 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 using kiotty::Result;
@@ -25,12 +27,12 @@ namespace
 
     TrackedResult okWith(Ledger& ledger, int id)
     {
-        return kiotty::ok(Tracked(ledger, id));
+        return TrackedResult::success(Tracked(ledger, id));
     }
 
     TrackedResult failWith(SendCode code)
     {
-        return kiotty::error(code);
+        return TrackedResult::failure(code);
     }
 
     struct AssignCase
@@ -64,6 +66,13 @@ namespace
     }
 }
 
+typedef Result<SendCode, std::unique_ptr<int>> UniqueResult;
+
+static_assert(!std::is_constructible<bool, TrackedResult>::value,
+              "Result has no operator bool, isOk() is the only test");
+static_assert(std::is_move_constructible<UniqueResult>::value && !std::is_copy_constructible<UniqueResult>::value,
+              "Result follows the copy and move of its Value");
+
 TEST(Result, OkResultReportsSuccessAndCarriesTheValue)
 {
     Ledger ledger;
@@ -80,7 +89,7 @@ TEST(Result, OkResultReportsSuccessAndCarriesTheValue)
     EXPECT_EQ(0, ledger.live());
 }
 
-TEST(Result, FailedResultCarriesTheCodeAndConstructsNoValue)
+TEST(Result, FailedResultCarriesTheCodeAndADefaultValue)
 {
     Ledger ledger;
 
@@ -89,25 +98,12 @@ TEST(Result, FailedResultCarriesTheCodeAndConstructsNoValue)
 
         EXPECT_FALSE(result.isOk());
         EXPECT_EQ(SendCode::Refused, result.code());
+        EXPECT_FALSE(result.value().owns());
 
         EXPECT_EQ(0, ledger.acquired);
     }
 
     EXPECT_EQ(0, ledger.live());
-}
-
-TEST(Result, OperatorBoolReportsFailureRatherThanSuccess)
-{
-    Ledger ledger;
-
-    const TrackedResult good = okWith(ledger, 6);
-    const TrackedResult bad  = failWith(SendCode::Exhausted);
-
-    EXPECT_FALSE(static_cast<bool>(good));
-    EXPECT_TRUE(static_cast<bool>(bad));
-
-    EXPECT_TRUE(good.isOk());
-    EXPECT_FALSE(bad.isOk());
 }
 
 TEST(Result, CopyingAnOkResultProducesAnIndependentValue)
@@ -245,8 +241,8 @@ TEST(Result, SelfAssignmentKeepsTheValue)
 
 TEST(Result, WorksWithAPlainIntegralErrorCode)
 {
-    const Result<int, int> good = kiotty::ok(42);
-    const Result<int, int> bad  = kiotty::error(7);
+    const Result<int, int> good = Result<int, int>::success(42);
+    const Result<int, int> bad  = Result<int, int>::failure(7);
 
     EXPECT_TRUE(good.isOk());
     EXPECT_EQ(42, good.value());

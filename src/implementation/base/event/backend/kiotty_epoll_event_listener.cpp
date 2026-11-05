@@ -531,18 +531,18 @@ namespace kiotty
             ListenerState& state = stateOf(_storage);
             if (state.epoll < 0)
             {
-                return error(SocketCode::CLOSED);
+                return AttachResult::failure(SocketCode::CLOSED);
             }
             if (socket == INVALID_SOCKET_HANDLE)
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return AttachResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             int copy = ::fcntl(static_cast<int>(socket), F_DUPFD_CLOEXEC, 0);
             if (copy < 0)
             {
-                return error(lastSocketCode());
+                return AttachResult::failure(lastSocketCode());
             }
-            return AttachResult(AttachResult::Success(), Holder<IoEvent>::make<EpollEvent>(&state, copy, slot));
+            return AttachResult::success(Holder<IoEvent>::make<EpollEvent>(&state, copy, slot));
         }
 
         SocketCode EventListener::submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload)

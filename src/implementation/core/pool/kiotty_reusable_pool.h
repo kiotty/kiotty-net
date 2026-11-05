@@ -95,13 +95,13 @@ namespace kiotty
             if (code != static_cast<code_type>(0))
             {
                 _objects[i].reset();
-                return error(code);
+                return AcquireResult::failure(code);
             }
             _states[i] = SlotState::ACTIVE;
             _count += 1;
-            return okRef(_objects[i]);
+            return AcquireResult::success(_objects[i]);
         }
-        return error(static_cast<code_type>(T::TABLE_FULL));
+        return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL));
     }
 
     template <class T, size_t N>

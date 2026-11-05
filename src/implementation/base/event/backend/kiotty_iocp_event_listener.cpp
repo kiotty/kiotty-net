@@ -396,19 +396,19 @@ namespace kiotty
             ListenerState& state = stateOf(_storage);
             if (state.port == nullptr)
             {
-                return error(SocketCode::CLOSED);
+                return AttachResult::failure(SocketCode::CLOSED);
             }
             if (socket == INVALID_SOCKET_HANDLE)
             {
-                return error(SocketCode::INVALID_ARGUMENT);
+                return AttachResult::failure(SocketCode::INVALID_ARGUMENT);
             }
             SOCKET native = static_cast<SOCKET>(socket);
             HANDLE associated = ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(native), state.port, 0, 0);
             if (associated == nullptr && ::GetLastError() != ERROR_INVALID_PARAMETER)
             {
-                return error(lastErrorCode());
+                return AttachResult::failure(lastErrorCode());
             }
-            return AttachResult(AttachResult::Success(), Holder<IoEvent>::make<IocpEvent>(&state, native, slot));
+            return AttachResult::success(Holder<IoEvent>::make<IocpEvent>(&state, native, slot));
         }
 
         SocketCode EventListener::submit(Holder<IoEvent>& event, const IoAction& action, IoPayload payload)

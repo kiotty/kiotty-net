@@ -79,11 +79,11 @@ namespace kiotty
             index = emptySlot();
             if (index == N)
             {
-                return error(static_cast<code_type>(T::TABLE_FULL));
+                return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL));
             }
             if (!create(index))
             {
-                return error(static_cast<code_type>(T::OUT_OF_MEMORY));
+                return AcquireResult::failure(static_cast<code_type>(T::OUT_OF_MEMORY));
             }
         }
         _generations[index] = detail::nextGeneration(_generations[index]);
@@ -95,11 +95,11 @@ namespace kiotty
         if (code != static_cast<code_type>(0))
         {
             object.reset();
-            return error(code);
+            return AcquireResult::failure(code);
         }
         _states[index] = SlotState::ACTIVE;
         _count += 1;
-        return okRef(object);
+        return AcquireResult::success(object);
     }
 
     template <class T, size_t N>

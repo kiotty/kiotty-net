@@ -1,4 +1,4 @@
-#include "core/pool/kiotty_static_pool.h"
+#include "core/pool/kiotty_global_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -10,8 +10,8 @@
 
 using kiotty::BlockClass;
 using kiotty::PoolLayout;
-using kiotty::StaticPool;
-using kiotty::StaticPoolUsage;
+using kiotty::GlobalPool;
+using kiotty::GlobalPoolUsage;
 
 namespace
 {
@@ -37,9 +37,9 @@ namespace
     }
 }
 
-TEST(StaticPool, AllocatesFromTheSmallestClassThatFits)
+TEST(GlobalPool, AllocatesFromTheSmallestClassThatFits)
 {
-    typedef StaticPool<SmallestTag, PoolLayout<Class32, Class64, Class256>> Pool;
+    typedef GlobalPool<SmallestTag, PoolLayout<Class32, Class64, Class256>> Pool;
     void* small = Pool::allocate(20);
     void* middle = Pool::allocate(33);
     void* large = Pool::allocate(200);
@@ -57,9 +57,9 @@ TEST(StaticPool, AllocatesFromTheSmallestClassThatFits)
     EXPECT_EQ(Pool::usage(2).live, 0u);
 }
 
-TEST(StaticPool, AReleasedBlockIsTheNextOneHandedOut)
+TEST(GlobalPool, AReleasedBlockIsTheNextOneHandedOut)
 {
-    typedef StaticPool<ReuseTag, PoolLayout<Class32>> Pool;
+    typedef GlobalPool<ReuseTag, PoolLayout<Class32>> Pool;
     void* first = Pool::allocate(32);
     void* second = Pool::allocate(32);
     EXPECT_NE(first, second);
@@ -69,9 +69,9 @@ TEST(StaticPool, AReleasedBlockIsTheNextOneHandedOut)
     EXPECT_TRUE(Pool::release(second));
 }
 
-TEST(StaticPool, AFullClassSpillsIntoTheNextLargerClass)
+TEST(GlobalPool, AFullClassSpillsIntoTheNextLargerClass)
 {
-    typedef StaticPool<SpillTag, PoolLayout<Class32, Class64>> Pool;
+    typedef GlobalPool<SpillTag, PoolLayout<Class32, Class64>> Pool;
     std::vector<void*> blocks;
     for (int i = 0; i < 4; ++i)
     {
@@ -87,9 +87,9 @@ TEST(StaticPool, AFullClassSpillsIntoTheNextLargerClass)
     }
 }
 
-TEST(StaticPool, WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure)
+TEST(GlobalPool, WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure)
 {
-    typedef StaticPool<FullTag, PoolLayout<Class32, Class64>> Pool;
+    typedef GlobalPool<FullTag, PoolLayout<Class32, Class64>> Pool;
     std::vector<void*> blocks;
     for (int i = 0; i < 8; ++i)
     {
@@ -108,9 +108,9 @@ TEST(StaticPool, WhenEveryFittingClassIsFullAllocateReturnsNullAndCountsAFailure
     EXPECT_NE(Pool::allocate(24), nullptr);
 }
 
-TEST(StaticPool, ReleaseRejectsPointersItDidNotHandOut)
+TEST(GlobalPool, ReleaseRejectsPointersItDidNotHandOut)
 {
-    typedef StaticPool<ForeignTag, PoolLayout<Class64>> Pool;
+    typedef GlobalPool<ForeignTag, PoolLayout<Class64>> Pool;
     alignas(16) unsigned char outside[64] = {};
     EXPECT_FALSE(Pool::release(outside));
     EXPECT_FALSE(Pool::holds(outside));
@@ -120,9 +120,9 @@ TEST(StaticPool, ReleaseRejectsPointersItDidNotHandOut)
     EXPECT_TRUE(Pool::release(block));
 }
 
-TEST(StaticPool, ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows)
+TEST(GlobalPool, ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows)
 {
-    typedef StaticPool<ReallocateTag, PoolLayout<Class32, Class64>> Pool;
+    typedef GlobalPool<ReallocateTag, PoolLayout<Class32, Class64>> Pool;
     char* block = static_cast<char*>(Pool::allocate(10));
     std::memcpy(block, "kiotty", 7);
     EXPECT_EQ(Pool::reallocate(block, 30), block);
@@ -135,16 +135,16 @@ TEST(StaticPool, ReallocateKeepsTheBlockWhenItFitsAndMovesTheBytesWhenItGrows)
     EXPECT_EQ(Pool::usage(1).live, 0u);
 }
 
-TEST(StaticPool, PeakIsTheMostBlocksLiveAtOnce)
+TEST(GlobalPool, PeakIsTheMostBlocksLiveAtOnce)
 {
-    typedef StaticPool<PeakTag, PoolLayout<Class32>> Pool;
+    typedef GlobalPool<PeakTag, PoolLayout<Class32>> Pool;
     void* a = Pool::allocate(1);
     void* b = Pool::allocate(1);
     void* c = Pool::allocate(1);
     Pool::release(b);
     Pool::release(c);
     void* d = Pool::allocate(1);
-    StaticPoolUsage usage = Pool::usage(0);
+    GlobalPoolUsage usage = Pool::usage(0);
     EXPECT_EQ(usage.live, 2u);
     EXPECT_EQ(usage.peak, 3u);
     EXPECT_EQ(usage.block_bytes, 32u);
@@ -153,9 +153,9 @@ TEST(StaticPool, PeakIsTheMostBlocksLiveAtOnce)
     Pool::release(d);
 }
 
-TEST(StaticPool, ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice)
+TEST(GlobalPool, ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice)
 {
-    typedef StaticPool<ThreadTag, PoolLayout<BlockClass<64, 64>>> Pool;
+    typedef GlobalPool<ThreadTag, PoolLayout<BlockClass<64, 64>>> Pool;
     std::atomic<int> collisions(0);
     std::vector<std::thread> threads;
     for (int t = 0; t < 4; ++t)
@@ -190,9 +190,9 @@ TEST(StaticPool, ConcurrentAllocateAndReleaseNeverHandsOutOneBlockTwice)
     EXPECT_LE(Pool::usage(0).peak, 4u);
 }
 
-TEST(StaticPool, LayoutConstantsDescribeTheArena)
+TEST(GlobalPool, LayoutConstantsDescribeTheArena)
 {
-    typedef StaticPool<LayoutTag, PoolLayout<Class32, Class64, Class256>> Pool;
+    typedef GlobalPool<LayoutTag, PoolLayout<Class32, Class64, Class256>> Pool;
     size_t classes = Pool::CLASS_COUNT;
     size_t arena = Pool::ARENA_BYTES;
     EXPECT_EQ(classes, 3u);
@@ -201,9 +201,9 @@ TEST(StaticPool, LayoutConstantsDescribeTheArena)
     EXPECT_EQ(Pool::usage(3).block_bytes, 0u);
 }
 
-TEST(StaticPool, ClassesMayBeListedInAnyOrder)
+TEST(GlobalPool, ClassesMayBeListedInAnyOrder)
 {
-    typedef StaticPool<UnorderedTag, PoolLayout<BlockClass<4096, 1>, BlockClass<64, 1>, BlockClass<1024, 1>>> Pool;
+    typedef GlobalPool<UnorderedTag, PoolLayout<BlockClass<4096, 1>, BlockClass<64, 1>, BlockClass<1024, 1>>> Pool;
     void* small = Pool::allocate(10);
     void* middle = Pool::allocate(1000);
     void* large = Pool::allocate(1025);
@@ -217,9 +217,9 @@ TEST(StaticPool, ClassesMayBeListedInAnyOrder)
     Pool::release(large);
 }
 
-TEST(StaticPool, AClassWithNoBlocksIsSkipped)
+TEST(GlobalPool, AClassWithNoBlocksIsSkipped)
 {
-    typedef StaticPool<EmptyClassTag, PoolLayout<BlockClass<32, 0>, BlockClass<64, 1>>> Pool;
+    typedef GlobalPool<EmptyClassTag, PoolLayout<BlockClass<32, 0>, BlockClass<64, 1>>> Pool;
     size_t arena = Pool::ARENA_BYTES;
     EXPECT_EQ(arena, 64u);
     void* block = Pool::allocate(8);

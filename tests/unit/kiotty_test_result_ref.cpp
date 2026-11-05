@@ -5,8 +5,6 @@
 #include <string>
 #include <type_traits>
 
-using kiotty::error;
-using kiotty::okRef;
 using kiotty::Result;
 
 namespace
@@ -33,12 +31,12 @@ namespace
 
     SlotResult lookupOk(Slot& slot)
     {
-        return okRef(slot);
+        return SlotResult::success(slot);
     }
 
     SlotResult lookupFail(LookupCode code)
     {
-        return error(code);
+        return SlotResult::failure(code);
     }
 
     struct FailCase
@@ -69,10 +67,13 @@ static_assert(std::is_copy_constructible<SlotResult>::value &&
               std::is_copy_assignable<SlotResult>::value,
               "Result<E, T&> must be copyable even when T is not");
 
+static_assert(!std::is_constructible<bool, SlotResult>::value,
+              "Result<E, T&> has no operator bool, isOk() is the only test");
+
 static_assert(std::is_same<decltype(std::declval<const SlotResult&>().value()), Slot&>::value,
               "const Result<E, T&>::value() must return T&, not const T&");
 
-TEST(ResultRef, OkRefProducesASuccessWithCodeZero)
+TEST(ResultRef, SuccessHasCodeZero)
 {
     Slot       slot(1);
     SlotResult result = lookupOk(slot);
@@ -81,7 +82,7 @@ TEST(ResultRef, OkRefProducesASuccessWithCodeZero)
     EXPECT_EQ(LookupCode::Ok, result.code());
 }
 
-TEST(ResultRef, OkRefValueIsTheOriginalObject)
+TEST(ResultRef, SuccessValueIsTheOriginalObject)
 {
     Slot       slot(1);
     SlotResult result = lookupOk(slot);
@@ -110,21 +111,11 @@ TEST(ResultRef, ConstResultValueStillRefersToTheOriginal)
     EXPECT_EQ(7, slot.id);
 }
 
-TEST(ResultRef, OperatorBoolIsFalseOnSuccessLikeThePrimaryTemplate)
-{
-    Slot       slot(1);
-    SlotResult result = lookupOk(slot);
-
-    EXPECT_FALSE(static_cast<bool>(result));
-    EXPECT_TRUE(result.isOk());
-}
-
-TEST_P(RefFail, ErrorProducesAFailureThatKeepsItsCode)
+TEST_P(RefFail, FailureKeepsItsCode)
 {
     SlotResult result = lookupFail(GetParam().code);
 
     EXPECT_FALSE(result.isOk());
-    EXPECT_TRUE(static_cast<bool>(result));
     EXPECT_EQ(GetParam().code, result.code());
 }
 

@@ -1,5 +1,5 @@
-#if !defined(KIOTTY_POOL_H)
-#define KIOTTY_POOL_H
+#if !defined(KIOTTY_MEMBER_POOL_H)
+#define KIOTTY_MEMBER_POOL_H
 
 #include "core/pool/kiotty_pool_layout.h"
 
@@ -70,19 +70,19 @@ namespace kiotty
     };
 
     template <class Layout>
-    class Pool : private PoolArena<Layout::ARENA_BYTES>, public ArenaPool
+    class MemberPool : private PoolArena<Layout::ARENA_BYTES>, public ArenaPool
     {
     public:
         static const size_t ARENA_BYTES = Layout::ARENA_BYTES;
 
-        Pool()
+        MemberPool()
             : ArenaPool(this->bytes, Layout::classes(), Layout::CLASS_COUNT)
         {
         }
     };
 
     template <class Layout>
-    const size_t Pool<Layout>::ARENA_BYTES;
+    const size_t MemberPool<Layout>::ARENA_BYTES;
 }
 
 #endif

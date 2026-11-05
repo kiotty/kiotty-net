@@ -54,6 +54,25 @@
   - clang ASan+UBSan
   - clang TSan
 
+## 추가 (같은 날) : Result 를 MISRA C++:2023 에 맞춤
+
+- `core/kiotty_result.h`:
+  - union 과 placement new, 소멸자 직접 호출을 뺐다 (Rule 12.3.1, 21.6.3). 멤버는 `ErrorCode _code` 와 `Value _value` 둘이고, 실패는 기본 생성한 Value 를 든다. 그래서 Value 는 기본 생성 가능해야 한다 (static_assert). 지금의 Value (`ActiveSocket`, `size_t`, `Holder<IoEvent>`) 는 모두 된다.
+  - copy / move / 대입은 컴파일러가 만든다. 손으로 짠 `assign` 이 없어졌다.
+  - `ok()` / `okRef()` / `error()` 의 암시 변환 연산자를 지우고 (Rule 15.1.3) static factory `success(value)` / `failure(code)` 로 바꿨다. 호출부는 typedef 를 쓴다 (`ActiveSocketResult::failure(code)`, `AcquireResult::success(object)`).
+  - 실패일 때 true 이던 `explicit operator bool` 을 지웠다. 검사는 `isOk()` 하나다.
+  - `Result<E, T&>` 는 포인터 멤버 그대로, factory 만 같은 모양으로 바꿨다.
+- 테스트: operator bool 케이스 둘을 지우고 bool 로 만들 수 없다는 static_assert 로 바꿨다. 실패 결과가 기본 Value 를 든다는 확인과 move 전용 Value (`unique_ptr`) 의 static_assert 를 더했다.
+- 남은 것: 설계 v4 의 `Result<KiottyNetCode, ConnectionStream>` 은 ConnectionStream 이 참조 멤버를 들면 기본 생성이 안 된다. 사이클 5 에서 포인터 멤버로 두거나 다른 모양으로 정한다.
+- 로컬: MSVC Debug TLS ON 204/204, OFF 202/202. WSL gcc / clang / clang ASan+UBSan / clang TSan TLS ON 205/205, gcc / clang TLS OFF 203/203, clang Release TLS 204/204.
+
+## 추가 (같은 날) : 등급 풀 이름
+
+- 저장 위치가 이름에 보이도록 바꿨다. `Pool<Layout>` → `MemberPool<Layout>` (저장 공간이 그 객체의 멤버, heap 에 따로 잡지 않는다), `StaticPool` → `GlobalPool` (멤버가 전부 static, .bss). 딸린 이름도 같이: `GlobalPoolUsage`, `GlobalClassStorage`, `GlobalPoolLevel`, `useTlsGlobalPool`.
+- 파일: `core/pool/kiotty_member_pool.h/.cpp`, `core/pool/kiotty_global_pool.h`, 테스트 `kiotty_test_member_pool.cpp`, `kiotty_test_global_pool.cpp`, `kiotty_test_tls_global_pool.cpp`. 테스트 이름은 `MemberPool.*`, `GlobalPool.*`, `TlsGlobalPool.*`.
+- CMake option `KIOTTY_NET_TLS_STATIC_POOL` 은 `KIOTTY_NET_USES_TLS_STATIC_LIBRARY` 가 됐다 (뜻: OpenSSL 을 kiotty 가 정적 라이브러리로 혼자 쓴다. 그래서 그 할당을 GlobalPool / MemberPool 로 받는다). 실행 파일 `kiotty_net_tls_pool_tests` 는 그대로다.
+- 설계 v4, plan v2 (앞으로 할 일의 줄), 테스트 계획 5.1 / 15절, build 스킬을 맞췄다. 지난 진행 노트와 feedback 문서는 기록이라 두었다.
+
 ## 다음 할 일
 
 R7. IoEvent 를 backend 의 구체 타입으로, `attach` 가 제자리에서 채운다. `kiotty_holder.h` 와 그 테스트를 지운다.

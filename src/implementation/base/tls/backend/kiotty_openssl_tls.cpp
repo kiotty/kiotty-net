@@ -48,9 +48,9 @@ namespace kiotty
             const size_t SUITE_LIST_BYTES = 256;
             const size_t BIO_PAIR_BYTES = 4096;
 
-#if KIOTTY_NET_TLS_STATIC_POOL
+#if KIOTTY_NET_USES_TLS_STATIC_LIBRARY
             struct TlsPoolTag;
-            typedef StaticPool<TlsPoolTag, ProcessTlsLayout> TlsPool;
+            typedef GlobalPool<TlsPoolTag, ProcessTlsLayout> TlsPool;
 
             void* hookAllocate(size_t size, const char* file, int line)
             {
@@ -278,8 +278,8 @@ namespace kiotty
             return true;
         }
 
-#if KIOTTY_NET_TLS_STATIC_POOL
-        bool useTlsStaticPool()
+#if KIOTTY_NET_USES_TLS_STATIC_LIBRARY
+        bool useTlsGlobalPool()
         {
             CRYPTO_malloc_fn allocate = nullptr;
             CRYPTO_realloc_fn reallocate = nullptr;
@@ -302,12 +302,12 @@ namespace kiotty
             return TlsPool::CLASS_COUNT;
         }
 
-        StaticPoolUsage tlsPoolUsage(size_t index)
+        GlobalPoolUsage tlsPoolUsage(size_t index)
         {
             return TlsPool::usage(index);
         }
 #else
-        bool useTlsStaticPool()
+        bool useTlsGlobalPool()
         {
             return false;
         }
@@ -317,10 +317,10 @@ namespace kiotty
             return 0;
         }
 
-        StaticPoolUsage tlsPoolUsage(size_t index)
+        GlobalPoolUsage tlsPoolUsage(size_t index)
         {
             (void)index;
-            StaticPoolUsage usage = { 0, 0, 0, 0, 0 };
+            GlobalPoolUsage usage = { 0, 0, 0, 0, 0 };
             return usage;
         }
 #endif
@@ -589,7 +589,7 @@ namespace kiotty
             {
                 _last_code = KIOTTY_INVALID_ARGUMENT;
                 _last_message = "tls: engine is not open";
-                return error(KIOTTY_INVALID_ARGUMENT);
+                return DecodeResult::failure(KIOTTY_INVALID_ARGUMENT);
             }
             feed();
             size_t total = 0;
@@ -649,9 +649,9 @@ namespace kiotty
             if (code != KIOTTY_SUCCESS && total == 0)
             {
                 _last_code = code;
-                return error(code);
+                return DecodeResult::failure(code);
             }
-            return ok(total);
+            return DecodeResult::success(total);
         }
 
         void TlsEngine::encode(KiottyNetSpan plain)

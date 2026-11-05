@@ -6,8 +6,8 @@
 #include <memory>
 #include <vector>
 
-using kiotty::StaticPoolUsage;
-using kiotty::net::useTlsStaticPool;
+using kiotty::GlobalPoolUsage;
+using kiotty::net::useTlsGlobalPool;
 using kiotty::net::TlsProfile;
 using kiotty::net::tlsPoolClassCount;
 using kiotty::net::tlsPoolUsage;
@@ -28,7 +28,7 @@ namespace
         Live total = { 0, 0 };
         for (size_t i = 0; i < tlsPoolClassCount(); ++i)
         {
-            StaticPoolUsage usage = tlsPoolUsage(i);
+            GlobalPoolUsage usage = tlsPoolUsage(i);
             total.blocks += usage.live;
             total.failures += usage.failures;
         }
@@ -43,16 +43,16 @@ namespace
     }
 }
 
-TEST(TlsStaticPool, HookRoutesOpenSslIntoTheStaticPoolBeforeAnyTlsObjectExists)
+TEST(TlsGlobalPool, HookRoutesOpenSslIntoTheGlobalPoolBeforeAnyTlsObjectExists)
 {
-    EXPECT_TRUE(useTlsStaticPool());
-    EXPECT_TRUE(useTlsStaticPool());
+    EXPECT_TRUE(useTlsGlobalPool());
+    EXPECT_TRUE(useTlsGlobalPool());
     EXPECT_GT(tlsPoolClassCount(), 0u);
 }
 
-TEST(TlsStaticPool, HandshakeTakesBlocksFromTheStaticPoolAndClosingGivesThemBack)
+TEST(TlsGlobalPool, HandshakeTakesBlocksFromTheGlobalPoolAndClosingGivesThemBack)
 {
-    ASSERT_TRUE(useTlsStaticPool());
+    ASSERT_TRUE(useTlsGlobalPool());
     TlsProfile server;
     TlsProfile client;
     ASSERT_EQ(server.openServer(serverConfig()), KIOTTY_SUCCESS);

@@ -13,7 +13,7 @@ namespace kiotty
             return false;
         }
 
-        bool useTlsStaticPool()
+        bool useTlsGlobalPool()
         {
             return false;
         }
@@ -23,10 +23,10 @@ namespace kiotty
             return 0;
         }
 
-        StaticPoolUsage tlsPoolUsage(size_t index)
+        GlobalPoolUsage tlsPoolUsage(size_t index)
         {
             (void)index;
-            StaticPoolUsage usage = { 0, 0, 0, 0, 0 };
+            GlobalPoolUsage usage = { 0, 0, 0, 0, 0 };
             return usage;
         }
 
@@ -106,7 +106,7 @@ namespace kiotty
         DecodeResult TlsEngine::decode(StageBase& plain)
         {
             (void)plain;
-            return error(KIOTTY_TLS_NOT_SUPPORTED);
+            return DecodeResult::failure(KIOTTY_TLS_NOT_SUPPORTED);
         }
 
         void TlsEngine::encode(KiottyNetSpan plain)
