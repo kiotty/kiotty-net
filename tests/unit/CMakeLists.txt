@@ -31,6 +31,6 @@ else()
 endif()
 
 if(KIOTTY_NET_USE_TLS AND KIOTTY_NET_USES_TLS_STATIC_LIBRARY)
-    kiotty_net_add_test_target(kiotty_net_tls_pool_tests unit kiotty_test_tls_global_pool.cpp)
+    kiotty_net_add_test_target(kiotty_net_tls_pool_tests unit kiotty_test_tls_memory.cpp)
     target_compile_definitions(kiotty_net_tls_pool_tests PRIVATE KIOTTY_TEST_CERT_DIR="${PROJECT_SOURCE_DIR}/tests/certs")
 endif()

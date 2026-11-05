@@ -1,6 +1,8 @@
+#include "base/tls/kiotty_tls_memory.h"
 #include "support/kiotty_test_tls.h"
 
 #include <openssl/crypto.h>
+#include <openssl/err.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -9,11 +11,13 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 using kiotty::Stage;
 using kiotty::StageBase;
 using kiotty::net::DecodeResult;
+using kiotty::net::TlsMemory;
 using kiotty::net::TlsEngine;
 using kiotty::net::TlsProfile;
 using kiotty::net::TlsStep;
@@ -28,6 +32,7 @@ namespace
     {
         TAG_GLOBAL,
         TAG_WARM,
+        TAG_THREAD,
         TAG_SERVER_PROFILE,
         TAG_CLIENT_PROFILE,
         TAG_SERVER_CONNECTION,
@@ -35,9 +40,11 @@ namespace
         TAG_COUNT
     };
 
-    const char* const TAG_NAMES[TAG_COUNT] = { "global", "warm", "server_profile", "client_profile", "server_connection", "client_connection" };
+    const char* const TAG_NAMES[TAG_COUNT] = { "global", "warm", "thread", "server_profile", "client_profile", "server_connection", "client_connection" };
 
     const size_t HEADER_BYTES = 16;
+    const size_t ERROR_SLOTS = 16;
+    const size_t ERROR_DATA_BYTES = 1000;
     const size_t CLASS_BYTES[] =
     {
         32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144,
@@ -470,6 +477,22 @@ namespace
         return ok;
     }
 
+    void measureThread()
+    {
+        std::thread worker([]()
+        {
+            TagScope scope(TAG_THREAD);
+            kiotty::net::attachTlsThread();
+            std::string data(ERROR_DATA_BYTES, 'e');
+            for (size_t i = 0; i < ERROR_SLOTS; ++i)
+            {
+                ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "%s", data.c_str());
+            }
+            ERR_clear_error();
+        });
+        worker.join();
+    }
+
     void printLedger(Tag tag, size_t divisor)
     {
         const Ledger& ledger = g_ledgers[tag];
@@ -514,6 +537,13 @@ int main(int argc, char** argv)
         return 1;
     }
     g_cert_dir = argv[1];
+    {
+        TagScope scope(TAG_WARM);
+        kiotty::net::installTlsMemory(TlsMemory::functions());
+        kiotty::net::attachTlsThread();
+        kiotty::net::warmTlsMemory();
+    }
+    measureThread();
     size_t count = static_cast<size_t>(std::strtoul(argv[2], nullptr, 10));
     g_stage_bytes = static_cast<size_t>(std::strtoul(argv[3], nullptr, 10));
     g_message_bytes = static_cast<size_t>(std::strtoul(argv[4], nullptr, 10));
@@ -538,6 +568,7 @@ int main(int argc, char** argv)
     std::printf("== global (after warm-up of every scenario, all objects closed)\n");
     printLedger(TAG_GLOBAL, 1);
     printLedger(TAG_WARM, 1);
+    printLedger(TAG_THREAD, 1);
     for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); ++i)
     {
         for (size_t tag = TAG_SERVER_PROFILE; tag < TAG_COUNT; ++tag)
@@ -566,19 +597,20 @@ int main(int argc, char** argv)
     {
         std::printf("  %s live %zu B\n", TAG_NAMES[tag], g_ledgers[tag].live_bytes);
     }
-    std::printf("== TlsLayoutOf (Blocks::count(global, profile, connection))\n");
+    std::printf("== TlsLayoutOf for GlobalTlsLayout, ServerTlsLayout, ClientTlsLayout (Blocks::count(global, thread, profile, connection))\n");
     size_t connection_bytes = 0;
     for (size_t index = 0; index < CLASS_COUNT; ++index)
     {
         size_t global = g_ledgers[TAG_WARM].classes[index].peak + g_ledgers[TAG_GLOBAL].classes[index].peak;
+        size_t thread = g_ledgers[TAG_THREAD].classes[index].peak;
         size_t profile = g_profile_blocks[index];
         size_t connection = g_connection_blocks[index];
-        if (global == 0 && profile == 0 && connection == 0)
+        if (global == 0 && thread == 0 && profile == 0 && connection == 0)
         {
             continue;
         }
         connection_bytes += connection * CLASS_BYTES[index];
-        std::printf("            BlockClass<%zu, Blocks::count(%zu, %zu, %zu)>,\n", CLASS_BYTES[index], global, profile, connection);
+        std::printf("            BlockClass<%zu, Blocks::count(%zu, %zu, %zu, %zu)>,\n", CLASS_BYTES[index], global, thread, profile, connection);
     }
     std::printf("  beyond the largest class: %zu blocks\n", g_connection_blocks[CLASS_COUNT] + g_ledgers[TAG_WARM].classes[CLASS_COUNT].peak);
     std::printf("  class-rounded bytes per connection: %zu\n", connection_bytes);

@@ -91,7 +91,7 @@ v1 의 번호를 이어 간다. 4b 가 다음이다.
 
 | 구현 | `_tls.active()` 분기 네 자리 (onOpened 의 deadline + onHandshake, refill 의 decode, select 의 cipherSend 우선과 encoded, onSent 의 cipherSend consume), `receiveStage(HANDSHAKE / TLS USER)`, handshake DONE 뒤의 decode 한 번. `connection/kiotty_acceptor.h/.cpp` (v2 9.8 + `listening()`. open 하지 않은 Acceptor 는 거짓) + IOCP / epoll 쪽 resolve (AcceptEx 버퍼 / 빈 payload) |
 |---|---|
-| 테스트 | 9절의 TLS 케이스 23 개 (TlsPump 로 DONE 까지 간 engine 을 심는다. Scope 는 테스트의 `OwnerTlsMemory<ServerTlsLayout>` 하나): handshake 의 SEND → NONE 과 drain 의 WRITE(HANDSHAKE), TLS 1.3 의 ticket 이 DONE 앞에 SEND 로 한 번 더, `as.write.length` 는 평문 / `completion.length` 는 암호문, encode 순서 = 송신 순서, KeyUpdate 답장이 cipherSend 에 남아 다음 drain 이 CONTROL 로 보낸다, decode 실패는 onError + CLOSE(RECORD_ERROR). 9절의 Acceptor 3 (integration) + `UnopenedAcceptorIsNotListening` |
+| 테스트 | 9절의 TLS 케이스 23 개 (TlsPump 로 DONE 까지 간 engine 을 심는다. Scope 는 테스트의 `OwnerTlsMemory<ServerTlsLayout>` 하나): handshake 의 SEND → NONE 과 drain 의 WRITE(HANDSHAKE), TLS 1.3 에 ticket 이 없다 (`SSL_CTX_set_num_tickets(0)`, R8. DONE 이 클라이언트 Finished 바로 뒤), `as.write.length` 는 평문 / `completion.length` 는 암호문, encode 순서 = 송신 순서, KeyUpdate 답장이 cipherSend 에 남아 다음 drain 이 CONTROL 로 보낸다, decode 실패는 onError + CLOSE(RECORD_ERROR). 9절의 Acceptor 3 (integration) + `UnopenedAcceptorIsNotListening` |
 | 완료 | unit 전부 매트릭스 초록 (TLS ON job 에서 TLS 케이스 포함). Acceptor integration 은 Windows / Linux |
 | commit | `connection: TLS path in Connection, Acceptor as IoSource with listening()` |
 
@@ -154,4 +154,4 @@ v0 12절의 일곱 가지와 v1 4절의 다섯 가지는 그대로다. 19절로 
 
 ## 5. 지금 할 일
 
-R4, R5 (11-04), R6, R7 (11-05) 끝. 다음은 R8 (여기서 push) → 4b.
+R4, R5 (11-04), R6, R7, R8 (11-05) 끝. R6 ~ R8 을 push 했다. 다음은 4b.

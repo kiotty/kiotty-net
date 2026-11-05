@@ -202,7 +202,9 @@ TEST(MemberPool, PoolBaseReferenceAllocatesAndReleasesThroughTheVirtualInterface
     void* block = base.allocate(60);
     ASSERT_NE(block, nullptr);
     EXPECT_TRUE(base.holds(block));
+    EXPECT_EQ(base.liveCount(), 1u);
     EXPECT_EQ(base.reallocate(block, 64), block);
     EXPECT_TRUE(base.release(block));
+    EXPECT_EQ(base.liveCount(), 0u);
     EXPECT_EQ(base.failureCount(), 0u);
 }

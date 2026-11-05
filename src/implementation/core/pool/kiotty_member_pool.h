@@ -20,6 +20,7 @@ namespace kiotty
         virtual bool   release(void* block) = 0;
         virtual bool   holds(const void* block) const = 0;
         virtual size_t failureCount() const = 0;
+        virtual size_t liveCount() const = 0;
 
     protected:
         ~PoolBase() = default;
@@ -33,6 +34,7 @@ namespace kiotty
         bool   release(void* block) override;
         bool   holds(const void* block) const override;
         size_t failureCount() const override;
+        size_t liveCount() const override;
 
     protected:
         ArenaPool(unsigned char* arena, const PoolClass* classes, size_t class_count);
@@ -60,6 +62,7 @@ namespace kiotty
         Region             _regions[POOL_MAX_CLASSES];
         size_t             _region_count;
         size_t             _failures;
+        size_t             _live;
         mutable std::mutex _mutex;
     };
 
@@ -78,6 +81,11 @@ namespace kiotty
         MemberPool()
             : ArenaPool(this->bytes, Layout::classes(), Layout::CLASS_COUNT)
         {
+        }
+
+        const unsigned char* arena() const
+        {
+            return this->bytes;
         }
     };
 

@@ -13,21 +13,28 @@ namespace kiotty
             return false;
         }
 
-        bool useTlsGlobalPool()
+        bool installTlsMemory(const TlsMemoryFunctions& functions)
         {
+            (void)functions;
             return false;
         }
 
-        size_t tlsPoolClassCount()
+        void warmTlsMemory()
         {
-            return 0;
         }
 
-        GlobalPoolUsage tlsPoolUsage(size_t index)
+        void attachTlsThread()
         {
-            (void)index;
-            GlobalPoolUsage usage = { 0, 0, 0, 0, 0 };
-            return usage;
+        }
+
+        void detachTlsThread()
+        {
+        }
+
+        bool tlsThreadStateFile(const char* file)
+        {
+            (void)file;
+            return false;
         }
 
         TlsProfile::TlsProfile()

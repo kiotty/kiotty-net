@@ -58,16 +58,19 @@ TEST(TlsLayout, EveryClassIsSixteenByteAlignedAndHasBlocksOnlyWithTls)
     EXPECT_GT(ClientTlsLayout::ARENA_BYTES, 0u);
 }
 
-TEST(TlsLayout, ServerLayoutScalesWithConnectionsPerServerAndClientLayoutHoldsOne)
+TEST(TlsLayout, GlobalLayoutHoldsOneThreadPerOwnerServerScalesWithConnectionsAndClientHoldsOne)
 {
     if (!MemoryLimits::TLS)
     {
         GTEST_SKIP() << "built with KIOTTY_NET_USE_TLS=OFF";
     }
     size_t per_server = MemoryLimits::CONNECTIONS_PER_SERVER;
-    EXPECT_EQ(blocksOf<GlobalTlsLayout>(0), 5096u);
-    EXPECT_EQ(blocksOf<ServerTlsLayout>(0), 381u + 149u * per_server);
-    EXPECT_EQ(blocksOf<ClientTlsLayout>(0), 381u + 149u);
+    size_t threads = MemoryLimits::OWNERS;
+    EXPECT_EQ(blocksOf<GlobalTlsLayout>(0), 5633u + 22u * threads);
+    EXPECT_EQ(blocksOf<ServerTlsLayout>(0), 387u + 159u * per_server);
+    EXPECT_EQ(blocksOf<ClientTlsLayout>(0), 387u + 159u);
+    EXPECT_EQ(blocksOf<GlobalTlsLayout>(10), 9u + 18u * threads);
+    EXPECT_EQ(blocksOf<ServerTlsLayout>(10), 3u + 6u * per_server);
     EXPECT_EQ(blocksOf<ServerTlsLayout>(16), 0u);
     EXPECT_EQ(blocksOf<GlobalTlsLayout>(17), 0u);
     EXPECT_EQ(blocksOf<ClientTlsLayout>(17), 1u);

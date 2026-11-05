@@ -23,6 +23,7 @@ namespace kiotty
         : _regions()
         , _region_count(0)
         , _failures(0)
+        , _live(0)
     {
         if (class_count > POOL_MAX_CLASSES)
         {
@@ -106,6 +107,12 @@ namespace kiotty
         return _failures;
     }
 
+    size_t ArenaPool::liveCount() const
+    {
+        std::lock_guard<std::mutex> guard(_mutex);
+        return _live;
+    }
+
     bool ArenaPool::available(const Region& region)
     {
         return region.free_next != 0 || region.untouched < region.block_count;
@@ -169,6 +176,7 @@ namespace kiotty
         {
             region.untouched += 1;
         }
+        _live += 1;
         return region.storage + index * region.block_bytes;
     }
 
@@ -189,5 +197,6 @@ namespace kiotty
         size_t index = static_cast<size_t>(address - region.storage) / region.block_bytes;
         std::memcpy(address, &region.free_next, sizeof(region.free_next));
         region.free_next = index + 1;
+        _live -= 1;
     }
 }

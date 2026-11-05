@@ -801,7 +801,7 @@ public:
     bool            connected() const;                                           // non-blocking recv(MSG_PEEK). 0 이면 false
     KiottyNetCode   handshake(uint32_t timeout_ms);                              // StreamClient 용. SEND 면 sendAll(cipherSend), RECEIVE 면 receiveSome(cipherReceive)
 private:
-    KiottyNetCode   flush(uint32_t timeout_ms);                                  // cipherSend 에 남은 것 (handshake 끝의 ticket, KeyUpdate 답장) 을 먼저 sendAll. 평문이면 아무것도 없다
+    KiottyNetCode   flush(uint32_t timeout_ms);                                  // cipherSend 에 남은 것 (KeyUpdate 답장. ticket 은 없다, 19.5) 을 먼저 sendAll. 평문이면 아무것도 없다
     ActiveSocket& _socket;
     TlsEngine&    _tls;
     StageBase&    _receive;
@@ -1597,14 +1597,15 @@ class GlobalPool { /* 같은 알고리즘. 멤버가 전부 static (.bss, 상수
 // tls/kiotty_tls_memory.h : 19.5. 전역은 static, thread 는 thread() 하나, Owner 는 멤버
 class TlsMemory
 {
-    PoolBase&               _pool;              // 파생의 서브풀. 생성자에서 묶는다
+    PoolBase&               _pool;              // 파생의 서브풀 (먼저 만들어진 base). 생성자에서 묶는다
+    Range*                  _range;             // 등록표의 내 칸. 생성자가 채우고 소멸자가 비운다
     static GlobalArena      s_global;           // GlobalPool<GlobalTlsTag, GlobalTlsLayout> 을 PoolBase 로 감싼 객체 하나
-    static Range            s_ranges[MAX_SERVERS + MAX_STREAM_CLIENTS + MAX_EVENT_CLIENTS];   // 등록표. Context::release 가 지운다
+    static Range            s_ranges[Limits::OWNERS];   // 등록표
     static std::atomic_flag s_ranges_lock;
-    struct Thread { PoolBase* current; PoolBase* last_hit; bool attached; };   // thread_local 하나. thread() 만 돌려준다
+    struct Thread { PoolBase* current; const Range* last_hit; bool attached; };   // thread_local 하나. thread() 만 돌려준다
 };
 template <class Layout>
-class OwnerTlsMemory : public TlsMemory { MemberPool<Layout> _pool; };
+class OwnerTlsMemory : private OwnerTlsPool<Layout>, public TlsMemory { };   // 서브풀 MemberPool<Layout> 은 OwnerTlsPool 의 멤버
 ```
 
 Connection 의 함수가 받는 것 (10번째 규칙의 "이 함수 호출 때 이 인자들이 필요하다"):
@@ -1669,68 +1670,88 @@ OpenSSL 의 allocator 는 process 에 하나 (`CRYPTO_set_mem_functions`) 다. �
 
 ```cpp
 // tls/kiotty_tls_memory.h. OpenSSL 헤더를 모른다. 함수 포인터의 시그니처만 OpenSSL 의 것 (size, file, line) 이다
-struct TlsMemoryFunctions                       // CRYPTO_set_mem_functions 에 그대로 넘기는 셋. backend 의 installTlsMemory() 가 받는다
+struct TlsMemoryFunctions                       // CRYPTO_set_mem_functions 에 그대로 넘기는 셋
 {
     void* (*allocate)(size_t bytes, const char* file, int line);
     void* (*reallocate)(void* block, size_t bytes, const char* file, int line);
     void  (*release)(void* block, const char* file, int line);
 };
 
+// backend (kiotty_openssl_tls.cpp / kiotty_stub_tls.cpp) 가 정의한다. stub 은 false 와 빈 함수
+bool installTlsMemory(const TlsMemoryFunctions& functions);   // 기본 malloc 이면 CRYPTO_set_mem_functions, 이미 우리 것이면 true, 다른 hook 이면 false (덮지 않는다). 늘 OPENSSL_init_ssl(OPENSSL_INIT_NO_ATEXIT)
+void warmTlsMemory();                           // RSA 1024 와 P-256 키를 만들어 자기 서명 인증서 → PEM (평문 + aes-256-cbc 암호) 왕복 → 상호 인증 handshake 를 TLS 1.3 / 1.2 로 BIO pair 위에서 한 번씩
+void attachTlsThread();                         // ERR_clear_error + RAND_bytes + RAND_priv_bytes
+void detachTlsThread();                         // OPENSSL_thread_stop
+bool tlsThreadStateFile(const char* file);      // file 이 OpenSSL 의 crypto/err/ 인가
+
 class TlsMemory
 {
 public:
-    // 전역 (process 에 하나). 전부 static
-    static TlsMemoryFunctions functions();      // Context::open → backend 가 CRYPTO_set_mem_functions(f.allocate, f.reallocate, f.release)
-    static bool               installed();      // hook 이 걸렸는가 (정적 링크 build)
-    static void               detachThread();   // IO Thread 끝. current 를 전역으로 되돌리고 backend 의 OPENSSL_thread_stop. Server::run 과 EventClient::run 의 끝 한 줄
-    static size_t             lateFrees();      // 어느 arena 에도 없는 주소의 free. 역참조하지 않고 센다
+    static TlsMemoryFunctions functions();
+    static bool               installGlobal();  // 한 번만 돈다 (atomic_flag). installTlsMemory → 걸렸으면 current 를 전역으로 두고 attachThread + warmTlsMemory. 결과를 돌려준다. 사이클 7 의 Context::open 이 부른다
+    static bool               installed();
+    static void               detachThread();   // current 를 전역으로, last_hit 을 비우고, installed 면 detachTlsThread
+    static size_t             lateFrees();      // 어느 arena 에도 없는 주소의 free / realloc. 역참조하지 않고 센다
+    static size_t             globalClassCount();
     static GlobalPoolUsage    globalUsage(size_t index);
+    static size_t             globalLiveBlocks();
 
-    // Owner 별
-    class Scope                                 // RAII. 이 thread 의 할당을 이 Owner 의 서브풀로. 생성자가 attachThread 도 한다. 소멸자가 이전 arena 를 복원한다
+    class Scope                                 // RAII. 이 thread 의 할당을 이 Owner 의 서브풀로. 생성자가 attachThread 도 한다
     {
     public:
-        explicit Scope(TlsMemory& owner);       // attachThread() → _previous 에 지금 것 → current = &owner._pool
+        explicit Scope(TlsMemory& owner);       // _previous = 지금 것 → attachThread() → 발행된 Owner 면 current = &owner._pool
         ~Scope();                               // current = &_previous
     private:
-        PoolBase& _previous;                    // 늘 있다. 전역 arena 도 PoolBase 객체라 nullptr 인 때가 없다
+        PoolBase& _previous;                    // 늘 있다. 전역 arena 도 PoolBase 객체다
     };
-    size_t failures() const;                    // 서브풀이 못 준 횟수. 그 handshake 만 실패했다
+
+    bool   published() const;                   // 등록표에 칸을 얻었는가. 못 얻었으면 (표가 가득, assert) Scope 가 current 를 바꾸지 않는다
+    size_t failures() const;                    // 서브풀이 못 준 횟수
+    size_t liveBlocks() const;                  // 서브풀의 살아 있는 블록 수 (PoolBase::liveCount)
 
 protected:
-    explicit TlsMemory(PoolBase& pool);         // 묶기만 한다. pool 은 아직 만들어지지 않았을 수 있다 (파생의 멤버). 여기서 읽지 않는다
-    void publish();                             // 파생 생성자의 본문에서. 등록표에 (begin, end, &_pool). release 순서로 발행
+    TlsMemory(PoolBase& pool, const unsigned char* arena, size_t arena_bytes);   // 묶고 등록표에 (begin, end, &pool) 을 발행. arena_bytes 0 (TLS OFF) 이면 발행하지 않는다
+    ~TlsMemory();                               // 등록표의 칸을 비운다 (pool 먼저 nullptr)
 
 private:
-    struct Thread { PoolBase* current; PoolBase* last_hit; bool attached; };   // 값이 바뀌므로 포인터. 처음은 &s_global, nullptr, false
-    struct Range  { const unsigned char* begin; const unsigned char* end; std::atomic<PoolBase*> pool; };
-    class GlobalArena : public PoolBase { /* GlobalPool<GlobalTlsTag, GlobalTlsLayout> 의 static 함수로 forward */ };
+    struct Range  { std::atomic<const unsigned char*> begin, end; std::atomic<PoolBase*> pool; };   // 쓰기는 s_ranges_lock 안, 읽기는 lock 없이 pool 을 acquire 로 먼저
+    struct Thread { PoolBase* current; const Range* last_hit; bool attached; };   // 처음은 &s_global, nullptr, false. 상수 초기화
+    class GlobalArena : public PoolBase { /* GlobalPool<GlobalTlsTag, GlobalTlsLayout> 의 static 함수로 forward. 파괴자 없음 */ };
 
     static Thread&  thread();                   // thread_local 을 돌려주는 유일한 자리
-    static void     attachThread();             // thread().attached 가 false 일 때만. current 가 전역인 채로 backend 의 ERR_clear_error + RAND_bytes (이 thread 의 OpenSSL 상태를 전역 arena 에)
-    static void*    allocate(size_t bytes, const char* file, int line);        // thread().current. 못 주면 nullptr 이고 failures++
-    static void*    reallocate(void* block, size_t bytes, const char* file, int line);   // block 의 arena 안에서 새로 꺼내 복사. nullptr 면 allocate
+    static void     attachThread();             // installed 이고 attached 가 false 일 때만. current 를 전역으로 둔 채 attachTlsThread
+    static void*    allocate(size_t bytes, const char* file, int line);        // 0 바이트는 nullptr. tlsThreadStateFile(file) 이면 전역, 아니면 thread().current. 못 주면 nullptr (그 pool 이 센다)
+    static void*    reallocate(void* block, size_t bytes, const char* file, int line);   // nullptr 면 allocate. 아니면 block 의 arena 안에서
     static void     release(void* block, const char* file, int line);          // arenaOf → release. 없으면 lateFrees++
     static PoolBase* arenaOf(const void* block); // last_hit → 등록표 → 전역. 비교는 std::less<const unsigned char*>
 
-    PoolBase&               _pool;
-    static GlobalArena      s_global;
-    static Range            s_ranges[MAX_SERVERS + MAX_STREAM_CLIENTS + MAX_EVENT_CLIENTS];   // 등록표. 칸 = Owner. Context::release 가 지운다
-    static std::atomic_flag s_ranges_lock;
+    PoolBase&                  _pool;
+    Range*                     _range;
+    static GlobalArena         s_global;
+    static Range               s_ranges[Limits::OWNERS];
+    static std::atomic_flag    s_ranges_lock;
+    static std::atomic_flag    s_install_lock;
+    static std::atomic<bool>   s_install_tried, s_installed;
+    static std::atomic<size_t> s_late_frees;
 };
 
 template <class Layout>
-class OwnerTlsMemory : public TlsMemory         // Server 는 ServerTlsLayout, client 둘은 ClientTlsLayout. TLS OFF 면 Layout 의 ARENA_BYTES 가 0
+struct OwnerTlsPool { MemberPool<Layout> pool; };
+
+template <class Layout>
+class OwnerTlsMemory : private OwnerTlsPool<Layout>, public TlsMemory   // Server 는 ServerTlsLayout, client 둘은 ClientTlsLayout. TLS OFF 면 ARENA_BYTES 0
 {
 public:
-    OwnerTlsMemory() : TlsMemory(_pool), _pool() { publish(); }
-private:
-    MemberPool<Layout> _pool;
+    OwnerTlsMemory() : OwnerTlsPool<Layout>(), TlsMemory(this->pool, this->pool.arena(), MemberPool<Layout>::ARENA_BYTES) {}
 };
 ```
 
 - 클래스가 둘인 이유: class template 의 static 멤버는 instantiation 마다 따로 생긴다. Server 와 client 의 Layout 이 다르므로 서브풀은 template 이어야 하고, 전역 arena 와 thread_local 은 하나여야 한다. 그래서 static 전부를 template 이 아닌 `TlsMemory` 에 두고, 서브풀 멤버만 `OwnerTlsMemory<Layout>` 이 든다.
-- `TlsMemory(_pool)` 은 아직 만들어지지 않은 멤버에 참조를 묶는 것인데, 묶기만 하고 읽지 않으면 적법하다. 정적 분석기가 "초기화 전 사용" 으로 볼 수 있으니 base 생성자가 `_pool` 을 건드리지 않는다는 것을 그 자리에 적는다.
+- 서브풀이 멤버가 아니라 private base (`OwnerTlsPool<Layout>`) 인 이유 (R8): 처음 안의 `OwnerTlsMemory() : TlsMemory(_pool), _pool()` 은 아직 생성이 시작되지 않은 `MemberPool<Layout>` 을 base 인 `PoolBase&` 로 바꾸는데, 이것은 묶기만 해도 정의되지 않은 동작이다 ([class.cdtor]/3). base 는 선언 순서대로 먼저 만들어지므로 서브풀을 앞의 base 에 두면 `TlsMemory` 의 생성자가 받을 때 이미 다 만들어져 있다 (base-from-member). 그래서 발행도 `publish()` 를 따로 부르지 않고 `TlsMemory` 의 생성자가 한다.
+- 등록표의 칸은 `TlsMemory` 의 소멸자가 비운다 (R8. 처음에는 `Context::release` 가 지우기로 했다). Owner 객체가 지워진 뒤 그 주소가 표에 남으면 같은 주소에 새로 잡힌 heap 메모리의 free 가 지워진 서브풀로 간다. 칸은 Owner 객체의 수명과 같다.
+- **OpenSSL 의 error queue 는 전역으로 보낸다 (R8).** thread 의 ERR 상태에는 칸 16 개마다 data 버퍼가 있고, OpenSSL 은 오류가 날 때 그 버퍼를 처음 잡고 (`ERR_vset_error` 의 1 KiB, `ERR_add_error_vdata` 의 81 B) 그 뒤로는 재사용한다. 이것이 Scope 안에서 처음 잡히면 그 Owner 의 서브풀에 남고, Owner 가 지워진 뒤 OpenSSL 이 거기에 쓴다. attachThread 에서 미리 채워도 `ERR_add_error_vdata` 는 칸의 STRING 표시가 없으면 새로 잡으므로 막지 못한다. 그래서 `allocate` 가 할당 자리의 file 을 보고 `crypto/err/` 이면 current 와 관계없이 전역 arena 에서 준다. OpenSSL 은 kiotty 가 혼자 쓰는 고정된 사본이고 (19.7), 다른 lazy thread 상태가 생기면 `GlobalStateStaysInTheGlobalArenaAfterAttachThread` 가 잡는다. file 이 nullptr (OPENSSL_NO_FILENAMES) 이면 current 다.
+- **profile 은 Owner 를 넘어 나누지 않는다.** OpenSSL 은 인증서의 공개키를 provider 쪽으로 처음 내보낼 때 그 사본을 X509 객체 안에 캐시한다. 그 할당은 그때의 current 로 가므로, Owner A 의 profile 을 Owner B 의 Scope 에서 handshake 하면 A 의 객체가 B 의 서브풀을 가리킨다 (B 가 먼저 지워지면 A 의 `SSL_CTX_free` 가 지워진 메모리를 읽는다. R8 의 첫 테스트가 그렇게 죽었다). 19.3 대로 profile 과 그 연결은 같은 Owner 이고 같은 Scope 안에서만 돈다.
+- 전역 arena 는 OpenSSL 전역 상태, 예열, thread 상태만 담는다. 연결은 담지 않는다 (Scope 밖의 handshake 는 전역 arena 를 바닥낸다. 예열의 연결은 하나씩 열고 닫는다).
 - detach 를 Scope 의 소멸자에 넣지 않는 이유: StreamClient 는 호출자 thread 에서 함수마다 Scope 를 만드는데, 소멸자가 `OPENSSL_thread_stop` 을 부르면 호출마다 이 thread 의 오류 큐와 DRBG 를 지우고 다음 호출의 attach 가 OS 의 entropy 를 다시 읽어 다시 만든다. IO Thread 의 콜백 안에서 StreamClient 를 부르면 (Scope 가 겹친다) 안쪽 소멸자가 Server 쪽이 쓰던 thread 상태를 지운다. 틀리지는 않지만 매번 낸다. 그래서 detach 는 "이 thread 의 OpenSSL 이 끝났다" 를 아는 자리, IO Thread 가 끝나는 run 의 끝 둘에만 있다. 사용자 thread 는 언제 끝나는지 라이브러리가 모르므로 detach 할 자리가 없다 (Windows 정적 링크에서는 그 thread 의 상태가 남는다. 사이클 6).
 
 | 자리 | Scope |
@@ -1740,7 +1761,7 @@ private:
 | 호출자 thread 에서 OpenSSL 을 부르는 API (StreamClient 의 connect / read / write / disconnect) | 함수마다 그 Owner 의 Scope |
 | `Context::open` | 전역 (Scope 없음). memory BIO 쌍으로 loopback handshake 를 한 번 돌려 lazy 전역 캐시를 전역 arena 에 만든다 |
 
-예열 (attachThread) 은 `ERR_clear_error()` 와 `RAND_bytes()` 한 번이다. Owner 서브풀에 전역 꼬리표 할당이 들어오지 않는지 계측 도구로 테스트한다. 지금 코드의 free 함수 셋 (`useTlsGlobalPool`, `tlsPoolClassCount`, `tlsPoolUsage`) 은 이 클래스의 static 이 된다.
+thread 예열 (attachThread) 은 `ERR_clear_error()`, `RAND_bytes()`, `RAND_priv_bytes()` 한 번이다. process 예열 (`warmTlsMemory`) 은 위 선언의 주석대로다. 인증서 파일 없이 lazy 전역 캐시 (provider 의 method store, decoder, RSA / EC / PBKDF2 / AES / ChaCha / HKDF / TLS1-PRF 의 fetch) 를 전역 arena 에 만든다. RSA 는 키 크기가 캐시의 종류를 바꾸지 않으므로 1024 bit 다 (security level 0 은 예열 SSL_CTX 에만). 이전의 free 함수 셋 (`useTlsGlobalPool`, `tlsPoolClassCount`, `tlsPoolUsage`) 과 `ProcessTlsLayout` 은 지웠다.
 
 OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_CACHE_OFF`, `SSL_OP_NO_RENEGOTIATION`, `SSL_OP_NO_COMPRESSION` (있음), `SSL_CTX_set_num_tickets(0)`, `SSL_CTX_set_max_cert_list(16 KiB)`, `SSL_CTX_set_verify_depth` (config). 상대가 보내는 양의 상한이 계측의 전제다.
 
@@ -1754,7 +1775,9 @@ OpenSSL 설정: `OPENSSL_INIT_NO_ATEXIT`, `SSL_MODE_RELEASE_BUFFERS`, `SSL_SESS_
 
 전역 상태는 처음 한 번 약 1 MB 다. profile 하나는 인증서를 읽는 동안 수십 KB, 열려 있는 동안 수백 B 다. 등급 합산으로 서브풀의 연결당 예약은 약 150 KiB 다.
 
-등급 목록은 `tests/measure/kiotty_measure_tls_memory.cpp` 의 계측이다. 할당마다 "전역 / profile / 연결" 꼬리표와 크기 등급 (32, 48, 64, 96, … 1.5 배 간격) 을 기록하고, 연결 N 개를 handshake 와 최대 길이 왕복까지 같이 진행시켜 동시 최대를 만든다. 인증서 (RSA 2048 / 4096, ECDSA P-256) × TLS 1.2 / 1.3 × client 인증 여덟 경우와 Stage 4 / 16 / 64 KiB 의 최악이 `GlobalTlsLayout`, `ServerTlsLayout`, `ClientTlsLayout` 이 된다. OpenSSL 을 올리거나 설정 범위를 넓히면 도구를 다시 돌린다. 인증서는 `tests/measure/generate_certs.sh` 가 만든다.
+등급 목록은 `tests/measure/kiotty_measure_tls_memory.cpp` 의 계측이다. 할당마다 "전역 / thread / profile / 연결" 꼬리표와 크기 등급 (32, 48, 64, 96, … 1.5 배 간격) 을 기록하고, 연결 N 개를 handshake 와 최대 길이 왕복까지 같이 진행시켜 동시 최대를 만든다. 인증서 (RSA 2048 / 4096, ECDSA P-256) × TLS 1.2 / 1.3 × client 인증 여덟 경우와 Stage 4 / 16 / 64 KiB 의 최악이 `GlobalTlsLayout`, `ServerTlsLayout`, `ClientTlsLayout` 이 된다. OpenSSL 을 올리거나 설정 범위를 넓히면 도구를 다시 돌린다. 인증서는 `tests/measure/generate_certs.sh` 가 만든다.
+
+R8 의 계측: 도구가 시작할 때 `installTlsMemory` + `attachTlsThread` + `warmTlsMemory` 를 "warm" 꼬리표로 돌리고, 새 thread 하나에서 attach 와 data 1000 B 의 오류 16 개를 "thread" 꼬리표로 돌린다 (ERR 칸 16 개가 전부 1 KiB 등급을 잡는 최악). 표는 `Blocks::count(global, thread, profile, connection)` 이고 `GlobalTlsBlocks` 는 `global + thread × Limits::OWNERS` (run 을 부르는 IO thread 와 StreamClient 를 부르는 thread 를 Owner 하나에 하나로 본다), `ServerTlsBlocks` 는 `profile + connection × CONNECTIONS_PER_SERVER`, `ClientTlsBlocks` 는 `profile + connection` 이다. 값은 항목마다 R6 표, MSVC (Windows), gcc (Linux) 계측의 최대다. Stage 는 R6 부터 compile time N (기본 16 KiB) 이라 64 KiB 계측은 이 build 에서 돌지 않는다. thread 하나는 약 31 KB 다.
 
 ### 19.7 OpenSSL 사본
 
