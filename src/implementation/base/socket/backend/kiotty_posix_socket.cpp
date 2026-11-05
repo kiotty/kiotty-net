@@ -150,7 +150,7 @@ namespace kiotty
                 return info;
             }
 
-            SocketCode waitWritable(int descriptor, uint32_t timeout_ms)
+            SocketCode waitFor(int descriptor, short events, uint32_t timeout_ms)
             {
                 uint64_t deadline = monotonicMs() + timeout_ms;
                 for (;;)
@@ -164,7 +164,7 @@ namespace kiotty
                     }
                     pollfd entry;
                     entry.fd = descriptor;
-                    entry.events = POLLOUT;
+                    entry.events = events;
                     entry.revents = 0;
                     int ready = ::poll(&entry, 1, wait_ms);
                     if (ready > 0)
@@ -271,7 +271,7 @@ namespace kiotty
                 {
                     return toSocketCode(started);
                 }
-                SocketCode waited = waitWritable(descriptor, timeout_ms);
+                SocketCode waited = waitFor(descriptor, POLLOUT, timeout_ms);
                 if (waited != SocketCode::SUCCESS)
                 {
                     return waited;
@@ -350,6 +350,52 @@ namespace kiotty
                     return TransferResult::failure(lastSocketCode());
                 }
             }
+        }
+
+        TransferResult ActiveSocket::peek(void* data, size_t length)
+        {
+            if (!valid())
+            {
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+            }
+            for (;;)
+            {
+                ssize_t received = ::recv(descriptorOf(_handle), data, length, MSG_PEEK);
+                if (received > 0)
+                {
+                    return TransferResult::success(static_cast<size_t>(received));
+                }
+                if (received == 0 && length > 0)
+                {
+                    return TransferResult::failure(SocketCode::CLOSED);
+                }
+                if (received == 0)
+                {
+                    return TransferResult::success(static_cast<size_t>(0));
+                }
+                if (errno != EINTR)
+                {
+                    return TransferResult::failure(lastSocketCode());
+                }
+            }
+        }
+
+        SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+        {
+            if (!valid())
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            return waitFor(descriptorOf(_handle), POLLIN, timeout_ms);
+        }
+
+        SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
+        {
+            if (!valid())
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            return waitFor(descriptorOf(_handle), POLLOUT, timeout_ms);
         }
 
         SocketCode ActiveSocket::shutdown()

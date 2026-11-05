@@ -48,7 +48,7 @@ src/
             event/      kiotty_io_action.h (as.write.length 추가), kiotty_event.h (IoKind::WORK_READY 추가), kiotty_event_listener.h (그대로),
                         backend/kiotty_iocp_event_listener.cpp (있음), kiotty_epoll_event_listener.cpp, kiotty_kqueue_*, kiotty_io_uring_*
             tls/        kiotty_tls_profile.h, kiotty_tls_engine.h, backend/kiotty_openssl_tls.cpp | kiotty_stub_tls.cpp
-            stream/     kiotty_connection_stream.h/.cpp                 동기 통로. 참조 넷을 드는 값. Connection (WORKING) 과 StreamClient 가 쓰는 자리에서 만든다
+            stream/     kiotty_connection_stream.h/.cpp, kiotty_input_file.h   동기 통로. 참조 넷을 드는 값. Connection (WORKING) 과 StreamClient 가 쓰는 자리에서 만든다
                         backend/kiotty_posix_file.cpp, kiotty_windows_file.cpp   writeFile 의 파일 열기 / 읽기
             connection/ kiotty_io_source.h, kiotty_sender.h (static 함수 둘), kiotty_work_context.h,
                         kiotty_connection.h/.cpp, kiotty_acceptor.h/.cpp, kiotty_connection_host.h/.cpp
@@ -853,6 +853,16 @@ KiottyNetCode Connection::closeStream(int32_t generation, const KiottyNetConnect
 - Owner close / IoLoop shutdown 이 WORKING 인 연결에 하는 것은 `apply(CLOSE)` (onDisconnected, CLOSING) 와 `shutdown()` (FIN) 이다. socket.close 는 settle 이 `!working()` 을 본 뒤에 한다. worker 의 Stream read 는 0 (CLOSED), write 는 오류를 받아 끝난다. `isConnectionStreamOpen` 은 CLOSING 이면 false.
 - 평문의 Stream write 는 복사 0 이다. 큰 것은 writeFile 로 send_capacity 씩 읽어 보낸다. TLS 는 encode 한 번이 어느 설계에서도 피할 수 없는 복사다.
 - `KIOTTY_BUSY` ("IO Thread 에서 부르면") 는 Owner 의 readStream 등이 `_loop.isIoThread()` 로 먼저 거른다. Connection 과 ConnectionStream 은 thread 를 모른다.
+
+ConnectionStream 의 세부 (4b):
+
+- **timeout.** `timeout_ms` 는 그 함수 호출 전체의 한도이고 0 이면 없다. 시작할 때 `Deadline` (core/kiotty_clock.h) 을 하나 만들고, 기다리는 자리마다 남은 시간으로 기다린다. 남은 시간이 없으면 `KIOTTY_TIMEOUT` 이다. handshake 의 timeout 은 `KIOTTY_TLS_HANDSHAKE_TIMEOUT`.
+- **기다림.** socket 은 non-blocking 그대로다. `ActiveSocket` 에 `waitReadable(timeout_ms)` / `waitWritable(timeout_ms)` (POSIX 는 poll, Windows 는 select) 와 `peek` (`recv(MSG_PEEK)`) 을 더했다. send / receive 가 WOULD_BLOCK 이면 기다린 뒤 다시 한다. IOCP 에 묶인 socket 이어도 WORKING 동안에는 걸린 overlapped 요청이 없으므로 동기 호출을 섞지 않는다.
+- **read.** buffer 가 nullptr 이거나 length 0 이면 INVALID_ARGUMENT. flush → receive Stage 에 남은 것을 최대 length 만큼 → (TLS) cipherReceive 에 남은 것을 decode → socket. 평문은 socket 에서 사용자 buffer 로 바로 recv 한다 (복사 0). TLS 는 cipherReceive 로 recv 하고 receive Stage 로 decode 한 뒤 복사한다. decode 가 KeyUpdate 답장을 만들면 그 자리에서 flush 한다. 결과는 바이트가 있으면 SUCCESS, peer 가 닫으면 `PEER_CLOSED` (0 바이트), TLS 레코드가 틀리면 `TLS_RECORD_ERROR`. length 는 `INT32_MAX` 로 자른다 (`KiottyNetResult::bytes`).
+- **write.** 전부 보내야 SUCCESS 다. timeout 이나 오류면 `bytes` 가 그때까지 보낸 평문 바이트 수다. TLS 는 send Stage 의 capacity 씩 encode 하고 매번 cipherSend 를 다 보낸다 (TlsEngine 의 send capacity 와 같아야 한다).
+- **writeFile.** `InputFile` (stream/kiotty_input_file.h, backend 는 POSIX `open` / `fstat` / `pread`, Windows `CreateFileW` (UTF-8 → UTF-16, 경로는 `KIOTTY_MAX_PATH_LENGTH` 안) / `GetFileSizeEx` / `ReadFile` 의 offset) 로 열고, `[offset, offset + length)` 가 파일 안이 아니면 INVALID_ARGUMENT. 파일이 없거나 일반 파일이 아니거나 읽다가 짧아져도 INVALID_ARGUMENT. send Stage 를 capacity 씩의 읽기 버퍼로 쓰고 write 와 같은 길로 보낸 뒤 비운다. 그래서 send Stage 에 데이터가 남아 있으면 `BUSY` 다 (WORKING 동안 send Stage 는 worker 의 것이고 closeStream(WRITE) 만 거기에 쓴다).
+- **connected.** receive Stage 에 남은 것이 있으면 true. 아니면 1 바이트 peek: 데이터가 있거나 WOULD_BLOCK 이면 true, 0 (FIN) 이나 오류면 false.
+- **handshake.** engine 이 open 되어 있지 않으면 INVALID_ARGUMENT. SEND 면 flush, RECEIVE 면 기다렸다가 cipherReceive 로 recv, DONE 이면 SUCCESS, FAILED 면 engine 의 lastCode.
 
 ### 9.8 ConnectionHost, notify, broadcast
 

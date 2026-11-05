@@ -148,6 +148,36 @@ namespace kiotty
                 return info;
             }
 
+            SocketCode waitReady(SOCKET socket, bool writing, uint32_t timeout_ms)
+            {
+                fd_set ready;
+                fd_set failed;
+                FD_ZERO(&ready);
+                FD_ZERO(&failed);
+                FD_SET(socket, &ready);
+                FD_SET(socket, &failed);
+                timeval limit;
+                limit.tv_sec = static_cast<long>(timeout_ms / 1000);
+                limit.tv_usec = static_cast<long>((timeout_ms % 1000) * 1000);
+                timeval* wait = &limit;
+                if (timeout_ms == 0)
+                {
+                    wait = nullptr;
+                }
+                fd_set* readable = writing ? nullptr : &ready;
+                fd_set* writable = writing ? &ready : nullptr;
+                int found = ::select(0, readable, writable, &failed, wait);
+                if (found == 0)
+                {
+                    return SocketCode::TIMEOUT;
+                }
+                if (found < 0)
+                {
+                    return lastSocketCode();
+                }
+                return SocketCode::SUCCESS;
+            }
+
             SocketCode waitConnected(SOCKET socket, uint32_t timeout_ms)
             {
                 fd_set writable;
@@ -321,6 +351,43 @@ namespace kiotty
                 return TransferResult::failure(SocketCode::CLOSED);
             }
             return TransferResult::success(static_cast<size_t>(received));
+        }
+
+        TransferResult ActiveSocket::peek(void* data, size_t length)
+        {
+            if (!valid())
+            {
+                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+            }
+            char* bytes = static_cast<char*>(data);
+            int received = ::recv(socketOf(_handle), bytes, clampLength(length), MSG_PEEK);
+            if (received == SOCKET_ERROR)
+            {
+                return TransferResult::failure(lastSocketCode());
+            }
+            if (received == 0 && length > 0)
+            {
+                return TransferResult::failure(SocketCode::CLOSED);
+            }
+            return TransferResult::success(static_cast<size_t>(received));
+        }
+
+        SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+        {
+            if (!valid())
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            return waitReady(socketOf(_handle), false, timeout_ms);
+        }
+
+        SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
+        {
+            if (!valid())
+            {
+                return SocketCode::INVALID_ARGUMENT;
+            }
+            return waitReady(socketOf(_handle), true, timeout_ms);
         }
 
         SocketCode ActiveSocket::shutdown()

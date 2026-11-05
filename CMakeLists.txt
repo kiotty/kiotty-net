@@ -46,6 +46,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/tls/kiotty_tls_engine.cpp
     src/implementation/base/tls/backend/kiotty_openssl_tls.cpp
     src/implementation/base/tls/backend/kiotty_stub_tls.cpp
+    src/implementation/base/stream/kiotty_connection_stream.cpp
+    src/implementation/base/stream/backend/kiotty_posix_file.cpp
+    src/implementation/base/stream/backend/kiotty_windows_file.cpp
 )
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})

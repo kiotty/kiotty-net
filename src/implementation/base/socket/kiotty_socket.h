@@ -40,6 +40,9 @@ namespace kiotty
             SocketCode     setNoDelay(bool on);
             TransferResult send(const void* data, size_t length);
             TransferResult receive(void* data, size_t length);
+            TransferResult peek(void* data, size_t length);
+            SocketCode     waitReadable(uint32_t timeout_ms);
+            SocketCode     waitWritable(uint32_t timeout_ms);
             SocketCode     shutdown();
             void           close();
 
