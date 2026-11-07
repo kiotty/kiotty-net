@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_TLS_PROFILE_H)
-#define KIOTTY_TLS_PROFILE_H
+#pragma once
 
 #include "kiotty_net_base.h"
 
@@ -10,7 +9,7 @@ struct ssl_ctx_st;
 
 namespace kiotty::net::implementation
 {
-    static const uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 10000;
+    inline constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MILLISECONDS = 10000;
 
     bool tlsSupported();
 
@@ -39,5 +38,3 @@ namespace kiotty::net::implementation
         bool        _verify_hostname;
     };
 }
-
-#endif

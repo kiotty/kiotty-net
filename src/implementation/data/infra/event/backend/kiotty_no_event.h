@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_NO_EVENT_H)
-#define KIOTTY_NO_EVENT_H
+#pragma once
 
 #if !defined(_WIN32) && !defined(__linux__)
 
@@ -24,7 +23,5 @@ namespace kiotty::net::implementation
     {
     }
 }
-
-#endif
 
 #endif

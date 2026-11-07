@@ -72,15 +72,15 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/socket/backend/kiotty_windows_passive_socket.cpp
     src/implementation/data/infra/socket/backend/kiotty_windows_socket_transfer.cpp
     src/implementation/domain/entity/kiotty_io_action.cpp
-    src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
-    src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
-    src/implementation/base/event/backend/kiotty_no_event_listener.cpp
-    src/implementation/base/tls/kiotty_tls_engine.cpp
-    src/implementation/base/tls/backend/kiotty_openssl_tls.cpp
-    src/implementation/base/tls/backend/kiotty_stub_tls.cpp
+    src/implementation/data/infra/event/backend/kiotty_epoll_event_listener.cpp
+    src/implementation/data/infra/event/backend/kiotty_iocp_event_listener.cpp
+    src/implementation/data/infra/event/backend/kiotty_no_event_listener.cpp
+    src/implementation/data/infra/tls/kiotty_tls_engine.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_tls.cpp
+    src/implementation/data/infra/tls/backend/kiotty_stub_tls.cpp
     src/implementation/base/stream/kiotty_connection_stream.cpp
-    src/implementation/base/stream/backend/kiotty_posix_file.cpp
-    src/implementation/base/stream/backend/kiotty_windows_file.cpp
+    src/implementation/data/infra/file/backend/kiotty_posix_file.cpp
+    src/implementation/data/infra/file/backend/kiotty_windows_file.cpp
     src/implementation/base/connection/kiotty_connection.cpp
     src/implementation/base/context/kiotty_owner.cpp
 )

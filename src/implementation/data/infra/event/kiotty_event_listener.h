@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_EVENT_LISTENER_H)
-#define KIOTTY_EVENT_LISTENER_H
+#pragma once
 
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
@@ -8,11 +7,11 @@
 #include "core/kiotty_span.h"
 
 #if defined(_WIN32)
-#include "base/event/backend/kiotty_iocp_event.h"
+#include "data/infra/event/backend/kiotty_iocp_event.h"
 #elif defined(__linux__)
-#include "base/event/backend/kiotty_epoll_event.h"
+#include "data/infra/event/backend/kiotty_epoll_event.h"
 #else
-#include "base/event/backend/kiotty_no_event.h"
+#include "data/infra/event/backend/kiotty_no_event.h"
 #endif
 
 #include <cstddef>
@@ -59,5 +58,3 @@ namespace kiotty::net::implementation
         alignas(STORAGE_ALIGN) unsigned char _storage[STORAGE_SIZE];
     };
 }
-
-#endif

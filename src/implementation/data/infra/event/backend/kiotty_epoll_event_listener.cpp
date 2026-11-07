@@ -1,7 +1,7 @@
 #if defined(__linux__)
 
 #include "data/infra/error/kiotty_socket_error.h"
-#include "base/event/kiotty_event_listener.h"
+#include "data/infra/event/kiotty_event_listener.h"
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -126,9 +126,13 @@ namespace kiotty::net::implementation
                 return SocketCode::SUCCESS;
             case IoActionKind::ACCEPT:
                 return SocketCode::SUCCESS;
-            default:
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return SocketCode::INVALID_ARGUMENT;
             }
+            return SocketCode::INVALID_ARGUMENT;
         }
 
         int sendFlags()
@@ -151,8 +155,7 @@ namespace kiotty::net::implementation
 
         SocketCode watch(EventListenerState& state, IoEvent& event)
         {
-            epoll_event interest;
-            std::memset(&interest, 0, sizeof(interest));
+            epoll_event interest{};
             interest.events = interestOf(event.action);
             interest.data.ptr = &event;
             int operation = EPOLL_CTL_ADD;
@@ -227,9 +230,15 @@ namespace kiotty::net::implementation
                 return sendRest(event);
             case IoActionKind::ACCEPT:
                 return SocketCode::SUCCESS;
-            default:
+            case IoActionKind::READ:
+            case IoActionKind::READ_UNTIL:
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return receiveOnce(event);
             }
+            return receiveOnce(event);
         }
 
         IoKind kindOf(const IoAction& action)
@@ -240,9 +249,15 @@ namespace kiotty::net::implementation
                 return IoKind::ACCEPT;
             case IoActionKind::WRITE:
                 return IoKind::SEND;
-            default:
+            case IoActionKind::READ:
+            case IoActionKind::READ_UNTIL:
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return IoKind::RECEIVE;
             }
+            return IoKind::RECEIVE;
         }
 
         IoCompletion completionOf(IoEvent& event, SocketCode code)
@@ -322,53 +337,72 @@ namespace kiotty::net::implementation
             return static_cast<int>(whole.count());
         }
 
-        size_t poll(EventListenerState& state, size_t room, uint32_t timeout_milliseconds)
+        size_t collect(EventListenerState& state, int ready)
         {
-            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_milliseconds);
-            int limit = -1;
-            if (timeout_milliseconds != EventListener::WAIT_FOREVER)
+            size_t count = 0;
+            for (int i = 0; i < ready; ++i)
             {
-                limit = remainingMilliseconds(deadline);
-            }
-            for (;;)
-            {
-                int ready = ::epoll_wait(state.epoll, state.entries, static_cast<int>(room), limit);
-                if (ready < 0 && errno != EINTR)
+                void* const tag = state.entries[i].data.ptr;
+                if (tag == nullptr)
                 {
-                    return 0;
-                }
-                size_t count = 0;
-                for (int i = 0; i < ready; ++i)
-                {
-                    void* tag = state.entries[i].data.ptr;
-                    if (tag == nullptr)
-                    {
-                        clearWake(state);
-                        state.completions[count] = IoCompletion::wake();
-                        count += 1;
-                        continue;
-                    }
-                    IoEvent& event = *static_cast<IoEvent*>(tag);
-                    bool completed = handle(state, event, state.completions[count]);
-                    if (completed)
-                    {
-                        count += 1;
-                    }
-                }
-                if (count > 0)
-                {
-                    return count;
-                }
-                if (timeout_milliseconds == EventListener::WAIT_FOREVER)
-                {
+                    clearWake(state);
+                    state.completions[count] = IoCompletion::wake();
+                    count += 1;
                     continue;
                 }
-                limit = remainingMilliseconds(deadline);
-                if (limit == 0)
-                {
-                    return 0;
-                }
+                IoEvent& event = *static_cast<IoEvent*>(tag);
+                const bool completed = handle(state, event, state.completions[count]);
+                if (completed) { count += 1; }
             }
+            return count;
+        }
+
+        size_t poll(EventListenerState& state, size_t room, uint32_t timeout_milliseconds)
+        {
+            using Clock = std::chrono::steady_clock;
+            const bool forever = timeout_milliseconds == EventListener::WAIT_FOREVER;
+            const Clock::time_point deadline = Clock::now() + std::chrono::milliseconds(timeout_milliseconds);
+            int limit = forever ? -1 : remainingMilliseconds(deadline);
+            for (;;)
+            {
+                const int ready = ::epoll_wait(state.epoll, state.entries, static_cast<int>(room), limit);
+                if (ready < 0 && errno != EINTR) { return 0; }
+                const size_t count = collect(state, ready);
+                if (count > 0) { return count; }
+                if (forever) { continue; }
+                limit = remainingMilliseconds(deadline);
+                if (limit == 0) { return 0; }
+            }
+        }
+
+        SocketCode allocate(EventListenerState& state, size_t completion_capacity)
+        {
+            state.entries = new (std::nothrow) epoll_event[completion_capacity];
+            state.completions = new (std::nothrow) IoCompletion[completion_capacity];
+            if (state.entries == nullptr || state.completions == nullptr) { return SocketCode::OUT_OF_RESOURCE; }
+            return SocketCode::SUCCESS;
+        }
+
+        SocketCode createHandles(EventListenerState& state)
+        {
+            state.epoll = ::epoll_create1(EPOLL_CLOEXEC);
+            if (state.epoll < 0) { return lastSocketCode(); }
+            state.wake = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+            if (state.wake < 0) { return lastSocketCode(); }
+            epoll_event interest{};
+            interest.events = EPOLLIN;
+            interest.data.ptr = nullptr;
+            const int added = ::epoll_ctl(state.epoll, EPOLL_CTL_ADD, state.wake, &interest);
+            if (added != 0) { return lastSocketCode(); }
+            return SocketCode::SUCCESS;
+        }
+
+        SocketCode admit(EventListenerState& state, IoEvent& event, const IoAction& action, IoPayload payload)
+        {
+            if (state.epoll < 0) { return SocketCode::CLOSED; }
+            if (!attached(event) || !belongsTo(event, state)) { return SocketCode::INVALID_ARGUMENT; }
+            if (event.pending) { return SocketCode::BUSY; }
+            return checkRequest(action, payload);
         }
     }
 
@@ -404,44 +438,15 @@ namespace kiotty::net::implementation
     SocketCode EventListener::open(size_t completion_capacity)
     {
         EventListenerState& state = stateOf(_storage);
-        if (state.epoll >= 0)
-        {
-            return SocketCode::INVALID_ARGUMENT;
-        }
-        if (completion_capacity == 0 || completion_capacity > static_cast<size_t>(INT_MAX))
-        {
-            return SocketCode::INVALID_ARGUMENT;
-        }
-        state.entries = new (std::nothrow) epoll_event[completion_capacity];
-        state.completions = new (std::nothrow) IoCompletion[completion_capacity];
-        if (state.entries == nullptr || state.completions == nullptr)
+        if (state.epoll >= 0) { return SocketCode::INVALID_ARGUMENT; }
+        const bool sized = completion_capacity > 0 && completion_capacity <= static_cast<size_t>(INT_MAX);
+        if (!sized) { return SocketCode::INVALID_ARGUMENT; }
+        SocketCode code = allocate(state, completion_capacity);
+        if (code == SocketCode::SUCCESS) { code = createHandles(state); }
+        if (code != SocketCode::SUCCESS)
         {
             close();
-            return SocketCode::OUT_OF_RESOURCE;
-        }
-        state.epoll = ::epoll_create1(EPOLL_CLOEXEC);
-        if (state.epoll < 0)
-        {
-            SocketCode failed = lastSocketCode();
-            close();
-            return failed;
-        }
-        state.wake = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (state.wake < 0)
-        {
-            SocketCode failed = lastSocketCode();
-            close();
-            return failed;
-        }
-        epoll_event interest;
-        std::memset(&interest, 0, sizeof(interest));
-        interest.events = EPOLLIN;
-        interest.data.ptr = nullptr;
-        if (::epoll_ctl(state.epoll, EPOLL_CTL_ADD, state.wake, &interest) != 0)
-        {
-            SocketCode failed = lastSocketCode();
-            close();
-            return failed;
+            return code;
         }
         state.capacity = completion_capacity;
         state.generation += 1;
@@ -514,38 +519,18 @@ namespace kiotty::net::implementation
     SocketCode EventListener::submit(IoEvent& event, const IoAction& action, IoPayload payload)
     {
         EventListenerState& state = stateOf(_storage);
-        if (state.epoll < 0)
-        {
-            return SocketCode::CLOSED;
-        }
-        if (!attached(event) || !belongsTo(event, state))
-        {
-            return SocketCode::INVALID_ARGUMENT;
-        }
-        if (event.pending)
-        {
-            return SocketCode::BUSY;
-        }
-        SocketCode checked = checkRequest(action, payload);
-        if (checked != SocketCode::SUCCESS)
-        {
-            return checked;
-        }
+        const SocketCode admitted = admit(state, event, action, payload);
+        if (admitted != SocketCode::SUCCESS) { return admitted; }
         arm(event, action, payload);
         SocketCode started = SocketCode::WOULD_BLOCK;
-        if (action.kind == IoActionKind::WRITE)
+        if (action.kind == IoActionKind::WRITE) { started = sendRest(event); }
+        if (started != SocketCode::WOULD_BLOCK)
         {
-            started = sendRest(event);
+            queueReady(state, event, started);
+            return SocketCode::SUCCESS;
         }
-        if (started == SocketCode::WOULD_BLOCK)
-        {
-            started = watch(state, event);
-            if (started == SocketCode::SUCCESS)
-            {
-                return SocketCode::SUCCESS;
-            }
-        }
-        queueReady(state, event, started);
+        const SocketCode watched = watch(state, event);
+        if (watched != SocketCode::SUCCESS) { queueReady(state, event, watched); }
         return SocketCode::SUCCESS;
     }
 

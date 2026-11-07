@@ -1,7 +1,7 @@
 #if !defined(_WIN32)
 
 #include "data/infra/error/kiotty_socket_error.h"
-#include "base/stream/kiotty_input_file.h"
+#include "data/infra/file/kiotty_input_file.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -86,6 +86,24 @@ namespace kiotty::net::implementation
             }
             return ::send(socket, buffer, static_cast<size_t>(loaded), 0);
 #endif
+        }
+
+        Result<uint64_t, SocketCode> sendPiece(int out, int in, uint64_t position, uint64_t left)
+        {
+            using Moved = Result<uint64_t, SocketCode>;
+            const size_t piece = left < SEND_CHUNK_BYTES ? static_cast<size_t>(left) : SEND_CHUNK_BYTES;
+            const ssize_t moved = sendRange(out, in, position, piece);
+            if (moved > 0) { return Moved::success(static_cast<uint64_t>(moved)); }
+            if (moved == 0) { return Moved::failure(SocketCode::INVALID_ARGUMENT); }
+            if (errno == EINTR) { return Moved::success(0); }
+            if (errno != EAGAIN && errno != EWOULDBLOCK) { return Moved::failure(lastSocketCode()); }
+            return Moved::failure(SocketCode::WOULD_BLOCK);
+        }
+
+        SocketCode awaitWritable(const ActiveSocket& socket, const Deadline& deadline)
+        {
+            if (deadline.expired()) { return SocketCode::TIMEOUT; }
+            return implementation::waitWritable(socket, deadline.remaining());
         }
     }
 
@@ -183,49 +201,22 @@ namespace kiotty::net::implementation
         return _handle;
     }
 
-    SocketCode sendFile(ActiveSocket& socket, InputFile& file, uint64_t offset, uint64_t length, const Deadline& deadline, uint64_t& sent)
+    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range, const Deadline& deadline)
     {
-        sent = 0;
-        if (!socket.valid() || !file.valid())
-        {
-            return SocketCode::INVALID_ARGUMENT;
-        }
+        if (!socket.valid() || !file.valid()) { return SocketCode::INVALID_ARGUMENT; }
 #if defined(__linux__)
-        SigpipeBlock block;
+        const SigpipeBlock block;
 #endif
-        int out = static_cast<int>(socket.handle());
-        int in = descriptorOf(file.handle());
-        while (sent < length)
+        const int out = static_cast<int>(socket.handle());
+        const int in = descriptorOf(file.handle());
+        uint64_t sent = 0;
+        while (sent < range.length)
         {
-            uint64_t left = length - sent;
-            size_t piece = left < SEND_CHUNK_BYTES ? static_cast<size_t>(left) : SEND_CHUNK_BYTES;
-            ssize_t moved = sendRange(out, in, offset + sent, piece);
-            if (moved > 0)
-            {
-                sent += static_cast<uint64_t>(moved);
-                continue;
-            }
-            if (moved == 0)
-            {
-                return SocketCode::INVALID_ARGUMENT;
-            }
-            if (errno == EINTR)
-            {
-                continue;
-            }
-            if (errno != EAGAIN && errno != EWOULDBLOCK)
-            {
-                return lastSocketCode();
-            }
-            if (deadline.expired())
-            {
-                return SocketCode::TIMEOUT;
-            }
-            SocketCode waited = implementation::waitWritable(socket, deadline.remaining());
-            if (waited != SocketCode::SUCCESS)
-            {
-                return waited;
-            }
+            const Result<uint64_t, SocketCode> moved = sendPiece(out, in, range.offset + sent, range.length - sent);
+            if (moved) { sent += moved.value; continue; }
+            if (moved.code != SocketCode::WOULD_BLOCK) { return moved.code; }
+            const SocketCode waited = awaitWritable(socket, deadline);
+            if (waited != SocketCode::SUCCESS) { return waited; }
         }
         return SocketCode::SUCCESS;
     }

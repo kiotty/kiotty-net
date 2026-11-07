@@ -1,8 +1,8 @@
 #if !defined(KIOTTY_TEST_TLS_H)
 #define KIOTTY_TEST_TLS_H
 
-#include "base/tls/kiotty_tls_engine.h"
-#include "base/tls/kiotty_tls_profile.h"
+#include "data/infra/tls/kiotty_tls_engine.h"
+#include "data/infra/tls/kiotty_tls_profile.h"
 #include "core/kiotty_stage.h"
 #include "data/datasource/kiotty_memory_limits.h"
 

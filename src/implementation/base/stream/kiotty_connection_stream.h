@@ -3,7 +3,8 @@
 
 #include "data/infra/socket/kiotty_passive_socket.h"
 #include "data/infra/socket/kiotty_socket_transfer.h"
-#include "base/tls/kiotty_tls_engine.h"
+#include "data/infra/tls/kiotty_tls_engine.h"
+#include "data/infra/tls/kiotty_tls_pipe.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_stage.h"
 #include "kiotty_net_base.h"
@@ -37,6 +38,7 @@ namespace kiotty::net::implementation
 
         ActiveSocket& _socket;
         TlsEngine&    _tls;
+        TlsPipe       _pipe;
         StageBase&    _receive;
         StageBase&    _send;
     };

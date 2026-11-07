@@ -1,7 +1,6 @@
-#if !defined(KIOTTY_TLS_ENGINE_H)
-#define KIOTTY_TLS_ENGINE_H
+#pragma once
 
-#include "base/tls/kiotty_tls_profile.h"
+#include "data/infra/tls/kiotty_tls_profile.h"
 #include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "data/datasource/kiotty_memory_layout.h"
@@ -21,6 +20,14 @@ namespace kiotty::net::implementation
 
     size_t tlsCipherBound(size_t plain_length);
     size_t tlsCipherCapacity(size_t plain_capacity);
+
+    struct TlsFailure
+    {
+        const char*   message;
+        KiottyNetCode code;
+    };
+
+    class TlsPipe;
 
     class TlsEngine
     {
@@ -43,15 +50,8 @@ namespace kiotty::net::implementation
         DecodeResult decode(StageBase& plain);
         DecodeResult decode(char* buffer, size_t length);
         void         encode(KiottyNetSpan plain);
-        TlsStep      write(KiottyNetSpan plain);
 
-        Span<char>       receiveRoom();
-        void             received(size_t length);
-        Span<const char> outgoing();
-        void             sent(size_t length);
-
-        KiottyNetCode lastCode() const;
-        const char*   lastMessage() const;
+        TlsFailure failure() const;
 
 #if defined(KIOTTY_NET_TESTING)
         void debugKeyUpdate();
@@ -59,20 +59,37 @@ namespace kiotty::net::implementation
 #endif
 
     private:
-        TlsStep fail(KiottyNetCode code, const char* message);
-        size_t  feed();
-        size_t  flush();
-        size_t  pending() const;
+        friend class TlsPipe;
+
+        struct Outcome
+        {
+            int result;
+            int reason;
+        };
+
+        struct Drained
+        {
+            size_t        length;
+            KiottyNetCode code;
+        };
+
+        TlsStep       fail(KiottyNetCode code, const char* message);
+        KiottyNetCode createSsl(ssl_ctx_st* context);
+        Outcome       driveHandshake();
+        Drained       drain(Span<char> target);
+        size_t        resume(int reason);
+        bool          fitsCipherSend(size_t plain_length);
+        void          writeRecord(KiottyNetSpan plain);
+        size_t        feed();
+        size_t        flush();
+        size_t        pending() const;
 
         Stage<CIPHER_RECEIVE_BYTES> _cipher_receive;
         Stage<CIPHER_SEND_BYTES>    _cipher_send;
         ssl_st*       _ssl;
         bio_st*       _network;
+        TlsFailure    _failure;
         bool          _active;
         bool          _failed;
-        KiottyNetCode _last_code;
-        const char*   _last_message;
     };
 }
-
-#endif

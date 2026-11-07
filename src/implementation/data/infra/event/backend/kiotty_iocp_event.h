@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_IOCP_EVENT_H)
-#define KIOTTY_IOCP_EVENT_H
+#pragma once
 
 #if defined(_WIN32)
 
@@ -59,7 +58,5 @@ namespace kiotty::net::implementation
     {
     }
 }
-
-#endif
 
 #endif

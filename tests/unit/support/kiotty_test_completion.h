@@ -3,7 +3,7 @@
 
 #include "base/connection/kiotty_connection.h"
 #include "base/connection/kiotty_connection_host.h"
-#include "base/tls/kiotty_tls_profile.h"
+#include "data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_handler.h"
 
 #include <cstddef>

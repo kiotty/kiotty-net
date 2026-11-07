@@ -1,6 +1,6 @@
 #include "base/stream/kiotty_connection_stream.h"
 
-#include "base/stream/kiotty_input_file.h"
+#include "data/infra/file/kiotty_input_file.h"
 
 #include <cstring>
 
@@ -28,6 +28,7 @@ namespace kiotty::net::implementation
     ConnectionStream::ConnectionStream(ActiveSocket& socket, TlsEngine& tls, StageBase& receive, StageBase& send)
         : _socket(socket)
         , _tls(tls)
+        , _pipe(tls)
         , _receive(receive)
         , _send(send)
     {
@@ -133,8 +134,7 @@ namespace kiotty::net::implementation
         }
         if (!_tls.active())
         {
-            uint64_t sent = 0;
-            SocketCode code = sendFile(_socket, file, offset, length, deadline, sent);
+            const SocketCode code = sendFile(_socket, file, FileRange{ offset, length }, deadline);
             if (code == SocketCode::INVALID_ARGUMENT)
             {
                 return KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -204,7 +204,7 @@ namespace kiotty::net::implementation
             TlsStep step = _tls.handshake();
             if (step == TlsStep::FAILED)
             {
-                return _tls.lastCode();
+                return _tls.failure().code;
             }
             if (step == TlsStep::DONE)
             {
@@ -260,17 +260,17 @@ namespace kiotty::net::implementation
                 return toNetCode(code);
             }
         }
-        Span<const char> outgoing = _tls.outgoing();
+        Span<const char> outgoing = _pipe.outgoing();
         while (!outgoing.empty())
         {
             size_t sent = 0;
             SocketCode code = sendAll(outgoing.data, outgoing.length, deadline, sent);
-            _tls.sent(sent);
+            _pipe.sent(sent);
             if (code != SocketCode::SUCCESS)
             {
                 return toNetCode(code);
             }
-            outgoing = _tls.outgoing();
+            outgoing = _pipe.outgoing();
         }
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -291,11 +291,11 @@ namespace kiotty::net::implementation
             TlsStep step = TlsStep::SEND;
             while (step == TlsStep::SEND)
             {
-                step = _tls.write(part);
+                step = _pipe.write(part);
                 KiottyNetCode flushed = flush(deadline);
                 if (step == TlsStep::FAILED)
                 {
-                    return resultOf(done, _tls.lastCode());
+                    return resultOf(done, _tls.failure().code);
                 }
                 if (flushed != KIOTTY_NET_CODE_SUCCESS)
                 {
@@ -346,7 +346,7 @@ namespace kiotty::net::implementation
 
     SocketCode ConnectionStream::receiveCipher()
     {
-        Span<char> room = _tls.receiveRoom();
+        Span<char> room = _pipe.receiveRoom();
         if (room.empty())
         {
             return receiveIntoStage();
@@ -356,7 +356,7 @@ namespace kiotty::net::implementation
         {
             return received.code;
         }
-        _tls.received(received.value);
+        _pipe.received(received.value);
         return SocketCode::SUCCESS;
     }
 

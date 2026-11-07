@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_INPUT_FILE_H)
-#define KIOTTY_INPUT_FILE_H
+#pragma once
 
 #include "data/infra/socket/kiotty_passive_socket.h"
 #include "data/infra/socket/kiotty_socket_transfer.h"
@@ -12,7 +11,13 @@
 
 namespace kiotty::net::implementation
 {
-    typedef Result<size_t, KiottyNetCode> FileReadResult;
+    using FileReadResult = Result<size_t, KiottyNetCode>;
+
+    struct FileRange
+    {
+        uint64_t offset;
+        uint64_t length;
+    };
 
     class InputFile
     {
@@ -36,7 +41,5 @@ namespace kiotty::net::implementation
         uint64_t _size;
     };
 
-    SocketCode sendFile(ActiveSocket& socket, InputFile& file, uint64_t offset, uint64_t length, const Deadline& deadline, uint64_t& sent);
+    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range, const Deadline& deadline);
 }
-
-#endif

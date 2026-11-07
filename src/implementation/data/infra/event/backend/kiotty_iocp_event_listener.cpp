@@ -1,7 +1,7 @@
 #if defined(_WIN32)
 
 #include "data/infra/error/kiotty_socket_error.h"
-#include "base/event/kiotty_event_listener.h"
+#include "data/infra/event/kiotty_event_listener.h"
 
 #if !defined(WIN32_LEAN_AND_MEAN)
 #define WIN32_LEAN_AND_MEAN
@@ -46,7 +46,7 @@ namespace kiotty::net::implementation
             event.pending = true;
             event.action = action;
             event.failure = SocketCode::SUCCESS;
-            std::memset(&event.request.overlapped, 0, sizeof(event.request.overlapped));
+            event.request.overlapped = OVERLAPPED{};
             event.request.owner = &event;
         }
 
@@ -79,35 +79,33 @@ namespace kiotty::net::implementation
             return toSocketCode(static_cast<int>(::GetLastError()));
         }
 
+        SocketCode checkAccept(IoPayload payload)
+        {
+            if (payload.length != sizeof(AcceptBuffer)) { return SocketCode::INVALID_ARGUMENT; }
+            const AcceptBuffer* const buffer = static_cast<const AcceptBuffer*>(payload.buffer);
+            if (buffer->socket == INVALID_SOCKET_HANDLE) { return SocketCode::INVALID_ARGUMENT; }
+            return SocketCode::SUCCESS;
+        }
+
         SocketCode checkRequest(const IoAction& action, IoPayload payload)
         {
-            if (payload.buffer == nullptr)
-            {
-                return SocketCode::INVALID_ARGUMENT;
-            }
+            if (payload.buffer == nullptr) { return SocketCode::INVALID_ARGUMENT; }
             switch (action.kind)
             {
             case IoActionKind::READ:
             case IoActionKind::READ_UNTIL:
             case IoActionKind::WRITE:
-                if (payload.length == 0)
-                {
-                    return SocketCode::INVALID_ARGUMENT;
-                }
+                if (payload.length == 0) { return SocketCode::INVALID_ARGUMENT; }
                 return SocketCode::SUCCESS;
             case IoActionKind::ACCEPT:
-                if (payload.length != sizeof(AcceptBuffer))
-                {
-                    return SocketCode::INVALID_ARGUMENT;
-                }
-                if (static_cast<const AcceptBuffer*>(payload.buffer)->socket == INVALID_SOCKET_HANDLE)
-                {
-                    return SocketCode::INVALID_ARGUMENT;
-                }
-                return SocketCode::SUCCESS;
-            default:
+                return checkAccept(payload);
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return SocketCode::INVALID_ARGUMENT;
             }
+            return SocketCode::INVALID_ARGUMENT;
         }
 
         SocketCode loadAcceptEx(IoEvent& event)
@@ -184,9 +182,13 @@ namespace kiotty::net::implementation
                 return startSend(event, payload);
             case IoActionKind::ACCEPT:
                 return startAccept(event, payload);
-            default:
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return SocketCode::INVALID_ARGUMENT;
             }
+            return SocketCode::INVALID_ARGUMENT;
         }
 
         SocketCode postFailure(EventListenerState& state, IoEvent& event, SocketCode failure)
@@ -209,9 +211,15 @@ namespace kiotty::net::implementation
                 return IoKind::ACCEPT;
             case IoActionKind::WRITE:
                 return IoKind::SEND;
-            default:
+            case IoActionKind::READ:
+            case IoActionKind::READ_UNTIL:
+            case IoActionKind::NONE:
+            case IoActionKind::HOLD:
+            case IoActionKind::START_WORK:
+            case IoActionKind::CLOSE:
                 return IoKind::RECEIVE;
             }
+            return IoKind::RECEIVE;
         }
 
         SocketCode statusOf(const IoEvent& event)

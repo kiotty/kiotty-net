@@ -165,6 +165,16 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+5단계에서 한 것 (2026-11-07):
+
+- `base/event`, `base/tls`, `base/stream` 의 파일 부분을 `data/infra/{event,tls,file}` 로 옮기고 include guard 를 `#pragma once` 로 바꿨다.
+- switch 의 `default:` 를 모두 없앴다 (epoll `checkRequest / progress / kindOf`, iocp `checkRequest / start / kindOf`). `memset` 은 `T x{};` 로.
+- 30 줄 넘던 함수를 나눴다: epoll `poll / open / submit` (`collect / allocate / createHandles / admit`), 파일 `sendFile` (`sendPiece / awaitWritable`, Windows `transmitPiece / finishPiece`), OpenSSL backend 의 `open / decode / handshake / encode / openServer / openClient / configureProtocol` (helper 20 여 개, `ProtocolSelection` struct).
+- `sendFile(const ActiveSocket&, const InputFile&, FileRange, const Deadline&)`: 출력 인자를 없애고 인자를 4 개로.
+- `TlsEngine` 에서 `TlsPipe` (`write / receiveRoom / received / outgoing / sent`) 를 떼었다. `lastCode / lastMessage` 는 `TlsFailure failure()` 하나로. OpenSSL backend 의 `strlen / memcpy` 는 `strnlen` 과 `Span::copyFrom` 으로. `TLS_HANDSHAKE_TIMEOUT_MS` 는 `TLS_HANDSHAKE_TIMEOUT_MILLISECONDS`.
+- 7단계로 넘긴 것: `TlsEngine` 의 public 이 아직 11 개다 (수칙 4.1 의 7 개 초과). `kiotty_openssl_tls.cpp` 가 약 700 줄 (400 줄 초과) 이고 100 자 넘는 줄이 15 개. `decode(char*, size_t)` 를 `Span` 으로. `pathExists` 의 `struct stat info` 초기화.
+- 확인: MSVC Debug TLS OFF 303, TLS ON 303, WSL gcc Debug TLS ON 304 초록.
+
 4단계에서 한 것 (2026-11-07):
 
 - `base/socket`, `base/error` 를 지우고 `data/infra/socket`, `data/infra/error` 초안을 빌드에 넣었다. backend 는 클래스별 (`*_address`, `*_active_socket`, `*_passive_socket`, `*_socket_transfer`) 로 나뉜다.
@@ -201,7 +211,7 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 2 | 끝 | 아래 "2단계에서 한 것" |
 | 3 | 끝 | 아래 "3단계에서 한 것" |
 | 4 | 끝 | 아래 "4단계에서 한 것" |
-| 5 | 시작 안 함 | |
+| 5 | 끝 | 아래 "5단계에서 한 것". 남은 것은 7단계 |
 | 6 | 시작 안 함 | 2.2 분할 확정 |
 | 7 | 시작 안 함 | |
 | 8 | 시작 안 함 | |

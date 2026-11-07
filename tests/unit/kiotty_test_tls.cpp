@@ -137,7 +137,7 @@ TEST(TlsProfile, OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault)
     EXPECT_EQ(profile.openClient(config), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_FALSE(profile.server());
     EXPECT_TRUE(profile.verifyHostname());
-    EXPECT_EQ(profile.handshakeTimeoutMilliseconds(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MS);
+    EXPECT_EQ(profile.handshakeTimeoutMilliseconds(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
 }
 
 TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
@@ -306,8 +306,8 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
-    EXPECT_EQ(pump.server.lastCode(), KIOTTY_NET_CODE_TLS_RECORD_ERROR);
-    EXPECT_STRNE(pump.server.lastMessage(), "");
+    EXPECT_EQ(pump.server.failure().code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
+    EXPECT_STRNE(pump.server.failure().message, "");
 }
 
 TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
@@ -320,8 +320,8 @@ TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
-    EXPECT_STRNE(pump.client.lastMessage(), "");
+    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_STRNE(pump.client.failure().message, "");
 }
 
 TEST(TlsEngine, ClientWithVerifyServerOffAcceptsUntrustedCa)
@@ -349,7 +349,7 @@ TEST(TlsEngine, HostnameMismatchReturnsHostnameMismatch)
     ASSERT_EQ(pump.open(profiles.server, profiles.client, "localhost"), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH);
+    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH);
 }
 
 TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
@@ -362,7 +362,7 @@ TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 }
 
 TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt)
@@ -380,7 +380,7 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
     ASSERT_EQ(rejected.open(server, anonymous), KIOTTY_NET_CODE_SUCCESS);
     rejected.handshake();
     ASSERT_EQ(rejected.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(rejected.server.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_EQ(rejected.server.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 
     KiottyNetTlsClientConfiguration client_config = clientConfig();
     copyText(client_config.identity.cert_file, certPath("client.pem"));
@@ -407,7 +407,7 @@ TEST(TlsEngine, VersionMismatchReturnsHandshakeFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.server.lastCode(), KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(pump.server.failure().code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
@@ -420,7 +420,7 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     ASSERT_EQ(server.open(profiles.server, nullptr), KIOTTY_NET_CODE_SUCCESS);
     put(server.cipherReceive(), "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
-    EXPECT_EQ(server.lastCode(), KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(server.failure().code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, Tls13ServerSendsNoSessionTicketSoItIsDoneRightAfterTheClientFinished)

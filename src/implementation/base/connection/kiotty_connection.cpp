@@ -273,7 +273,7 @@ namespace kiotty::net::implementation
     {
         if (_tls.active())
         {
-            setDeadline(TLS_HANDSHAKE_TIMEOUT_MS);
+            setDeadline(TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
             return apply(onHandshake(handler), handler);
         }
         KiottyNetConnectionAction returned = handler.callbacks.onReady(_context, handle(handler));
@@ -527,7 +527,7 @@ namespace kiotty::net::implementation
         case TlsStep::SEND:
             return IoAction::none();
         case TlsStep::RECEIVE:
-            return IoAction::read(IoPurpose::HANDSHAKE, TLS_HANDSHAKE_TIMEOUT_MS, 0);
+            return IoAction::read(IoPurpose::HANDSHAKE, TLS_HANDSHAKE_TIMEOUT_MILLISECONDS, 0);
         case TlsStep::DONE:
         {
             _phase.store(Phase::READY);
@@ -537,8 +537,9 @@ namespace kiotty::net::implementation
         case TlsStep::FAILED:
             break;
         }
-        reject(handler, _tls.lastCode(), _tls.lastMessage());
-        return IoAction::close(_tls.lastCode());
+        const TlsFailure rejected = _tls.failure();
+        reject(handler, rejected.code, rejected.message);
+        return IoAction::close(rejected.code);
     }
 
     IoAction Connection::onPeerGone(SocketCode code)
@@ -625,7 +626,9 @@ namespace kiotty::net::implementation
                     Result<size_t, KiottyNetCode> more = refill();
                     if (!more)
                     {
-                        const char* message = more.code == KIOTTY_NET_CODE_REQUEST_TOO_LARGE ? STAGE_FULL_MESSAGE : _tls.lastMessage();
+                        const TlsFailure failed = _tls.failure();
+                        const bool is_full = more.code == KIOTTY_NET_CODE_REQUEST_TOO_LARGE;
+                        const char* message = is_full ? STAGE_FULL_MESSAGE : failed.message;
                         reject(handler, more.code, message);
                         return IoAction::close(more.code);
                     }

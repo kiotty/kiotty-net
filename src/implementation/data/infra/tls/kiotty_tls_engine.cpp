@@ -1,4 +1,4 @@
-#include "base/tls/kiotty_tls_engine.h"
+#include "data/infra/tls/kiotty_tls_engine.h"
 
 namespace kiotty::net::implementation
 {
@@ -24,10 +24,9 @@ namespace kiotty::net::implementation
         , _cipher_send()
         , _ssl(nullptr)
         , _network(nullptr)
+        , _failure{ "", KIOTTY_NET_CODE_SUCCESS }
         , _active(false)
         , _failed(false)
-        , _last_code(KIOTTY_NET_CODE_SUCCESS)
-        , _last_message("")
     {
     }
 
@@ -52,21 +51,15 @@ namespace kiotty::net::implementation
         return _cipher_send;
     }
 
-    KiottyNetCode TlsEngine::lastCode() const
+    TlsFailure TlsEngine::failure() const
     {
-        return _last_code;
-    }
-
-    const char* TlsEngine::lastMessage() const
-    {
-        return _last_message;
+        return _failure;
     }
 
     TlsStep TlsEngine::fail(KiottyNetCode code, const char* message)
     {
         _failed = true;
-        _last_code = code;
-        _last_message = message;
+        _failure = TlsFailure{ message, code };
         return TlsStep::FAILED;
     }
 }

@@ -1,10 +1,16 @@
 #if !KIOTTY_NET_USE_TLS
 
-#include "base/tls/kiotty_tls_engine.h"
-#include "base/tls/kiotty_tls_profile.h"
+#include "data/infra/tls/kiotty_tls_engine.h"
+#include "data/infra/tls/kiotty_tls_pipe.h"
+#include "data/infra/tls/kiotty_tls_profile.h"
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        const char* const NOT_SUPPORTED_MESSAGE = "tls: not supported";
+    }
+
     bool tlsSupported()
     {
         return false;
@@ -54,7 +60,7 @@ namespace kiotty::net::implementation
 
     uint32_t TlsProfile::handshakeTimeoutMilliseconds() const
     {
-        return TLS_HANDSHAKE_TIMEOUT_MS;
+        return TLS_HANDSHAKE_TIMEOUT_MILLISECONDS;
     }
 
     ssl_ctx_st* TlsProfile::context() const
@@ -80,7 +86,7 @@ namespace kiotty::net::implementation
 
     TlsStep TlsEngine::handshake()
     {
-        return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, "tls: not supported");
+        return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, NOT_SUPPORTED_MESSAGE);
     }
 
     DecodeResult TlsEngine::decode(StageBase& plain)
@@ -101,34 +107,6 @@ namespace kiotty::net::implementation
         (void)plain;
     }
 
-    TlsStep TlsEngine::write(KiottyNetSpan plain)
-    {
-        (void)plain;
-        return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, "tls: not supported");
-    }
-
-    Span<char> TlsEngine::receiveRoom()
-    {
-        Span<char> room = { nullptr, 0 };
-        return room;
-    }
-
-    void TlsEngine::received(size_t length)
-    {
-        (void)length;
-    }
-
-    Span<const char> TlsEngine::outgoing()
-    {
-        Span<const char> waiting = { nullptr, 0 };
-        return waiting;
-    }
-
-    void TlsEngine::sent(size_t length)
-    {
-        (void)length;
-    }
-
 #if defined(KIOTTY_NET_TESTING)
     void TlsEngine::debugKeyUpdate()
     {
@@ -138,6 +116,37 @@ namespace kiotty::net::implementation
     {
     }
 #endif
+
+    TlsPipe::TlsPipe(TlsEngine& engine)
+        : _engine(engine)
+    {
+    }
+
+    TlsStep TlsPipe::write(KiottyNetSpan plain)
+    {
+        (void)plain;
+        return _engine.fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, NOT_SUPPORTED_MESSAGE);
+    }
+
+    Span<char> TlsPipe::receiveRoom()
+    {
+        return Span<char>{ nullptr, 0 };
+    }
+
+    void TlsPipe::received(size_t length)
+    {
+        (void)length;
+    }
+
+    Span<const char> TlsPipe::outgoing()
+    {
+        return Span<const char>{ nullptr, 0 };
+    }
+
+    void TlsPipe::sent(size_t length)
+    {
+        (void)length;
+    }
 }
 
 #endif

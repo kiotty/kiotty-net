@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_EPOLL_EVENT_H)
-#define KIOTTY_EPOLL_EVENT_H
+#pragma once
 
 #if defined(__linux__)
 
@@ -50,7 +49,5 @@ namespace kiotty::net::implementation
     {
     }
 }
-
-#endif
 
 #endif
