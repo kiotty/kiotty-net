@@ -65,7 +65,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/socket/kiotty_socket.cpp
     src/implementation/base/socket/backend/kiotty_posix_socket.cpp
     src/implementation/base/socket/backend/kiotty_windows_socket.cpp
-    src/implementation/base/event/kiotty_io_action.cpp
+    src/implementation/domain/entity/kiotty_io_action.cpp
     src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
     src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp
     src/implementation/base/event/backend/kiotty_no_event_listener.cpp

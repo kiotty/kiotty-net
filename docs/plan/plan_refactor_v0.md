@@ -53,7 +53,7 @@ src/implementation/
     core/                 result, span, checked, stage, stage_set, clock, deadline, parker,
                           pool/ (pool_handle, reusable, reusable_pool, lazy_reusable_pool)
     domain/entity/        io_action, io_completion, io_payload, socket_code, phase, tls_step,
-                          connection_limits, handler, connection_configuration
+                          connection_limits, handler
     domain/usecases/      io_loop/ (6 사이클 뒤. 이번에는 자리만)
     data/datasource/      memory_limits (생성 헤더를 감싼다), memory_layout
     data/infra/           error/, socket/, event/, tls/, file/ (InputFile, sendFile). 각자 backend/
@@ -165,6 +165,14 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+3단계에서 한 것 (2026-11-07):
+
+- `domain/entity/` 의 `io_action (.h/.cpp)`, `io_completion`, `io_payload`, `socket_code`, `phase`, `tls_step`, `connection_limits`, `handler` 를 빌드에 넣었다. 옛 `base/event/kiotty_io_action.*`, `kiotty_event.h`, `base/pool/kiotty_memory_layout.h` 는 지웠다. `Phase / Handler / ConnectionLimits / TlsStep / SocketCode / toNetCode` 의 옛 정의도 지웠다 (옛 헤더는 domain 헤더를 include 한다).
+- `IoAction`, `IoCompletion` 은 멤버를 크기 내림차순으로 두고 `static_assert(sizeof)` 를 단다 (64 bit 에서 32, 48 바이트). 집합 초기화 순서가 바뀌었다 (`{ action, length, slot, kind, code }`).
+- `toNetCode` 는 default 없는 switch 로 domain 헤더의 inline 이 됐다.
+- `ConnectionConfiguration` 은 domain 으로 옮기지 않는다. `ActiveSocket` 과 `TlsProfile&` 을 들고 있어 domain 이 data 에 기대게 되므로, 6단계에서 `data/repository/connection/` 에 둔다.
+- 확인: MSVC Debug TLS OFF 303, TLS ON 303, WSL gcc Debug TLS ON 304 초록.
+
 2단계에서 한 것 (2026-11-07):
 
 - `tools/rename_public_api.tsv` (120 쌍) 를 사용자가 확인했고, 그 표로 `include/`, `src/`, `tests/`, `docs/requirement/`, `docs/deviations.md` 의 1929 곳을 바꿨다. 내부 `elapsedMs` 같은 `Ms` 이름도 `Milliseconds` 로.
@@ -184,7 +192,7 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 0 | 끝 | |
 | 1 | 끝 | 아래 "1단계에서 한 것" |
 | 2 | 끝 | 아래 "2단계에서 한 것" |
-| 3 | 초안 일부 | ConnectionConfiguration, 테스트 |
+| 3 | 끝 | 아래 "3단계에서 한 것" |
 | 4 | 초안 | 빌드와 테스트 |
 | 5 | 시작 안 함 | |
 | 6 | 시작 안 함 | 2.2 분할 확정 |

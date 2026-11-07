@@ -3,7 +3,8 @@
 
 #if !defined(_WIN32) && !defined(__linux__)
 
-#include "base/event/kiotty_event.h"
+#include "domain/entity/kiotty_io_completion.h"
+#include "domain/entity/kiotty_io_payload.h"
 
 namespace kiotty::net::implementation
 {

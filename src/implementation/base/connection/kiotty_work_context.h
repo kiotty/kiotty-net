@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_WORK_CONTEXT_H)
 #define KIOTTY_WORK_CONTEXT_H
 
-#include "base/event/kiotty_io_action.h"
+#include "domain/entity/kiotty_io_action.h"
 #include "kiotty_net_base.h"
 
 #include <atomic>

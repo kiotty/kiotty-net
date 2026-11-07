@@ -1,7 +1,8 @@
 #if !defined(KIOTTY_EVENT_LISTENER_H)
 #define KIOTTY_EVENT_LISTENER_H
 
-#include "base/event/kiotty_event.h"
+#include "domain/entity/kiotty_io_completion.h"
+#include "domain/entity/kiotty_io_payload.h"
 #include "base/socket/kiotty_socket.h"
 #include "core/kiotty_span.h"
 

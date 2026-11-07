@@ -20,7 +20,7 @@ namespace kiotty_test
     {
         inline kiotty::net::implementation::IoCompletion make(kiotty::net::implementation::IoKind kind, const kiotty::net::implementation::IoAction& action, size_t length, kiotty::net::implementation::SocketCode code)
         {
-            kiotty::net::implementation::IoCompletion result = { kind, 0, code, length, action };
+            kiotty::net::implementation::IoCompletion result = { action, length, 0, kind, code };
             return result;
         }
 

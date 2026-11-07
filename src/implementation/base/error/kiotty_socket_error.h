@@ -2,31 +2,13 @@
 #define KIOTTY_SOCKET_ERROR_H
 
 #include "core/kiotty_span.h"
+#include "domain/entity/kiotty_socket_code.h"
 #include "kiotty_net_base.h"
 
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    enum class SocketCode : uint8_t
-    {
-        SUCCESS,
-        WOULD_BLOCK,
-        PENDING,
-        CLOSED,
-        CANCELLED,
-        TIMEOUT,
-        REFUSED,
-        RESET,
-        UNREACHABLE,
-        ADDRESS_IN_USE,
-        INVALID_ARGUMENT,
-        OUT_OF_RESOURCE,
-        NOT_SUPPORTED,
-        BUSY,
-        UNKNOWN
-    };
-
     struct SocketErrorEntry
     {
         int        os_error;
@@ -36,7 +18,6 @@ namespace kiotty::net::implementation
     Span<const SocketErrorEntry> socketErrorTable();
     SocketCode                   toSocketCode(int os_error);
     SocketCode                   lastSocketCode();
-    KiottyNetCode                toNetCode(SocketCode code);
 }
 
 #endif

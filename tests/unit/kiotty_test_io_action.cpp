@@ -1,5 +1,6 @@
-#include "base/event/kiotty_io_action.h"
-#include "base/event/kiotty_event.h"
+#include "domain/entity/kiotty_io_action.h"
+#include "domain/entity/kiotty_io_completion.h"
+#include "domain/entity/kiotty_io_payload.h"
 
 #include <gtest/gtest.h>
 

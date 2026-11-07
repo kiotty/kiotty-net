@@ -1,7 +1,7 @@
 #include "base/connection/kiotty_connection.h"
 
 #include "base/connection/kiotty_sender.h"
-#include "base/pool/kiotty_memory_layout.h"
+#include "data/datasource/kiotty_memory_layout.h"
 #include "core/kiotty_clock.h"
 #include "core/kiotty_deadline.h"
 
@@ -100,13 +100,6 @@ namespace kiotty::net::implementation
         {
             return data.data != nullptr && data.length > 0;
         }
-    }
-
-    Handler::Handler(const KiottyNetConnectionHandler& handler_callbacks, KiottyNetAppContext handler_app_context, Owner& handler_owner)
-        : callbacks(handler_callbacks)
-        , app_context(handler_app_context)
-        , owner(handler_owner)
-    {
     }
 
     Connection::Connection()

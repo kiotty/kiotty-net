@@ -4,8 +4,9 @@
 #include "base/tls/kiotty_tls_profile.h"
 #include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
-#include "base/pool/kiotty_memory_layout.h"
+#include "data/datasource/kiotty_memory_layout.h"
 #include "core/kiotty_stage.h"
+#include "domain/entity/kiotty_tls_step.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
@@ -16,14 +17,6 @@ struct bio_st;
 
 namespace kiotty::net::implementation
 {
-    enum class TlsStep : uint8_t
-    {
-        SEND,
-        RECEIVE,
-        DONE,
-        FAILED
-    };
-
     typedef Result<size_t, KiottyNetCode> DecodeResult;
 
     size_t tlsCipherBound(size_t plain_length);

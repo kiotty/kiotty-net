@@ -15,6 +15,9 @@
 #include "core/kiotty_stage.h"
 #include "core/kiotty_stage_set.h"
 #include "core/pool/kiotty_pool_handle.h"
+#include "domain/entity/kiotty_connection_limits.h"
+#include "domain/entity/kiotty_handler.h"
+#include "domain/entity/kiotty_phase.h"
 #include "kiotty_net_base.h"
 
 #include <atomic>
@@ -24,30 +27,6 @@
 
 namespace kiotty::net::implementation
 {
-    enum class Phase : uint8_t
-    {
-        IDLE,
-        HANDSHAKING,
-        READY,
-        CLOSING
-    };
-
-    struct Handler
-    {
-        Handler(const KiottyNetConnectionHandler& handler_callbacks, KiottyNetAppContext handler_app_context, Owner& handler_owner);
-
-        const KiottyNetConnectionHandler& callbacks;
-        KiottyNetAppContext               app_context;
-        Owner&                            owner;
-    };
-
-    struct ConnectionLimits
-    {
-        size_t receive;
-        size_t send;
-        size_t notify;
-    };
-
     struct ConnectionConfiguration
     {
         ActiveSocket               socket;

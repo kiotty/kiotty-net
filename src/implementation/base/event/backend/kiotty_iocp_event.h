@@ -10,7 +10,8 @@
 #define NOMINMAX
 #endif
 
-#include "base/event/kiotty_event.h"
+#include "domain/entity/kiotty_io_completion.h"
+#include "domain/entity/kiotty_io_payload.h"
 
 #include <winsock2.h>
 #include <mswsock.h>
