@@ -171,6 +171,12 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+8단계에서 한 것 (2026-11-07):
+
+- `docs/design/design_base_v5.html` 을 썼다. 절 번호는 v4 와 같다 (0절 v4 → v5 요약, 17절 수칙 v2 와 v4 가 달라진 곳 23 줄, 18절 DV1 ~ DV13 요약, 20절 다음). 코드가 있는 부분 (core, domain, data, `context/kiotty_owner.h`) 은 지금 헤더에서 옮겨 적었고, 없는 부분 (Acceptor, IoLoop, Server / Client, Context, base.cpp) 은 v4 를 새 이름으로 옮긴 설계로 표시했다.
+- 설계에서 새로 적은 것: IoLoop 의 `LoopParts { host, desk, listener, acceptor, profile, handler }` 와 `StopPolicy { WHEN_STOPPED, WHEN_EMPTY }` (D2), IoLoop 은 `domain/usecases/io_loop/`, Server / Client / Context / config / action 은 `context/`.
+- 문서가 찾은 열린 질문 (v5 20절): `LazyReusablePool` 의 선할당 (commit `ada2830`) 이 메모리 보장 시점을 `create*` 에서 `initializeContext` 로 당긴다 (v4 19.1 #2, #3 과 다르다). settle 이 묻는 "반납해도 되나" 의 자리와 host 의 `count` 노출. 수칙 3.5 (`alignas(64)`), 2.7 (`secureZero` 의 `key_password`), OpenSSL 포인터를 DV3 에 넣을지.
+
 7단계에서 한 것 (2026-11-07):
 
 - 옛 파일: `base/` 는 6단계에서 이미 없어졌다. `src/kiotty_net_{base,http,websocket}.cpp` (빈 파일) 와 `single_header/kiotty_net.hpp` 는 공개 API 의 자리라 둔다.
@@ -266,4 +272,4 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 5 | 끝 | 아래 "5단계에서 한 것". 남은 것은 7단계 |
 | 6 | 끝 | 아래 "6단계에서 한 것". 100 자 줄은 7단계 |
 | 7 | 끝 (push 와 CI 는 남음) | 위 "7단계에서 한 것" |
-| 8 | 시작 안 함 | |
+| 8 | 끝 | 위 "8단계에서 한 것". 열린 질문은 `plan_base_v2` 5b 이후 |
