@@ -1,7 +1,8 @@
 #if !defined(KIOTTY_CONNECTION_STREAM_H)
 #define KIOTTY_CONNECTION_STREAM_H
 
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 #include "base/tls/kiotty_tls_engine.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_stage.h"

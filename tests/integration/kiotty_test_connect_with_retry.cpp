@@ -1,4 +1,6 @@
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_connect_with_retry.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"

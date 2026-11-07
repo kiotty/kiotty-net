@@ -266,7 +266,7 @@ namespace kiotty::net::implementation
 
     void Connection::shutdown()
     {
-        (void)_socket.shutdown();
+        (void)implementation::shutdownWrite(_socket);
     }
 
     IoAction Connection::onOpened(const Handler& handler)

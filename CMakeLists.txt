@@ -59,12 +59,18 @@ set(KIOTTY_NET_SOURCES
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_deadline.cpp
     src/implementation/core/kiotty_stage.cpp
-    src/implementation/base/error/kiotty_socket_error.cpp
-    src/implementation/base/error/backend/kiotty_posix_error.cpp
-    src/implementation/base/error/backend/kiotty_windows_error.cpp
-    src/implementation/base/socket/kiotty_socket.cpp
-    src/implementation/base/socket/backend/kiotty_posix_socket.cpp
-    src/implementation/base/socket/backend/kiotty_windows_socket.cpp
+    src/implementation/data/infra/error/kiotty_socket_error.cpp
+    src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
+    src/implementation/data/infra/error/backend/kiotty_windows_socket_error.cpp
+    src/implementation/data/infra/socket/kiotty_connect_with_retry.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_address.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_active_socket.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_passive_socket.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_socket_transfer.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_address.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_active_socket.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_passive_socket.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_socket_transfer.cpp
     src/implementation/domain/entity/kiotty_io_action.cpp
     src/implementation/base/event/backend/kiotty_epoll_event_listener.cpp
     src/implementation/base/event/backend/kiotty_iocp_event_listener.cpp

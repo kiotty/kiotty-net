@@ -1,5 +1,6 @@
 #if !defined(_WIN32)
 
+#include "data/infra/error/kiotty_socket_error.h"
 #include "base/stream/kiotty_input_file.h"
 
 #include <fcntl.h>
@@ -220,7 +221,7 @@ namespace kiotty::net::implementation
             {
                 return SocketCode::TIMEOUT;
             }
-            SocketCode waited = socket.waitWritable(deadline.remaining());
+            SocketCode waited = implementation::waitWritable(socket, deadline.remaining());
             if (waited != SocketCode::SUCCESS)
             {
                 return waited;

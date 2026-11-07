@@ -1,5 +1,6 @@
 #if defined(_WIN32)
 
+#include "data/infra/error/kiotty_socket_error.h"
 #include "base/stream/kiotty_input_file.h"
 
 #if !defined(WIN32_LEAN_AND_MEAN)

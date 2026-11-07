@@ -3,7 +3,8 @@
 
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 #include "core/kiotty_span.h"
 
 #if defined(_WIN32)

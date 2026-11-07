@@ -1,4 +1,5 @@
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
@@ -10,6 +11,8 @@
 #include <string>
 #include <utility>
 
+using kiotty::net::implementation::NoDelay;
+using kiotty::net::implementation::Span;
 using kiotty::net::implementation::ActiveSocket;
 using kiotty::net::implementation::ActiveSocketResult;
 using kiotty::net::implementation::SocketCode;
@@ -49,7 +52,7 @@ namespace
     {
         SocketCode code = SocketCode::WOULD_BLOCK;
         kiotty_test::waitUntil([&]() {
-            TransferResult result = socket.receive(buffer, length);
+            TransferResult result = receive(socket, Span<char>{ buffer, length });
             code = result.code;
             if (result)
             {
@@ -68,7 +71,7 @@ TEST(ActiveSocket, OpenTcpGivesValidNonBlockingSocket)
     EXPECT_TRUE(socket.valid());
     EXPECT_NE(socket.handle(), kiotty::net::implementation::INVALID_SOCKET_HANDLE);
     char buffer[8];
-    TransferResult result = socket.receive(buffer, sizeof(buffer));
+    TransferResult result = receive(socket, Span<char>{ buffer, sizeof(buffer) });
     EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }
 
@@ -112,9 +115,9 @@ TEST(ActiveSocket, ConnectTimeoutExpiresOnUnroutableAddress)
 TEST(ActiveSocket, SetNoDelayOnTcpIsReflectedByGetsockopt)
 {
     ActiveSocket socket = openTcp();
-    EXPECT_EQ(socket.setNoDelay(true), SocketCode::SUCCESS);
+    EXPECT_EQ(configureNoDelay(socket, NoDelay::ENABLED), SocketCode::SUCCESS);
     EXPECT_TRUE(kiotty_test::noDelayOf(socket.handle()));
-    EXPECT_EQ(socket.setNoDelay(false), SocketCode::SUCCESS);
+    EXPECT_EQ(configureNoDelay(socket, NoDelay::DISABLED), SocketCode::SUCCESS);
     EXPECT_FALSE(kiotty_test::noDelayOf(socket.handle()));
 }
 
@@ -122,15 +125,15 @@ TEST(ActiveSocket, SetNoDelayOnUnixDomainSocketReturnsSuccessAndDoesNothing)
 {
     ActiveSocketResult opened = ActiveSocket::open(KIOTTY_NET_TRANSPORT_PIPE);
     ASSERT_TRUE(opened);
-    EXPECT_EQ(opened.value.setNoDelay(true), SocketCode::SUCCESS);
-    EXPECT_EQ(opened.value.setNoDelay(false), SocketCode::SUCCESS);
+    EXPECT_EQ(configureNoDelay(opened.value, NoDelay::ENABLED), SocketCode::SUCCESS);
+    EXPECT_EQ(configureNoDelay(opened.value, NoDelay::DISABLED), SocketCode::SUCCESS);
 }
 
 TEST(ActiveSocket, SendAndReceiveRoundTripOnLoopback)
 {
     LoopbackPeer peer;
     ActiveSocket socket = connectedTo(peer);
-    TransferResult sent = socket.send("ping", 4);
+    TransferResult sent = send(socket, Span<const char>{ "ping", 4 });
     ASSERT_TRUE(sent);
     EXPECT_EQ(sent.value, 4u);
     char echoed[4];
@@ -159,7 +162,7 @@ TEST(ActiveSocket, ReceiveWithNothingPendingReturnsWouldBlock)
     LoopbackPeer peer;
     ActiveSocket socket = connectedTo(peer);
     char buffer[16];
-    TransferResult result = socket.receive(buffer, sizeof(buffer));
+    TransferResult result = receive(socket, Span<char>{ buffer, sizeof(buffer) });
     EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }
 
@@ -172,7 +175,7 @@ TEST(ActiveSocket, CloseTwiceIsSafeAndMovedFromSocketIsInvalid)
     ActiveSocket other = openTcp();
     socket.close();
     EXPECT_TRUE(other.valid());
-    EXPECT_EQ(other.setNoDelay(true), SocketCode::SUCCESS);
+    EXPECT_EQ(configureNoDelay(other, NoDelay::ENABLED), SocketCode::SUCCESS);
 
     ActiveSocket moved(std::move(other));
     EXPECT_FALSE(other.valid());

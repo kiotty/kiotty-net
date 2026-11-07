@@ -1,4 +1,5 @@
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
@@ -9,6 +10,7 @@
 #include <string>
 #include <utility>
 
+using kiotty::net::implementation::Span;
 using kiotty::net::implementation::ActiveSocket;
 using kiotty::net::implementation::ActiveSocketResult;
 using kiotty::net::implementation::PassiveSocket;
@@ -84,7 +86,7 @@ TEST(PassiveSocket, AcceptAfterPeerConnectReturnsConnectedSocket)
     }, 2000);
     ASSERT_TRUE(ready);
     EXPECT_STREQ(accepted.peer().hostname, "127.0.0.1");
-    ASSERT_TRUE(accepted.send("hi", 2));
+    ASSERT_TRUE(send(accepted, Span<const char>{ "hi", 2 }));
     char buffer[2];
     ASSERT_TRUE(peer.recvExactly(buffer, sizeof(buffer), 2000));
     EXPECT_EQ(std::memcmp(buffer, "hi", 2), 0);

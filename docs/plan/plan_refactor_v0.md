@@ -165,6 +165,13 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+4단계에서 한 것 (2026-11-07):
+
+- `base/socket`, `base/error` 를 지우고 `data/infra/socket`, `data/infra/error` 초안을 빌드에 넣었다. backend 는 클래스별 (`*_address`, `*_active_socket`, `*_passive_socket`, `*_socket_transfer`) 로 나뉜다.
+- 전송은 자유 함수 `send / receive / peek (Span)`, `waitReadable / waitWritable`, `shutdownWrite`, `configureNoDelay(socket, NoDelay)` 다. 같은 이름의 멤버가 있는 클래스 (`ConnectionStream::waitReadable`) 안에서는 `implementation::` 로 부른다.
+- `sendAll(..., size_t& sent)`, `sendFile(..., uint64_t& sent)` 의 출력 인자는 아직 남았다. 각각 6단계 (stream), 5단계 (file) 에서 없앤다.
+- 확인: MSVC Debug TLS OFF 303, TLS ON 303, WSL gcc Debug TLS ON 304 초록.
+
 3단계에서 한 것 (2026-11-07):
 
 - `domain/entity/` 의 `io_action (.h/.cpp)`, `io_completion`, `io_payload`, `socket_code`, `phase`, `tls_step`, `connection_limits`, `handler` 를 빌드에 넣었다. 옛 `base/event/kiotty_io_action.*`, `kiotty_event.h`, `base/pool/kiotty_memory_layout.h` 는 지웠다. `Phase / Handler / ConnectionLimits / TlsStep / SocketCode / toNetCode` 의 옛 정의도 지웠다 (옛 헤더는 domain 헤더를 include 한다).
@@ -193,7 +200,7 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 1 | 끝 | 아래 "1단계에서 한 것" |
 | 2 | 끝 | 아래 "2단계에서 한 것" |
 | 3 | 끝 | 아래 "3단계에서 한 것" |
-| 4 | 초안 | 빌드와 테스트 |
+| 4 | 끝 | 아래 "4단계에서 한 것" |
 | 5 | 시작 안 함 | |
 | 6 | 시작 안 함 | 2.2 분할 확정 |
 | 7 | 시작 안 함 | |

@@ -1,4 +1,5 @@
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 #include "base/stream/kiotty_connection_stream.h"
 #include "base/tls/kiotty_tls_engine.h"
 #include "base/tls/kiotty_tls_profile.h"
@@ -18,6 +19,7 @@
 #include <thread>
 #include <utility>
 
+using kiotty::net::implementation::Span;
 using kiotty::net::implementation::Stage;
 using kiotty::net::implementation::StageBase;
 using kiotty::net::implementation::ActiveSocket;
@@ -204,9 +206,9 @@ namespace
     {
         std::string bytes;
         char buffer[CAPACITY];
-        while (socket.waitReadable(quiet_milliseconds) == SocketCode::SUCCESS)
+        while (waitReadable(socket, quiet_milliseconds) == SocketCode::SUCCESS)
         {
-            kiotty::net::implementation::TransferResult received = socket.receive(buffer, sizeof(buffer));
+            kiotty::net::implementation::TransferResult received = receive(socket, Span<char>{ buffer, sizeof(buffer) });
             if (!received)
             {
                 break;
@@ -275,7 +277,7 @@ TEST(ConnectionStream, ReadReturnsStagedPlaintextBeforeTouchingSocket)
     ASSERT_TRUE(connect(peer, side));
     kiotty_test::put(side.receive, "abc");
     ASSERT_TRUE(peer.sendAll("xyz", 3));
-    ASSERT_EQ(side.socket.waitReadable(WAIT_MS), SocketCode::SUCCESS);
+    ASSERT_EQ(waitReadable(side.socket, WAIT_MS), SocketCode::SUCCESS);
     char buffer[16];
     KiottyNetResult staged = side.stream().read(buffer, sizeof(buffer), WAIT_MS);
     ASSERT_EQ(staged.code, KIOTTY_NET_CODE_SUCCESS);

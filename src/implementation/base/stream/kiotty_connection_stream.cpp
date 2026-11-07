@@ -85,7 +85,7 @@ namespace kiotty::net::implementation
                 }
                 continue;
             }
-            TransferResult received = _socket.receive(buffer, limit);
+            TransferResult received = implementation::receive(_socket, Span<char>{ static_cast<char*>(buffer), limit });
             if (received && received.value > 0)
             {
                 return resultOf(received.value, KIOTTY_NET_CODE_SUCCESS);
@@ -184,7 +184,7 @@ namespace kiotty::net::implementation
             return true;
         }
         char byte = 0;
-        TransferResult peeked = _socket.peek(&byte, sizeof(byte));
+        TransferResult peeked = implementation::peek(_socket, Span<char>{ &byte, sizeof(byte) });
         if (peeked)
         {
             return true;
@@ -312,7 +312,7 @@ namespace kiotty::net::implementation
         sent = 0;
         while (sent < length)
         {
-            TransferResult moved = _socket.send(data + sent, length - sent);
+            TransferResult moved = implementation::send(_socket, Span<const char>{ data + sent, length - sent });
             if (moved)
             {
                 sent += moved.value;
@@ -326,7 +326,7 @@ namespace kiotty::net::implementation
             {
                 return SocketCode::TIMEOUT;
             }
-            SocketCode waited = _socket.waitWritable(deadline.remaining());
+            SocketCode waited = implementation::waitWritable(_socket, deadline.remaining());
             if (waited != SocketCode::SUCCESS)
             {
                 return waited;
@@ -341,7 +341,7 @@ namespace kiotty::net::implementation
         {
             return SocketCode::TIMEOUT;
         }
-        return _socket.waitReadable(deadline.remaining());
+        return implementation::waitReadable(_socket, deadline.remaining());
     }
 
     SocketCode ConnectionStream::receiveCipher()
@@ -351,7 +351,7 @@ namespace kiotty::net::implementation
         {
             return receiveIntoStage();
         }
-        TransferResult received = _socket.receive(room.data, room.length);
+        TransferResult received = implementation::receive(_socket, Span<char>{ room.data, room.length });
         if (!received)
         {
             return received.code;
@@ -371,7 +371,7 @@ namespace kiotty::net::implementation
             return SocketCode::OUT_OF_RESOURCE;
         }
         char* target = provider.prepare(room);
-        TransferResult received = _socket.receive(target, room);
+        TransferResult received = implementation::receive(_socket, Span<char>{ target, room });
         if (!received)
         {
             return received.code;

@@ -1,7 +1,8 @@
 #if !defined(KIOTTY_INPUT_FILE_H)
 #define KIOTTY_INPUT_FILE_H
 
-#include "base/socket/kiotty_socket.h"
+#include "data/infra/socket/kiotty_passive_socket.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_result.h"
 #include "kiotty_net_base.h"

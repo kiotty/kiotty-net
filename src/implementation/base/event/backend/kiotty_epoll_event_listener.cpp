@@ -1,5 +1,6 @@
 #if defined(__linux__)
 
+#include "data/infra/error/kiotty_socket_error.h"
 #include "base/event/kiotty_event_listener.h"
 
 #include <sys/epoll.h>
