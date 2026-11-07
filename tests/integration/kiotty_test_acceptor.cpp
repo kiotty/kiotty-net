@@ -22,6 +22,16 @@ using kiotty::net::implementation::SocketCode;
 using kiotty::net::implementation::Span;
 using kiotty_test::LoopbackPeer;
 
+TEST(Acceptor, UnopenedAcceptorIsNotListening)
+{
+    Acceptor acceptor;
+    EXPECT_FALSE(acceptor.listening());
+    EXPECT_FALSE(acceptor.isPending());
+    EXPECT_EQ(acceptor.slot(), -1);
+}
+
+#if KIOTTY_NET_HAS_EVENT_BACKEND
+
 namespace
 {
     const uint32_t WAIT_MS = 2000;
@@ -56,16 +66,6 @@ namespace
         ASSERT_EQ(submitted, SocketCode::SUCCESS);
     }
 }
-
-TEST(Acceptor, UnopenedAcceptorIsNotListening)
-{
-    Acceptor acceptor;
-    EXPECT_FALSE(acceptor.listening());
-    EXPECT_FALSE(acceptor.isPending());
-    EXPECT_EQ(acceptor.slot(), -1);
-}
-
-#if KIOTTY_NET_HAS_EVENT_BACKEND
 
 TEST(Acceptor, OpenListensAndEventIsNotPendingUntilSubmitted)
 {
