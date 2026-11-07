@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-using kiotty::Result;
+using kiotty::net::implementation::Result;
 using kiotty_test::Ledger;
 using kiotty_test::Tracked;
 
@@ -23,7 +23,7 @@ namespace
         Exhausted = 2,
     };
 
-    typedef Result<SendCode, Tracked> TrackedResult;
+    typedef Result<Tracked, SendCode> TrackedResult;
 
     TrackedResult okWith(Ledger& ledger, int id)
     {
@@ -66,10 +66,12 @@ namespace
     }
 }
 
-typedef Result<SendCode, std::unique_ptr<int>> UniqueResult;
+typedef Result<std::unique_ptr<int>, SendCode> UniqueResult;
 
-static_assert(!std::is_constructible<bool, TrackedResult>::value,
-              "Result has no operator bool, isOk() is the only test");
+static_assert(std::is_constructible<bool, TrackedResult>::value && !std::is_convertible<TrackedResult, bool>::value,
+              "Result tests through an explicit operator bool");
+static_assert(std::is_same<decltype(TrackedResult::code), SendCode>::value && std::is_same<decltype(TrackedResult::value), Tracked>::value,
+              "Result keeps code and value as public fields");
 static_assert(std::is_move_constructible<UniqueResult>::value && !std::is_copy_constructible<UniqueResult>::value,
               "Result follows the copy and move of its Value");
 
@@ -80,9 +82,9 @@ TEST(Result, OkResultReportsSuccessAndCarriesTheValue)
     {
         const TrackedResult result = okWith(ledger, 5);
 
-        EXPECT_TRUE(result.isOk());
-        EXPECT_EQ(SendCode::Ok, result.code());
-        EXPECT_EQ(5, result.value().id());
+        EXPECT_TRUE(result);
+        EXPECT_EQ(SendCode::Ok, result.code);
+        EXPECT_EQ(5, result.value.id());
         EXPECT_EQ(1, ledger.live());
     }
 
@@ -96,9 +98,9 @@ TEST(Result, FailedResultCarriesTheCodeAndADefaultValue)
     {
         const TrackedResult result = failWith(SendCode::Refused);
 
-        EXPECT_FALSE(result.isOk());
-        EXPECT_EQ(SendCode::Refused, result.code());
-        EXPECT_FALSE(result.value().owns());
+        EXPECT_FALSE(result);
+        EXPECT_EQ(SendCode::Refused, result.code);
+        EXPECT_FALSE(result.value.owns());
 
         EXPECT_EQ(0, ledger.acquired);
     }
@@ -116,8 +118,8 @@ TEST(Result, CopyingAnOkResultProducesAnIndependentValue)
 
         const TrackedResult copy(source);
 
-        EXPECT_TRUE(copy.isOk());
-        EXPECT_EQ(7, copy.value().id());
+        EXPECT_TRUE(copy);
+        EXPECT_EQ(7, copy.value.id());
         EXPECT_EQ(before + 1, ledger.copies);
 
         EXPECT_EQ(2, ledger.live());
@@ -134,8 +136,8 @@ TEST(Result, CopyingAFailedResultStartsNoValue)
         const TrackedResult source = failWith(SendCode::Refused);
         const TrackedResult copy(source);
 
-        EXPECT_FALSE(copy.isOk());
-        EXPECT_EQ(SendCode::Refused, copy.code());
+        EXPECT_FALSE(copy);
+        EXPECT_EQ(SendCode::Refused, copy.code);
         EXPECT_EQ(0, ledger.acquired);
     }
 
@@ -153,11 +155,11 @@ TEST(Result, MovingAnOkResultMovesTheValueRatherThanCopyingIt)
 
         const TrackedResult moved(std::move(source));
 
-        EXPECT_TRUE(moved.isOk());
-        EXPECT_EQ(8, moved.value().id());
+        EXPECT_TRUE(moved);
+        EXPECT_EQ(8, moved.value.id());
         EXPECT_EQ(copies_before, ledger.copies) << "the move copied instead";
 
-        EXPECT_TRUE(source.isOk());
+        EXPECT_TRUE(source);
         EXPECT_EQ(1, ledger.live());
     }
 
@@ -172,8 +174,8 @@ TEST(Result, MovingAFailedResultStartsNoValue)
         TrackedResult       source = failWith(SendCode::Exhausted);
         const TrackedResult moved(std::move(source));
 
-        EXPECT_FALSE(moved.isOk());
-        EXPECT_EQ(SendCode::Exhausted, moved.code());
+        EXPECT_FALSE(moved);
+        EXPECT_EQ(SendCode::Exhausted, moved.code);
         EXPECT_EQ(0, ledger.acquired);
     }
 
@@ -203,15 +205,15 @@ TEST_P(Assign, LeavesNoValueBehindWhicheverWayItGoes)
             target = source;
         }
 
-        EXPECT_EQ(sample.source_ok, target.isOk());
+        EXPECT_EQ(sample.source_ok, static_cast<bool>(target));
 
         if (sample.source_ok)
         {
-            EXPECT_EQ(2, target.value().id());
+            EXPECT_EQ(2, target.value.id());
         }
         else
         {
-            EXPECT_EQ(SendCode::Exhausted, target.code());
+            EXPECT_EQ(SendCode::Exhausted, target.code);
         }
     }
 
@@ -231,8 +233,8 @@ TEST(Result, SelfAssignmentKeepsTheValue)
 
         result = alias;
 
-        EXPECT_TRUE(result.isOk());
-        EXPECT_EQ(9, result.value().id());
+        EXPECT_TRUE(result);
+        EXPECT_EQ(9, result.value.id());
         EXPECT_EQ(1, ledger.live());
     }
 
@@ -244,8 +246,8 @@ TEST(Result, WorksWithAPlainIntegralErrorCode)
     const Result<int, int> good = Result<int, int>::success(42);
     const Result<int, int> bad  = Result<int, int>::failure(7);
 
-    EXPECT_TRUE(good.isOk());
-    EXPECT_EQ(42, good.value());
-    EXPECT_FALSE(bad.isOk());
-    EXPECT_EQ(7, bad.code());
+    EXPECT_TRUE(good);
+    EXPECT_EQ(42, good.value);
+    EXPECT_FALSE(bad);
+    EXPECT_EQ(7, bad.code);
 }

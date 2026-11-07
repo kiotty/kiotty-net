@@ -1,9 +1,8 @@
-#if !defined(KIOTTY_STAGE_H)
-#define KIOTTY_STAGE_H
+#pragma once
 
 #include <cstddef>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     class StageBase
     {
@@ -53,8 +52,8 @@ namespace kiotty
         char*  _buffer;
         size_t _maximum;
         size_t _capacity;
-        size_t _begin_pos;
-        size_t _end_pos;
+        size_t _begin_position;
+        size_t _end_position;
     };
 
     template <size_t N>
@@ -67,16 +66,11 @@ namespace kiotty
     class Stage : private StageStorage<N>, public StageBase
     {
     public:
-        static const size_t MAXIMUM = N;
+        static constexpr size_t MAXIMUM = N;
 
         Stage()
             : StageBase(this->bytes, N)
         {
         }
     };
-
-    template <size_t N>
-    const size_t Stage<N>::MAXIMUM;
 }
-
-#endif

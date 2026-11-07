@@ -1,110 +1,96 @@
-#if !defined(KIOTTY_RESULT_H)
-#define KIOTTY_RESULT_H
+#pragma once
 
 #include <cassert>
 #include <memory>
 #include <type_traits>
 #include <utility>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    template<typename ErrorCode, typename Value>
-    class Result
+    template <typename Value, typename Code>
+    struct [[nodiscard]] Result
     {
-        static_assert(
-            std::is_enum<ErrorCode>::value || std::is_integral<ErrorCode>::value,
-            "kiotty::Result: ErrorCode must be an enum or an integral type.");
-        static_assert(
-            !std::is_same<ErrorCode, bool>::value,
-            "kiotty::Result: ErrorCode must not be bool.");
-        static_assert(
-            std::is_default_constructible<Value>::value,
-            "kiotty::Result: Value must be default constructible, a failed result holds a default Value.");
+        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value, "Result: Code must be an enum or an integral type");
+        static_assert(!std::is_same<Code, bool>::value, "Result: Code must not be bool");
+        static_assert(std::is_default_constructible<Value>::value, "Result: a failed result holds a default Value");
 
-    public:
-        static Result success(const Value& value)
-        {
-            return Result(static_cast<ErrorCode>(0), value);
-        }
+        Code  code;
+        Value value;
 
-        static Result success(Value&& value)
-        {
-            return Result(static_cast<ErrorCode>(0), std::move(value));
-        }
+        explicit operator bool() const;
 
-        static Result failure(ErrorCode code)
-        {
-            return Result(code);
-        }
-
-        bool isOk() const { return _code == static_cast<ErrorCode>(0); }
-
-        ErrorCode code() const { return _code; }
-
-        Value& value() { return _value; }
-        const Value& value() const { return _value; }
-
-    private:
-        explicit Result(ErrorCode code) :
-            _code(code),
-            _value()
-            {}
-
-        Result(ErrorCode code, const Value& value) :
-            _code(code),
-            _value(value)
-            {}
-
-        Result(ErrorCode code, Value&& value) :
-            _code(code),
-            _value(std::move(value))
-            {}
-
-        ErrorCode _code;
-        Value     _value;
+        static Result success(Value content);
+        static Result failure(Code error_code);
     };
 
-    template<typename ErrorCode, typename Value>
-    class Result<ErrorCode, Value&>
+    template <typename Value, typename Code>
+    class [[nodiscard]] Result<Value&, Code>
     {
-        static_assert(
-            std::is_enum<ErrorCode>::value || std::is_integral<ErrorCode>::value,
-            "kiotty::Result: ErrorCode must be an enum or an integral type.");
-        static_assert(
-            !std::is_same<ErrorCode, bool>::value,
-            "kiotty::Result: ErrorCode must not be bool.");
+        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value, "Result: Code must be an enum or an integral type");
+        static_assert(!std::is_same<Code, bool>::value, "Result: Code must not be bool");
 
     public:
-        static Result success(Value& value)
-        {
-            Value* address = std::addressof(value);
-            return Result(static_cast<ErrorCode>(0), address);
-        }
+        static Result success(Value& content);
+        static Result failure(Code error_code);
 
-        static Result failure(ErrorCode code)
-        {
-            return Result(code, nullptr);
-        }
+        explicit operator bool() const;
+        Value&   value() const;
 
-        bool isOk() const { return _code == static_cast<ErrorCode>(0); }
-
-        ErrorCode code() const { return _code; }
-
-        Value& value() const
-        {
-            assert(_value != nullptr && "kiotty::Result<E, T&>::value() on a failed result");
-            return *_value;
-        }
+        Code code;
 
     private:
-        Result(ErrorCode code, Value* value) :
-            _code(code),
-            _value(value)
-            {}
+        Result(Code error_code, Value* content);
 
-        ErrorCode _code;
-        Value*    _value;
+        Value* _value;
     };
+
+    template <typename Value, typename Code>
+    inline Result<Value, Code>::operator bool() const
+    {
+        return code == Code{};
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value, Code> Result<Value, Code>::success(Value content)
+    {
+        return Result{ Code{}, std::move(content) };
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value, Code> Result<Value, Code>::failure(Code error_code)
+    {
+        return Result{ error_code, Value{} };
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value&, Code>::Result(Code error_code, Value* content)
+        : code(error_code)
+        , _value(content)
+    {
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value&, Code> Result<Value&, Code>::success(Value& content)
+    {
+        return Result(Code{}, std::addressof(content));
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value&, Code> Result<Value&, Code>::failure(Code error_code)
+    {
+        return Result(error_code, nullptr);
+    }
+
+    template <typename Value, typename Code>
+    inline Result<Value&, Code>::operator bool() const
+    {
+        return code == Code{};
+    }
+
+    template <typename Value, typename Code>
+    inline Value& Result<Value&, Code>::value() const
+    {
+        assert(_value != nullptr && "Result<Value&, Code>::value() on a failed result");
+        return *_value;
+    }
 }
-
-#endif

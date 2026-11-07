@@ -5,25 +5,22 @@
 
 #include "base/event/kiotty_event.h"
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    struct IoEvent
     {
-        struct IoEvent
-        {
-            IoEvent();
-            IoEvent(const IoEvent&) = delete;
-            IoEvent& operator=(const IoEvent&) = delete;
+        IoEvent();
+        IoEvent(const IoEvent&) = delete;
+        IoEvent& operator=(const IoEvent&) = delete;
 
-            bool     pending;
-            IoAction action;
-        };
+        bool     pending;
+        IoAction action;
+    };
 
-        inline IoEvent::IoEvent()
-            : pending(false)
-            , action(IoAction::none())
-        {
-        }
+    inline IoEvent::IoEvent()
+        : pending(false)
+        , action(IoAction::none())
+    {
     }
 }
 

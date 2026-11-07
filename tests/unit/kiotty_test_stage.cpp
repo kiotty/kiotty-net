@@ -4,8 +4,8 @@
 
 #include <cstring>
 
-using kiotty::Stage;
-using kiotty::StageBase;
+using kiotty::net::implementation::Stage;
+using kiotty::net::implementation::StageBase;
 
 namespace
 {

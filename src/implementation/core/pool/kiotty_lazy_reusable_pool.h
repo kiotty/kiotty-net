@@ -1,9 +1,8 @@
-#if !defined(KIOTTY_LAZY_REUSABLE_POOL_H)
-#define KIOTTY_LAZY_REUSABLE_POOL_H
+#pragma once
 
-#include "core/kiotty_result.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "core/pool/kiotty_reusable.h"
+#include "core/kiotty_result.h"
 
 #include <array>
 #include <cassert>
@@ -13,7 +12,7 @@
 #include <new>
 #include <utility>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     template <class T, size_t N>
     class LazyReusablePool
@@ -22,9 +21,9 @@ namespace kiotty
         static_assert(N > 0, "a pool needs at least one slot");
 
     public:
-        typedef typename T::code_type          code_type;
-        typedef typename T::configuration_type configuration_type;
-        typedef Result<code_type, T&>          AcquireResult;
+        using code_type = typename T::code_type;
+        using configuration_type = typename T::configuration_type;
+        using AcquireResult = Result<T&, code_type>;
 
         LazyReusablePool();
         ~LazyReusablePool();
@@ -36,7 +35,6 @@ namespace kiotty
         void          release(T& object);
         code_type     reserve(size_t count);
         void          clear();
-        T*            find(PoolHandle id);
         size_t        capacity() const;
         size_t        count() const;
         size_t        created() const;
@@ -77,22 +75,15 @@ namespace kiotty
         if (index == N)
         {
             index = emptySlot();
-            if (index == N)
-            {
-                return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL));
-            }
-            if (!create(index))
-            {
-                return AcquireResult::failure(static_cast<code_type>(T::OUT_OF_MEMORY));
-            }
+            if (index == N) { return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL)); }
+            const bool made = create(index);
+            if (!made) { return AcquireResult::failure(static_cast<code_type>(T::OUT_OF_MEMORY)); }
         }
         _generations[index] = detail::nextGeneration(_generations[index]);
-        PoolHandle id;
-        id.generation = _generations[index];
-        id.index = static_cast<int32_t>(index);
+        const PoolHandle id{ _generations[index], static_cast<int32_t>(index) };
         T& object = *_objects[index];
-        code_type code = object.initialize(id, std::move(configuration));
-        if (code != static_cast<code_type>(0))
+        const code_type code = object.initialize(id, std::move(configuration));
+        if (code != code_type{})
         {
             object.reset();
             return AcquireResult::failure(code);
@@ -105,12 +96,9 @@ namespace kiotty
     template <class T, size_t N>
     void LazyReusablePool<T, N>::release(T& object)
     {
-        size_t index = indexOf(object);
+        const size_t index = indexOf(object);
         assert(index < N && _states[index] == SlotState::ACTIVE);
-        if (index >= N || _states[index] != SlotState::ACTIVE)
-        {
-            return;
-        }
+        if (index >= N || _states[index] != SlotState::ACTIVE) { return; }
         object.reset();
         _states[index] = SlotState::RETIRED;
         _count -= 1;
@@ -121,17 +109,12 @@ namespace kiotty
     {
         while (created() < count)
         {
-            size_t index = emptySlot();
-            if (index == N)
-            {
-                return static_cast<code_type>(T::TABLE_FULL);
-            }
-            if (!create(index))
-            {
-                return static_cast<code_type>(T::OUT_OF_MEMORY);
-            }
+            const size_t index = emptySlot();
+            if (index == N) { return static_cast<code_type>(T::TABLE_FULL); }
+            const bool made = create(index);
+            if (!made) { return static_cast<code_type>(T::OUT_OF_MEMORY); }
         }
-        return static_cast<code_type>(0);
+        return code_type{};
     }
 
     template <class T, size_t N>
@@ -147,25 +130,6 @@ namespace kiotty
             _states[i] = SlotState::EMPTY;
         }
         _count = 0;
-    }
-
-    template <class T, size_t N>
-    T* LazyReusablePool<T, N>::find(PoolHandle id)
-    {
-        if (id.index < 0)
-        {
-            return nullptr;
-        }
-        size_t index = static_cast<size_t>(id.index);
-        if (index >= N)
-        {
-            return nullptr;
-        }
-        if (_states[index] != SlotState::ACTIVE || _generations[index] != id.generation)
-        {
-            return nullptr;
-        }
-        return _objects[index].get();
     }
 
     template <class T, size_t N>
@@ -199,10 +163,7 @@ namespace kiotty
     {
         for (size_t i = 0; i < N; ++i)
         {
-            if (_states[i] == SlotState::RETIRED)
-            {
-                return i;
-            }
+            if (_states[i] == SlotState::RETIRED) { return i; }
         }
         return N;
     }
@@ -212,10 +173,7 @@ namespace kiotty
     {
         for (size_t i = 0; i < N; ++i)
         {
-            if (_states[i] == SlotState::EMPTY)
-            {
-                return i;
-            }
+            if (_states[i] == SlotState::EMPTY) { return i; }
         }
         return N;
     }
@@ -225,10 +183,7 @@ namespace kiotty
     {
         for (size_t i = 0; i < N; ++i)
         {
-            if (_objects[i].get() == &object)
-            {
-                return i;
-            }
+            if (_objects[i].get() == &object) { return i; }
         }
         return N;
     }
@@ -237,13 +192,8 @@ namespace kiotty
     bool LazyReusablePool<T, N>::create(size_t index)
     {
         _objects[index].reset(new (std::nothrow) T);
-        if (!_objects[index])
-        {
-            return false;
-        }
+        if (!_objects[index]) { return false; }
         _states[index] = SlotState::RETIRED;
         return true;
     }
 }
-
-#endif

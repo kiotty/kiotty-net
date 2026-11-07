@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     StageBase::Provider::Provider(StageBase& stage)
         : _stage(stage)
@@ -12,27 +12,21 @@ namespace kiotty
 
     size_t StageBase::Provider::writable() const
     {
-        return _stage._capacity - _stage._end_pos;
+        return _stage._capacity - _stage._end_position;
     }
 
     char* StageBase::Provider::prepare(size_t requested)
     {
-        if (_stage._capacity == 0 || requested > writable())
-        {
-            return nullptr;
-        }
-        return _stage._buffer + _stage._end_pos;
+        if (_stage._capacity == 0 || requested > writable()) { return nullptr; }
+        return _stage._buffer + _stage._end_position;
     }
 
     void StageBase::Provider::commit(size_t written)
     {
-        size_t room = writable();
+        const size_t room = writable();
         assert(written <= room);
-        if (written > room)
-        {
-            written = room;
-        }
-        _stage._end_pos += written;
+        const size_t accepted = written > room ? room : written;
+        _stage._end_position += accepted;
     }
 
     StageBase::Consumer::Consumer(StageBase& stage)
@@ -42,35 +36,29 @@ namespace kiotty
 
     size_t StageBase::Consumer::readable() const
     {
-        return _stage._end_pos - _stage._begin_pos;
+        return _stage._end_position - _stage._begin_position;
     }
 
     char* StageBase::Consumer::peek()
     {
-        if (_stage._capacity == 0)
-        {
-            return nullptr;
-        }
-        return _stage._buffer + _stage._begin_pos;
+        if (_stage._capacity == 0) { return nullptr; }
+        return _stage._buffer + _stage._begin_position;
     }
 
     void StageBase::Consumer::commit(size_t consumed)
     {
-        size_t ready = readable();
+        const size_t ready = readable();
         assert(consumed <= ready);
-        if (consumed > ready)
-        {
-            consumed = ready;
-        }
-        _stage._begin_pos += consumed;
+        const size_t accepted = consumed > ready ? ready : consumed;
+        _stage._begin_position += accepted;
     }
 
     StageBase::StageBase(char* buffer, size_t maximum)
         : _buffer(buffer)
         , _maximum(maximum)
         , _capacity(maximum)
-        , _begin_pos(0)
-        , _end_pos(0)
+        , _begin_position(0)
+        , _end_position(0)
     {
     }
 
@@ -96,29 +84,25 @@ namespace kiotty
 
     void StageBase::compact()
     {
-        size_t unread = _end_pos - _begin_pos;
-        if (unread > 0 && _begin_pos > 0)
+        const size_t unread = _end_position - _begin_position;
+        if (unread > 0 && _begin_position > 0)
         {
-            std::memmove(_buffer, _buffer + _begin_pos, unread);
+            std::memmove(_buffer, _buffer + _begin_position, unread);
         }
-        _begin_pos = 0;
-        _end_pos = unread;
+        _begin_position = 0;
+        _end_position = unread;
     }
 
     void StageBase::clear()
     {
-        _begin_pos = 0;
-        _end_pos = 0;
+        _begin_position = 0;
+        _end_position = 0;
     }
 
     void StageBase::limit(size_t capacity)
     {
-        assert(_end_pos == _begin_pos);
-        if (capacity > _maximum)
-        {
-            capacity = _maximum;
-        }
-        _capacity = capacity;
+        assert(_end_position == _begin_position);
+        _capacity = capacity > _maximum ? _maximum : capacity;
         clear();
     }
 }

@@ -1,11 +1,10 @@
-#if !defined(KIOTTY_STAGE_SET_H)
-#define KIOTTY_STAGE_SET_H
+#pragma once
 
 #include "core/kiotty_stage.h"
 
 #include <cstddef>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     template <size_t Receive, size_t Send, size_t Notify>
     struct StageSet
@@ -34,5 +33,3 @@ namespace kiotty
         notify.clear();
     }
 }
-
-#endif

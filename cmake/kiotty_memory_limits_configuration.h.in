@@ -1,0 +1,15 @@
+#pragma once
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    inline constexpr size_t CONFIGURED_SERVERS = @KIOTTY_NET_MAX_SERVERS@;
+    inline constexpr size_t CONFIGURED_STREAM_CLIENTS = @KIOTTY_NET_MAX_STREAM_CLIENTS@;
+    inline constexpr size_t CONFIGURED_EVENT_CLIENTS = @KIOTTY_NET_MAX_EVENT_CLIENTS@;
+    inline constexpr size_t CONFIGURED_CONNECTIONS_PER_SERVER = @KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER@;
+    inline constexpr size_t CONFIGURED_RECEIVE_CAPACITY = @KIOTTY_NET_MAX_RECEIVE_CAPACITY@;
+    inline constexpr size_t CONFIGURED_SEND_CAPACITY = @KIOTTY_NET_MAX_SEND_CAPACITY@;
+    inline constexpr size_t CONFIGURED_PUSH_CAPACITY = @KIOTTY_NET_MAX_PUSH_CAPACITY@;
+    inline constexpr bool   CONFIGURED_TLS = @KIOTTY_NET_TLS_VALUE@;
+}

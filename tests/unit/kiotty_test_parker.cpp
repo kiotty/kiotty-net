@@ -6,7 +6,7 @@
 #include <chrono>
 #include <thread>
 
-using kiotty::Parker;
+using kiotty::net::implementation::Parker;
 
 namespace
 {

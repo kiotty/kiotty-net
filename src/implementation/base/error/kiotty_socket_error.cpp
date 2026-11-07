@@ -1,43 +1,40 @@
 #include "base/error/kiotty_socket_error.h"
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    SocketCode toSocketCode(int os_error)
     {
-        SocketCode toSocketCode(int os_error)
+        if (os_error == 0)
         {
-            if (os_error == 0)
-            {
-                return SocketCode::SUCCESS;
-            }
-            Span<const SocketErrorEntry> table = socketErrorTable();
-            for (const SocketErrorEntry& entry : table)
-            {
-                if (entry.os_error == os_error)
-                {
-                    return entry.code;
-                }
-            }
-            return SocketCode::UNKNOWN;
+            return SocketCode::SUCCESS;
         }
-
-        KiottyNetCode toNetCode(SocketCode code)
+        Span<const SocketErrorEntry> table = socketErrorTable();
+        for (const SocketErrorEntry& entry : table)
         {
-            switch (code)
+            if (entry.os_error == os_error)
             {
-            case SocketCode::SUCCESS:
-                return KIOTTY_SUCCESS;
-            case SocketCode::CLOSED:
-                return KIOTTY_PEER_CLOSED;
-            case SocketCode::CANCELLED:
-                return KIOTTY_CLOSED;
-            case SocketCode::TIMEOUT:
-                return KIOTTY_TIMEOUT;
-            case SocketCode::BUSY:
-                return KIOTTY_BUSY;
-            default:
-                return KIOTTY_SOCKET_ERROR;
+                return entry.code;
             }
+        }
+        return SocketCode::UNKNOWN;
+    }
+
+    KiottyNetCode toNetCode(SocketCode code)
+    {
+        switch (code)
+        {
+        case SocketCode::SUCCESS:
+            return KIOTTY_SUCCESS;
+        case SocketCode::CLOSED:
+            return KIOTTY_PEER_CLOSED;
+        case SocketCode::CANCELLED:
+            return KIOTTY_CLOSED;
+        case SocketCode::TIMEOUT:
+            return KIOTTY_TIMEOUT;
+        case SocketCode::BUSY:
+            return KIOTTY_BUSY;
+        default:
+            return KIOTTY_SOCKET_ERROR;
         }
     }
 }

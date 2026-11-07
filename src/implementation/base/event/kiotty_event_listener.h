@@ -22,43 +22,40 @@
 #define KIOTTY_NET_HAS_EVENT_BACKEND 0
 #endif
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    struct AcceptBuffer
     {
-        struct AcceptBuffer
-        {
-            static const size_t ADDRESS_LENGTH = 128 + 16;
+        static const size_t ADDRESS_LENGTH = 128 + 16;
 
-            SocketHandle socket;
-            char         addresses[2 * ADDRESS_LENGTH];
-        };
+        SocketHandle socket;
+        char         addresses[2 * ADDRESS_LENGTH];
+    };
 
-        class EventListener
-        {
-        public:
-            static const size_t   STORAGE_SIZE = 256;
-            static const size_t   STORAGE_ALIGN = 16;
-            static const uint32_t WAIT_FOREVER = 0xFFFFFFFFu;
+    class EventListener
+    {
+    public:
+        static const size_t   STORAGE_SIZE = 256;
+        static const size_t   STORAGE_ALIGN = 16;
+        static const uint32_t WAIT_FOREVER = 0xFFFFFFFFu;
 
-            EventListener();
-            ~EventListener();
+        EventListener();
+        ~EventListener();
 
-            EventListener(const EventListener&) = delete;
-            EventListener& operator=(const EventListener&) = delete;
+        EventListener(const EventListener&) = delete;
+        EventListener& operator=(const EventListener&) = delete;
 
-            SocketCode               open(size_t completion_capacity);
-            void                     close();
-            SocketCode               attach(IoEvent& event, SocketHandle socket, int32_t slot);
-            SocketCode               submit(IoEvent& event, const IoAction& action, IoPayload payload);
-            void                     detach(IoEvent& event);
-            Span<const IoCompletion> wait(uint32_t timeout_ms);
-            SocketCode               wake();
+        SocketCode               open(size_t completion_capacity);
+        void                     close();
+        SocketCode               attach(IoEvent& event, SocketHandle socket, int32_t slot);
+        SocketCode               submit(IoEvent& event, const IoAction& action, IoPayload payload);
+        void                     detach(IoEvent& event);
+        Span<const IoCompletion> wait(uint32_t timeout_ms);
+        SocketCode               wake();
 
-        private:
-            alignas(STORAGE_ALIGN) unsigned char _storage[STORAGE_SIZE];
-        };
-    }
+    private:
+        alignas(STORAGE_ALIGN) unsigned char _storage[STORAGE_SIZE];
+    };
 }
 
 #endif

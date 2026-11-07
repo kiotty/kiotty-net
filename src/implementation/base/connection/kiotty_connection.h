@@ -5,7 +5,7 @@
 #include "base/connection/kiotty_work_context.h"
 #include "base/context/kiotty_owner.h"
 #include "base/event/kiotty_event_listener.h"
-#include "base/pool/kiotty_memory_limits.h"
+#include "data/datasource/kiotty_memory_limits.h"
 #include "base/socket/kiotty_socket.h"
 #include "base/stream/kiotty_connection_stream.h"
 #include "base/tls/kiotty_tls_engine.h"
@@ -22,142 +22,140 @@
 #include <cstdint>
 #include <mutex>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    enum class Phase : uint8_t
     {
-        enum class Phase : uint8_t
-        {
-            IDLE,
-            HANDSHAKING,
-            READY,
-            CLOSING
-        };
+        IDLE,
+        HANDSHAKING,
+        READY,
+        CLOSING
+    };
 
-        struct Handler
-        {
-            Handler(const KiottyNetConnectionHandler& callbacks, KiottyNetAppContext app_context, Owner& owner);
+    struct Handler
+    {
+        Handler(const KiottyNetConnectionHandler& handler_callbacks, KiottyNetAppContext handler_app_context, Owner& handler_owner);
 
-            const KiottyNetConnectionHandler& callbacks;
-            KiottyNetAppContext               app_context;
-            Owner&                            owner;
-        };
+        const KiottyNetConnectionHandler& callbacks;
+        KiottyNetAppContext               app_context;
+        Owner&                            owner;
+    };
 
-        struct ConnectionLimits
-        {
-            size_t receive;
-            size_t send;
-            size_t notify;
-        };
+    struct ConnectionLimits
+    {
+        size_t receive;
+        size_t send;
+        size_t notify;
+    };
 
-        struct ConnectionConfiguration
-        {
-            ActiveSocket               socket;
-            KiottyNetConnectionContext context;
-            const char*                hostname;
-            ConnectionLimits           limits;
-            TlsProfile&                profile;
-        };
+    struct ConnectionConfiguration
+    {
+        ActiveSocket               socket;
+        KiottyNetConnectionContext context;
+        const char*                hostname;
+        ConnectionLimits           limits;
+        TlsProfile&                profile;
+    };
 
-        typedef Result<KiottyNetCode, IoAction> AdoptResult;
+    typedef Result<IoAction, KiottyNetCode> AdoptResult;
 
-        class Connection : public IoSource
-        {
-        public:
-            typedef KiottyNetCode           code_type;
-            typedef ConnectionConfiguration configuration_type;
+    class Connection : public IoSource
+    {
+    public:
+        typedef KiottyNetCode           code_type;
+        typedef ConnectionConfiguration configuration_type;
 
-            static const KiottyNetCode TABLE_FULL = KIOTTY_TABLE_FULL;
-            static const KiottyNetCode OUT_OF_MEMORY = KIOTTY_OUT_OF_MEMORY;
+        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_TABLE_FULL;
+        static constexpr KiottyNetCode OUT_OF_MEMORY = KIOTTY_OUT_OF_MEMORY;
+        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_PEER_CLOSED;
 
-            Connection();
-            ~Connection() override;
+        Connection();
+        ~Connection() override;
 
-            Connection(const Connection&) = delete;
-            Connection& operator=(const Connection&) = delete;
-            Connection(Connection&&) = delete;
-            Connection& operator=(Connection&&) = delete;
+        Connection(const Connection&) = delete;
+        Connection& operator=(const Connection&) = delete;
+        Connection(Connection&&) = delete;
+        Connection& operator=(Connection&&) = delete;
 
-            KiottyNetCode initialize(PoolHandle id, ConnectionConfiguration&& configuration);
-            void          reset() noexcept;
-            PoolHandle    id() const;
-            int32_t       generation() const;
-            bool          alive() const;
-            Phase         phase() const;
+        KiottyNetCode initialize(PoolHandle id, ConnectionConfiguration&& configuration);
+        void          reset() noexcept;
+        PoolHandle    id() const;
+        int32_t       generation() const;
+        bool          alive() const;
+        Phase         phase() const;
 
-            SocketHandle socket() const override;
-            int32_t      slot() const override;
-            IoEvent&     eventFor(const IoAction& action) override;
-            IoPayload    resolve(const IoAction& action) override;
-            SocketCode   attach(EventListener& listener) override;
-            void         detach(EventListener& listener) override;
-            void         shutdown() override;
+        SocketHandle socket() const override;
+        int32_t      slot() const override;
+        IoEvent&     eventFor(const IoAction& action) override;
+        IoPayload    resolve(const IoAction& action) override;
+        SocketCode   attach(EventListener& listener) override;
+        void         detach(EventListener& listener) override;
+        void         shutdown() override;
 
-            IoAction onOpened(const Handler& handler);
-            IoAction close(KiottyNetCode reason, const Handler& handler);
-            IoAction dispatch(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
+        IoAction onOpened(const Handler& handler);
+        IoAction close(KiottyNetCode reason, const Handler& handler);
+        IoAction dispatch(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
 
-            IoAction pickWrite(std::mutex& notification);
+        IoAction pickWrite(std::mutex& notification);
 
-            uint64_t       deadline() const;
-            bool           expireDeadline(uint64_t now);
-            bool           workReady() const;
-            bool           workFinished() const;
-            IoAction       takeWorkOutcome();
-            bool           working() const;
-            const IoEvent& readEvent() const;
-            const IoEvent& writeEvent() const;
+        uint64_t       deadline() const;
+        bool           expireDeadline(uint64_t now);
+        bool           workReady() const;
+        bool           workFinished() const;
+        IoAction       takeWorkOutcome();
+        bool           working() const;
+        const IoEvent& readEvent() const;
+        const IoEvent& writeEvent() const;
 
-            KiottyNetConnectionInfo    info() const;
-            KiottyNetConnectionContext context() const;
-            int32_t                    state() const;
-            void                       setState(int32_t state);
-            size_t                     notificationWritable();
-            KiottyNetCode              stageNotification(KiottyNetSpan data);
+        KiottyNetConnectionInfo    info() const;
+        KiottyNetConnectionContext context() const;
+        int32_t                    state() const;
+        void                       setState(int32_t state);
+        size_t                     notificationWritable();
+        KiottyNetCode              stageNotification(KiottyNetSpan data);
 
-            KiottyNetCode    verifyWork(int32_t generation) const;
-            ConnectionStream stream();
-            KiottyNetCode    closeStream(int32_t generation, const KiottyNetConnectionAction& then);
+        KiottyNetCode    verifyWork(int32_t generation) const;
+        ConnectionStream stream();
+        KiottyNetCode    closeStream(int32_t generation, const KiottyNetConnectionAction& then);
 
-        private:
-            IoAction onReceived(const IoCompletion& completion, const Handler& handler);
-            IoAction onSent(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
-            IoAction onTimeout(const Handler& handler);
-            IoAction onWorkReady(const Handler& handler);
-            IoAction onWorkFinished(const IoCompletion& completion, const Handler& handler);
-            IoAction onHandshake(const Handler& handler);
-            IoAction onPeerGone(SocketCode code);
-            AdoptResult adopt(const KiottyNetConnectionAction& returned);
-            IoAction admit(const KiottyNetConnectionAction& returned, const Handler& handler);
-            IoAction drive(IoAction action, const Handler& handler);
-            IoAction extend(const KiottyNetConnectionAction& returned, const Handler& handler);
-            Result<KiottyNetCode, size_t> refill();
-            IoAction apply(IoAction action, const Handler& handler);
-            IoAction select(std::mutex& notification);
-            IoAction encoded(IoAction write, Span<char> plain);
-            bool     userActionPending();
-            void     setDeadline(uint32_t timeout_ms);
-            void     reject(const Handler& handler, KiottyNetCode code, const char* message) const;
-            StageBase& receiveStage(IoPurpose purpose);
-            KiottyNetConnectionHandle handle(const Handler& handler) const;
-            KiottyNetConnectionStream streamHandle(const Handler& handler) const;
+    private:
+        IoAction onReceived(const IoCompletion& completion, const Handler& handler);
+        IoAction onSent(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
+        IoAction onTimeout(const Handler& handler);
+        IoAction onWorkReady(const Handler& handler);
+        IoAction onWorkFinished(const IoCompletion& completion, const Handler& handler);
+        IoAction onHandshake(const Handler& handler);
+        IoAction onPeerGone(SocketCode code);
+        AdoptResult adopt(const KiottyNetConnectionAction& returned);
+        IoAction admit(const KiottyNetConnectionAction& returned, const Handler& handler);
+        IoAction drive(IoAction action, const Handler& handler);
+        IoAction extend(const KiottyNetConnectionAction& returned, const Handler& handler);
+        Result<size_t, KiottyNetCode> refill();
+        IoAction apply(IoAction action, const Handler& handler);
+        IoAction select(std::mutex& notification);
+        IoAction encoded(IoAction write, Span<char> plain);
+        bool     userActionPending();
+        void     setDeadline(uint32_t timeout_ms);
+        void     reject(const Handler& handler, KiottyNetCode code, const char* message) const;
+        StageBase& receiveStage(IoPurpose purpose);
+        KiottyNetConnectionHandle handle(const Handler& handler) const;
+        KiottyNetConnectionStream streamHandle(const Handler& handler) const;
 
-            typedef StageSet<MemoryLimits::RECV_CAPACITY, MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY> PlainStages;
+        typedef StageSet<MemoryLimits::RECEIVE_CAPACITY, MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY> PlainStages;
 
-            std::atomic<Phase>         _phase;
-            uint64_t                   _deadline;
-            WorkContext                _work;
-            IoEvent                    _read_event;
-            IoEvent                    _write_event;
-            PlainStages                _plain;
-            TlsEngine                  _tls;
-            ActiveSocket               _socket;
-            PoolHandle                 _id;
-            KiottyNetConnectionContext _context;
-            KiottyNetConnectionInfo    _info;
-            std::atomic<int32_t>       _state;
-        };
-    }
+        std::atomic<Phase>         _phase;
+        uint64_t                   _deadline;
+        WorkContext                _work;
+        IoEvent                    _read_event;
+        IoEvent                    _write_event;
+        PlainStages                _plain;
+        TlsEngine                  _tls;
+        ActiveSocket               _socket;
+        PoolHandle                 _id;
+        KiottyNetConnectionContext _context;
+        KiottyNetConnectionInfo    _info;
+        std::atomic<int32_t>       _state;
+    };
 }
 
 #endif

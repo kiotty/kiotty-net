@@ -17,550 +17,547 @@
 #include <cstring>
 #include <utility>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    namespace
     {
-        namespace
+        struct Address
         {
-            struct Address
-            {
-                sockaddr_storage storage;
-                socklen_t        length;
-            };
+            sockaddr_storage storage;
+            socklen_t        length;
+        };
 
-            int descriptorOf(SocketHandle handle)
+        int descriptorOf(SocketHandle handle)
+        {
+            return static_cast<int>(handle);
+        }
+
+        int familyOf(KiottyNetTransport transport)
+        {
+            if (transport == KIOTTY_PIPE)
             {
-                return static_cast<int>(handle);
+                return AF_UNIX;
             }
+            return AF_INET;
+        }
 
-            int familyOf(KiottyNetTransport transport)
-            {
-                if (transport == KIOTTY_PIPE)
-                {
-                    return AF_UNIX;
-                }
-                return AF_INET;
-            }
-
-            int sendFlags()
-            {
+        int sendFlags()
+        {
 #if defined(MSG_NOSIGNAL)
-                return MSG_NOSIGNAL;
+            return MSG_NOSIGNAL;
 #else
-                return 0;
+            return 0;
 #endif
-            }
+        }
 
-            SocketCode prepare(int descriptor)
+        SocketCode prepare(int descriptor)
+        {
+            int flags = ::fcntl(descriptor, F_GETFL, 0);
+            if (flags < 0)
             {
-                int flags = ::fcntl(descriptor, F_GETFL, 0);
-                if (flags < 0)
-                {
-                    return lastSocketCode();
-                }
-                if (::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0)
-                {
-                    return lastSocketCode();
-                }
-                if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) < 0)
-                {
-                    return lastSocketCode();
-                }
+                return lastSocketCode();
+            }
+            if (::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0)
+            {
+                return lastSocketCode();
+            }
+            if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) < 0)
+            {
+                return lastSocketCode();
+            }
 #if defined(SO_NOSIGPIPE)
-                int on = 1;
-                if (::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) < 0)
-                {
-                    return lastSocketCode();
-                }
+            int on = 1;
+            if (::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) < 0)
+            {
+                return lastSocketCode();
+            }
 #endif
-                return SocketCode::SUCCESS;
-            }
+            return SocketCode::SUCCESS;
+        }
 
-            SocketCode unixAddressOf(const char* path, Address& address)
+        SocketCode unixAddressOf(const char* path, Address& address)
+        {
+            sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&address.storage);
+            size_t length = std::strlen(path);
+            if (length == 0 || length >= sizeof(unix_address->sun_path))
             {
-                sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&address.storage);
-                size_t length = std::strlen(path);
-                if (length == 0 || length >= sizeof(unix_address->sun_path))
-                {
-                    return SocketCode::INVALID_ARGUMENT;
-                }
-                std::memset(&address.storage, 0, sizeof(address.storage));
-                unix_address->sun_family = AF_UNIX;
-                std::memcpy(unix_address->sun_path, path, length);
-                address.length = static_cast<socklen_t>(sizeof(sockaddr_un));
-                return SocketCode::SUCCESS;
+                return SocketCode::INVALID_ARGUMENT;
             }
+            std::memset(&address.storage, 0, sizeof(address.storage));
+            unix_address->sun_family = AF_UNIX;
+            std::memcpy(unix_address->sun_path, path, length);
+            address.length = static_cast<socklen_t>(sizeof(sockaddr_un));
+            return SocketCode::SUCCESS;
+        }
 
-            SocketCode inetAddressOf(const KiottyNetEndpoint& endpoint, bool passive, Address& address)
+        SocketCode inetAddressOf(const KiottyNetEndpoint& endpoint, bool passive, Address& address)
+        {
+            addrinfo hints;
+            std::memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            if (passive)
             {
-                addrinfo hints;
-                std::memset(&hints, 0, sizeof(hints));
-                hints.ai_family = AF_INET;
-                hints.ai_socktype = SOCK_STREAM;
-                if (passive)
-                {
-                    hints.ai_flags = AI_PASSIVE;
-                }
-                const char* host = endpoint.host;
-                if (host[0] == '\0')
-                {
-                    host = nullptr;
-                }
-                addrinfo* found = nullptr;
-                int resolved = ::getaddrinfo(host, nullptr, &hints, &found);
-                if (resolved != 0 || found == nullptr)
-                {
-                    return SocketCode::UNREACHABLE;
-                }
-                std::memset(&address.storage, 0, sizeof(address.storage));
-                std::memcpy(&address.storage, found->ai_addr, found->ai_addrlen);
-                address.length = static_cast<socklen_t>(found->ai_addrlen);
-                ::freeaddrinfo(found);
-                sockaddr_in* inet_address = reinterpret_cast<sockaddr_in*>(&address.storage);
-                inet_address->sin_port = htons(endpoint.port);
-                return SocketCode::SUCCESS;
+                hints.ai_flags = AI_PASSIVE;
             }
-
-            SocketCode addressOf(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, bool passive, Address& address)
+            const char* host = endpoint.host;
+            if (host[0] == '\0')
             {
-                if (transport == KIOTTY_PIPE)
-                {
-                    return unixAddressOf(endpoint.host, address);
-                }
-                return inetAddressOf(endpoint, passive, address);
+                host = nullptr;
             }
-
-            KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage)
+            addrinfo* found = nullptr;
+            int resolved = ::getaddrinfo(host, nullptr, &hints, &found);
+            if (resolved != 0 || found == nullptr)
             {
-                KiottyNetConnectionInfo info;
-                std::memset(&info, 0, sizeof(info));
-                if (storage.ss_family == AF_INET)
-                {
-                    const sockaddr_in* inet_address = reinterpret_cast<const sockaddr_in*>(&storage);
-                    ::inet_ntop(AF_INET, &inet_address->sin_addr, info.hostname, sizeof(info.hostname));
-                    info.port = ntohs(inet_address->sin_port);
-                }
-                if (storage.ss_family == AF_UNIX)
-                {
-                    const sockaddr_un* unix_address = reinterpret_cast<const sockaddr_un*>(&storage);
-                    size_t length = strnlen(unix_address->sun_path, sizeof(unix_address->sun_path));
-                    std::memcpy(info.hostname, unix_address->sun_path, length);
-                }
-                return info;
+                return SocketCode::UNREACHABLE;
             }
+            std::memset(&address.storage, 0, sizeof(address.storage));
+            std::memcpy(&address.storage, found->ai_addr, found->ai_addrlen);
+            address.length = static_cast<socklen_t>(found->ai_addrlen);
+            ::freeaddrinfo(found);
+            sockaddr_in* inet_address = reinterpret_cast<sockaddr_in*>(&address.storage);
+            inet_address->sin_port = htons(endpoint.port);
+            return SocketCode::SUCCESS;
+        }
 
-            SocketCode waitFor(int descriptor, short events, uint32_t timeout_ms)
+        SocketCode addressOf(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, bool passive, Address& address)
+        {
+            if (transport == KIOTTY_PIPE)
             {
-                uint64_t deadline = monotonicMs() + timeout_ms;
-                for (;;)
-                {
-                    int wait_ms = -1;
-                    if (timeout_ms != 0)
-                    {
-                        uint64_t now = monotonicMs();
-                        uint64_t remaining = deadline > now ? deadline - now : 0;
-                        wait_ms = static_cast<int>(remaining);
-                    }
-                    pollfd entry;
-                    entry.fd = descriptor;
-                    entry.events = events;
-                    entry.revents = 0;
-                    int ready = ::poll(&entry, 1, wait_ms);
-                    if (ready > 0)
-                    {
-                        return SocketCode::SUCCESS;
-                    }
-                    if (ready == 0)
-                    {
-                        return SocketCode::TIMEOUT;
-                    }
-                    if (errno != EINTR)
-                    {
-                        return lastSocketCode();
-                    }
-                }
+                return unixAddressOf(endpoint.host, address);
             }
+            return inetAddressOf(endpoint, passive, address);
+        }
 
-            SocketCode pendingError(int descriptor)
+        KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage)
+        {
+            KiottyNetConnectionInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (storage.ss_family == AF_INET)
             {
-                int error = 0;
-                socklen_t length = sizeof(error);
-                if (::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &length) < 0)
+                const sockaddr_in* inet_address = reinterpret_cast<const sockaddr_in*>(&storage);
+                ::inet_ntop(AF_INET, &inet_address->sin_addr, info.hostname, sizeof(info.hostname));
+                info.port = ntohs(inet_address->sin_port);
+            }
+            if (storage.ss_family == AF_UNIX)
+            {
+                const sockaddr_un* unix_address = reinterpret_cast<const sockaddr_un*>(&storage);
+                size_t length = strnlen(unix_address->sun_path, sizeof(unix_address->sun_path));
+                std::memcpy(info.hostname, unix_address->sun_path, length);
+            }
+            return info;
+        }
+
+        SocketCode waitFor(int descriptor, short events, uint32_t timeout_ms)
+        {
+            uint64_t deadline = monotonicMilliseconds() + timeout_ms;
+            for (;;)
+            {
+                int wait_ms = -1;
+                if (timeout_ms != 0)
+                {
+                    uint64_t now = monotonicMilliseconds();
+                    uint64_t remaining = deadline > now ? deadline - now : 0;
+                    wait_ms = static_cast<int>(remaining);
+                }
+                pollfd entry;
+                entry.fd = descriptor;
+                entry.events = events;
+                entry.revents = 0;
+                int ready = ::poll(&entry, 1, wait_ms);
+                if (ready > 0)
+                {
+                    return SocketCode::SUCCESS;
+                }
+                if (ready == 0)
+                {
+                    return SocketCode::TIMEOUT;
+                }
+                if (errno != EINTR)
                 {
                     return lastSocketCode();
                 }
-                return toSocketCode(error);
             }
         }
 
-        ActiveSocket::ActiveSocket()
-            : _handle(INVALID_SOCKET_HANDLE)
-            , _transport(KIOTTY_TCP)
-            , _peer()
+        SocketCode pendingError(int descriptor)
         {
+            int error = 0;
+            socklen_t length = sizeof(error);
+            if (::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &length) < 0)
+            {
+                return lastSocketCode();
+            }
+            return toSocketCode(error);
         }
+    }
 
-        ActiveSocket::ActiveSocket(SocketHandle handle, KiottyNetTransport transport)
-            : _handle(handle)
-            , _transport(transport)
-            , _peer()
-        {
-        }
+    ActiveSocket::ActiveSocket()
+        : _handle(INVALID_SOCKET_HANDLE)
+        , _transport(KIOTTY_TCP)
+        , _peer()
+    {
+    }
 
-        ActiveSocket::~ActiveSocket()
+    ActiveSocket::ActiveSocket(SocketHandle handle, KiottyNetTransport transport)
+        : _handle(handle)
+        , _transport(transport)
+        , _peer()
+    {
+    }
+
+    ActiveSocket::~ActiveSocket()
+    {
+        close();
+    }
+
+    ActiveSocket::ActiveSocket(ActiveSocket&& other) noexcept
+        : _handle(other._handle)
+        , _transport(other._transport)
+        , _peer(other._peer)
+    {
+        other._handle = INVALID_SOCKET_HANDLE;
+    }
+
+    ActiveSocket& ActiveSocket::operator=(ActiveSocket&& other) noexcept
+    {
+        if (this != &other)
         {
             close();
-        }
-
-        ActiveSocket::ActiveSocket(ActiveSocket&& other) noexcept
-            : _handle(other._handle)
-            , _transport(other._transport)
-            , _peer(other._peer)
-        {
+            _handle = other._handle;
+            _transport = other._transport;
+            _peer = other._peer;
             other._handle = INVALID_SOCKET_HANDLE;
         }
+        return *this;
+    }
 
-        ActiveSocket& ActiveSocket::operator=(ActiveSocket&& other) noexcept
+    ActiveSocketResult ActiveSocket::open(KiottyNetTransport transport)
+    {
+        int descriptor = ::socket(familyOf(transport), SOCK_STREAM, 0);
+        if (descriptor < 0)
         {
-            if (this != &other)
-            {
-                close();
-                _handle = other._handle;
-                _transport = other._transport;
-                _peer = other._peer;
-                other._handle = INVALID_SOCKET_HANDLE;
-            }
-            return *this;
+            return ActiveSocketResult::failure(lastSocketCode());
         }
-
-        ActiveSocketResult ActiveSocket::open(KiottyNetTransport transport)
+        ActiveSocket socket(descriptor, transport);
+        SocketCode prepared = prepare(descriptor);
+        if (prepared != SocketCode::SUCCESS)
         {
-            int descriptor = ::socket(familyOf(transport), SOCK_STREAM, 0);
-            if (descriptor < 0)
-            {
-                return ActiveSocketResult::failure(lastSocketCode());
-            }
-            ActiveSocket socket(descriptor, transport);
-            SocketCode prepared = prepare(descriptor);
-            if (prepared != SocketCode::SUCCESS)
-            {
-                return ActiveSocketResult::failure(prepared);
-            }
-            return ActiveSocketResult::success(std::move(socket));
+            return ActiveSocketResult::failure(prepared);
         }
+        return ActiveSocketResult::success(std::move(socket));
+    }
 
-        SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
+    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
+    {
+        if (!valid())
         {
-            if (!valid())
+            return SocketCode::INVALID_ARGUMENT;
+        }
+        Address address;
+        SocketCode resolved = addressOf(_transport, endpoint, false, address);
+        if (resolved != SocketCode::SUCCESS)
+        {
+            return resolved;
+        }
+        int descriptor = descriptorOf(_handle);
+        const sockaddr* target = reinterpret_cast<const sockaddr*>(&address.storage);
+        if (::connect(descriptor, target, address.length) != 0)
+        {
+            int started = errno;
+            if (started != EINPROGRESS)
             {
-                return SocketCode::INVALID_ARGUMENT;
+                return toSocketCode(started);
             }
-            Address address;
-            SocketCode resolved = addressOf(_transport, endpoint, false, address);
-            if (resolved != SocketCode::SUCCESS)
+            SocketCode waited = waitFor(descriptor, POLLOUT, timeout_ms);
+            if (waited != SocketCode::SUCCESS)
             {
-                return resolved;
+                return waited;
             }
-            int descriptor = descriptorOf(_handle);
-            const sockaddr* target = reinterpret_cast<const sockaddr*>(&address.storage);
-            if (::connect(descriptor, target, address.length) != 0)
+            SocketCode connected = pendingError(descriptor);
+            if (connected != SocketCode::SUCCESS)
             {
-                int started = errno;
-                if (started != EINPROGRESS)
-                {
-                    return toSocketCode(started);
-                }
-                SocketCode waited = waitFor(descriptor, POLLOUT, timeout_ms);
-                if (waited != SocketCode::SUCCESS)
-                {
-                    return waited;
-                }
-                SocketCode connected = pendingError(descriptor);
-                if (connected != SocketCode::SUCCESS)
-                {
-                    return connected;
-                }
+                return connected;
             }
-            _peer = infoOf(address.storage);
+        }
+        _peer = infoOf(address.storage);
+        return SocketCode::SUCCESS;
+    }
+
+    SocketCode ActiveSocket::setNoDelay(bool on)
+    {
+        if (!valid())
+        {
+            return SocketCode::INVALID_ARGUMENT;
+        }
+        if (_transport == KIOTTY_PIPE)
+        {
             return SocketCode::SUCCESS;
         }
-
-        SocketCode ActiveSocket::setNoDelay(bool on)
+        int value = on ? 1 : 0;
+        if (::setsockopt(descriptorOf(_handle), IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value)) < 0)
         {
-            if (!valid())
-            {
-                return SocketCode::INVALID_ARGUMENT;
-            }
-            if (_transport == KIOTTY_PIPE)
-            {
-                return SocketCode::SUCCESS;
-            }
-            int value = on ? 1 : 0;
-            if (::setsockopt(descriptorOf(_handle), IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value)) < 0)
-            {
-                return lastSocketCode();
-            }
-            return SocketCode::SUCCESS;
+            return lastSocketCode();
         }
+        return SocketCode::SUCCESS;
+    }
 
-        TransferResult ActiveSocket::send(const void* data, size_t length)
+    TransferResult ActiveSocket::send(const void* data, size_t length)
+    {
+        if (!valid())
         {
-            if (!valid())
+            return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+        }
+        for (;;)
+        {
+            ssize_t sent = ::send(descriptorOf(_handle), data, length, sendFlags());
+            if (sent >= 0)
             {
-                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::success(static_cast<size_t>(sent));
             }
-            for (;;)
+            if (errno != EINTR)
             {
-                ssize_t sent = ::send(descriptorOf(_handle), data, length, sendFlags());
-                if (sent >= 0)
-                {
-                    return TransferResult::success(static_cast<size_t>(sent));
-                }
-                if (errno != EINTR)
-                {
-                    return TransferResult::failure(lastSocketCode());
-                }
+                return TransferResult::failure(lastSocketCode());
             }
         }
+    }
 
-        TransferResult ActiveSocket::receive(void* data, size_t length)
+    TransferResult ActiveSocket::receive(void* data, size_t length)
+    {
+        if (!valid())
         {
-            if (!valid())
-            {
-                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
-            }
-            for (;;)
-            {
-                ssize_t received = ::recv(descriptorOf(_handle), data, length, 0);
-                if (received > 0)
-                {
-                    return TransferResult::success(static_cast<size_t>(received));
-                }
-                if (received == 0 && length > 0)
-                {
-                    return TransferResult::failure(SocketCode::CLOSED);
-                }
-                if (received == 0)
-                {
-                    return TransferResult::success(static_cast<size_t>(0));
-                }
-                if (errno != EINTR)
-                {
-                    return TransferResult::failure(lastSocketCode());
-                }
-            }
+            return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
         }
-
-        TransferResult ActiveSocket::peek(void* data, size_t length)
+        for (;;)
         {
-            if (!valid())
+            ssize_t received = ::recv(descriptorOf(_handle), data, length, 0);
+            if (received > 0)
             {
-                return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+                return TransferResult::success(static_cast<size_t>(received));
             }
-            for (;;)
+            if (received == 0 && length > 0)
             {
-                ssize_t received = ::recv(descriptorOf(_handle), data, length, MSG_PEEK);
-                if (received > 0)
-                {
-                    return TransferResult::success(static_cast<size_t>(received));
-                }
-                if (received == 0 && length > 0)
-                {
-                    return TransferResult::failure(SocketCode::CLOSED);
-                }
-                if (received == 0)
-                {
-                    return TransferResult::success(static_cast<size_t>(0));
-                }
-                if (errno != EINTR)
-                {
-                    return TransferResult::failure(lastSocketCode());
-                }
+                return TransferResult::failure(SocketCode::CLOSED);
+            }
+            if (received == 0)
+            {
+                return TransferResult::success(static_cast<size_t>(0));
+            }
+            if (errno != EINTR)
+            {
+                return TransferResult::failure(lastSocketCode());
             }
         }
+    }
 
-        SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+    TransferResult ActiveSocket::peek(void* data, size_t length)
+    {
+        if (!valid())
         {
-            if (!valid())
+            return TransferResult::failure(SocketCode::INVALID_ARGUMENT);
+        }
+        for (;;)
+        {
+            ssize_t received = ::recv(descriptorOf(_handle), data, length, MSG_PEEK);
+            if (received > 0)
             {
-                return SocketCode::INVALID_ARGUMENT;
+                return TransferResult::success(static_cast<size_t>(received));
             }
-            return waitFor(descriptorOf(_handle), POLLIN, timeout_ms);
-        }
-
-        SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
-        {
-            if (!valid())
+            if (received == 0 && length > 0)
             {
-                return SocketCode::INVALID_ARGUMENT;
+                return TransferResult::failure(SocketCode::CLOSED);
             }
-            return waitFor(descriptorOf(_handle), POLLOUT, timeout_ms);
-        }
-
-        SocketCode ActiveSocket::shutdown()
-        {
-            if (!valid())
+            if (received == 0)
             {
-                return SocketCode::INVALID_ARGUMENT;
+                return TransferResult::success(static_cast<size_t>(0));
             }
-            if (::shutdown(descriptorOf(_handle), SHUT_WR) < 0)
+            if (errno != EINTR)
             {
-                return lastSocketCode();
+                return TransferResult::failure(lastSocketCode());
             }
-            return SocketCode::SUCCESS;
         }
+    }
 
-        void ActiveSocket::close()
+    SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+    {
+        if (!valid())
         {
-            if (!valid())
-            {
-                return;
-            }
-            ::close(descriptorOf(_handle));
-            _handle = INVALID_SOCKET_HANDLE;
+            return SocketCode::INVALID_ARGUMENT;
         }
+        return waitFor(descriptorOf(_handle), POLLIN, timeout_ms);
+    }
 
-        bool ActiveSocket::valid() const
+    SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
+    {
+        if (!valid())
         {
-            return _handle != INVALID_SOCKET_HANDLE;
+            return SocketCode::INVALID_ARGUMENT;
         }
+        return waitFor(descriptorOf(_handle), POLLOUT, timeout_ms);
+    }
 
-        SocketHandle ActiveSocket::handle() const
+    SocketCode ActiveSocket::shutdown()
+    {
+        if (!valid())
         {
-            return _handle;
+            return SocketCode::INVALID_ARGUMENT;
         }
-
-        KiottyNetConnectionInfo ActiveSocket::peer() const
+        if (::shutdown(descriptorOf(_handle), SHUT_WR) < 0)
         {
-            return _peer;
+            return lastSocketCode();
         }
+        return SocketCode::SUCCESS;
+    }
 
-        PassiveSocket::PassiveSocket()
-            : _handle(INVALID_SOCKET_HANDLE)
-            , _transport(KIOTTY_TCP)
-            , _port(0)
+    void ActiveSocket::close()
+    {
+        if (!valid())
         {
+            return;
         }
+        ::close(descriptorOf(_handle));
+        _handle = INVALID_SOCKET_HANDLE;
+    }
 
-        PassiveSocket::~PassiveSocket()
+    bool ActiveSocket::valid() const
+    {
+        return _handle != INVALID_SOCKET_HANDLE;
+    }
+
+    SocketHandle ActiveSocket::handle() const
+    {
+        return _handle;
+    }
+
+    KiottyNetConnectionInfo ActiveSocket::peer() const
+    {
+        return _peer;
+    }
+
+    PassiveSocket::PassiveSocket()
+        : _handle(INVALID_SOCKET_HANDLE)
+        , _transport(KIOTTY_TCP)
+        , _port(0)
+    {
+    }
+
+    PassiveSocket::~PassiveSocket()
+    {
+        close();
+    }
+
+    SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
+    {
+        close();
+        Address address;
+        SocketCode resolved = addressOf(endpoint.transport, endpoint, true, address);
+        if (resolved != SocketCode::SUCCESS)
+        {
+            return resolved;
+        }
+        int descriptor = ::socket(familyOf(endpoint.transport), SOCK_STREAM, 0);
+        if (descriptor < 0)
+        {
+            return lastSocketCode();
+        }
+        _handle = descriptor;
+        _transport = endpoint.transport;
+        SocketCode prepared = prepare(descriptor);
+        if (prepared != SocketCode::SUCCESS)
         {
             close();
+            return prepared;
         }
-
-        SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
+        if (_transport == KIOTTY_PIPE)
         {
+            ::unlink(endpoint.host);
+        }
+        else
+        {
+            int reuse = 1;
+            ::setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        }
+        const sockaddr* local = reinterpret_cast<const sockaddr*>(&address.storage);
+        if (::bind(descriptor, local, address.length) < 0)
+        {
+            SocketCode code = lastSocketCode();
             close();
-            Address address;
-            SocketCode resolved = addressOf(endpoint.transport, endpoint, true, address);
-            if (resolved != SocketCode::SUCCESS)
-            {
-                return resolved;
-            }
-            int descriptor = ::socket(familyOf(endpoint.transport), SOCK_STREAM, 0);
-            if (descriptor < 0)
-            {
-                return lastSocketCode();
-            }
-            _handle = descriptor;
-            _transport = endpoint.transport;
-            SocketCode prepared = prepare(descriptor);
-            if (prepared != SocketCode::SUCCESS)
-            {
-                close();
-                return prepared;
-            }
-            if (_transport == KIOTTY_PIPE)
-            {
-                ::unlink(endpoint.host);
-            }
-            else
-            {
-                int reuse = 1;
-                ::setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-            }
-            const sockaddr* local = reinterpret_cast<const sockaddr*>(&address.storage);
-            if (::bind(descriptor, local, address.length) < 0)
-            {
-                SocketCode code = lastSocketCode();
-                close();
-                return code;
-            }
-            if (::listen(descriptor, backlog) < 0)
-            {
-                SocketCode code = lastSocketCode();
-                close();
-                return code;
-            }
-            if (_transport == KIOTTY_TCP)
-            {
-                sockaddr_storage bound;
-                socklen_t length = sizeof(bound);
-                std::memset(&bound, 0, sizeof(bound));
-                ::getsockname(descriptor, reinterpret_cast<sockaddr*>(&bound), &length);
-                KiottyNetConnectionInfo info = infoOf(bound);
-                _port = static_cast<uint16_t>(info.port);
-            }
-            return SocketCode::SUCCESS;
+            return code;
         }
-
-        ActiveSocketResult PassiveSocket::accept()
+        if (::listen(descriptor, backlog) < 0)
         {
-            if (!valid())
-            {
-                return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT);
-            }
-            sockaddr_storage peer;
-            socklen_t length = sizeof(peer);
-            std::memset(&peer, 0, sizeof(peer));
-            int descriptor = -1;
-            for (;;)
-            {
-                descriptor = ::accept(descriptorOf(_handle), reinterpret_cast<sockaddr*>(&peer), &length);
-                if (descriptor >= 0 || errno != EINTR)
-                {
-                    break;
-                }
-            }
-            if (descriptor < 0)
-            {
-                return ActiveSocketResult::failure(lastSocketCode());
-            }
-            ActiveSocket socket(descriptor, _transport);
-            SocketCode prepared = prepare(descriptor);
-            if (prepared != SocketCode::SUCCESS)
-            {
-                return ActiveSocketResult::failure(prepared);
-            }
-            socket._peer = infoOf(peer);
-            return ActiveSocketResult::success(std::move(socket));
+            SocketCode code = lastSocketCode();
+            close();
+            return code;
         }
-
-        void PassiveSocket::close()
+        if (_transport == KIOTTY_TCP)
         {
-            if (!valid())
+            sockaddr_storage bound;
+            socklen_t length = sizeof(bound);
+            std::memset(&bound, 0, sizeof(bound));
+            ::getsockname(descriptor, reinterpret_cast<sockaddr*>(&bound), &length);
+            KiottyNetConnectionInfo info = infoOf(bound);
+            _port = static_cast<uint16_t>(info.port);
+        }
+        return SocketCode::SUCCESS;
+    }
+
+    ActiveSocketResult PassiveSocket::accept()
+    {
+        if (!valid())
+        {
+            return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT);
+        }
+        sockaddr_storage peer;
+        socklen_t length = sizeof(peer);
+        std::memset(&peer, 0, sizeof(peer));
+        int descriptor = -1;
+        for (;;)
+        {
+            descriptor = ::accept(descriptorOf(_handle), reinterpret_cast<sockaddr*>(&peer), &length);
+            if (descriptor >= 0 || errno != EINTR)
             {
-                return;
+                break;
             }
-            ::close(descriptorOf(_handle));
-            _handle = INVALID_SOCKET_HANDLE;
-            _port = 0;
         }
-
-        bool PassiveSocket::valid() const
+        if (descriptor < 0)
         {
-            return _handle != INVALID_SOCKET_HANDLE;
+            return ActiveSocketResult::failure(lastSocketCode());
         }
-
-        SocketHandle PassiveSocket::handle() const
+        ActiveSocket socket(descriptor, _transport);
+        SocketCode prepared = prepare(descriptor);
+        if (prepared != SocketCode::SUCCESS)
         {
-            return _handle;
+            return ActiveSocketResult::failure(prepared);
         }
+        socket._peer = infoOf(peer);
+        return ActiveSocketResult::success(std::move(socket));
+    }
 
-        uint16_t PassiveSocket::port() const
+    void PassiveSocket::close()
+    {
+        if (!valid())
         {
-            return _port;
+            return;
         }
+        ::close(descriptorOf(_handle));
+        _handle = INVALID_SOCKET_HANDLE;
+        _port = 0;
+    }
+
+    bool PassiveSocket::valid() const
+    {
+        return _handle != INVALID_SOCKET_HANDLE;
+    }
+
+    SocketHandle PassiveSocket::handle() const
+    {
+        return _handle;
+    }
+
+    uint16_t PassiveSocket::port() const
+    {
+        return _port;
     }
 }
 

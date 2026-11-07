@@ -165,10 +165,18 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+1단계에서 한 것 (2026-11-07):
+
+- 모든 초안 (`core`, `domain`, `data`) 을 `kiotty_*.h / .cpp` 로 이름을 바꿨다. core 의 옛 파일은 지웠다. `domain/`, `data/infra/` 초안은 아직 CMake 에 없다.
+- `base/pool/kiotty_memory_limits.h` 를 지우고 `data/datasource/kiotty_memory_limits.h` 로 옮겼다. 이 헤더는 생성 헤더 `kiotty_memory_limits_configuration.h` (`cmake/*.h.in`, `<build>/generated/`) 의 `CONFIGURED_*` 를 읽는다. CMake 캐시 이름 `KIOTTY_NET_MAX_RECV_CAPACITY` 는 `KIOTTY_NET_MAX_RECEIVE_CAPACITY` 가 됐다. 테스트는 기대값을 `KIOTTY_TEST_EXPECTED_*` 정의로 받는다.
+- `ReusablePool` 은 `ReusablePoolBase<T>` 위에 선다. `find` 대신 `get` (Result). `full / empty` 를 지웠다 (`count / capacity`). `Connection::INVALID_HANDLE = KIOTTY_PEER_CLOSED`. `LazyReusablePool` 에는 `get` 이 없다 (쓰는 곳이 없다).
+- 테스트 타깃도 gcc / clang 에서 `-fno-rtti` (라이브러리의 다형 타입을 테스트가 상속한다). 예외는 테스트에서만 켠다 (deviations DV8).
+- 확인: MSVC Debug TLS OFF 303, TLS ON 303, WSL gcc Debug TLS ON 304 모두 초록. clang 과 나머지 매트릭스는 7단계.
+
 | 단계 | 상태 | 남은 것 |
 |---|---|---|
 | 0 | 끝 | |
-| 1 | 초안 일부 | 6절. 초안 이름 바꾸기, CMake, 생성 헤더, 치환, 테스트 |
+| 1 | 끝 | 아래 "1단계에서 한 것" |
 | 2 | 시작 안 함 | 이름 표 만들고 확인 받기 |
 | 3 | 초안 일부 | ConnectionConfiguration, 테스트 |
 | 4 | 초안 | 빌드와 테스트 |

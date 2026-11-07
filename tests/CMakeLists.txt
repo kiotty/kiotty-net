@@ -17,6 +17,7 @@ include(GoogleTest)
 add_library(kiotty_net_test_warnings INTERFACE)
 target_compile_options(kiotty_net_test_warnings INTERFACE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-fno-rtti>
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c++17-attribute-extensions>
     $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX;/permissive->
 )
@@ -26,9 +27,16 @@ function(kiotty_net_add_test_target target label)
     target_include_directories(${target} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/src/implementation
+        ${KIOTTY_NET_GENERATED_DIR}
     )
-    target_compile_features(${target} PRIVATE cxx_std_14)
-    target_compile_definitions(${target} PRIVATE KIOTTY_NET_TESTING=1)
+    target_compile_features(${target} PRIVATE cxx_std_17)
+    target_compile_definitions(${target} PRIVATE
+        KIOTTY_NET_TESTING=1
+        KIOTTY_TEST_EXPECTED_SERVERS=${KIOTTY_NET_MAX_SERVERS}
+        KIOTTY_TEST_EXPECTED_STREAM_CLIENTS=${KIOTTY_NET_MAX_STREAM_CLIENTS}
+        KIOTTY_TEST_EXPECTED_EVENT_CLIENTS=${KIOTTY_NET_MAX_EVENT_CLIENTS}
+        KIOTTY_TEST_EXPECTED_CONNECTIONS_PER_SERVER=${KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER}
+    )
     target_link_libraries(${target} PRIVATE kiotty_net kiotty_net_test_warnings GTest::gtest_main)
     gtest_discover_tests(${target}
         PROPERTIES LABELS ${label}

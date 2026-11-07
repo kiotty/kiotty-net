@@ -40,7 +40,8 @@ namespace kiotty_test
         enum : int
         {
             TABLE_FULL = 10,
-            OUT_OF_MEMORY = 11
+            OUT_OF_MEMORY = 11,
+            INVALID_HANDLE = 12
         };
 
         Reusable()
@@ -59,7 +60,7 @@ namespace kiotty_test
         Reusable(const Reusable&) = delete;
         Reusable& operator=(const Reusable&) = delete;
 
-        int initialize(kiotty::PoolHandle id, ReusableConfiguration configuration)
+        int initialize(kiotty::net::implementation::PoolHandle id, ReusableConfiguration configuration)
         {
             reusableCounts().initialized += 1;
             _id = id;
@@ -75,7 +76,7 @@ namespace kiotty_test
             _active = false;
         }
 
-        kiotty::PoolHandle id() const
+        kiotty::net::implementation::PoolHandle id() const
         {
             return _id;
         }
@@ -91,7 +92,7 @@ namespace kiotty_test
         }
 
     private:
-        kiotty::PoolHandle _id;
+        kiotty::net::implementation::PoolHandle _id;
         int                _value;
         bool               _active;
     };

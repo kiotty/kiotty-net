@@ -11,9 +11,9 @@
 #include <thread>
 #include <vector>
 
-namespace net = kiotty::net;
+namespace net = kiotty::net::implementation;
 
-using kiotty::PoolHandle;
+using kiotty::net::implementation::PoolHandle;
 using kiotty_test::ConnectionBench;
 using kiotty_test::limitsOf;
 using kiotty_test::spanOf;
@@ -92,13 +92,13 @@ TEST(ConnectionHost, AcquireFailureResetsTheConnectionAndLeavesTheSlotEmpty)
 {
     ConnectionBench<1> bench(limitsOf(0, 64, 64));
     net::ConnectionResult failed = bench.acquire();
-    EXPECT_FALSE(failed.isOk());
-    EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, failed.code());
+    EXPECT_FALSE(failed);
+    EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, failed.code);
     EXPECT_TRUE(bench.host->empty());
     EXPECT_EQ(net::Phase::IDLE, bench.host->at(0).phase());
     bench.host->initialize(smallLimits());
     net::ConnectionResult acquired = bench.acquire();
-    ASSERT_TRUE(acquired.isOk());
+    ASSERT_TRUE(acquired);
     EXPECT_EQ(&bench.host->at(0), &acquired.value());
 }
 
@@ -106,7 +106,7 @@ TEST(ConnectionHost, AcquireRejectsLimitsAboveTheCompiledMaximum)
 {
     ConnectionBench<1> bench(limitsOf(64, net::MemoryLimits::SEND_CAPACITY + 1, 64));
     net::ConnectionResult failed = bench.acquire();
-    EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, failed.code());
+    EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, failed.code);
     EXPECT_TRUE(bench.host->empty());
 }
 
@@ -115,12 +115,12 @@ TEST(ConnectionHost, AcquireHandsOutEveryIdleSlotThenNull)
     ConnectionBench<4> bench(smallLimits());
     for (int i = 0; i < 4; ++i)
     {
-        ASSERT_TRUE(bench.acquire().isOk());
+        ASSERT_TRUE(bench.acquire());
     }
     EXPECT_TRUE(bench.host->full());
     net::ConnectionResult refused = bench.acquire();
-    EXPECT_FALSE(refused.isOk());
-    EXPECT_EQ(KIOTTY_TABLE_FULL, refused.code());
+    EXPECT_FALSE(refused);
+    EXPECT_EQ(KIOTTY_TABLE_FULL, refused.code);
 }
 
 TEST(ConnectionHost, ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent)
@@ -135,7 +135,7 @@ TEST(ConnectionHost, ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent)
         if (acquire)
         {
             net::ConnectionResult acquired = bench.acquire();
-            ASSERT_TRUE(acquired.isOk());
+            ASSERT_TRUE(acquired);
             open.push_back(&acquired.value());
         }
         else
@@ -148,7 +148,7 @@ TEST(ConnectionHost, ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent)
         ASSERT_EQ(open.size() == slots, bench.host->full());
         if (bench.host->full())
         {
-            ASSERT_EQ(KIOTTY_TABLE_FULL, bench.acquire().code());
+            ASSERT_EQ(KIOTTY_TABLE_FULL, bench.acquire().code);
         }
     }
 }
@@ -156,7 +156,7 @@ TEST(ConnectionHost, ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent)
 TEST(ConnectionHost, FindWithCurrentHandleReturnsTheConnection)
 {
     ConnectionBench<2> bench(smallLimits());
-    bench.acquire();
+    (void)bench.acquire();
     net::Connection& connection = bench.open();
     EXPECT_EQ(KIOTTY_SUCCESS, bench.host->notify(connection.id(), spanOf("hi")));
     EXPECT_EQ("hi", pickedNotification(bench, connection));
@@ -179,7 +179,7 @@ TEST(ConnectionHost, FindWithStaleGenerationOrIdleSlotOrOutOfRangeSlotReturnsNul
     {
         EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->notify(id, spanOf("x")));
         EXPECT_EQ(0, bench.host->info(id).port);
-        EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->working(id).code());
+        EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->working(id).code);
         EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->closeStream(id, thenHold(0)));
     }
 }
@@ -190,10 +190,10 @@ TEST(ConnectionHost, WorkingAndCloseStreamGoThroughTheCurrentHandleOnly)
     net::Connection& connection = bench.open();
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    EXPECT_EQ(KIOTTY_BUSY, bench.host->working(connection.id()).code());
+    EXPECT_EQ(KIOTTY_BUSY, bench.host->working(connection.id()).code);
     bench.complete(connection, completion::workReady());
     net::ConnectionResult working = bench.host->working(connection.id());
-    ASSERT_TRUE(working.isOk());
+    ASSERT_TRUE(working);
     EXPECT_EQ(&connection, &working.value());
     EXPECT_EQ(KIOTTY_SUCCESS, bench.host->closeStream(connection.id(), thenHold(0)));
     EXPECT_TRUE(connection.workFinished());

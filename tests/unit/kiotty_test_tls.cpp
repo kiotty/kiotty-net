@@ -7,13 +7,13 @@
 #include <string>
 #include <vector>
 
-using kiotty::Stage;
-using kiotty::StageBase;
-using kiotty::net::MemoryLimits;
-using kiotty::net::DecodeResult;
-using kiotty::net::TlsEngine;
-using kiotty::net::TlsProfile;
-using kiotty::net::TlsStep;
+using kiotty::net::implementation::Stage;
+using kiotty::net::implementation::StageBase;
+using kiotty::net::implementation::MemoryLimits;
+using kiotty::net::implementation::DecodeResult;
+using kiotty::net::implementation::TlsEngine;
+using kiotty::net::implementation::TlsProfile;
+using kiotty::net::implementation::TlsStep;
 using kiotty_test::OpenSslMemory;
 using kiotty_test::TlsPump;
 using kiotty_test::certPath;
@@ -28,7 +28,7 @@ using kiotty_test::take;
 #define REQUIRE_TLS()                                       \
     do                                                      \
     {                                                       \
-        if (!kiotty::net::tlsSupported())                   \
+        if (!kiotty::net::implementation::tlsSupported())                   \
         {                                                   \
             GTEST_SKIP() << "built with KIOTTY_NET_USE_TLS=OFF"; \
         }                                                   \
@@ -71,21 +71,21 @@ namespace
         ASSERT_TRUE(pump.done());
         Stage<16> plain;
         DecodeResult swallowed = pump.client.decode(plain);
-        ASSERT_TRUE(swallowed.isOk());
-        ASSERT_EQ(swallowed.value(), 0u);
+        ASSERT_TRUE(swallowed);
+        ASSERT_EQ(swallowed.value, 0u);
     }
 
     std::string roundTrip(TlsEngine& from, TlsEngine& to, const std::string& text, size_t plain_capacity)
     {
         from.encode(spanOf(text));
         std::string received;
-        Stage<KIOTTY_NET_MAX_RECV_CAPACITY> plain;
+        Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY> plain;
         plain.limit(plain_capacity);
         while (from.cipherSend().consumer().readable() > 0)
         {
             move(from, to);
             DecodeResult result = to.decode(plain);
-            if (!result.isOk())
+            if (!result)
             {
                 break;
             }
@@ -137,12 +137,12 @@ TEST(TlsProfile, OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault)
     EXPECT_EQ(profile.openClient(config), KIOTTY_SUCCESS);
     EXPECT_FALSE(profile.server());
     EXPECT_TRUE(profile.verifyHostname());
-    EXPECT_EQ(profile.handshakeTimeoutMs(), kiotty::net::TLS_HANDSHAKE_TIMEOUT_MS);
+    EXPECT_EQ(profile.handshakeTimeoutMs(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MS);
 }
 
 TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
 {
-    if (kiotty::net::tlsSupported())
+    if (kiotty::net::implementation::tlsSupported())
     {
         GTEST_SKIP() << "built with KIOTTY_NET_USE_TLS=ON";
     }
@@ -235,7 +235,7 @@ TEST(TlsEngine, EncodeLargerThanOneRecordProducesMultipleRecordsThatDecodeInOrde
     REQUIRE_TLS();
     Profiles profiles;
     openDefaults(profiles);
-    if (MemoryLimits::SEND_CAPACITY <= kiotty::net::TLS_RECORD_PLAIN_BYTES || MemoryLimits::RECV_CAPACITY <= kiotty::net::TLS_RECORD_PLAIN_BYTES)
+    if (MemoryLimits::SEND_CAPACITY <= kiotty::net::implementation::TLS_RECORD_PLAIN_BYTES || MemoryLimits::RECEIVE_CAPACITY <= kiotty::net::implementation::TLS_RECORD_PLAIN_BYTES)
     {
         GTEST_SKIP() << "one plain message fits a single record in this build";
     }
@@ -244,7 +244,7 @@ TEST(TlsEngine, EncodeLargerThanOneRecordProducesMultipleRecordsThatDecodeInOrde
     std::string text = pattern(MemoryLimits::SEND_CAPACITY);
     pump.client.encode(spanOf(text));
     EXPECT_GT(pump.client.cipherSend().consumer().readable(), text.size() + 2 * 5);
-    EXPECT_EQ(roundTrip(pump.client, pump.server, "", MemoryLimits::RECV_CAPACITY), text);
+    EXPECT_EQ(roundTrip(pump.client, pump.server, "", MemoryLimits::RECEIVE_CAPACITY), text);
 }
 
 TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
@@ -260,12 +260,12 @@ TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
     Stage<4096> plain;
     move(pump.client, pump.server, record / 2);
     DecodeResult first = pump.server.decode(plain);
-    ASSERT_TRUE(first.isOk());
-    EXPECT_EQ(first.value(), 0u);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first.value, 0u);
     move(pump.client, pump.server);
     DecodeResult second = pump.server.decode(plain);
-    ASSERT_TRUE(second.isOk());
-    EXPECT_EQ(second.value(), text.size());
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second.value, text.size());
     EXPECT_EQ(take(plain), text);
 }
 
@@ -284,7 +284,7 @@ TEST(TlsEngine, DecodeWithOneByteAtATimeEventuallyYieldsTheRecord)
     {
         move(pump.client, pump.server, 1);
         DecodeResult result = pump.server.decode(plain);
-        ASSERT_TRUE(result.isOk());
+        ASSERT_TRUE(result);
         received += take(plain);
     }
     EXPECT_EQ(received, text);
@@ -304,8 +304,8 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
-    ASSERT_FALSE(result.isOk());
-    EXPECT_EQ(result.code(), KIOTTY_TLS_RECORD_ERROR);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.code, KIOTTY_TLS_RECORD_ERROR);
     EXPECT_EQ(pump.server.lastCode(), KIOTTY_TLS_RECORD_ERROR);
     EXPECT_STRNE(pump.server.lastMessage(), "");
 }
@@ -454,12 +454,12 @@ TEST(TlsEngine, KeyUpdateFromPeerLeavesTheReplyInCipherSendAfterDecode)
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
-    ASSERT_TRUE(result.isOk());
-    EXPECT_EQ(result.value(), 0u);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result.value, 0u);
     EXPECT_GT(pump.server.cipherSend().consumer().readable(), 0u);
     move(pump.server, pump.client);
     DecodeResult reply = pump.client.decode(plain);
-    ASSERT_TRUE(reply.isOk());
+    ASSERT_TRUE(reply);
     EXPECT_EQ(roundTrip(pump.client, pump.server, "after update", 64), "after update");
     EXPECT_EQ(roundTrip(pump.server, pump.client, "both ways", 64), "both ways");
 }
@@ -475,8 +475,8 @@ TEST(TlsEngine, CloseNotifyFromPeerDecodesAsPeerClosed)
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
-    ASSERT_FALSE(result.isOk());
-    EXPECT_EQ(result.code(), KIOTTY_PEER_CLOSED);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.code, KIOTTY_PEER_CLOSED);
 }
 
 TEST(TlsEngine, CloseThenOpenReusesTheSslObjectAndHandshakesAgain)
@@ -567,13 +567,13 @@ TEST(TlsEngine, DecodeDrainsPlaintextLeftInSslAcrossCalls)
     for (int i = 0; i < 3; ++i)
     {
         DecodeResult result = pump.server.decode(plain);
-        ASSERT_TRUE(result.isOk());
-        EXPECT_EQ(result.value(), 4096u) << i;
+        ASSERT_TRUE(result);
+        EXPECT_EQ(result.value, 4096u) << i;
         received += take(plain);
     }
     DecodeResult rest = pump.server.decode(plain);
-    ASSERT_TRUE(rest.isOk());
-    EXPECT_EQ(rest.value(), 0u);
+    ASSERT_TRUE(rest);
+    EXPECT_EQ(rest.value, 0u);
     EXPECT_EQ(received, text);
 }
 
@@ -588,7 +588,7 @@ TEST(TlsEngine, DecodeCompactsCipherReceive)
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
-    ASSERT_TRUE(result.isOk());
+    ASSERT_TRUE(result);
     StageBase& cipher = pump.server.cipherReceive();
     EXPECT_EQ(cipher.consumer().readable(), 0u);
     EXPECT_EQ(cipher.provider().writable(), cipher.capacity());
@@ -615,7 +615,7 @@ TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
             pump.handshake();
             ASSERT_TRUE(pump.done());
             Stage<16> plain;
-            ASSERT_TRUE(pump.client.decode(plain).isOk());
+            ASSERT_TRUE(pump.client.decode(plain));
             std::string text = pattern(capacity);
             pump.server.encode(spanOf(text));
             EXPECT_GT(pump.server.cipherSend().consumer().readable(), capacity) << version << " " << capacity;
@@ -645,8 +645,8 @@ TEST(TlsEngine, EncodeOrDecodeOnInactiveEngineIsRejected)
     engine.limit(4096, 4096);
     Stage<64> plain;
     DecodeResult result = engine.decode(plain);
-    ASSERT_FALSE(result.isOk());
-    EXPECT_EQ(result.code(), KIOTTY_INVALID_ARGUMENT);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.code, KIOTTY_INVALID_ARGUMENT);
     EXPECT_DEBUG_DEATH(engine.encode(spanOf(std::string("x"))), "");
     EXPECT_EQ(engine.cipherSend().consumer().readable(), 0u);
 }

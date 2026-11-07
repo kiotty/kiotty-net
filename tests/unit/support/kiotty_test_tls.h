@@ -4,6 +4,7 @@
 #include "base/tls/kiotty_tls_engine.h"
 #include "base/tls/kiotty_tls_profile.h"
 #include "core/kiotty_stage.h"
+#include "data/datasource/kiotty_memory_limits.h"
 
 #include <cstring>
 #include <string>
@@ -11,10 +12,10 @@
 
 namespace kiotty_test
 {
-    using kiotty::StageBase;
-    using kiotty::net::TlsEngine;
-    using kiotty::net::TlsProfile;
-    using kiotty::net::TlsStep;
+    using kiotty::net::implementation::StageBase;
+    using kiotty::net::implementation::TlsEngine;
+    using kiotty::net::implementation::TlsProfile;
+    using kiotty::net::implementation::TlsStep;
 
     inline std::string certPath(const char* name)
     {
@@ -103,7 +104,7 @@ namespace kiotty_test
     class TlsPump
     {
     public:
-        explicit TlsPump(size_t capacity = KIOTTY_NET_MAX_RECV_CAPACITY)
+        explicit TlsPump(size_t capacity = kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY)
             : server()
             , client()
         {

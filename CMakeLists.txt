@@ -8,13 +8,15 @@ set(KIOTTY_NET_MAX_SERVERS "4" CACHE STRING "Servers a process can hold at once,
 set(KIOTTY_NET_MAX_STREAM_CLIENTS "8" CACHE STRING "Stream clients a process can hold at once, 1 to 16")
 set(KIOTTY_NET_MAX_EVENT_CLIENTS "4" CACHE STRING "Event clients a process can hold at once, 1 to 16")
 set(KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER "128" CACHE STRING "Upper bound of max_clients, 1 to 1024")
-set(KIOTTY_NET_MAX_RECV_CAPACITY "16384" CACHE STRING "Upper bound of recv_capacity in bytes")
+set(KIOTTY_NET_MAX_RECEIVE_CAPACITY "16384" CACHE STRING "Upper bound of receive_capacity in bytes")
 set(KIOTTY_NET_MAX_SEND_CAPACITY "16384" CACHE STRING "Upper bound of send_capacity in bytes")
 set(KIOTTY_NET_MAX_PUSH_CAPACITY "16384" CACHE STRING "Upper bound of push_capacity in bytes")
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)
 option(KIOTTY_NET_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
 set(KIOTTY_NET_SANITIZER "" CACHE STRING "Sanitizer for every target: address, thread, undefined or a comma list")
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -27,12 +29,35 @@ endif()
 add_library(kiotty_net_warnings INTERFACE)
 target_compile_options(kiotty_net_warnings INTERFACE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wconversion;-Wsign-compare;-Wshadow;-Wswitch>
     $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX;/permissive->
 )
+
+add_library(kiotty_net_hardening INTERFACE)
+target_compile_options(kiotty_net_hardening INTERFACE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-fno-rtti;-fno-exceptions>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fstack-protector-strong>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Release>>:-U_FORTIFY_SOURCE;-D_FORTIFY_SOURCE=2>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/GR-;/EHs-c->
+    $<$<CXX_COMPILER_ID:MSVC>:/sdl>
+)
+target_compile_definitions(kiotty_net_hardening INTERFACE
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_HAS_EXCEPTIONS=0>
+)
+
+if(KIOTTY_NET_USE_TLS)
+    set(KIOTTY_NET_TLS_VALUE "true")
+else()
+    set(KIOTTY_NET_TLS_VALUE "false")
+endif()
+set(KIOTTY_NET_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+configure_file(cmake/kiotty_memory_limits_configuration.h.in
+    ${KIOTTY_NET_GENERATED_DIR}/kiotty_memory_limits_configuration.h @ONLY)
 
 set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
+    src/implementation/core/kiotty_deadline.cpp
     src/implementation/core/kiotty_stage.cpp
     src/implementation/base/error/kiotty_socket_error.cpp
     src/implementation/base/error/backend/kiotty_posix_error.cpp
@@ -58,27 +83,12 @@ add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
 
 target_include_directories(kiotty_net
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation ${KIOTTY_NET_GENERATED_DIR}
 )
 
-if(MSVC)
-    target_compile_features(kiotty_net PUBLIC cxx_std_14)
-else()
-    target_compile_features(kiotty_net PUBLIC cxx_std_11)
-endif()
-target_compile_features(kiotty_net PUBLIC c_std_99)
+target_compile_features(kiotty_net PUBLIC cxx_std_17 c_std_99)
 
-target_link_libraries(kiotty_net PRIVATE kiotty_net_warnings)
-
-target_compile_definitions(kiotty_net PUBLIC
-    KIOTTY_NET_MAX_SERVERS=${KIOTTY_NET_MAX_SERVERS}
-    KIOTTY_NET_MAX_STREAM_CLIENTS=${KIOTTY_NET_MAX_STREAM_CLIENTS}
-    KIOTTY_NET_MAX_EVENT_CLIENTS=${KIOTTY_NET_MAX_EVENT_CLIENTS}
-    KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER=${KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER}
-    KIOTTY_NET_MAX_RECV_CAPACITY=${KIOTTY_NET_MAX_RECV_CAPACITY}
-    KIOTTY_NET_MAX_SEND_CAPACITY=${KIOTTY_NET_MAX_SEND_CAPACITY}
-    KIOTTY_NET_MAX_PUSH_CAPACITY=${KIOTTY_NET_MAX_PUSH_CAPACITY}
-)
+target_link_libraries(kiotty_net PRIVATE kiotty_net_warnings kiotty_net_hardening)
 
 if(KIOTTY_NET_USE_TLS)
     include(FetchContent)

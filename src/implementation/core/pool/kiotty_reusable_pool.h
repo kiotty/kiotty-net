@@ -1,9 +1,9 @@
-#if !defined(KIOTTY_REUSABLE_POOL_H)
-#define KIOTTY_REUSABLE_POOL_H
+#pragma once
 
-#include "core/kiotty_result.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "core/pool/kiotty_reusable.h"
+#include "core/kiotty_result.h"
+#include "core/kiotty_span.h"
 
 #include <array>
 #include <cassert>
@@ -12,64 +12,81 @@
 #include <functional>
 #include <utility>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    static const size_t REUSABLE_POOL_MAX_SLOTS = 65536;
+    static constexpr size_t REUSABLE_POOL_MAX_SLOTS = 65536;
 
-    template <class T, size_t N>
-    class ReusablePool
+    template <class T>
+    class ReusablePoolBase
     {
         static_assert(is_reusable<T>::value, "ReusablePool needs a default constructible, non copyable, non movable T with initialize and noexcept reset");
-        static_assert(N > 0, "a pool needs at least one slot");
-        static_assert(N <= REUSABLE_POOL_MAX_SLOTS, "a slot index must fit 16 bits");
 
     public:
-        typedef typename T::code_type          code_type;
-        typedef typename T::configuration_type configuration_type;
-        typedef Result<code_type, T&>          AcquireResult;
+        using code_type = typename T::code_type;
+        using configuration_type = typename T::configuration_type;
+        using AcquireResult = Result<T&, code_type>;
+        using ConstResult = Result<const T&, code_type>;
 
-        ReusablePool();
-        ~ReusablePool();
-
-        ReusablePool(const ReusablePool&) = delete;
-        ReusablePool& operator=(const ReusablePool&) = delete;
+        ReusablePoolBase(const ReusablePoolBase&) = delete;
+        ReusablePoolBase& operator=(const ReusablePoolBase&) = delete;
 
         AcquireResult acquire(configuration_type configuration);
         void          release(T& object);
-        T*            find(PoolHandle id);
-        const T*      find(PoolHandle id) const;
+        AcquireResult get(PoolHandle id);
+        ConstResult   get(PoolHandle id) const;
         T&            at(size_t index);
         const T&      at(size_t index) const;
         bool          active(size_t index) const;
         size_t        capacity() const;
         size_t        count() const;
-        bool          full() const;
-        bool          empty() const;
+
+    protected:
+        ReusablePoolBase(Span<T> objects, Span<SlotState> states, Span<int32_t> generations);
+        ~ReusablePoolBase();
 
     private:
         size_t indexOf(const T& object) const;
         size_t slotOf(PoolHandle id) const;
 
-        std::array<T, N>         _objects;
-        std::array<SlotState, N> _states;
-        std::array<int32_t, N>   _generations;
-        size_t                   _count;
+        Span<T>         _objects;
+        Span<SlotState> _states;
+        Span<int32_t>   _generations;
+        size_t          _count;
     };
 
     template <class T, size_t N>
-    ReusablePool<T, N>::ReusablePool()
-        : _states()
-        , _generations()
-        , _count(0)
+    struct ReusablePoolStorage
     {
-        _states.fill(SlotState::EMPTY);
-        _generations.fill(0);
-    }
+        ReusablePoolStorage();
+
+        std::array<T, N>         objects;
+        std::array<SlotState, N> states;
+        std::array<int32_t, N>   generations;
+    };
 
     template <class T, size_t N>
-    ReusablePool<T, N>::~ReusablePool()
+    class ReusablePool : private ReusablePoolStorage<T, N>, public ReusablePoolBase<T>
     {
-        for (size_t i = 0; i < N; ++i)
+        static_assert(N > 0, "a pool needs at least one slot");
+        static_assert(N <= REUSABLE_POOL_MAX_SLOTS, "a slot index must fit 16 bits");
+
+    public:
+        ReusablePool();
+    };
+
+    template <class T>
+    ReusablePoolBase<T>::ReusablePoolBase(Span<T> objects, Span<SlotState> states, Span<int32_t> generations)
+        : _objects(objects)
+        , _states(states)
+        , _generations(generations)
+        , _count(0)
+    {
+    }
+
+    template <class T>
+    ReusablePoolBase<T>::~ReusablePoolBase()
+    {
+        for (size_t i = 0; i < _objects.length; ++i)
         {
             if (_states[i] == SlotState::ACTIVE)
             {
@@ -78,21 +95,16 @@ namespace kiotty
         }
     }
 
-    template <class T, size_t N>
-    typename ReusablePool<T, N>::AcquireResult ReusablePool<T, N>::acquire(configuration_type configuration)
+    template <class T>
+    typename ReusablePoolBase<T>::AcquireResult ReusablePoolBase<T>::acquire(configuration_type configuration)
     {
-        for (size_t i = 0; i < N; ++i)
+        for (size_t i = 0; i < _objects.length; ++i)
         {
-            if (_states[i] != SlotState::EMPTY)
-            {
-                continue;
-            }
+            if (_states[i] != SlotState::EMPTY) { continue; }
             _generations[i] = detail::nextGeneration(_generations[i]);
-            PoolHandle id;
-            id.generation = _generations[i];
-            id.index = static_cast<int32_t>(i);
-            code_type code = _objects[i].initialize(id, std::move(configuration));
-            if (code != static_cast<code_type>(0))
+            const PoolHandle id{ _generations[i], static_cast<int32_t>(i) };
+            const code_type code = _objects[i].initialize(id, std::move(configuration));
+            if (code != code_type{})
             {
                 _objects[i].reset();
                 return AcquireResult::failure(code);
@@ -104,115 +116,97 @@ namespace kiotty
         return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL));
     }
 
-    template <class T, size_t N>
-    void ReusablePool<T, N>::release(T& object)
+    template <class T>
+    void ReusablePoolBase<T>::release(T& object)
     {
-        size_t index = indexOf(object);
-        assert(index < N && _states[index] == SlotState::ACTIVE);
-        if (index >= N || _states[index] != SlotState::ACTIVE)
-        {
-            return;
-        }
+        const size_t index = indexOf(object);
+        assert(index < _objects.length && _states[index] == SlotState::ACTIVE);
+        if (index >= _objects.length || _states[index] != SlotState::ACTIVE) { return; }
         _objects[index].reset();
         _states[index] = SlotState::EMPTY;
         _count -= 1;
     }
 
-    template <class T, size_t N>
-    T* ReusablePool<T, N>::find(PoolHandle id)
+    template <class T>
+    typename ReusablePoolBase<T>::AcquireResult ReusablePoolBase<T>::get(PoolHandle id)
     {
-        size_t index = slotOf(id);
-        if (index == N)
-        {
-            return nullptr;
-        }
-        return &_objects[index];
+        const size_t index = slotOf(id);
+        if (index == _objects.length) { return AcquireResult::failure(static_cast<code_type>(T::INVALID_HANDLE)); }
+        return AcquireResult::success(_objects[index]);
     }
 
-    template <class T, size_t N>
-    const T* ReusablePool<T, N>::find(PoolHandle id) const
+    template <class T>
+    typename ReusablePoolBase<T>::ConstResult ReusablePoolBase<T>::get(PoolHandle id) const
     {
-        size_t index = slotOf(id);
-        if (index == N)
-        {
-            return nullptr;
-        }
-        return &_objects[index];
+        const size_t index = slotOf(id);
+        if (index == _objects.length) { return ConstResult::failure(static_cast<code_type>(T::INVALID_HANDLE)); }
+        return ConstResult::success(_objects[index]);
     }
 
-    template <class T, size_t N>
-    size_t ReusablePool<T, N>::slotOf(PoolHandle id) const
+    template <class T>
+    size_t ReusablePoolBase<T>::slotOf(PoolHandle id) const
     {
-        if (id.index < 0)
-        {
-            return N;
-        }
-        size_t index = static_cast<size_t>(id.index);
-        if (index >= N)
-        {
-            return N;
-        }
-        if (_states[index] != SlotState::ACTIVE || _generations[index] != id.generation)
-        {
-            return N;
-        }
+        if (id.index < 0) { return _objects.length; }
+        const size_t index = static_cast<size_t>(id.index);
+        if (index >= _objects.length) { return _objects.length; }
+        if (_states[index] != SlotState::ACTIVE || _generations[index] != id.generation) { return _objects.length; }
         return index;
     }
 
-    template <class T, size_t N>
-    T& ReusablePool<T, N>::at(size_t index)
+    template <class T>
+    T& ReusablePoolBase<T>::at(size_t index)
     {
         return _objects[index];
     }
 
-    template <class T, size_t N>
-    const T& ReusablePool<T, N>::at(size_t index) const
+    template <class T>
+    const T& ReusablePoolBase<T>::at(size_t index) const
     {
         return _objects[index];
     }
 
-    template <class T, size_t N>
-    bool ReusablePool<T, N>::active(size_t index) const
+    template <class T>
+    bool ReusablePoolBase<T>::active(size_t index) const
     {
-        return index < N && _states[index] == SlotState::ACTIVE;
+        return index < _objects.length && _states[index] == SlotState::ACTIVE;
     }
 
-    template <class T, size_t N>
-    size_t ReusablePool<T, N>::capacity() const
+    template <class T>
+    size_t ReusablePoolBase<T>::capacity() const
     {
-        return N;
+        return _objects.length;
     }
 
-    template <class T, size_t N>
-    size_t ReusablePool<T, N>::count() const
+    template <class T>
+    size_t ReusablePoolBase<T>::count() const
     {
         return _count;
     }
 
-    template <class T, size_t N>
-    bool ReusablePool<T, N>::full() const
-    {
-        return _count == N;
-    }
-
-    template <class T, size_t N>
-    bool ReusablePool<T, N>::empty() const
-    {
-        return _count == 0;
-    }
-
-    template <class T, size_t N>
-    size_t ReusablePool<T, N>::indexOf(const T& object) const
+    template <class T>
+    size_t ReusablePoolBase<T>::indexOf(const T& object) const
     {
         const T* address = &object;
-        const T* begin = _objects.data();
-        std::less<const T*> before;
-        if (before(address, begin) || !before(address, begin + N))
-        {
-            return N;
-        }
+        const T* begin = _objects.data;
+        const std::less<const T*> before;
+        if (before(address, begin) || !before(address, begin + _objects.length)) { return _objects.length; }
         return static_cast<size_t>(address - begin);
     }
-}
 
-#endif
+    template <class T, size_t N>
+    ReusablePoolStorage<T, N>::ReusablePoolStorage()
+        : objects()
+        , states()
+        , generations()
+    {
+        states.fill(SlotState::EMPTY);
+        generations.fill(0);
+    }
+
+    template <class T, size_t N>
+    ReusablePool<T, N>::ReusablePool()
+        : ReusablePoolStorage<T, N>()
+        , ReusablePoolBase<T>(Span<T>{ this->objects.data(), N }, Span<SlotState>{ this->states.data(), N }, Span<int32_t>{ this->generations.data(), N })
+    {
+    }
+}

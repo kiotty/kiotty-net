@@ -22,12 +22,9 @@ struct KiottyNetConnectionOwner
     virtual KiottyNetCode           closeStream(int64_t id, const KiottyNetConnectionAction& then) = 0;
 };
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
-    {
-        typedef ::KiottyNetConnectionOwner Owner;
-    }
+    typedef ::KiottyNetConnectionOwner Owner;
 }
 
 #endif

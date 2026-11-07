@@ -10,10 +10,10 @@
 #include <string>
 #include <utility>
 
-using kiotty::net::ActiveSocket;
-using kiotty::net::ActiveSocketResult;
-using kiotty::net::SocketCode;
-using kiotty::net::TransferResult;
+using kiotty::net::implementation::ActiveSocket;
+using kiotty::net::implementation::ActiveSocketResult;
+using kiotty::net::implementation::SocketCode;
+using kiotty::net::implementation::TransferResult;
 using kiotty_test::LoopbackPeer;
 
 namespace
@@ -31,8 +31,8 @@ namespace
     ActiveSocket openTcp()
     {
         ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
-        EXPECT_TRUE(opened.isOk());
-        return std::move(opened.value());
+        EXPECT_TRUE(opened);
+        return std::move(opened.value);
     }
 
     ActiveSocket connectedTo(LoopbackPeer& peer)
@@ -50,10 +50,10 @@ namespace
         SocketCode code = SocketCode::WOULD_BLOCK;
         kiotty_test::waitUntil([&]() {
             TransferResult result = socket.receive(buffer, length);
-            code = result.code();
-            if (result.isOk())
+            code = result.code;
+            if (result)
             {
-                received = result.value();
+                received = result.value;
             }
             return code != SocketCode::WOULD_BLOCK;
         }, 2000);
@@ -66,10 +66,10 @@ TEST(ActiveSocket, OpenTcpGivesValidNonBlockingSocket)
     LoopbackPeer peer;
     ActiveSocket socket = connectedTo(peer);
     EXPECT_TRUE(socket.valid());
-    EXPECT_NE(socket.handle(), kiotty::net::INVALID_SOCKET_HANDLE);
+    EXPECT_NE(socket.handle(), kiotty::net::implementation::INVALID_SOCKET_HANDLE);
     char buffer[8];
     TransferResult result = socket.receive(buffer, sizeof(buffer));
-    EXPECT_EQ(result.code(), SocketCode::WOULD_BLOCK);
+    EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }
 
 TEST(ActiveSocket, ConnectToListeningLoopbackSucceeds)
@@ -121,9 +121,9 @@ TEST(ActiveSocket, SetNoDelayOnTcpIsReflectedByGetsockopt)
 TEST(ActiveSocket, SetNoDelayOnUnixDomainSocketReturnsSuccessAndDoesNothing)
 {
     ActiveSocketResult opened = ActiveSocket::open(KIOTTY_PIPE);
-    ASSERT_TRUE(opened.isOk());
-    EXPECT_EQ(opened.value().setNoDelay(true), SocketCode::SUCCESS);
-    EXPECT_EQ(opened.value().setNoDelay(false), SocketCode::SUCCESS);
+    ASSERT_TRUE(opened);
+    EXPECT_EQ(opened.value.setNoDelay(true), SocketCode::SUCCESS);
+    EXPECT_EQ(opened.value.setNoDelay(false), SocketCode::SUCCESS);
 }
 
 TEST(ActiveSocket, SendAndReceiveRoundTripOnLoopback)
@@ -131,8 +131,8 @@ TEST(ActiveSocket, SendAndReceiveRoundTripOnLoopback)
     LoopbackPeer peer;
     ActiveSocket socket = connectedTo(peer);
     TransferResult sent = socket.send("ping", 4);
-    ASSERT_TRUE(sent.isOk());
-    EXPECT_EQ(sent.value(), 4u);
+    ASSERT_TRUE(sent);
+    EXPECT_EQ(sent.value, 4u);
     char echoed[4];
     ASSERT_TRUE(peer.recvExactly(echoed, sizeof(echoed), 2000));
     EXPECT_EQ(std::memcmp(echoed, "ping", 4), 0);
@@ -160,7 +160,7 @@ TEST(ActiveSocket, ReceiveWithNothingPendingReturnsWouldBlock)
     ActiveSocket socket = connectedTo(peer);
     char buffer[16];
     TransferResult result = socket.receive(buffer, sizeof(buffer));
-    EXPECT_EQ(result.code(), SocketCode::WOULD_BLOCK);
+    EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }
 
 TEST(ActiveSocket, CloseTwiceIsSafeAndMovedFromSocketIsInvalid)
@@ -168,7 +168,7 @@ TEST(ActiveSocket, CloseTwiceIsSafeAndMovedFromSocketIsInvalid)
     ActiveSocket socket = openTcp();
     socket.close();
     EXPECT_FALSE(socket.valid());
-    EXPECT_EQ(socket.handle(), kiotty::net::INVALID_SOCKET_HANDLE);
+    EXPECT_EQ(socket.handle(), kiotty::net::implementation::INVALID_SOCKET_HANDLE);
     ActiveSocket other = openTcp();
     socket.close();
     EXPECT_TRUE(other.valid());

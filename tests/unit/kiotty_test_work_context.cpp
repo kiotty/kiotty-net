@@ -5,10 +5,10 @@
 #include <atomic>
 #include <thread>
 
-using kiotty::net::IoAction;
-using kiotty::net::IoActionKind;
-using kiotty::net::IoPurpose;
-using kiotty::net::WorkContext;
+using kiotty::net::implementation::IoAction;
+using kiotty::net::implementation::IoActionKind;
+using kiotty::net::implementation::IoPurpose;
+using kiotty::net::implementation::WorkContext;
 
 namespace
 {

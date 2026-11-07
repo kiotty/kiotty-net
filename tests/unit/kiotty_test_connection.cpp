@@ -1,5 +1,6 @@
 #include "base/connection/kiotty_connection.h"
 #include "core/kiotty_clock.h"
+#include "core/kiotty_deadline.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 
@@ -9,7 +10,7 @@
 #include <string>
 #include <thread>
 
-namespace net = kiotty::net;
+namespace net = kiotty::net::implementation;
 
 using kiotty_test::Call;
 using kiotty_test::ConnectionBench;
@@ -84,8 +85,8 @@ TEST(Connection, InitializeRaisesGenerationAndHandleChangesEachTime)
     EXPECT_EQ(&first, &second);
     EXPECT_EQ(before.owner, after.owner);
     EXPECT_NE(before.id, after.id);
-    EXPECT_EQ(kiotty::PoolHandle::fromValue(before.id).index, kiotty::PoolHandle::fromValue(after.id).index);
-    EXPECT_NE(kiotty::PoolHandle::fromValue(before.id).generation, kiotty::PoolHandle::fromValue(after.id).generation);
+    EXPECT_EQ(kiotty::net::implementation::PoolHandle::fromValue(before.id).index, kiotty::net::implementation::PoolHandle::fromValue(after.id).index);
+    EXPECT_NE(kiotty::net::implementation::PoolHandle::fromValue(before.id).generation, kiotty::net::implementation::PoolHandle::fromValue(after.id).generation);
 }
 
 TEST(Connection, StreamHandleSharesOwnerAndIdWithTheConnectionHandle)
@@ -121,9 +122,9 @@ TEST(Connection, OnOpenedPlainCallsOnReadyOnceAndAppliesItsAction)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.recorder.then(thenRead(4, 500));
-    uint64_t before = kiotty::monotonicMs();
+    uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction action = bench.opened(connection);
-    uint64_t after = kiotty::monotonicMs();
+    uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_READY));
     EXPECT_EQ(1u, bench.recorder.total());
     EXPECT_EQ(net::IoActionKind::READ, action.kind);
@@ -447,9 +448,9 @@ TEST(Connection, OnReadReturningWriteStagesIntoSendAndReturnsHoldWithDeadline)
     bench.recorder.then(thenRead(1, 0));
     bench.recorder.thenWrite("pong", 300);
     net::IoAction read = bench.opened(connection);
-    uint64_t before = kiotty::monotonicMs();
+    uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction held = bench.deliver(connection, read, "x");
-    uint64_t after = kiotty::monotonicMs();
+    uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(net::IoActionKind::HOLD, held.kind);
     EXPECT_EQ(300u, held.timeout_ms);
     expectDeadlineAround(connection, before, after, 300);
@@ -812,16 +813,16 @@ TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndHoldOrReadRet
     EXPECT_EQ(0u, connection.deadline());
 
     bench.recorder.then(thenRead(8, 200));
-    uint64_t before = kiotty::monotonicMs();
+    uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction extended = bench.complete(connection, completion::timeout());
-    uint64_t after = kiotty::monotonicMs();
+    uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(net::IoActionKind::HOLD, extended.kind);
     expectDeadlineAround(connection, before, after, 200);
 
     bench.recorder.thenReadUntil("\n", 16, 300);
-    before = kiotty::monotonicMs();
+    before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction until = bench.complete(connection, completion::timeout());
-    after = kiotty::monotonicMs();
+    after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(net::IoActionKind::HOLD, until.kind);
     expectDeadlineAround(connection, before, after, 300);
 
@@ -833,9 +834,9 @@ TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndHoldOrReadRet
 TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndWriteReturnedReportsBusyOnceAndExtends)
 {
     bench.recorder.thenWrite("x", 300);
-    uint64_t before = kiotty::monotonicMs();
+    uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction extended = bench.complete(connection, completion::timeout());
-    uint64_t after = kiotty::monotonicMs();
+    uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_ERROR));
     EXPECT_EQ(KIOTTY_BUSY, bench.recorder.last(Call::ON_ERROR).code);
     EXPECT_STREQ(BUSY_MESSAGE, bench.recorder.last(Call::ON_ERROR).message);
@@ -1033,9 +1034,9 @@ TEST(Connection, WorkDoneDrivesTheOutcomeThatCloseStreamStored)
     net::IoAction outcome = connection.takeWorkOutcome();
     EXPECT_FALSE(connection.working());
     EXPECT_FALSE(connection.workFinished());
-    uint64_t before = kiotty::monotonicMs();
+    uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction read = bench.complete(connection, completion::workDone(outcome));
-    uint64_t after = kiotty::monotonicMs();
+    uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(net::IoActionKind::READ, read.kind);
     EXPECT_EQ(4u, read.as.read.exact);
     expectDeadlineAround(connection, before, after, 700);
@@ -1150,7 +1151,7 @@ TEST(Connection, NotifyOnIdleOrClosingConnectionReturnsPeerClosed)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    kiotty::PoolHandle old_id = connection.id();
+    kiotty::net::implementation::PoolHandle old_id = connection.id();
     bench.host->release(connection);
     EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->notify(old_id, spanOf("x")));
     net::Connection& reopened = bench.open();

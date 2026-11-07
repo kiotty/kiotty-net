@@ -18,16 +18,16 @@
 #include <thread>
 #include <utility>
 
-using kiotty::Stage;
-using kiotty::StageBase;
-using kiotty::net::ActiveSocket;
-using kiotty::net::ActiveSocketResult;
-using kiotty::net::ConnectionStream;
-using kiotty::net::DecodeResult;
-using kiotty::net::PassiveSocket;
-using kiotty::net::SocketCode;
-using kiotty::net::TlsEngine;
-using kiotty::net::TlsProfile;
+using kiotty::net::implementation::Stage;
+using kiotty::net::implementation::StageBase;
+using kiotty::net::implementation::ActiveSocket;
+using kiotty::net::implementation::ActiveSocketResult;
+using kiotty::net::implementation::ConnectionStream;
+using kiotty::net::implementation::DecodeResult;
+using kiotty::net::implementation::PassiveSocket;
+using kiotty::net::implementation::SocketCode;
+using kiotty::net::implementation::TlsEngine;
+using kiotty::net::implementation::TlsProfile;
 using kiotty_test::LoopbackPeer;
 
 namespace
@@ -85,8 +85,8 @@ namespace
 
         ActiveSocket                         socket;
         TlsEngine                            engine;
-        Stage<KIOTTY_NET_MAX_RECV_CAPACITY>  receive;
-        Stage<KIOTTY_NET_MAX_SEND_CAPACITY>  send;
+        Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY>  receive;
+        Stage<kiotty::net::implementation::MemoryLimits::SEND_CAPACITY>  send;
     };
 
     bool connect(LoopbackPeer& peer, Side& side)
@@ -96,11 +96,11 @@ namespace
             return false;
         }
         ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
-        if (!opened.isOk())
+        if (!opened)
         {
             return false;
         }
-        side.socket = std::move(opened.value());
+        side.socket = std::move(opened.value);
         if (side.socket.connect(loopback(peer.port()), WAIT_MS) != SocketCode::SUCCESS)
         {
             return false;
@@ -116,22 +116,22 @@ namespace
             return false;
         }
         ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
-        if (!opened.isOk())
+        if (!opened)
         {
             return false;
         }
-        client.socket = std::move(opened.value());
+        client.socket = std::move(opened.value);
         if (client.socket.connect(loopback(listener.port()), WAIT_MS) != SocketCode::SUCCESS)
         {
             return false;
         }
         bool accepted = kiotty_test::waitUntil([&]() {
             ActiveSocketResult taken = listener.accept();
-            if (!taken.isOk())
+            if (!taken)
             {
                 return false;
             }
-            server.socket = std::move(taken.value());
+            server.socket = std::move(taken.value);
             return true;
         }, WAIT_MS);
         return accepted;
@@ -206,12 +206,12 @@ namespace
         char buffer[CAPACITY];
         while (socket.waitReadable(quiet_ms) == SocketCode::SUCCESS)
         {
-            kiotty::net::TransferResult received = socket.receive(buffer, sizeof(buffer));
-            if (!received.isOk())
+            kiotty::net::implementation::TransferResult received = socket.receive(buffer, sizeof(buffer));
+            if (!received)
             {
                 break;
             }
-            bytes.append(buffer, received.value());
+            bytes.append(buffer, received.value);
         }
         return bytes;
     }
@@ -229,12 +229,12 @@ namespace
             kiotty_test::put(incoming, cipher.substr(at, piece));
             at += piece;
             DecodeResult decoded = engine.decode(buffer, sizeof(buffer));
-            if (!decoded.isOk())
+            if (!decoded)
             {
                 break;
             }
-            plain.append(buffer, decoded.value());
-            if (decoded.value() == 0 && at == cipher.size())
+            plain.append(buffer, decoded.value);
+            if (decoded.value == 0 && at == cipher.size())
             {
                 break;
             }
@@ -262,7 +262,7 @@ namespace
 #define REQUIRE_TLS()                                            \
     do                                                           \
     {                                                            \
-        if (!kiotty::net::tlsSupported())                        \
+        if (!kiotty::net::implementation::tlsSupported())                        \
         {                                                        \
             GTEST_SKIP() << "built with KIOTTY_NET_USE_TLS=OFF"; \
         }                                                        \
@@ -446,7 +446,7 @@ TEST(ConnectionStream, WriteTlsSendsFullRecordsStraightFromTheEngine)
 {
     REQUIRE_TLS();
     Profiles profiles;
-    std::unique_ptr<Side> server(new Side(KIOTTY_NET_MAX_RECV_CAPACITY));
+    std::unique_ptr<Side> server(new Side(kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY));
     std::unique_ptr<Side> client(new Side(TLS_CHUNK));
     ASSERT_TRUE(handshake(profiles, *server, *client));
     std::string data = pattern(40000);

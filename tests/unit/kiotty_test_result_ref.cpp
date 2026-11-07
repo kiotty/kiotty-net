@@ -5,7 +5,7 @@
 #include <string>
 #include <type_traits>
 
-using kiotty::Result;
+using kiotty::net::implementation::Result;
 
 namespace
 {
@@ -27,7 +27,7 @@ namespace
         int id;
     };
 
-    typedef Result<LookupCode, Slot&> SlotResult;
+    typedef Result<Slot&, LookupCode> SlotResult;
 
     SlotResult lookupOk(Slot& slot)
     {
@@ -62,24 +62,24 @@ namespace
 }
 
 static_assert(std::is_trivially_copyable<SlotResult>::value,
-              "Result<E, T&> holds a pointer and a code; copying it must cost nothing");
+              "Result<Value&, Code> holds a pointer and a code; copying it must cost nothing");
 static_assert(std::is_copy_constructible<SlotResult>::value &&
               std::is_copy_assignable<SlotResult>::value,
-              "Result<E, T&> must be copyable even when T is not");
+              "Result<Value&, Code> must be copyable even when T is not");
 
-static_assert(!std::is_constructible<bool, SlotResult>::value,
-              "Result<E, T&> has no operator bool, isOk() is the only test");
+static_assert(std::is_constructible<bool, SlotResult>::value && !std::is_convertible<SlotResult, bool>::value,
+              "Result<Value&, Code> tests through an explicit operator bool");
 
 static_assert(std::is_same<decltype(std::declval<const SlotResult&>().value()), Slot&>::value,
-              "const Result<E, T&>::value() must return T&, not const T&");
+              "const Result<Value&, Code>::value() must return T&, not const T&");
 
 TEST(ResultRef, SuccessHasCodeZero)
 {
     Slot       slot(1);
     SlotResult result = lookupOk(slot);
 
-    EXPECT_TRUE(result.isOk());
-    EXPECT_EQ(LookupCode::Ok, result.code());
+    EXPECT_TRUE(result);
+    EXPECT_EQ(LookupCode::Ok, result.code);
 }
 
 TEST(ResultRef, SuccessValueIsTheOriginalObject)
@@ -87,7 +87,7 @@ TEST(ResultRef, SuccessValueIsTheOriginalObject)
     Slot       slot(1);
     SlotResult result = lookupOk(slot);
 
-    ASSERT_TRUE(result.isOk());
+    ASSERT_TRUE(result);
     EXPECT_EQ(&slot, &result.value());
 }
 
@@ -115,8 +115,8 @@ TEST_P(RefFail, FailureKeepsItsCode)
 {
     SlotResult result = lookupFail(GetParam().code);
 
-    EXPECT_FALSE(result.isOk());
-    EXPECT_EQ(GetParam().code, result.code());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(GetParam().code, result.code);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllCodes, RefFail, ::testing::ValuesIn(kFailCases), nameOf);
@@ -127,7 +127,7 @@ TEST(ResultRef, CopyConstructedResultRefersToTheSameObject)
     SlotResult original = lookupOk(slot);
     SlotResult copy(original);
 
-    EXPECT_TRUE(copy.isOk());
+    EXPECT_TRUE(copy);
     EXPECT_EQ(&slot, &copy.value());
     EXPECT_EQ(&original.value(), &copy.value());
 }
@@ -152,8 +152,8 @@ TEST(ResultRef, CopyAssigningAFailureOverASuccessKeepsTheFailureCode)
 
     target = source;
 
-    EXPECT_FALSE(target.isOk());
-    EXPECT_EQ(LookupCode::Stale, target.code());
+    EXPECT_FALSE(target);
+    EXPECT_EQ(LookupCode::Stale, target.code);
 }
 
 TEST(ResultRef, CopyAssigningASuccessOverAFailureRestoresTheObject)
@@ -163,10 +163,10 @@ TEST(ResultRef, CopyAssigningASuccessOverAFailureRestoresTheObject)
     SlotResult failed = lookupFail(LookupCode::NotFound);
 
     target = failed;
-    ASSERT_FALSE(target.isOk());
+    ASSERT_FALSE(target);
 
     target = lookupOk(slot);
-    EXPECT_TRUE(target.isOk());
+    EXPECT_TRUE(target);
     EXPECT_EQ(&slot, &target.value());
 }
 
@@ -175,8 +175,8 @@ TEST(ResultRef, CopiedFailureKeepsItsCode)
     SlotResult original = lookupFail(LookupCode::NotFound);
     SlotResult copy(original);
 
-    EXPECT_FALSE(copy.isOk());
-    EXPECT_EQ(LookupCode::NotFound, copy.code());
+    EXPECT_FALSE(copy);
+    EXPECT_EQ(LookupCode::NotFound, copy.code);
 }
 
 #if !defined(NDEBUG) && !defined(_WIN32) && GTEST_HAS_DEATH_TEST

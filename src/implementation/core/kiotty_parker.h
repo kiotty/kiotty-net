@@ -1,51 +1,48 @@
-#if !defined(KIOTTY_PARKER_H)
-#define KIOTTY_PARKER_H
+#pragma once
 
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     class Parker
     {
     public:
-        static const uint64_t MAX_SLICE_MS = 86400000;
+        static constexpr uint64_t MAX_SLICE_MILLISECONDS = 86400000;
 
         Parker() = default;
         Parker(const Parker&) = delete;
         Parker& operator=(const Parker&) = delete;
 
         template <class Ready>
-        bool park(Ready ready, uint64_t timeout_ms);
+        bool park(Ready ready, uint64_t timeout_milliseconds);
 
         template <class Change>
         void unpark(Change change);
 
     private:
         std::mutex              _mutex;
-        std::condition_variable _cv;
+        std::condition_variable _condition;
     };
 
     template <class Ready>
-    bool Parker::park(Ready ready, uint64_t timeout_ms)
+    bool Parker::park(Ready ready, uint64_t timeout_milliseconds)
     {
         std::unique_lock<std::mutex> lock(_mutex);
-        if (timeout_ms == 0)
+        if (timeout_milliseconds == 0)
         {
-            _cv.wait(lock, ready);
+            _condition.wait(lock, ready);
             return true;
         }
-        uint64_t remaining = timeout_ms;
+        uint64_t remaining = timeout_milliseconds;
         while (remaining > 0)
         {
-            uint64_t slice = remaining < MAX_SLICE_MS ? remaining : MAX_SLICE_MS;
-            std::chrono::milliseconds wait(static_cast<std::chrono::milliseconds::rep>(slice));
-            if (_cv.wait_for(lock, wait, ready))
-            {
-                return true;
-            }
+            const uint64_t slice = remaining < MAX_SLICE_MILLISECONDS ? remaining : MAX_SLICE_MILLISECONDS;
+            const std::chrono::milliseconds wait(static_cast<std::chrono::milliseconds::rep>(slice));
+            const bool satisfied = _condition.wait_for(lock, wait, ready);
+            if (satisfied) { return true; }
             remaining -= slice;
         }
         return ready();
@@ -58,8 +55,6 @@ namespace kiotty
             std::lock_guard<std::mutex> lock(_mutex);
             change();
         }
-        _cv.notify_all();
+        _condition.notify_all();
     }
 }
-
-#endif

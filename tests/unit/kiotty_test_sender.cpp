@@ -6,9 +6,9 @@
 #include <cstring>
 #include <string>
 
-using kiotty::Stage;
-using kiotty::StageBase;
-using kiotty::net::Sender;
+using kiotty::net::implementation::Stage;
+using kiotty::net::implementation::StageBase;
+using kiotty::net::implementation::Sender;
 
 namespace
 {

@@ -8,39 +8,36 @@
 
 struct ssl_ctx_st;
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    static const uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 10000;
+
+    bool tlsSupported();
+
+    class TlsProfile
     {
-        static const uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 10000;
+    public:
+        TlsProfile();
+        ~TlsProfile();
 
-        bool tlsSupported();
+        TlsProfile(const TlsProfile&) = delete;
+        TlsProfile& operator=(const TlsProfile&) = delete;
 
-        class TlsProfile
-        {
-        public:
-            TlsProfile();
-            ~TlsProfile();
+        KiottyNetCode openServer(const KiottyNetTlsServerConfig& config);
+        KiottyNetCode openClient(const KiottyNetTlsClientConfig& config);
+        void          close();
 
-            TlsProfile(const TlsProfile&) = delete;
-            TlsProfile& operator=(const TlsProfile&) = delete;
+        bool        valid() const;
+        bool        server() const;
+        bool        verifyHostname() const;
+        uint32_t    handshakeTimeoutMs() const;
+        ssl_ctx_st* context() const;
 
-            KiottyNetCode openServer(const KiottyNetTlsServerConfig& config);
-            KiottyNetCode openClient(const KiottyNetTlsClientConfig& config);
-            void          close();
-
-            bool        valid() const;
-            bool        server() const;
-            bool        verifyHostname() const;
-            uint32_t    handshakeTimeoutMs() const;
-            ssl_ctx_st* context() const;
-
-        private:
-            ssl_ctx_st* _context;
-            bool        _server;
-            bool        _verify_hostname;
-        };
-    }
+    private:
+        ssl_ctx_st* _context;
+        bool        _server;
+        bool        _verify_hostname;
+    };
 }
 
 #endif

@@ -47,7 +47,7 @@ tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 
 ## 언어
 
-- C 인터페이스는 C99, C++ 은 C++11 이하에서 컴파일되어야 한다. C++20 coroutine 은 쓰지 않는다.
+- C 인터페이스는 C99, C++ 은 C++17 이다 (개발 수칙 v2, `docs/requirement/development_rule.md`). C++20 기능은 쓰지 않는다. 라이브러리는 RTTI 와 예외 없이 빌드된다.
 - TLS 를 위한 OpenSSL 외에는 의존성이 없다.
 
 ## 이름

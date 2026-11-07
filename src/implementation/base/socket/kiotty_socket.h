@@ -9,82 +9,79 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    typedef intptr_t SocketHandle;
+
+    static const SocketHandle INVALID_SOCKET_HANDLE = -1;
+
+    class ActiveSocket;
+
+    typedef Result<ActiveSocket, SocketCode> ActiveSocketResult;
+    typedef Result<size_t, SocketCode>       TransferResult;
+
+    class ActiveSocket
     {
-        typedef intptr_t SocketHandle;
+    public:
+        ActiveSocket();
+        ~ActiveSocket();
 
-        static const SocketHandle INVALID_SOCKET_HANDLE = -1;
+        ActiveSocket(ActiveSocket&& other) noexcept;
+        ActiveSocket& operator=(ActiveSocket&& other) noexcept;
 
-        class ActiveSocket;
+        ActiveSocket(const ActiveSocket&) = delete;
+        ActiveSocket& operator=(const ActiveSocket&) = delete;
 
-        typedef Result<SocketCode, ActiveSocket> ActiveSocketResult;
-        typedef Result<SocketCode, size_t>       TransferResult;
+        static ActiveSocketResult open(KiottyNetTransport transport);
 
-        class ActiveSocket
-        {
-        public:
-            ActiveSocket();
-            ~ActiveSocket();
+        SocketCode     connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms);
+        SocketCode     setNoDelay(bool on);
+        TransferResult send(const void* data, size_t length);
+        TransferResult receive(void* data, size_t length);
+        TransferResult peek(void* data, size_t length);
+        SocketCode     waitReadable(uint32_t timeout_ms);
+        SocketCode     waitWritable(uint32_t timeout_ms);
+        SocketCode     shutdown();
+        void           close();
 
-            ActiveSocket(ActiveSocket&& other) noexcept;
-            ActiveSocket& operator=(ActiveSocket&& other) noexcept;
+        bool                    valid() const;
+        SocketHandle            handle() const;
+        KiottyNetConnectionInfo peer() const;
 
-            ActiveSocket(const ActiveSocket&) = delete;
-            ActiveSocket& operator=(const ActiveSocket&) = delete;
+    private:
+        friend class PassiveSocket;
 
-            static ActiveSocketResult open(KiottyNetTransport transport);
+        ActiveSocket(SocketHandle handle, KiottyNetTransport transport);
 
-            SocketCode     connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms);
-            SocketCode     setNoDelay(bool on);
-            TransferResult send(const void* data, size_t length);
-            TransferResult receive(void* data, size_t length);
-            TransferResult peek(void* data, size_t length);
-            SocketCode     waitReadable(uint32_t timeout_ms);
-            SocketCode     waitWritable(uint32_t timeout_ms);
-            SocketCode     shutdown();
-            void           close();
+        SocketHandle            _handle;
+        KiottyNetTransport      _transport;
+        KiottyNetConnectionInfo _peer;
+    };
 
-            bool                    valid() const;
-            SocketHandle            handle() const;
-            KiottyNetConnectionInfo peer() const;
+    class PassiveSocket
+    {
+    public:
+        PassiveSocket();
+        ~PassiveSocket();
 
-        private:
-            friend class PassiveSocket;
+        PassiveSocket(const PassiveSocket&) = delete;
+        PassiveSocket& operator=(const PassiveSocket&) = delete;
 
-            ActiveSocket(SocketHandle handle, KiottyNetTransport transport);
+        SocketCode         open(const KiottyNetEndpoint& endpoint, int backlog);
+        ActiveSocketResult accept();
+        void               close();
 
-            SocketHandle            _handle;
-            KiottyNetTransport      _transport;
-            KiottyNetConnectionInfo _peer;
-        };
+        bool         valid() const;
+        SocketHandle handle() const;
+        uint16_t     port() const;
 
-        class PassiveSocket
-        {
-        public:
-            PassiveSocket();
-            ~PassiveSocket();
+    private:
+        SocketHandle       _handle;
+        KiottyNetTransport _transport;
+        uint16_t           _port;
+    };
 
-            PassiveSocket(const PassiveSocket&) = delete;
-            PassiveSocket& operator=(const PassiveSocket&) = delete;
-
-            SocketCode         open(const KiottyNetEndpoint& endpoint, int backlog);
-            ActiveSocketResult accept();
-            void               close();
-
-            bool         valid() const;
-            SocketHandle handle() const;
-            uint16_t     port() const;
-
-        private:
-            SocketHandle       _handle;
-            KiottyNetTransport _transport;
-            uint16_t           _port;
-        };
-
-        Result<KiottyNetCode, ActiveSocket> connectWithRetry(const KiottyNetClientConfig& config, const std::atomic<bool>& stop);
-    }
+    Result<ActiveSocket, KiottyNetCode> connectWithRetry(const KiottyNetClientConfig& config, const std::atomic<bool>& stop);
 }
 
 #endif

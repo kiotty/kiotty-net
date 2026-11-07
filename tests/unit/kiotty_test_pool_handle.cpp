@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-using kiotty::PoolHandle;
+using kiotty::net::implementation::PoolHandle;
 
 namespace
 {

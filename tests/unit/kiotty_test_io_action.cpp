@@ -5,10 +5,10 @@
 
 #include <cstring>
 
-using kiotty::net::IoAction;
-using kiotty::net::IoActionKind;
-using kiotty::net::IoCompletion;
-using kiotty::net::IoPurpose;
+using kiotty::net::implementation::IoAction;
+using kiotty::net::implementation::IoActionKind;
+using kiotty::net::implementation::IoCompletion;
+using kiotty::net::implementation::IoPurpose;
 
 namespace
 {
@@ -126,12 +126,12 @@ TEST(IoAction, WriteCarriesPurposeTimeoutAndPlaintextLength)
 TEST(IoAction, LocalCompletionsCarryTheirSlotAndWorkDoneCarriesTheOutcome)
 {
     IoCompletion ready = IoCompletion::workReady(3);
-    EXPECT_EQ(ready.kind, kiotty::net::IoKind::WORK_READY);
+    EXPECT_EQ(ready.kind, kiotty::net::implementation::IoKind::WORK_READY);
     EXPECT_EQ(ready.slot, 3);
     EXPECT_EQ(ready.action.kind, IoActionKind::NONE);
     IoAction outcome = IoAction::read(IoPurpose::USER, 77, 12);
     IoCompletion done = IoCompletion::workDone(4, outcome);
-    EXPECT_EQ(done.kind, kiotty::net::IoKind::WORK_DONE);
+    EXPECT_EQ(done.kind, kiotty::net::implementation::IoKind::WORK_DONE);
     EXPECT_EQ(done.slot, 4);
     EXPECT_EQ(done.action.kind, IoActionKind::READ);
     EXPECT_EQ(done.action.timeout_ms, 77u);

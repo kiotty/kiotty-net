@@ -1,25 +1,8 @@
-#if !defined(KIOTTY_CLOCK_H)
-#define KIOTTY_CLOCK_H
+#pragma once
 
 #include <cstdint>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    uint64_t monotonicMs();
-
-    class Deadline
-    {
-    public:
-        explicit Deadline(uint32_t timeout_ms);
-
-        bool     limited() const;
-        bool     expired() const;
-        uint32_t remaining() const;
-
-    private:
-        bool     _limited;
-        uint64_t _end;
-    };
+    uint64_t monotonicMilliseconds();
 }
-
-#endif

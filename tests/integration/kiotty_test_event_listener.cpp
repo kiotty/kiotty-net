@@ -21,22 +21,22 @@
 #include <utility>
 #include <vector>
 
-using kiotty::Span;
-using kiotty::net::AcceptBuffer;
-using kiotty::net::ActiveSocket;
-using kiotty::net::ActiveSocketResult;
-using kiotty::net::IoAction;
-using kiotty::net::IoActionKind;
-using kiotty::net::IoCompletion;
-using kiotty::net::IoEvent;
-using kiotty::net::IoKind;
-using kiotty::net::IoPayload;
-using kiotty::net::IoPurpose;
-using kiotty::net::PassiveSocket;
-using kiotty::net::SocketCode;
+using kiotty::net::implementation::Span;
+using kiotty::net::implementation::AcceptBuffer;
+using kiotty::net::implementation::ActiveSocket;
+using kiotty::net::implementation::ActiveSocketResult;
+using kiotty::net::implementation::IoAction;
+using kiotty::net::implementation::IoActionKind;
+using kiotty::net::implementation::IoCompletion;
+using kiotty::net::implementation::IoEvent;
+using kiotty::net::implementation::IoKind;
+using kiotty::net::implementation::IoPayload;
+using kiotty::net::implementation::IoPurpose;
+using kiotty::net::implementation::PassiveSocket;
+using kiotty::net::implementation::SocketCode;
 using kiotty_test::LoopbackPeer;
 
-namespace net = kiotty::net;
+namespace net = kiotty::net::implementation;
 
 namespace
 {
@@ -73,11 +73,11 @@ namespace
             return false;
         }
         ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
-        if (!opened.isOk())
+        if (!opened)
         {
             return false;
         }
-        link.socket = std::move(opened.value());
+        link.socket = std::move(opened.value);
         if (link.socket.connect(loopback(link.peer.port()), WAIT_MS) != SocketCode::SUCCESS)
         {
             return false;
@@ -85,7 +85,7 @@ namespace
         return link.peer.accept(WAIT_MS);
     }
 
-    bool attach(net::EventListener& listener, IoEvent& event, kiotty::net::SocketHandle socket, int32_t slot)
+    bool attach(net::EventListener& listener, IoEvent& event, kiotty::net::implementation::SocketHandle socket, int32_t slot)
     {
         SocketCode attached = listener.attach(event, socket, slot);
         EXPECT_EQ(attached, SocketCode::SUCCESS) << static_cast<int>(attached);
@@ -142,13 +142,13 @@ namespace
         AcceptTarget()
         {
             std::memset(&_buffer, 0, sizeof(_buffer));
-            _buffer.socket = kiotty::net::INVALID_SOCKET_HANDLE;
+            _buffer.socket = kiotty::net::implementation::INVALID_SOCKET_HANDLE;
 #if defined(_WIN32)
             ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
-            EXPECT_TRUE(opened.isOk());
-            if (opened.isOk())
+            EXPECT_TRUE(opened);
+            if (opened)
             {
-                _socket = std::move(opened.value());
+                _socket = std::move(opened.value);
                 _buffer.socket = _socket.handle();
             }
 #endif
@@ -490,7 +490,7 @@ TEST_F(EventListener, SubmitOnEmptyOrDetachedEventIsRejectedWithInvalidArgument)
 TEST_F(EventListener, AttachOnInvalidSocketIsRejected)
 {
     IoEvent event;
-    EXPECT_EQ(listener.attach(event, kiotty::net::INVALID_SOCKET_HANDLE, SLOT), SocketCode::INVALID_ARGUMENT);
+    EXPECT_EQ(listener.attach(event, kiotty::net::implementation::INVALID_SOCKET_HANDLE, SLOT), SocketCode::INVALID_ARGUMENT);
     EXPECT_FALSE(event.pending);
     net::EventListener closed;
     EXPECT_EQ(closed.attach(event, link.socket.handle(), SLOT), SocketCode::CLOSED);

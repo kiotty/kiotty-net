@@ -5,7 +5,7 @@ description: kiotty-net 을 로컬 (Windows MSVC, WSL Ubuntu gcc / clang) 에서
 
 # kiotty-net 빌드
 
-CMake 프로젝트다. 옵션은 `KIOTTY_NET_USE_TLS` (기본 ON. ON 이면 configure 때 openssl-cmake 로 OpenSSL 3.6 static 을 받는다, OFF 면 stub), `KIOTTY_NET_OPENSSL_PREBUILT` (기본 ON. OFF 면 OpenSSL 을 소스에서 빌드, 10 ~ 30 분), `KIOTTY_NET_BUILD_TESTS`, `KIOTTY_NET_BUILD_BENCHMARKS`, `KIOTTY_NET_SANITIZER` (address, thread, undefined 또는 콤마 목록), 메모리 상한 `KIOTTY_NET_MAX_OWNERS` / `_CONNECTIONS_PER_SERVER` / `_RECV_CAPACITY` / `_SEND_CAPACITY` / `_PUSH_CAPACITY` / `_TLS_CONTEXTS` (설계 v4 19.3). 빌드 디렉터리는 `build/<이름>` 이고 `.gitignore` 에 있다. ctest 라벨은 `unit` 과 `integration` 이다.
+CMake 프로젝트다. 옵션은 `KIOTTY_NET_USE_TLS` (기본 ON. ON 이면 configure 때 openssl-cmake 로 OpenSSL 3.6 static 을 받는다, OFF 면 stub), `KIOTTY_NET_OPENSSL_PREBUILT` (기본 ON. OFF 면 OpenSSL 을 소스에서 빌드, 10 ~ 30 분), `KIOTTY_NET_BUILD_TESTS`, `KIOTTY_NET_BUILD_BENCHMARKS`, `KIOTTY_NET_SANITIZER` (address, thread, undefined 또는 콤마 목록), 메모리 상한 `KIOTTY_NET_MAX_OWNERS` / `_CONNECTIONS_PER_SERVER` / `_RECEIVE_CAPACITY` / `_SEND_CAPACITY` / `_PUSH_CAPACITY` / `_TLS_CONTEXTS` (설계 v4 19.3). 빌드 디렉터리는 `build/<이름>` 이고 `.gitignore` 에 있다. ctest 라벨은 `unit` 과 `integration` 이다.
 
 ## Windows (MSVC, IOCP)
 
@@ -38,7 +38,8 @@ clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl
 - integration 테스트의 Unix domain socket 경로는 POSIX 에서 `/tmp` 아래다. WSL 의 `/mnt/c` (DrvFs) 는 socket 파일을 만들 수 없다 (NOT_SUPPORTED).
 - Git Bash 에서 `wsl -- bash -lc '...'` 로 넘기면 `$변수` 가 사라질 수 있다. 긴 명령은 스크립트 파일로 만들고 `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-24.04 -- bash /mnt/c/.../script.sh` 로 돌린다.
 
-- 경고는 오류다 (`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror`). 경고를 끄지 말고 코드를 고친다.
-- 라이브러리는 gcc / clang 에서 C++11, MSVC 는 C++14 (`/permissive-`). 테스트 타깃만 C++14.
+- 경고는 오류다 (`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-compare -Wshadow -Wswitch`). 경고를 끄지 말고 코드를 고친다.
+- 라이브러리와 테스트 모두 C++17 (`CMAKE_CXX_STANDARD 17`, MSVC `/permissive-`). 라이브러리는 RTTI 와 예외 없이 (`-fno-rtti -fno-exceptions`, MSVC `/GR- /EHs-c- _HAS_EXCEPTIONS=0`), `-fstack-protector-strong`, Release 에서 `_FORTIFY_SOURCE=2`. 테스트는 예외를 켠다.
+- 메모리 상한은 CMake 가 `<build>/generated/kiotty_memory_limits_configuration.h` 로 만든다. 소스는 `KIOTTY_NET_MAX_*` 매크로를 읽지 않는다.
 - 한 사이클 (`docs/plan/plan_base_v0.md` 0절) 은 Windows 와 WSL 둘 다 초록이어야 push 한다. push 뒤 `gh run watch` 로 CI 를 본다.
 - 헤더만 검사할 때는 memory 의 `header-compile-check` 레시피 (`/Zs`, `-fsyntax-only`).

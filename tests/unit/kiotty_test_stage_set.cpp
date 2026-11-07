@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-typedef kiotty::StageSet<64, 128, 256> SmallSet;
+typedef kiotty::net::implementation::StageSet<64, 128, 256> SmallSet;
 
 TEST(StageSet, EachMemberHasItsOwnLimit)
 {

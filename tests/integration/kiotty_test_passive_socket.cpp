@@ -9,10 +9,10 @@
 #include <string>
 #include <utility>
 
-using kiotty::net::ActiveSocket;
-using kiotty::net::ActiveSocketResult;
-using kiotty::net::PassiveSocket;
-using kiotty::net::SocketCode;
+using kiotty::net::implementation::ActiveSocket;
+using kiotty::net::implementation::ActiveSocketResult;
+using kiotty::net::implementation::PassiveSocket;
+using kiotty::net::implementation::SocketCode;
 using kiotty_test::LoopbackPeer;
 
 namespace
@@ -75,16 +75,16 @@ TEST(PassiveSocket, AcceptAfterPeerConnectReturnsConnectedSocket)
     ActiveSocket accepted;
     bool ready = kiotty_test::waitUntil([&]() {
         ActiveSocketResult result = listener.accept();
-        if (!result.isOk())
+        if (!result)
         {
             return false;
         }
-        accepted = std::move(result.value());
+        accepted = std::move(result.value);
         return true;
     }, 2000);
     ASSERT_TRUE(ready);
     EXPECT_STREQ(accepted.peer().hostname, "127.0.0.1");
-    ASSERT_TRUE(accepted.send("hi", 2).isOk());
+    ASSERT_TRUE(accepted.send("hi", 2));
     char buffer[2];
     ASSERT_TRUE(peer.recvExactly(buffer, sizeof(buffer), 2000));
     EXPECT_EQ(std::memcmp(buffer, "hi", 2), 0);
@@ -95,5 +95,5 @@ TEST(PassiveSocket, AcceptWithNoPendingConnectionReturnsWouldBlock)
     PassiveSocket listener;
     ASSERT_EQ(listener.open(endpointOf(KIOTTY_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
     ActiveSocketResult result = listener.accept();
-    EXPECT_EQ(result.code(), SocketCode::WOULD_BLOCK);
+    EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }

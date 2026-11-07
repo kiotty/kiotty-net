@@ -11,41 +11,41 @@
 #include <cerrno>
 #endif
 
-using kiotty::net::SocketCode;
-using kiotty::net::SocketErrorEntry;
+using kiotty::net::implementation::SocketCode;
+using kiotty::net::implementation::SocketErrorEntry;
 
 TEST(SocketError, EveryOsCodeTheBackendProducesMapsToASocketCode)
 {
-    kiotty::Span<const SocketErrorEntry> table = kiotty::net::socketErrorTable();
+    kiotty::net::implementation::Span<const SocketErrorEntry> table = kiotty::net::implementation::socketErrorTable();
     ASSERT_FALSE(table.empty());
     for (const SocketErrorEntry& entry : table)
     {
-        EXPECT_EQ(kiotty::net::toSocketCode(entry.os_error), entry.code) << entry.os_error;
+        EXPECT_EQ(kiotty::net::implementation::toSocketCode(entry.os_error), entry.code) << entry.os_error;
         EXPECT_NE(entry.code, SocketCode::UNKNOWN) << entry.os_error;
         EXPECT_NE(entry.code, SocketCode::SUCCESS) << entry.os_error;
     }
 #if defined(_WIN32)
-    EXPECT_EQ(kiotty::net::toSocketCode(WSAECONNRESET), SocketCode::RESET);
-    EXPECT_EQ(kiotty::net::toSocketCode(WSAEADDRINUSE), SocketCode::ADDRESS_IN_USE);
-    EXPECT_EQ(kiotty::net::toSocketCode(WSAECONNREFUSED), SocketCode::REFUSED);
-    EXPECT_EQ(kiotty::net::toSocketCode(WSAEWOULDBLOCK), SocketCode::WOULD_BLOCK);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(WSAECONNRESET), SocketCode::RESET);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(WSAEADDRINUSE), SocketCode::ADDRESS_IN_USE);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(WSAECONNREFUSED), SocketCode::REFUSED);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(WSAEWOULDBLOCK), SocketCode::WOULD_BLOCK);
 #else
-    EXPECT_EQ(kiotty::net::toSocketCode(ECONNRESET), SocketCode::RESET);
-    EXPECT_EQ(kiotty::net::toSocketCode(EADDRINUSE), SocketCode::ADDRESS_IN_USE);
-    EXPECT_EQ(kiotty::net::toSocketCode(ECONNREFUSED), SocketCode::REFUSED);
-    EXPECT_EQ(kiotty::net::toSocketCode(EAGAIN), SocketCode::WOULD_BLOCK);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(ECONNRESET), SocketCode::RESET);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(EADDRINUSE), SocketCode::ADDRESS_IN_USE);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(ECONNREFUSED), SocketCode::REFUSED);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(EAGAIN), SocketCode::WOULD_BLOCK);
 #endif
-    EXPECT_EQ(kiotty::net::toSocketCode(0), SocketCode::SUCCESS);
-    EXPECT_EQ(kiotty::net::toSocketCode(0x7FFF1234), SocketCode::UNKNOWN);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(0), SocketCode::SUCCESS);
+    EXPECT_EQ(kiotty::net::implementation::toSocketCode(0x7FFF1234), SocketCode::UNKNOWN);
 }
 
 TEST(SocketError, ToNetCodeMapsClosedToPeerClosedBusyToBusyAndTheRestToSocketError)
 {
-    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::SUCCESS), KIOTTY_SUCCESS);
-    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::CLOSED), KIOTTY_PEER_CLOSED);
-    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::CANCELLED), KIOTTY_CLOSED);
-    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::TIMEOUT), KIOTTY_TIMEOUT);
-    EXPECT_EQ(kiotty::net::toNetCode(SocketCode::BUSY), KIOTTY_BUSY);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::SUCCESS), KIOTTY_SUCCESS);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CLOSED), KIOTTY_PEER_CLOSED);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CANCELLED), KIOTTY_CLOSED);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::TIMEOUT), KIOTTY_TIMEOUT);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::BUSY), KIOTTY_BUSY);
     SocketCode rest[] =
     {
         SocketCode::WOULD_BLOCK,
@@ -61,6 +61,6 @@ TEST(SocketError, ToNetCodeMapsClosedToPeerClosedBusyToBusyAndTheRestToSocketErr
     };
     for (SocketCode code : rest)
     {
-        EXPECT_EQ(kiotty::net::toNetCode(code), KIOTTY_SOCKET_ERROR) << static_cast<int>(code);
+        EXPECT_EQ(kiotty::net::implementation::toNetCode(code), KIOTTY_SOCKET_ERROR) << static_cast<int>(code);
     }
 }

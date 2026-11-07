@@ -73,7 +73,7 @@ namespace kiotty_test
         std::deque<std::string>               _buffers;
     };
 
-    class FakeOwner : public kiotty::net::Owner
+    class FakeOwner : public kiotty::net::implementation::Owner
     {
     public:
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;

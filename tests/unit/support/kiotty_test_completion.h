@@ -18,41 +18,41 @@ namespace kiotty_test
 {
     namespace completion
     {
-        inline kiotty::net::IoCompletion make(kiotty::net::IoKind kind, const kiotty::net::IoAction& action, size_t length, kiotty::net::SocketCode code)
+        inline kiotty::net::implementation::IoCompletion make(kiotty::net::implementation::IoKind kind, const kiotty::net::implementation::IoAction& action, size_t length, kiotty::net::implementation::SocketCode code)
         {
-            kiotty::net::IoCompletion result = { kind, 0, code, length, action };
+            kiotty::net::implementation::IoCompletion result = { kind, 0, code, length, action };
             return result;
         }
 
-        inline kiotty::net::IoCompletion receive(const kiotty::net::IoAction& action, size_t length, kiotty::net::SocketCode code = kiotty::net::SocketCode::SUCCESS)
+        inline kiotty::net::implementation::IoCompletion receive(const kiotty::net::implementation::IoAction& action, size_t length, kiotty::net::implementation::SocketCode code = kiotty::net::implementation::SocketCode::SUCCESS)
         {
-            return make(kiotty::net::IoKind::RECEIVE, action, length, code);
+            return make(kiotty::net::implementation::IoKind::RECEIVE, action, length, code);
         }
 
-        inline kiotty::net::IoCompletion sent(const kiotty::net::IoAction& action, size_t length, kiotty::net::SocketCode code = kiotty::net::SocketCode::SUCCESS)
+        inline kiotty::net::implementation::IoCompletion sent(const kiotty::net::implementation::IoAction& action, size_t length, kiotty::net::implementation::SocketCode code = kiotty::net::implementation::SocketCode::SUCCESS)
         {
-            return make(kiotty::net::IoKind::SEND, action, length, code);
+            return make(kiotty::net::implementation::IoKind::SEND, action, length, code);
         }
 
-        inline kiotty::net::IoCompletion timeout()
+        inline kiotty::net::implementation::IoCompletion timeout()
         {
-            return kiotty::net::IoCompletion::timeout(0);
+            return kiotty::net::implementation::IoCompletion::timeout(0);
         }
 
-        inline kiotty::net::IoCompletion workReady()
+        inline kiotty::net::implementation::IoCompletion workReady()
         {
-            return kiotty::net::IoCompletion::workReady(0);
+            return kiotty::net::implementation::IoCompletion::workReady(0);
         }
 
-        inline kiotty::net::IoCompletion workDone(const kiotty::net::IoAction& outcome)
+        inline kiotty::net::implementation::IoCompletion workDone(const kiotty::net::implementation::IoAction& outcome)
         {
-            return kiotty::net::IoCompletion::workDone(0, outcome);
+            return kiotty::net::implementation::IoCompletion::workDone(0, outcome);
         }
     }
 
-    inline kiotty::net::ConnectionLimits limitsOf(size_t receive, size_t send, size_t notify)
+    inline kiotty::net::implementation::ConnectionLimits limitsOf(size_t receive, size_t send, size_t notify)
     {
-        kiotty::net::ConnectionLimits limits = { receive, send, notify };
+        kiotty::net::implementation::ConnectionLimits limits = { receive, send, notify };
         return limits;
     }
 
@@ -60,9 +60,9 @@ namespace kiotty_test
     class ConnectionBench
     {
     public:
-        typedef kiotty::net::ConnectionHost<N> Host;
+        typedef kiotty::net::implementation::ConnectionHost<N> Host;
 
-        explicit ConnectionBench(kiotty::net::ConnectionLimits limits)
+        explicit ConnectionBench(kiotty::net::implementation::ConnectionLimits limits)
             : host(new Host())
             , profile()
             , owner()
@@ -73,31 +73,31 @@ namespace kiotty_test
             host->initialize(limits);
         }
 
-        kiotty::net::ConnectionResult acquire()
+        kiotty::net::implementation::ConnectionResult acquire()
         {
-            kiotty::net::ConnectionConfiguration configuration = { kiotty::net::ActiveSocket(), &recorder, "", limitsOf(0, 0, 0), profile };
+            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), &recorder, "", limitsOf(0, 0, 0), profile };
             return host->acquire(std::move(configuration));
         }
 
-        kiotty::net::Connection& open()
+        kiotty::net::implementation::Connection& open()
         {
-            kiotty::net::ConnectionResult acquired = acquire();
+            kiotty::net::implementation::ConnectionResult acquired = acquire();
             return acquired.value();
         }
 
-        kiotty::net::IoAction opened(kiotty::net::Connection& connection)
+        kiotty::net::implementation::IoAction opened(kiotty::net::implementation::Connection& connection)
         {
             return connection.onOpened(handler);
         }
 
-        kiotty::net::IoAction complete(kiotty::net::Connection& connection, const kiotty::net::IoCompletion& done)
+        kiotty::net::implementation::IoAction complete(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoCompletion& done)
         {
             return connection.dispatch(done, handler, host->notificationMutex());
         }
 
-        size_t place(kiotty::net::Connection& connection, const kiotty::net::IoAction& read, const std::string& bytes)
+        size_t place(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoAction& read, const std::string& bytes)
         {
-            kiotty::net::IoPayload room = connection.resolve(read);
+            kiotty::net::implementation::IoPayload room = connection.resolve(read);
             size_t length = bytes.size() < room.length ? bytes.size() : room.length;
             if (length > 0)
             {
@@ -106,38 +106,38 @@ namespace kiotty_test
             return length;
         }
 
-        kiotty::net::IoAction deliver(kiotty::net::Connection& connection, const kiotty::net::IoAction& read, const std::string& bytes)
+        kiotty::net::implementation::IoAction deliver(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoAction& read, const std::string& bytes)
         {
             size_t length = place(connection, read, bytes);
             return complete(connection, completion::receive(read, length));
         }
 
-        kiotty::net::IoAction pick(kiotty::net::Connection& connection)
+        kiotty::net::implementation::IoAction pick(kiotty::net::implementation::Connection& connection)
         {
             return connection.pickWrite(host->notificationMutex());
         }
 
-        KiottyNetCode notify(kiotty::net::Connection& connection, const std::string& bytes)
+        KiottyNetCode notify(kiotty::net::implementation::Connection& connection, const std::string& bytes)
         {
             return host->notify(connection.id(), spanOf(bytes));
         }
 
         std::unique_ptr<Host>            host;
-        kiotty::net::TlsProfile          profile;
+        kiotty::net::implementation::TlsProfile          profile;
         FakeOwner                        owner;
         Recorder                         recorder;
         const KiottyNetConnectionHandler callbacks;
-        kiotty::net::Handler             handler;
+        kiotty::net::implementation::Handler             handler;
     };
 
-    inline kiotty::net::IoEvent& readEventOf(kiotty::net::Connection& connection)
+    inline kiotty::net::implementation::IoEvent& readEventOf(kiotty::net::implementation::Connection& connection)
     {
-        return connection.eventFor(kiotty::net::IoAction::read(kiotty::net::IoPurpose::USER, 0, 1));
+        return connection.eventFor(kiotty::net::implementation::IoAction::read(kiotty::net::implementation::IoPurpose::USER, 0, 1));
     }
 
-    inline kiotty::net::IoEvent& writeEventOf(kiotty::net::Connection& connection)
+    inline kiotty::net::implementation::IoEvent& writeEventOf(kiotty::net::implementation::Connection& connection)
     {
-        return connection.eventFor(kiotty::net::IoAction::write(kiotty::net::IoPurpose::USER, 0, 1));
+        return connection.eventFor(kiotty::net::implementation::IoAction::write(kiotty::net::implementation::IoPurpose::USER, 0, 1));
     }
 }
 

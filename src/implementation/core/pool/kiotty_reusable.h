@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_REUSABLE_H)
-#define KIOTTY_REUSABLE_H
+#pragma once
 
 #include "core/pool/kiotty_pool_handle.h"
 
@@ -7,7 +6,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
     enum class SlotState : uint8_t
     {
@@ -18,19 +17,13 @@ namespace kiotty
 
     namespace detail
     {
-        template <class... Types>
-        struct Voider
-        {
-            typedef void type;
-        };
-
         template <class T, class = void>
         struct HasInitialize : std::false_type
         {
         };
 
         template <class T>
-        struct HasInitialize<T, typename Voider<typename T::code_type, typename T::configuration_type, decltype(std::declval<T&>().initialize(std::declval<PoolHandle>(), std::declval<typename T::configuration_type>()))>::type>
+        struct HasInitialize<T, std::void_t<typename T::code_type, typename T::configuration_type, decltype(std::declval<T&>().initialize(std::declval<PoolHandle>(), std::declval<typename T::configuration_type>()))>>
             : std::is_same<decltype(std::declval<T&>().initialize(std::declval<PoolHandle>(), std::declval<typename T::configuration_type>())), typename T::code_type>
         {
         };
@@ -41,17 +34,14 @@ namespace kiotty
         };
 
         template <class T>
-        struct HasReset<T, typename Voider<decltype(std::declval<T&>().reset())>::type>
+        struct HasReset<T, std::void_t<decltype(std::declval<T&>().reset())>>
             : std::integral_constant<bool, std::is_same<decltype(std::declval<T&>().reset()), void>::value && noexcept(std::declval<T&>().reset())>
         {
         };
 
         inline int32_t nextGeneration(int32_t generation)
         {
-            if (generation == INT32_MAX)
-            {
-                return 1;
-            }
+            if (generation == INT32_MAX) { return 1; }
             return generation + 1;
         }
     }
@@ -59,7 +49,7 @@ namespace kiotty
     template <class T>
     struct is_reusable
     {
-        static const bool value =
+        static constexpr bool value =
             std::is_default_constructible<T>::value &&
             !std::is_copy_constructible<T>::value &&
             !std::is_copy_assignable<T>::value &&
@@ -68,9 +58,4 @@ namespace kiotty
             detail::HasInitialize<T>::value &&
             detail::HasReset<T>::value;
     };
-
-    template <class T>
-    const bool is_reusable<T>::value;
 }
-
-#endif

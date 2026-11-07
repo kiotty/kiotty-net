@@ -5,29 +5,26 @@
 
 #include <cstdint>
 
-namespace kiotty
+namespace kiotty::net::implementation
 {
-    namespace net
+    class IoSource
     {
-        class IoSource
-        {
-        public:
-            virtual ~IoSource() = default;
+    public:
+        virtual ~IoSource() = default;
 
-            virtual SocketHandle socket() const = 0;
-            virtual int32_t      slot() const = 0;
-            virtual IoEvent&     eventFor(const IoAction& action) = 0;
-            virtual IoPayload    resolve(const IoAction& action) = 0;
-            virtual SocketCode   attach(EventListener& listener) = 0;
-            virtual void         detach(EventListener& listener) = 0;
-            virtual void         shutdown() = 0;
+        virtual SocketHandle socket() const = 0;
+        virtual int32_t      slot() const = 0;
+        virtual IoEvent&     eventFor(const IoAction& action) = 0;
+        virtual IoPayload    resolve(const IoAction& action) = 0;
+        virtual SocketCode   attach(EventListener& listener) = 0;
+        virtual void         detach(EventListener& listener) = 0;
+        virtual void         shutdown() = 0;
 
-        protected:
-            IoSource() = default;
-            IoSource(const IoSource&) = delete;
-            IoSource& operator=(const IoSource&) = delete;
-        };
-    }
+    protected:
+        IoSource() = default;
+        IoSource(const IoSource&) = delete;
+        IoSource& operator=(const IoSource&) = delete;
+    };
 }
 
 #endif

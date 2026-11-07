@@ -18,6 +18,7 @@ add_executable(kiotty_net_benchmarks
 target_include_directories(kiotty_net_benchmarks PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src/implementation
+    ${KIOTTY_NET_GENERATED_DIR}
 )
-target_compile_features(kiotty_net_benchmarks PRIVATE cxx_std_14)
+target_compile_features(kiotty_net_benchmarks PRIVATE cxx_std_17)
 target_link_libraries(kiotty_net_benchmarks PRIVATE kiotty_net benchmark::benchmark_main)
