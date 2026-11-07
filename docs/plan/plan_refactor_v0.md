@@ -83,6 +83,12 @@ src/implementation/
 
 6단계 시작 때 이 표를 확정한다. 나누는 기준은 "맥락은 맥락끼리" (설계 v4 방침 1) 다.
 
+확정 (2026-11-07, 사용자 답):
+
+- Connection 은 아래 표의 안 그대로 나눈다. ReceiveFlow / SendFlow / WorkFlow 는 Connection 의 멤버이고 accessor 로 닿는다. stage, TLS, socket, event 는 Connection 이 가진다. 읽기 전용 getter 는 `state()` 가 돌려주는 `ConnectionState` 값 하나로 모은다 (StateMachine 용 `int32_t` 상태 값은 이름이 겹치므로 `machineState / setMachineState` 로 바꾼다).
+- public 7 개 한계는 Connection 자신의 메서드에만 센다. 구현하는 인터페이스 `IoSource` 의 override 7 개는 따로 센다. 이 해석을 `docs/deviations.md` 에 적는다.
+- ConnectionHost 는 template 을 없애 `ReusablePoolBase<Connection>&` 를 받고, IO thread 쪽 `ConnectionHost` 와 아무 thread 쪽 `NotificationDesk` 로 나눈다. 둘은 notification mutex 를 함께 쓴다. `ReusablePool<Connection, N>` 은 Owner 가 가진다.
+
 | 클래스 | 지금 public | 나누는 안 |
 |---|---|---|
 | `Connection` | 약 35 | `Connection` (수명: initialize / reset / dispatch / pickWrite / close 와 IoSource), 받는 맥락 `ReceiveFlow` (drive / refill / satisfied), 보내는 맥락 `SendFlow` (select / encoded / resolve), Work 맥락 `WorkFlow` (verify / stream / closeStream). 상태 읽기 (deadline, workReady 등) 는 `ConnectionState` 값 하나를 돌려주는 메서드로 모은다 |
