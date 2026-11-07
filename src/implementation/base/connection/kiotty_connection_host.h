@@ -119,7 +119,7 @@ namespace kiotty::net::implementation
     {
         std::lock_guard<std::mutex> lock(_notification);
         const ConnectionResult found = _connections.get(id);
-        if (!found || !found.value().alive()) { return KIOTTY_PEER_CLOSED; }
+        if (!found || !found.value().alive()) { return KIOTTY_NET_CODE_PEER_CLOSED; }
         return found.value().stageNotification(data);
     }
 
@@ -128,7 +128,7 @@ namespace kiotty::net::implementation
     {
         if (data.data == nullptr && data.length > 0)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         std::lock_guard<std::mutex> lock(_notification);
         for (size_t i = 0; i < N; ++i)
@@ -137,7 +137,7 @@ namespace kiotty::net::implementation
             bool target = _connections.active(i) && connection.alive();
             if (target && connection.notificationWritable() < data.length)
             {
-                return KIOTTY_BUFFER_FULL;
+                return KIOTTY_NET_CODE_BUFFER_FULL;
             }
         }
         for (size_t i = 0; i < N; ++i)
@@ -148,7 +148,7 @@ namespace kiotty::net::implementation
                 (void)connection.stageNotification(data);
             }
         }
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     template <size_t N>
@@ -166,7 +166,7 @@ namespace kiotty::net::implementation
         const ConnectionResult found = find(id);
         if (!found) { return found; }
         const KiottyNetCode verified = found.value().verifyWork(id.generation);
-        if (verified != KIOTTY_SUCCESS) { return ConnectionResult::failure(verified); }
+        if (verified != KIOTTY_NET_CODE_SUCCESS) { return ConnectionResult::failure(verified); }
         return found;
     }
 

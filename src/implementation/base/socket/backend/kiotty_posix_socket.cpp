@@ -34,7 +34,7 @@ namespace kiotty::net::implementation
 
         int familyOf(KiottyNetTransport transport)
         {
-            if (transport == KIOTTY_PIPE)
+            if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
                 return AF_UNIX;
             }
@@ -122,7 +122,7 @@ namespace kiotty::net::implementation
 
         SocketCode addressOf(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, bool passive, Address& address)
         {
-            if (transport == KIOTTY_PIPE)
+            if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
                 return unixAddressOf(endpoint.host, address);
             }
@@ -148,23 +148,23 @@ namespace kiotty::net::implementation
             return info;
         }
 
-        SocketCode waitFor(int descriptor, short events, uint32_t timeout_ms)
+        SocketCode waitFor(int descriptor, short events, uint32_t timeout_milliseconds)
         {
-            uint64_t deadline = monotonicMilliseconds() + timeout_ms;
+            uint64_t deadline = monotonicMilliseconds() + timeout_milliseconds;
             for (;;)
             {
-                int wait_ms = -1;
-                if (timeout_ms != 0)
+                int wait_milliseconds = -1;
+                if (timeout_milliseconds != 0)
                 {
                     uint64_t now = monotonicMilliseconds();
                     uint64_t remaining = deadline > now ? deadline - now : 0;
-                    wait_ms = static_cast<int>(remaining);
+                    wait_milliseconds = static_cast<int>(remaining);
                 }
                 pollfd entry;
                 entry.fd = descriptor;
                 entry.events = events;
                 entry.revents = 0;
-                int ready = ::poll(&entry, 1, wait_ms);
+                int ready = ::poll(&entry, 1, wait_milliseconds);
                 if (ready > 0)
                 {
                     return SocketCode::SUCCESS;
@@ -194,7 +194,7 @@ namespace kiotty::net::implementation
 
     ActiveSocket::ActiveSocket()
         : _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
         , _peer()
     {
     }
@@ -248,7 +248,7 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
-    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
+    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
@@ -269,7 +269,7 @@ namespace kiotty::net::implementation
             {
                 return toSocketCode(started);
             }
-            SocketCode waited = waitFor(descriptor, POLLOUT, timeout_ms);
+            SocketCode waited = waitFor(descriptor, POLLOUT, timeout_milliseconds);
             if (waited != SocketCode::SUCCESS)
             {
                 return waited;
@@ -290,7 +290,7 @@ namespace kiotty::net::implementation
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        if (_transport == KIOTTY_PIPE)
+        if (_transport == KIOTTY_NET_TRANSPORT_PIPE)
         {
             return SocketCode::SUCCESS;
         }
@@ -378,22 +378,22 @@ namespace kiotty::net::implementation
         }
     }
 
-    SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+    SocketCode ActiveSocket::waitReadable(uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        return waitFor(descriptorOf(_handle), POLLIN, timeout_ms);
+        return waitFor(descriptorOf(_handle), POLLIN, timeout_milliseconds);
     }
 
-    SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
+    SocketCode ActiveSocket::waitWritable(uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        return waitFor(descriptorOf(_handle), POLLOUT, timeout_ms);
+        return waitFor(descriptorOf(_handle), POLLOUT, timeout_milliseconds);
     }
 
     SocketCode ActiveSocket::shutdown()
@@ -436,7 +436,7 @@ namespace kiotty::net::implementation
 
     PassiveSocket::PassiveSocket()
         : _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
         , _port(0)
     {
     }
@@ -468,7 +468,7 @@ namespace kiotty::net::implementation
             close();
             return prepared;
         }
-        if (_transport == KIOTTY_PIPE)
+        if (_transport == KIOTTY_NET_TRANSPORT_PIPE)
         {
             ::unlink(endpoint.host);
         }
@@ -490,7 +490,7 @@ namespace kiotty::net::implementation
             close();
             return code;
         }
-        if (_transport == KIOTTY_TCP)
+        if (_transport == KIOTTY_NET_TRANSPORT_TCP)
         {
             sockaddr_storage bound;
             socklen_t length = sizeof(bound);

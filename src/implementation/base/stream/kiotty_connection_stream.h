@@ -19,11 +19,11 @@ namespace kiotty::net::implementation
         ConnectionStream(const ConnectionStream& other) = default;
         ConnectionStream& operator=(const ConnectionStream&) = delete;
 
-        KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_ms);
-        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_ms);
-        KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms);
+        KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
+        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+        KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds);
         bool            connected() const;
-        KiottyNetCode   handshake(uint32_t timeout_ms);
+        KiottyNetCode   handshake(uint32_t timeout_milliseconds);
 
     private:
         KiottyNetCode   flush(const Deadline& deadline);

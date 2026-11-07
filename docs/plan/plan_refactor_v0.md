@@ -165,6 +165,12 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+2단계에서 한 것 (2026-11-07):
+
+- `tools/rename_public_api.tsv` (120 쌍) 를 사용자가 확인했고, 그 표로 `include/`, `src/`, `tests/`, `docs/requirement/`, `docs/deviations.md` 의 1929 곳을 바꿨다. 내부 `elapsedMs` 같은 `Ms` 이름도 `Milliseconds` 로.
+- 정한 모양: action enum 은 타입 이름 그대로 `KIOTTY_NET_ACTION_TYPE_READ` (예시의 `CONNECTION_ACTION` 이 아니다). WebSocket 은 두 단어 `WEB_SOCKET`. TLS cipher suite 는 표준 이름을 담으므로 수칙 4.5 의 네 단어 한계를 넘어도 둔다.
+- 확인: MSVC Debug TLS OFF 303, TLS ON 303, WSL gcc Debug TLS ON 304 초록.
+
 1단계에서 한 것 (2026-11-07):
 
 - 모든 초안 (`core`, `domain`, `data`) 을 `kiotty_*.h / .cpp` 로 이름을 바꿨다. core 의 옛 파일은 지웠다. `domain/`, `data/infra/` 초안은 아직 CMake 에 없다.
@@ -177,7 +183,7 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 |---|---|---|
 | 0 | 끝 | |
 | 1 | 끝 | 아래 "1단계에서 한 것" |
-| 2 | 시작 안 함 | 이름 표 만들고 확인 받기 |
+| 2 | 끝 | 아래 "2단계에서 한 것" |
 | 3 | 초안 일부 | ConnectionConfiguration, 테스트 |
 | 4 | 초안 | 빌드와 테스트 |
 | 5 | 시작 안 함 | |

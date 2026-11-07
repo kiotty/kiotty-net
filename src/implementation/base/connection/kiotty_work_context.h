@@ -115,13 +115,13 @@ namespace kiotty::net::implementation
     {
         if (_state.load(std::memory_order_acquire) != State::WORKING)
         {
-            return KIOTTY_BUSY;
+            return KIOTTY_NET_CODE_BUSY;
         }
         if (_generation != generation)
         {
-            return KIOTTY_PEER_CLOSED;
+            return KIOTTY_NET_CODE_PEER_CLOSED;
         }
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     inline void WorkContext::finish(IoAction outcome)

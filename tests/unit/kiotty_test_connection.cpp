@@ -50,13 +50,13 @@ namespace
         ASSERT_EQ(net::IoActionKind::START_WORK, requested.kind);
         net::IoAction started = bench.complete(connection, completion::workReady());
         ASSERT_EQ(net::IoActionKind::NONE, started.kind);
-        ASSERT_EQ(KIOTTY_SUCCESS, connection.verifyWork(connection.generation()));
+        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.verifyWork(connection.generation()));
     }
 
-    void expectDeadlineAround(const net::Connection& connection, uint64_t before, uint64_t after, uint32_t timeout_ms)
+    void expectDeadlineAround(const net::Connection& connection, uint64_t before, uint64_t after, uint32_t timeout_milliseconds)
     {
-        EXPECT_GE(connection.deadline(), before + timeout_ms);
-        EXPECT_LE(connection.deadline(), after + timeout_ms);
+        EXPECT_GE(connection.deadline(), before + timeout_milliseconds);
+        EXPECT_LE(connection.deadline(), after + timeout_milliseconds);
     }
 }
 
@@ -129,7 +129,7 @@ TEST(Connection, OnOpenedPlainCallsOnReadyOnceAndAppliesItsAction)
     EXPECT_EQ(1u, bench.recorder.total());
     EXPECT_EQ(net::IoActionKind::READ, action.kind);
     EXPECT_EQ(4u, action.as.read.exact);
-    EXPECT_EQ(500u, action.timeout_ms);
+    EXPECT_EQ(500u, action.timeout_milliseconds);
     expectDeadlineAround(connection, before, after, 500);
     EXPECT_FALSE(connection.expireDeadline(before + 499));
     EXPECT_TRUE(connection.expireDeadline(after + 500));
@@ -167,7 +167,7 @@ TEST_P(ConnectionCompletionKind, AnyCompletionInClosingReturnsNoneAndCallsNothin
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    bench.recorder.then(thenClose(KIOTTY_SUCCESS));
+    bench.recorder.then(thenClose(KIOTTY_NET_CODE_SUCCESS));
     net::IoAction closed = bench.complete(connection, completion::timeout());
     ASSERT_EQ(net::IoActionKind::CLOSE, closed.kind);
     ASSERT_EQ(net::Phase::CLOSING, connection.phase());
@@ -189,10 +189,10 @@ TEST(Connection, ReceiveWithClosedCodeReturnsClosePeerClosedAndOnDisconnectedOnc
     ASSERT_NE(0u, connection.deadline());
     net::IoAction closed = bench.complete(connection, completion::receive(read, 0, net::SocketCode::CLOSED));
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, closed.as.close.reason);
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
     const kiotty_test::Record& gone = bench.recorder.last(Call::ON_DISCONNECTED);
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, gone.code);
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, gone.code);
     EXPECT_EQ(&bench.recorder, gone.app_context);
     EXPECT_EQ(&bench.recorder, gone.connection_context);
     EXPECT_EQ(connection.id().value(), gone.handle.id);
@@ -208,8 +208,8 @@ TEST(Connection, ReceiveOrSendWithErrorCodeReturnsCloseSocketError)
     net::IoAction read = receiving.opened(reader);
     net::IoAction failed = receiving.complete(reader, completion::receive(read, 0, net::SocketCode::RESET));
     EXPECT_EQ(net::IoActionKind::CLOSE, failed.kind);
-    EXPECT_EQ(KIOTTY_SOCKET_ERROR, failed.as.close.reason);
-    EXPECT_EQ(KIOTTY_SOCKET_ERROR, receiving.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_SOCKET_ERROR, failed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_SOCKET_ERROR, receiving.recorder.last(Call::ON_DISCONNECTED).code);
 
     Bench sending(smallLimits());
     net::Connection& writer = sending.open();
@@ -219,7 +219,7 @@ TEST(Connection, ReceiveOrSendWithErrorCodeReturnsCloseSocketError)
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
     net::IoAction refused = sending.complete(writer, completion::sent(write, 0, net::SocketCode::RESET));
     EXPECT_EQ(net::IoActionKind::CLOSE, refused.kind);
-    EXPECT_EQ(KIOTTY_SOCKET_ERROR, refused.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_SOCKET_ERROR, refused.as.close.reason);
     EXPECT_EQ(0u, sending.recorder.count(Call::ON_WRITTEN));
 }
 
@@ -229,7 +229,7 @@ TEST(Connection, CloseIsAppliedOnlyOnceEvenIfReadAndWriteCompletionsBothCarryErr
     net::Connection& connection = bench.open();
     bench.recorder.then(thenRead(4, 0));
     net::IoAction read = bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
     net::IoAction first = bench.complete(connection, completion::receive(read, 0, net::SocketCode::RESET));
@@ -263,7 +263,7 @@ TEST(Connection, ReceiveShortOfExactReturnsTheSameReadAndNoCallback)
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_READ));
     EXPECT_EQ(net::IoActionKind::READ, next.kind);
     EXPECT_EQ(4u, next.as.read.exact);
-    EXPECT_EQ(700u, next.timeout_ms);
+    EXPECT_EQ(700u, next.timeout_milliseconds);
 }
 
 TEST(Connection, ReceiveWithMoreThanExactDeliversExactAndKeepsTheRest)
@@ -335,10 +335,10 @@ TEST(Connection, FullStageWithoutTheConditionReturnsCloseRequestTooLarge)
     net::IoAction read = bench.opened(connection);
     net::IoAction closed = bench.deliver(connection, read, std::string(16, 'a'));
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_REQUEST_TOO_LARGE, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_REQUEST_TOO_LARGE, closed.as.close.reason);
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_ERROR));
-    EXPECT_EQ(KIOTTY_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_ERROR).code);
-    EXPECT_EQ(KIOTTY_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_ERROR).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_DISCONNECTED).code);
 }
 
 TEST(Connection, ReadExactLargerThanReceiveCapacityReturnsCloseRequestTooLarge)
@@ -348,8 +348,8 @@ TEST(Connection, ReadExactLargerThanReceiveCapacityReturnsCloseRequestTooLarge)
     bench.recorder.then(thenRead(8192, 0));
     net::IoAction closed = bench.opened(connection);
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_REQUEST_TOO_LARGE, closed.as.close.reason);
-    EXPECT_EQ(KIOTTY_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_REQUEST_TOO_LARGE, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_REQUEST_TOO_LARGE, bench.recorder.last(Call::ON_DISCONNECTED).code);
 }
 
 TEST(Connection, ReadUntilDeliversUpToAndIncludingTheDelimiter)
@@ -403,8 +403,8 @@ TEST(Connection, ReadUntilWithoutDelimiterWithinMaxReturnsCloseProtocolError)
     net::IoAction read = bench.opened(connection);
     net::IoAction closed = bench.deliver(connection, read, "abcdefghi");
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_PROTOCOL_ERROR, closed.as.close.reason);
-    EXPECT_EQ(KIOTTY_PROTOCOL_ERROR, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, bench.recorder.last(Call::ON_DISCONNECTED).code);
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_READ));
 }
 
@@ -417,13 +417,13 @@ namespace
         bench.recorder.then(returned);
         net::IoAction closed = bench.opened(connection);
         EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-        EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, closed.as.close.reason);
+        EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, closed.as.close.reason);
         ASSERT_EQ(1u, bench.recorder.count(Call::ON_ERROR));
         const kiotty_test::Record& error = bench.recorder.last(Call::ON_ERROR);
-        EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, error.code);
+        EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, error.code);
         ASSERT_NE(nullptr, error.message);
         EXPECT_NE(0u, std::strlen(error.message));
-        EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, bench.recorder.last(Call::ON_DISCONNECTED).code);
+        EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, bench.recorder.last(Call::ON_DISCONNECTED).code);
         EXPECT_EQ(net::Phase::CLOSING, connection.phase());
     }
 }
@@ -452,7 +452,7 @@ TEST(Connection, OnReadReturningWriteStagesIntoSendAndReturnsHoldWithDeadline)
     net::IoAction held = bench.deliver(connection, read, "x");
     uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     EXPECT_EQ(net::IoActionKind::HOLD, held.kind);
-    EXPECT_EQ(300u, held.timeout_ms);
+    EXPECT_EQ(300u, held.timeout_milliseconds);
     expectDeadlineAround(connection, before, after, 300);
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
@@ -470,8 +470,8 @@ TEST(Connection, WriteLargerThanSendCapacityReturnsCloseBufferFullWithoutPartial
     net::IoAction read = bench.opened(connection);
     net::IoAction closed = bench.deliver(connection, read, "x");
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_BUFFER_FULL, closed.as.close.reason);
-    EXPECT_EQ(KIOTTY_BUFFER_FULL, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.recorder.last(Call::ON_DISCONNECTED).code);
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_ERROR));
     bench.host->release(connection);
     net::Connection& reopened = bench.open();
@@ -518,8 +518,8 @@ TEST(Connection, PickWriteOnIdleOrClosingIsNone)
     net::Connection& connection = bench.open();
     bench.recorder.thenWrite("user", 100);
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
-    bench.recorder.then(thenClose(KIOTTY_SUCCESS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
+    bench.recorder.then(thenClose(KIOTTY_NET_CODE_SUCCESS));
     bench.complete(connection, completion::timeout());
     ASSERT_EQ(net::Phase::CLOSING, connection.phase());
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
@@ -531,11 +531,11 @@ TEST(Connection, PickWriteWhileWorkIsRequestedWorkingOrDoneIsNone)
     net::Connection& connection = bench.open();
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
     bench.complete(connection, completion::workReady());
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
-    ASSERT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
     bench.complete(connection, completion::workDone(connection.takeWorkOutcome()));
     net::IoAction write = bench.pick(connection);
@@ -548,7 +548,7 @@ TEST(Connection, PickWriteWithPendingWriteEventIsNone)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     writeEventOf(connection).pending = true;
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
     writeEventOf(connection).pending = false;
@@ -561,8 +561,8 @@ TEST(Connection, PickWriteWithNotifyAndSendBothStagedPicksNotifyFirst)
     net::Connection& connection = bench.open();
     bench.recorder.thenWrite("response", 0);
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "N1"));
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "N2"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "N1"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "N2"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
     EXPECT_EQ(net::IoPurpose::NOTIFY, write.purpose);
@@ -596,10 +596,10 @@ TEST(Connection, ResolveWriteOfNotifyKeepsThePickedLengthWhenMoreIsAppendedBefor
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "abc"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "abc"));
     net::IoAction write = bench.pick(connection);
     net::IoPayload picked = connection.resolve(write);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "def"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "def"));
     net::IoPayload resolved = connection.resolve(write);
     EXPECT_EQ(picked.buffer, resolved.buffer);
     EXPECT_EQ(3u, resolved.length);
@@ -626,7 +626,7 @@ TEST(Connection, ResolveOfNoneHoldStartWorkCloseIsEmptyPayload)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    net::IoAction actions[] = { net::IoAction::none(), net::IoAction::hold(100), net::IoAction::startWork(), net::IoAction::close(KIOTTY_SUCCESS) };
+    net::IoAction actions[] = { net::IoAction::none(), net::IoAction::hold(100), net::IoAction::startWork(), net::IoAction::close(KIOTTY_NET_CODE_SUCCESS) };
     for (const net::IoAction& action : actions)
     {
         net::IoPayload payload = connection.resolve(action);
@@ -641,7 +641,7 @@ TEST(Connection, SendNotifyReleasesOnlyNotifyAndReturnsNone)
     net::Connection& connection = bench.open();
     bench.recorder.thenWrite("user", 0);
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push!"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push!"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoPurpose::NOTIFY, write.purpose);
     net::IoAction after = bench.complete(connection, completion::sent(write, 5));
@@ -662,7 +662,7 @@ TEST(Connection, SendUserReleasesOnlySendAndCallsOnWrittenWithPlainLength)
     bench.opened(connection);
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoPurpose::USER, write.purpose);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     net::IoAction after = bench.complete(connection, completion::sent(write, 4));
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_WRITTEN));
     EXPECT_EQ(4u, bench.recorder.last(Call::ON_WRITTEN).length);
@@ -681,9 +681,9 @@ TEST(Connection, NotifyStagedWhileNotifyWriteIsInFlightGoesOutAsTheNextWrite)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "abc"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "abc"));
     net::IoAction first = bench.pick(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "de"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "de"));
     bench.complete(connection, completion::sent(first, 3));
     net::IoAction second = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, second.kind);
@@ -699,7 +699,7 @@ TEST(Connection, ThenWriteDuringNotifySendOnlyStagesAndSetsDeadline)
     bench.recorder.then(thenRead(1, 0));
     bench.recorder.thenWrite("resp", 300);
     net::IoAction read = bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "nn"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "nn"));
     net::IoAction push = bench.pick(connection);
     writeEventOf(connection).pending = true;
     net::IoAction held = bench.deliver(connection, read, "x");
@@ -724,7 +724,7 @@ TEST(Connection, TimeoutAfterHoldAppliesWhateverHandlerReturns)
     net::IoAction held = writing.complete(writer, completion::timeout());
     EXPECT_EQ(1u, writing.recorder.count(Call::ON_TIMEOUT));
     EXPECT_EQ(net::IoActionKind::HOLD, held.kind);
-    EXPECT_EQ(50u, held.timeout_ms);
+    EXPECT_EQ(50u, held.timeout_milliseconds);
     EXPECT_EQ("late", payloadOf(writer, writing.pick(writer)));
 
     Bench working(smallLimits());
@@ -797,11 +797,11 @@ namespace
 
 TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndCloseReturnedCloses)
 {
-    bench.recorder.then(thenClose(KIOTTY_TIMEOUT));
+    bench.recorder.then(thenClose(KIOTTY_NET_CODE_TIMEOUT));
     net::IoAction closed = bench.complete(connection, completion::timeout());
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_EQ(KIOTTY_TIMEOUT, closed.as.close.reason);
-    EXPECT_EQ(KIOTTY_TIMEOUT, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, closed.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, bench.recorder.last(Call::ON_DISCONNECTED).code);
     EXPECT_EQ(net::Phase::CLOSING, connection.phase());
 }
 
@@ -838,7 +838,7 @@ TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndWriteReturned
     net::IoAction extended = bench.complete(connection, completion::timeout());
     uint64_t after = kiotty::net::implementation::monotonicMilliseconds();
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_ERROR));
-    EXPECT_EQ(KIOTTY_BUSY, bench.recorder.last(Call::ON_ERROR).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.recorder.last(Call::ON_ERROR).code);
     EXPECT_STREQ(BUSY_MESSAGE, bench.recorder.last(Call::ON_ERROR).message);
     EXPECT_EQ(net::IoActionKind::HOLD, extended.kind);
     expectDeadlineAround(connection, before, after, 300);
@@ -850,7 +850,7 @@ TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndWorkReturnedR
     bench.recorder.then(thenWork());
     net::IoAction extended = bench.complete(connection, completion::timeout());
     ASSERT_EQ(1u, bench.recorder.count(Call::ON_ERROR));
-    EXPECT_EQ(KIOTTY_BUSY, bench.recorder.last(Call::ON_ERROR).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.recorder.last(Call::ON_ERROR).code);
     EXPECT_EQ(net::IoActionKind::HOLD, extended.kind);
     EXPECT_EQ(0u, connection.deadline());
     EXPECT_FALSE(connection.working());
@@ -866,7 +866,7 @@ TEST(Connection, TimeoutWithOnlyNotifyWriteInFlightIsNotUserActionPending)
     bench.recorder.then(thenHold(100));
     bench.recorder.then(thenRead(4, 0));
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "n"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "n"));
     net::IoAction push = bench.pick(connection);
     ASSERT_EQ(net::IoPurpose::NOTIFY, push.purpose);
     writeEventOf(connection).pending = true;
@@ -925,7 +925,7 @@ TEST(Connection, WorkReadyCompletionStartsWorkAndCallsOnWorkStartedWithStreamHan
     EXPECT_EQ(&bench.owner, work.stream.owner);
     EXPECT_EQ(connection.id().value(), work.stream.id);
     EXPECT_TRUE(connection.working());
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.verifyWork(connection.generation()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.verifyWork(connection.generation()));
 }
 
 TEST(Connection, ApplyCloseAbandonsRequestedWork)
@@ -935,7 +935,7 @@ TEST(Connection, ApplyCloseAbandonsRequestedWork)
     bench.recorder.then(thenHold(0));
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "n"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "n"));
     net::IoAction push = bench.pick(connection);
     writeEventOf(connection).pending = true;
     bench.complete(connection, completion::timeout());
@@ -955,13 +955,13 @@ TEST(Connection, ApplyCloseDuringWorkingKeepsWorkUntilCloseStream)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     startWork(bench, connection);
-    net::IoAction closed = connection.close(KIOTTY_CLOSED, bench.handler);
+    net::IoAction closed = connection.close(KIOTTY_NET_CODE_CLOSED, bench.handler);
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
     EXPECT_EQ(net::Phase::CLOSING, connection.phase());
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
-    EXPECT_EQ(KIOTTY_CLOSED, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, bench.recorder.last(Call::ON_DISCONNECTED).code);
     EXPECT_TRUE(connection.working());
-    EXPECT_EQ(net::IoActionKind::NONE, connection.close(KIOTTY_CLOSED, bench.handler).kind);
+    EXPECT_EQ(net::IoActionKind::NONE, connection.close(KIOTTY_NET_CODE_CLOSED, bench.handler).kind);
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
 }
 
@@ -971,13 +971,13 @@ TEST(Connection, StreamReturnsConnectionStreamOnlyWhileWorking)
     net::Connection& connection = bench.open();
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    EXPECT_EQ(KIOTTY_BUSY, connection.verifyWork(connection.generation()));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, connection.verifyWork(connection.generation()));
     bench.complete(connection, completion::workReady());
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.verifyWork(connection.generation()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.verifyWork(connection.generation()));
     net::ConnectionStream stream = connection.stream();
     (void)stream;
-    ASSERT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
-    EXPECT_EQ(KIOTTY_BUSY, connection.verifyWork(connection.generation()));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, connection.verifyWork(connection.generation()));
 }
 
 TEST(Connection, CloseStreamVerifyIsBusyWhenNotWorking)
@@ -986,13 +986,13 @@ TEST(Connection, CloseStreamVerifyIsBusyWhenNotWorking)
     net::Connection& connection = bench.open();
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    EXPECT_EQ(KIOTTY_BUSY, connection.closeStream(connection.generation(), thenRead(4, 0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, connection.closeStream(connection.generation(), thenRead(4, 0)));
     bench.complete(connection, completion::workReady());
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 0)));
-    EXPECT_EQ(KIOTTY_BUSY, connection.closeStream(connection.generation(), thenClose(KIOTTY_SUCCESS)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, connection.closeStream(connection.generation(), thenClose(KIOTTY_NET_CODE_SUCCESS)));
     net::IoAction outcome = connection.takeWorkOutcome();
     EXPECT_EQ(net::IoActionKind::READ, outcome.kind);
-    EXPECT_EQ(KIOTTY_BUSY, connection.closeStream(connection.generation(), thenClose(KIOTTY_SUCCESS)));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, connection.closeStream(connection.generation(), thenClose(KIOTTY_NET_CODE_SUCCESS)));
 }
 
 TEST(Connection, CloseStreamVerifyIsPeerClosedForAnOldGeneration)
@@ -1005,9 +1005,9 @@ TEST(Connection, CloseStreamVerifyIsPeerClosedForAnOldGeneration)
     net::Connection& second = bench.open();
     startWork(bench, second);
     ASSERT_NE(old_generation, second.generation());
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, second.closeStream(old_generation, thenWriteSpan(spanOf("stale"), 0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, second.closeStream(old_generation, thenWriteSpan(spanOf("stale"), 0)));
     EXPECT_FALSE(second.workFinished());
-    EXPECT_EQ(KIOTTY_SUCCESS, second.closeStream(second.generation(), thenHold(0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, second.closeStream(second.generation(), thenHold(0)));
     bench.complete(second, completion::workDone(second.takeWorkOutcome()));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(second).kind);
 }
@@ -1018,10 +1018,10 @@ TEST(Connection, CloseStreamVerifyIsSuccessAndGoesDone)
     net::Connection& connection = bench.open();
     startWork(bench, connection);
     int32_t generation = connection.generation();
-    KiottyNetCode closed = KIOTTY_BUSY;
+    KiottyNetCode closed = KIOTTY_NET_CODE_BUSY;
     std::thread worker([&connection, generation, &closed]() { closed = connection.closeStream(generation, thenRead(4, 0)); });
     worker.join();
-    EXPECT_EQ(KIOTTY_SUCCESS, closed);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, closed);
     EXPECT_TRUE(connection.workFinished());
 }
 
@@ -1030,7 +1030,7 @@ TEST(Connection, WorkDoneDrivesTheOutcomeThatCloseStreamStored)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     startWork(bench, connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 700)));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 700)));
     net::IoAction outcome = connection.takeWorkOutcome();
     EXPECT_FALSE(connection.working());
     EXPECT_FALSE(connection.workFinished());
@@ -1049,13 +1049,13 @@ TEST(Connection, CloseStreamWithThenWriteStagesOnTheWorkerAndWorkDoneReturnsHold
     startWork(bench, connection);
     int32_t generation = connection.generation();
     std::string response = "resp";
-    KiottyNetCode closed = KIOTTY_BUSY;
+    KiottyNetCode closed = KIOTTY_NET_CODE_BUSY;
     std::thread worker([&]() { closed = connection.closeStream(generation, thenWriteSpan(spanOf(response), 100)); });
     worker.join();
-    ASSERT_EQ(KIOTTY_SUCCESS, closed);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, closed);
     net::IoAction outcome = connection.takeWorkOutcome();
     EXPECT_EQ(net::IoActionKind::HOLD, outcome.kind);
-    EXPECT_EQ(100u, outcome.timeout_ms);
+    EXPECT_EQ(100u, outcome.timeout_milliseconds);
     net::IoAction held = bench.complete(connection, completion::workDone(outcome));
     EXPECT_EQ(net::IoActionKind::HOLD, held.kind);
     net::IoAction write = bench.pick(connection);
@@ -1074,7 +1074,7 @@ TEST(Connection, CloseStreamWithThenReadAlreadySatisfiedCallsOnReadAtWorkDone)
     net::IoAction requested = bench.deliver(connection, read, "abcdef");
     ASSERT_EQ(net::IoActionKind::START_WORK, requested.kind);
     bench.complete(connection, completion::workReady());
-    ASSERT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 0)));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenRead(4, 0)));
     bench.complete(connection, completion::workDone(connection.takeWorkOutcome()));
     ASSERT_EQ(2u, bench.recorder.count(Call::ON_READ));
     EXPECT_EQ("cdef", bench.recorder.last(Call::ON_READ).data);
@@ -1085,10 +1085,10 @@ TEST(Connection, CloseStreamWithThenWorkReturnsInvalidArgumentAndStreamStaysVali
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     startWork(bench, connection);
-    EXPECT_EQ(KIOTTY_INVALID_ARGUMENT, connection.closeStream(connection.generation(), thenWork()));
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.verifyWork(connection.generation()));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, connection.closeStream(connection.generation(), thenWork()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.verifyWork(connection.generation()));
     EXPECT_FALSE(connection.workFinished());
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenClose(KIOTTY_SUCCESS)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenClose(KIOTTY_NET_CODE_SUCCESS)));
 }
 
 TEST(Connection, CloseStreamWithWriteLargerThanSendCapacityReturnsBufferFullAndStreamStaysValid)
@@ -1097,9 +1097,9 @@ TEST(Connection, CloseStreamWithWriteLargerThanSendCapacityReturnsBufferFullAndS
     net::Connection& connection = bench.open();
     startWork(bench, connection);
     std::string large(9, 'w');
-    EXPECT_EQ(KIOTTY_BUFFER_FULL, connection.closeStream(connection.generation(), thenWriteSpan(spanOf(large), 0)));
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.verifyWork(connection.generation()));
-    EXPECT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, connection.closeStream(connection.generation(), thenWriteSpan(spanOf(large), 0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.verifyWork(connection.generation()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
     bench.complete(connection, completion::workDone(connection.takeWorkOutcome()));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
 }
@@ -1109,8 +1109,8 @@ TEST(Connection, CloseStreamDuringClosingReturnsClosedButGoesDone)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     startWork(bench, connection);
-    connection.close(KIOTTY_CLOSED, bench.handler);
-    EXPECT_EQ(KIOTTY_CLOSED, connection.closeStream(connection.generation(), thenHold(0)));
+    connection.close(KIOTTY_NET_CODE_CLOSED, bench.handler);
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, connection.closeStream(connection.generation(), thenHold(0)));
     EXPECT_TRUE(connection.workFinished());
     net::IoAction outcome = connection.takeWorkOutcome();
     EXPECT_EQ(net::IoActionKind::NONE, bench.complete(connection, completion::workDone(outcome)).kind);
@@ -1123,9 +1123,9 @@ TEST(Connection, NotifyDuringWorkIsStagedAndPickedOnlyAfterWorkDone)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     startWork(bench, connection);
-    EXPECT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "n"));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "n"));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
-    ASSERT_EQ(KIOTTY_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.closeStream(connection.generation(), thenHold(0)));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
     bench.complete(connection, completion::workDone(connection.takeWorkOutcome()));
     net::IoAction write = bench.pick(connection);
@@ -1139,7 +1139,7 @@ TEST(Connection, NotifyStagesPlaintextIntoTheNotifyStage)
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    EXPECT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "hello"));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "hello"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
     EXPECT_EQ(5u, write.as.write.length);
@@ -1153,11 +1153,11 @@ TEST(Connection, NotifyOnIdleOrClosingConnectionReturnsPeerClosed)
     bench.opened(connection);
     kiotty::net::implementation::PoolHandle old_id = connection.id();
     bench.host->release(connection);
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.host->notify(old_id, spanOf("x")));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->notify(old_id, spanOf("x")));
     net::Connection& reopened = bench.open();
     bench.opened(reopened);
-    reopened.close(KIOTTY_CLOSED, bench.handler);
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, bench.notify(reopened, "x"));
+    reopened.close(KIOTTY_NET_CODE_CLOSED, bench.handler);
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.notify(reopened, "x"));
 }
 
 TEST(Connection, NotifyBeyondPushCapacityReturnsBufferFullAndWritesNothing)
@@ -1165,8 +1165,8 @@ TEST(Connection, NotifyBeyondPushCapacityReturnsBufferFullAndWritesNothing)
     Bench bench(limitsOf(64, 64, 8));
     net::Connection& connection = bench.open();
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "12345678"));
-    EXPECT_EQ(KIOTTY_BUFFER_FULL, bench.notify(connection, "9"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "12345678"));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.notify(connection, "9"));
     net::IoAction write = bench.pick(connection);
     EXPECT_EQ(8u, write.as.write.length);
     EXPECT_EQ("12345678", payloadOf(connection, write));
@@ -1187,7 +1187,7 @@ TEST(Connection, NotifyFromAnotherThreadAThousandTimesWhilePickAndReleaseRunKeep
         for (int i = 0; i < messages; ++i)
         {
             std::string message = std::to_string(10000 + i);
-            while (bench.notify(connection, message) == KIOTTY_BUFFER_FULL)
+            while (bench.notify(connection, message) == KIOTTY_NET_CODE_BUFFER_FULL)
             {
                 std::this_thread::yield();
             }
@@ -1215,7 +1215,7 @@ TEST(Connection, ReleaseReturnsToIdleClearsStagesAndResetsWork)
     net::Connection& connection = bench.open();
     bench.recorder.thenWrite("user", 100);
     bench.opened(connection);
-    ASSERT_EQ(KIOTTY_SUCCESS, bench.notify(connection, "push"));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     bench.recorder.then(thenWork());
     bench.complete(connection, completion::sent(net::IoAction::write(net::IoPurpose::USER, 0, 4), 4));
     ASSERT_TRUE(connection.working());

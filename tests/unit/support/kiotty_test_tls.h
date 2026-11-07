@@ -33,24 +33,24 @@ namespace kiotty_test
         std::memcpy(target, text.data(), length);
     }
 
-    inline KiottyNetTlsServerConfig serverConfig(const char* cert = "server.pem", const char* key = "server.key")
+    inline KiottyNetTlsServerConfiguration serverConfig(const char* cert = "server.pem", const char* key = "server.key")
     {
-        KiottyNetTlsServerConfig config;
+        KiottyNetTlsServerConfiguration config;
         std::memset(&config, 0, sizeof(config));
-        config.versions = KIOTTY_TLS_V12 | KIOTTY_TLS_V13;
+        config.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
         config.v12_cipher_suites = 0xF;
         config.v13_cipher_suites = 0x1F;
         copyText(config.identity.cert_file, certPath(cert));
         copyText(config.identity.key_file, certPath(key));
-        config.client_auth = KIOTTY_CLIENT_AUTH_NONE;
+        config.client_authentication = KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
         return config;
     }
 
-    inline KiottyNetTlsClientConfig clientConfig(const char* trust = "ca.pem")
+    inline KiottyNetTlsClientConfiguration clientConfig(const char* trust = "ca.pem")
     {
-        KiottyNetTlsClientConfig config;
+        KiottyNetTlsClientConfiguration config;
         std::memset(&config, 0, sizeof(config));
-        config.versions = KIOTTY_TLS_V12 | KIOTTY_TLS_V13;
+        config.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
         config.v12_cipher_suites = 0xF;
         config.v13_cipher_suites = 0x1F;
         copyText(config.trust_store_path, certPath(trust));
@@ -117,7 +117,7 @@ namespace kiotty_test
             server_steps.clear();
             client_steps.clear();
             KiottyNetCode code = server.open(server_profile, nullptr);
-            if (code != KIOTTY_SUCCESS)
+            if (code != KIOTTY_NET_CODE_SUCCESS)
             {
                 return code;
             }

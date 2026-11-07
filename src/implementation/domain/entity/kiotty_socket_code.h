@@ -30,15 +30,15 @@ namespace kiotty::net::implementation
         switch (code)
         {
         case SocketCode::SUCCESS:
-            return KIOTTY_SUCCESS;
+            return KIOTTY_NET_CODE_SUCCESS;
         case SocketCode::CLOSED:
-            return KIOTTY_PEER_CLOSED;
+            return KIOTTY_NET_CODE_PEER_CLOSED;
         case SocketCode::CANCELLED:
-            return KIOTTY_CLOSED;
+            return KIOTTY_NET_CODE_CLOSED;
         case SocketCode::TIMEOUT:
-            return KIOTTY_TIMEOUT;
+            return KIOTTY_NET_CODE_TIMEOUT;
         case SocketCode::BUSY:
-            return KIOTTY_BUSY;
+            return KIOTTY_NET_CODE_BUSY;
         case SocketCode::WOULD_BLOCK:
         case SocketCode::PENDING:
         case SocketCode::REFUSED:
@@ -49,8 +49,8 @@ namespace kiotty::net::implementation
         case SocketCode::OUT_OF_RESOURCE:
         case SocketCode::NOT_SUPPORTED:
         case SocketCode::UNKNOWN:
-            return KIOTTY_SOCKET_ERROR;
+            return KIOTTY_NET_CODE_SOCKET_ERROR;
         }
-        return KIOTTY_SOCKET_ERROR;
+        return KIOTTY_NET_CODE_SOCKET_ERROR;
     }
 }

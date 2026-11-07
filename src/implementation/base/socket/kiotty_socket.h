@@ -34,13 +34,13 @@ namespace kiotty::net::implementation
 
         static ActiveSocketResult open(KiottyNetTransport transport);
 
-        SocketCode     connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms);
+        SocketCode     connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds);
         SocketCode     setNoDelay(bool on);
         TransferResult send(const void* data, size_t length);
         TransferResult receive(void* data, size_t length);
         TransferResult peek(void* data, size_t length);
-        SocketCode     waitReadable(uint32_t timeout_ms);
-        SocketCode     waitWritable(uint32_t timeout_ms);
+        SocketCode     waitReadable(uint32_t timeout_milliseconds);
+        SocketCode     waitWritable(uint32_t timeout_milliseconds);
         SocketCode     shutdown();
         void           close();
 
@@ -81,7 +81,7 @@ namespace kiotty::net::implementation
         uint16_t           _port;
     };
 
-    Result<ActiveSocket, KiottyNetCode> connectWithRetry(const KiottyNetClientConfig& config, const std::atomic<bool>& stop);
+    Result<ActiveSocket, KiottyNetCode> connectWithRetry(const KiottyNetClientConfiguration& config, const std::atomic<bool>& stop);
 }
 
 #endif

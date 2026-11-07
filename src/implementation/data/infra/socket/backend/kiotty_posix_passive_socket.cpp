@@ -23,7 +23,7 @@ namespace kiotty::net::implementation
 
     PassiveSocket::PassiveSocket()
         : _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
         , _port(0)
     {
     }
@@ -55,7 +55,7 @@ namespace kiotty::net::implementation
             close();
             return listening;
         }
-        if (_transport == KIOTTY_TCP)
+        if (_transport == KIOTTY_NET_TRANSPORT_TCP)
         {
             _port = boundPort(descriptor);
         }
@@ -102,7 +102,7 @@ namespace kiotty::net::implementation
     {
         void releasePath(KiottyNetTransport transport, int descriptor, const KiottyNetEndpoint& endpoint)
         {
-            if (transport == KIOTTY_PIPE)
+            if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
                 ::unlink(endpoint.host);
                 return;

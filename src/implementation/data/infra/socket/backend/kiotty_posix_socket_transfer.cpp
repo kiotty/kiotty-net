@@ -63,7 +63,7 @@ namespace kiotty::net::implementation
     SocketCode configureNoDelay(const ActiveSocket& socket, NoDelay no_delay)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        if (socket.transport() == KIOTTY_PIPE) { return SocketCode::SUCCESS; }
+        if (socket.transport() == KIOTTY_NET_TRANSPORT_PIPE) { return SocketCode::SUCCESS; }
         const int value = no_delay == NoDelay::ENABLED ? 1 : 0;
         const int set = ::setsockopt(descriptorOf(socket.handle()), IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value));
         if (set < 0) { return lastSocketCode(); }

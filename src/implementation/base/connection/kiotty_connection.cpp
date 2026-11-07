@@ -35,7 +35,7 @@ namespace kiotty::net::implementation
             size_t exact = action.as.read.exact;
             if (exact > stage.capacity())
             {
-                return ReadyResult::failure(KIOTTY_REQUEST_TOO_LARGE);
+                return ReadyResult::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE);
             }
             StageBase::Consumer in = stage.consumer();
             if (in.readable() < exact)
@@ -51,7 +51,7 @@ namespace kiotty::net::implementation
             size_t max = action.as.read_until.max;
             if (length == 0)
             {
-                return ReadyResult::failure(KIOTTY_INVALID_ARGUMENT);
+                return ReadyResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
             }
             StageBase::Consumer in = stage.consumer();
             size_t readable = in.readable();
@@ -69,7 +69,7 @@ namespace kiotty::net::implementation
             action.as.read_until.scanned = position;
             if (readable >= max)
             {
-                return ReadyResult::failure(KIOTTY_PROTOCOL_ERROR);
+                return ReadyResult::failure(KIOTTY_NET_CODE_PROTOCOL_ERROR);
             }
             return ReadyResult::success(span(nullptr, 0));
         }
@@ -137,7 +137,7 @@ namespace kiotty::net::implementation
         bool notify = fits(limits.notify, _plain.notify.maximum());
         if (!receive || !send || !notify)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         _plain.limit(limits.receive, limits.send, limits.notify);
         _tls.limit(limits.receive, largerOf(limits.send, limits.notify));
@@ -150,16 +150,16 @@ namespace kiotty::net::implementation
         if (!configuration.profile.valid())
         {
             _phase.store(Phase::READY);
-            return KIOTTY_SUCCESS;
+            return KIOTTY_NET_CODE_SUCCESS;
         }
         const char* hostname = configuration.hostname == nullptr ? "" : configuration.hostname;
         KiottyNetCode opened = _tls.open(configuration.profile, hostname);
-        if (opened != KIOTTY_SUCCESS)
+        if (opened != KIOTTY_NET_CODE_SUCCESS)
         {
             return opened;
         }
         _phase.store(Phase::HANDSHAKING);
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     void Connection::reset() noexcept
@@ -432,13 +432,13 @@ namespace kiotty::net::implementation
     KiottyNetCode Connection::closeStream(int32_t generation, const KiottyNetConnectionAction& then)
     {
         KiottyNetCode verified = _work.verify(generation);
-        if (verified != KIOTTY_SUCCESS)
+        if (verified != KIOTTY_NET_CODE_SUCCESS)
         {
             return verified;
         }
-        if (then.type == KIOTTY_ACTION_START_WORK)
+        if (then.type == KIOTTY_NET_ACTION_TYPE_START_WORK)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         AdoptResult outcome = adopt(then);
         if (!outcome)
@@ -448,9 +448,9 @@ namespace kiotty::net::implementation
         _work.finish(outcome.value);
         if (_phase.load() == Phase::CLOSING)
         {
-            return KIOTTY_CLOSED;
+            return KIOTTY_NET_CODE_CLOSED;
         }
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     IoAction Connection::onReceived(const IoCompletion& completion, const Handler& handler)
@@ -504,8 +504,8 @@ namespace kiotty::net::implementation
     {
         if (_phase.load() == Phase::HANDSHAKING)
         {
-            reject(handler, KIOTTY_TLS_HANDSHAKE_TIMEOUT, HANDSHAKE_TIMEOUT_MESSAGE);
-            return IoAction::close(KIOTTY_TLS_HANDSHAKE_TIMEOUT);
+            reject(handler, KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT, HANDSHAKE_TIMEOUT_MESSAGE);
+            return IoAction::close(KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT);
         }
         KiottyNetConnectionAction returned = handler.callbacks.onTimeout(_context, handle(handler));
         if (userActionPending())
@@ -552,46 +552,46 @@ namespace kiotty::net::implementation
     {
         if (code == SocketCode::CLOSED)
         {
-            return IoAction::close(KIOTTY_PEER_CLOSED);
+            return IoAction::close(KIOTTY_NET_CODE_PEER_CLOSED);
         }
-        return IoAction::close(KIOTTY_SOCKET_ERROR);
+        return IoAction::close(KIOTTY_NET_CODE_SOCKET_ERROR);
     }
 
     AdoptResult Connection::adopt(const KiottyNetConnectionAction& returned)
     {
         switch (returned.type)
         {
-        case KIOTTY_ACTION_HOLD:
-        case KIOTTY_ACTION_START_WORK:
-        case KIOTTY_ACTION_CLOSE:
+        case KIOTTY_NET_ACTION_TYPE_HOLD:
+        case KIOTTY_NET_ACTION_TYPE_START_WORK:
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
             return AdoptResult::success(IoAction::from(returned));
-        case KIOTTY_ACTION_READ:
+        case KIOTTY_NET_ACTION_TYPE_READ:
             if (returned.as.read.exact == 0)
             {
-                return AdoptResult::failure(KIOTTY_INVALID_ARGUMENT);
+                return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
             }
             return AdoptResult::success(IoAction::from(returned));
-        case KIOTTY_ACTION_READ_UNTIL:
+        case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
             if (!validDelimiter(returned.as.read_until.delimiter, returned.as.read_until.max))
             {
-                return AdoptResult::failure(KIOTTY_INVALID_ARGUMENT);
+                return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
             }
             return AdoptResult::success(IoAction::from(returned));
-        case KIOTTY_ACTION_WRITE:
+        case KIOTTY_NET_ACTION_TYPE_WRITE:
         {
             if (!validWrite(returned.as.write.data))
             {
-                return AdoptResult::failure(KIOTTY_INVALID_ARGUMENT);
+                return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
             }
             KiottyNetCode staged = Sender::stage(_plain.send, returned.as.write.data);
-            if (staged != KIOTTY_SUCCESS)
+            if (staged != KIOTTY_NET_CODE_SUCCESS)
             {
                 return AdoptResult::failure(staged);
             }
-            return AdoptResult::success(IoAction::hold(returned.timeout_ms));
+            return AdoptResult::success(IoAction::hold(returned.timeout_milliseconds));
         }
         }
-        return AdoptResult::failure(KIOTTY_INVALID_ARGUMENT);
+        return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
     }
 
     IoAction Connection::admit(const KiottyNetConnectionAction& returned, const Handler& handler)
@@ -601,9 +601,9 @@ namespace kiotty::net::implementation
         {
             return adopted.value;
         }
-        if (adopted.code == KIOTTY_INVALID_ARGUMENT)
+        if (adopted.code == KIOTTY_NET_CODE_INVALID_ARGUMENT)
         {
-            reject(handler, KIOTTY_INVALID_ARGUMENT, INVALID_ACTION_MESSAGE);
+            reject(handler, KIOTTY_NET_CODE_INVALID_ARGUMENT, INVALID_ACTION_MESSAGE);
         }
         return IoAction::close(adopted.code);
     }
@@ -632,7 +632,7 @@ namespace kiotty::net::implementation
                     Result<size_t, KiottyNetCode> more = refill();
                     if (!more)
                     {
-                        const char* message = more.code == KIOTTY_REQUEST_TOO_LARGE ? STAGE_FULL_MESSAGE : _tls.lastMessage();
+                        const char* message = more.code == KIOTTY_NET_CODE_REQUEST_TOO_LARGE ? STAGE_FULL_MESSAGE : _tls.lastMessage();
                         reject(handler, more.code, message);
                         return IoAction::close(more.code);
                     }
@@ -659,21 +659,21 @@ namespace kiotty::net::implementation
     {
         switch (returned.type)
         {
-        case KIOTTY_ACTION_CLOSE:
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
             return IoAction::close(returned.as.close.reason);
-        case KIOTTY_ACTION_HOLD:
-        case KIOTTY_ACTION_READ:
-        case KIOTTY_ACTION_READ_UNTIL:
-            return IoAction::hold(returned.timeout_ms);
-        case KIOTTY_ACTION_WRITE:
-            reject(handler, KIOTTY_BUSY, BUSY_ACTION_MESSAGE);
-            return IoAction::hold(returned.timeout_ms);
-        case KIOTTY_ACTION_START_WORK:
-            reject(handler, KIOTTY_BUSY, BUSY_ACTION_MESSAGE);
+        case KIOTTY_NET_ACTION_TYPE_HOLD:
+        case KIOTTY_NET_ACTION_TYPE_READ:
+        case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
+            return IoAction::hold(returned.timeout_milliseconds);
+        case KIOTTY_NET_ACTION_TYPE_WRITE:
+            reject(handler, KIOTTY_NET_CODE_BUSY, BUSY_ACTION_MESSAGE);
+            return IoAction::hold(returned.timeout_milliseconds);
+        case KIOTTY_NET_ACTION_TYPE_START_WORK:
+            reject(handler, KIOTTY_NET_CODE_BUSY, BUSY_ACTION_MESSAGE);
             return IoAction::hold(0);
         }
-        reject(handler, KIOTTY_INVALID_ARGUMENT, INVALID_ACTION_MESSAGE);
-        return IoAction::close(KIOTTY_INVALID_ARGUMENT);
+        reject(handler, KIOTTY_NET_CODE_INVALID_ARGUMENT, INVALID_ACTION_MESSAGE);
+        return IoAction::close(KIOTTY_NET_CODE_INVALID_ARGUMENT);
     }
 
     Result<size_t, KiottyNetCode> Connection::refill()
@@ -691,7 +691,7 @@ namespace kiotty::net::implementation
         }
         if (produced == 0 && _plain.receive.provider().writable() == 0)
         {
-            return Result<size_t, KiottyNetCode>::failure(KIOTTY_REQUEST_TOO_LARGE);
+            return Result<size_t, KiottyNetCode>::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE);
         }
         return Result<size_t, KiottyNetCode>::success(produced);
     }
@@ -703,7 +703,7 @@ namespace kiotty::net::implementation
         case IoActionKind::HOLD:
         case IoActionKind::READ:
         case IoActionKind::READ_UNTIL:
-            setDeadline(action.timeout_ms);
+            setDeadline(action.timeout_milliseconds);
             return action;
         case IoActionKind::START_WORK:
             _deadline = 0;
@@ -768,14 +768,14 @@ namespace kiotty::net::implementation
         return _read_event.pending || _plain.send.consumer().readable() > 0;
     }
 
-    void Connection::setDeadline(uint32_t timeout_ms)
+    void Connection::setDeadline(uint32_t timeout_milliseconds)
     {
-        if (timeout_ms == 0)
+        if (timeout_milliseconds == 0)
         {
             _deadline = 0;
             return;
         }
-        _deadline = monotonicMilliseconds() + timeout_ms;
+        _deadline = monotonicMilliseconds() + timeout_milliseconds;
     }
 
     void Connection::reject(const Handler& handler, KiottyNetCode code, const char* message) const

@@ -33,7 +33,7 @@ TEST(WorkContext, RequestStartFinishOnFinishedCyclesIdleRequestedWorkingDoneIdle
     IoAction outcome = work.onFinished();
     EXPECT_EQ(IoActionKind::READ, outcome.kind);
     EXPECT_EQ(4u, outcome.as.read.exact);
-    EXPECT_EQ(250u, outcome.timeout_ms);
+    EXPECT_EQ(250u, outcome.timeout_milliseconds);
     expectFlags(work, false, false, false);
 }
 
@@ -64,18 +64,18 @@ TEST(WorkContext, VerifyIsSuccessOnlyWhenWorkingWithTheSameGeneration)
     WorkContext work;
     work.request();
     work.start(3);
-    EXPECT_EQ(KIOTTY_SUCCESS, work.verify(3));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, work.verify(3));
 }
 
 TEST(WorkContext, VerifyInIdleRequestedOrDoneIsBusy)
 {
     WorkContext work;
-    EXPECT_EQ(KIOTTY_BUSY, work.verify(0));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, work.verify(0));
     work.request();
-    EXPECT_EQ(KIOTTY_BUSY, work.verify(0));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, work.verify(0));
     work.start(5);
     work.finish(IoAction::hold(0));
-    EXPECT_EQ(KIOTTY_BUSY, work.verify(5));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, work.verify(5));
 }
 
 TEST(WorkContext, VerifyWithDifferentGenerationIsPeerClosed)
@@ -83,7 +83,7 @@ TEST(WorkContext, VerifyWithDifferentGenerationIsPeerClosed)
     WorkContext work;
     work.request();
     work.start(5);
-    EXPECT_EQ(KIOTTY_PEER_CLOSED, work.verify(4));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, work.verify(4));
 }
 
 TEST(WorkContext, FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome)
@@ -95,7 +95,7 @@ TEST(WorkContext, FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome)
         work.start(i);
         size_t exact = static_cast<size_t>(i);
         std::thread worker([&work, i, exact]() {
-            if (work.verify(i) == KIOTTY_SUCCESS)
+            if (work.verify(i) == KIOTTY_NET_CODE_SUCCESS)
             {
                 work.finish(IoAction::read(IoPurpose::USER, static_cast<uint32_t>(i), exact));
             }
@@ -108,7 +108,7 @@ TEST(WorkContext, FinishFromAnotherThreadIsSeenAsFinishedWithItsOutcome)
         worker.join();
         ASSERT_EQ(IoActionKind::READ, outcome.kind);
         ASSERT_EQ(exact, outcome.as.read.exact);
-        ASSERT_EQ(static_cast<uint32_t>(i), outcome.timeout_ms);
+        ASSERT_EQ(static_cast<uint32_t>(i), outcome.timeout_milliseconds);
     }
 }
 

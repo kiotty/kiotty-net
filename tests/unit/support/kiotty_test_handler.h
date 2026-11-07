@@ -45,8 +45,8 @@ namespace kiotty_test
         static KiottyNetConnectionHandler callbacks();
 
         void then(KiottyNetConnectionAction action);
-        void thenWrite(const std::string& data, uint32_t timeout_ms);
-        void thenReadUntil(const std::string& delimiter, size_t max, uint32_t timeout_ms);
+        void thenWrite(const std::string& data, uint32_t timeout_milliseconds);
+        void thenReadUntil(const std::string& delimiter, size_t max, uint32_t timeout_milliseconds);
 
         size_t        count(Call call) const;
         size_t        total() const;
@@ -78,19 +78,19 @@ namespace kiotty_test
     public:
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
-        KiottyNetResult         readStream(int64_t id, void* buffer, size_t length, uint32_t timeout_ms) override;
-        KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_ms) override;
-        KiottyNetCode           writeStreamFile(int64_t id, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_ms) override;
+        KiottyNetResult         readStream(int64_t id, void* buffer, size_t length, uint32_t timeout_milliseconds) override;
+        KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) override;
+        KiottyNetCode           writeStreamFile(int64_t id, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds) override;
         bool                    isStreamOpen(int64_t id) override;
         KiottyNetCode           closeStream(int64_t id, const KiottyNetConnectionAction& then) override;
     };
 
-    KiottyNetConnectionAction thenHold(uint32_t timeout_ms);
-    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_ms);
+    KiottyNetConnectionAction thenHold(uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_milliseconds);
     KiottyNetConnectionAction thenWork();
     KiottyNetConnectionAction thenClose(KiottyNetCode reason);
-    KiottyNetConnectionAction thenWriteSpan(KiottyNetSpan data, uint32_t timeout_ms);
-    KiottyNetConnectionAction thenReadUntilSpan(KiottyNetSpan delimiter, size_t max, uint32_t timeout_ms);
+    KiottyNetConnectionAction thenWriteSpan(KiottyNetSpan data, uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenReadUntilSpan(KiottyNetSpan delimiter, size_t max, uint32_t timeout_milliseconds);
     KiottyNetSpan             spanOf(const std::string& text);
 }
 

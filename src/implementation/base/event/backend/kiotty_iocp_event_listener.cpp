@@ -250,7 +250,7 @@ namespace kiotty::net::implementation
             return completion;
         }
 
-        DWORD remainingMs(std::chrono::steady_clock::time_point deadline)
+        DWORD remainingMilliseconds(std::chrono::steady_clock::time_point deadline)
         {
             std::chrono::steady_clock::duration left = deadline - std::chrono::steady_clock::now();
             if (left <= std::chrono::steady_clock::duration::zero())
@@ -265,10 +265,10 @@ namespace kiotty::net::implementation
             return static_cast<DWORD>(whole.count());
         }
 
-        bool dequeue(EventListenerState& state, uint32_t timeout_ms, ULONG& removed)
+        bool dequeue(EventListenerState& state, uint32_t timeout_milliseconds, ULONG& removed)
         {
-            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-            DWORD limit = timeout_ms;
+            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_milliseconds);
+            DWORD limit = timeout_milliseconds;
             for (;;)
             {
                 BOOL dequeued = ::GetQueuedCompletionStatusEx(state.port, state.entries, static_cast<ULONG>(state.capacity), &removed, limit, FALSE);
@@ -280,11 +280,11 @@ namespace kiotty::net::implementation
                 {
                     return false;
                 }
-                if (timeout_ms == EventListener::WAIT_FOREVER)
+                if (timeout_milliseconds == EventListener::WAIT_FOREVER)
                 {
                     continue;
                 }
-                limit = remainingMs(deadline);
+                limit = remainingMilliseconds(deadline);
                 if (limit == 0)
                 {
                     return false;
@@ -425,7 +425,7 @@ namespace kiotty::net::implementation
         event.socket = INVALID_SOCKET;
     }
 
-    Span<const IoCompletion> EventListener::wait(uint32_t timeout_ms)
+    Span<const IoCompletion> EventListener::wait(uint32_t timeout_milliseconds)
     {
         EventListenerState& state = stateOf(_storage);
         Span<const IoCompletion> completions = { state.completions, 0 };
@@ -434,7 +434,7 @@ namespace kiotty::net::implementation
             return completions;
         }
         ULONG removed = 0;
-        if (!dequeue(state, timeout_ms, removed))
+        if (!dequeue(state, timeout_milliseconds, removed))
         {
             return completions;
         }

@@ -18,55 +18,55 @@ namespace kiotty_test
             entry.stream.owner = nullptr;
             entry.stream.id = 0;
             entry.length = 0;
-            entry.code = KIOTTY_SUCCESS;
+            entry.code = KIOTTY_NET_CODE_SUCCESS;
             entry.message = nullptr;
             return entry;
         }
 
-        KiottyNetConnectionAction action(KiottyNetActionType type, uint32_t timeout_ms)
+        KiottyNetConnectionAction action(KiottyNetActionType type, uint32_t timeout_milliseconds)
         {
             KiottyNetConnectionAction result;
             std::memset(&result, 0, sizeof(result));
             result.type = type;
-            result.timeout_ms = timeout_ms;
+            result.timeout_milliseconds = timeout_milliseconds;
             return result;
         }
     }
 
-    KiottyNetConnectionAction thenHold(uint32_t timeout_ms)
+    KiottyNetConnectionAction thenHold(uint32_t timeout_milliseconds)
     {
-        return action(KIOTTY_ACTION_HOLD, timeout_ms);
+        return action(KIOTTY_NET_ACTION_TYPE_HOLD, timeout_milliseconds);
     }
 
-    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_ms)
+    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_milliseconds)
     {
-        KiottyNetConnectionAction result = action(KIOTTY_ACTION_READ, timeout_ms);
+        KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_READ, timeout_milliseconds);
         result.as.read.exact = exact;
         return result;
     }
 
     KiottyNetConnectionAction thenWork()
     {
-        return action(KIOTTY_ACTION_START_WORK, 0);
+        return action(KIOTTY_NET_ACTION_TYPE_START_WORK, 0);
     }
 
     KiottyNetConnectionAction thenClose(KiottyNetCode reason)
     {
-        KiottyNetConnectionAction result = action(KIOTTY_ACTION_CLOSE, 0);
+        KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_CLOSE, 0);
         result.as.close.reason = reason;
         return result;
     }
 
-    KiottyNetConnectionAction thenWriteSpan(KiottyNetSpan data, uint32_t timeout_ms)
+    KiottyNetConnectionAction thenWriteSpan(KiottyNetSpan data, uint32_t timeout_milliseconds)
     {
-        KiottyNetConnectionAction result = action(KIOTTY_ACTION_WRITE, timeout_ms);
+        KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_WRITE, timeout_milliseconds);
         result.as.write.data = data;
         return result;
     }
 
-    KiottyNetConnectionAction thenReadUntilSpan(KiottyNetSpan delimiter, size_t max, uint32_t timeout_ms)
+    KiottyNetConnectionAction thenReadUntilSpan(KiottyNetSpan delimiter, size_t max, uint32_t timeout_milliseconds)
     {
-        KiottyNetConnectionAction result = action(KIOTTY_ACTION_READ_UNTIL, timeout_ms);
+        KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, timeout_milliseconds);
         result.as.read_until.delimiter = delimiter;
         result.as.read_until.max = max;
         return result;
@@ -104,16 +104,16 @@ namespace kiotty_test
         _script.push_back(next_action);
     }
 
-    void Recorder::thenWrite(const std::string& data, uint32_t timeout_ms)
+    void Recorder::thenWrite(const std::string& data, uint32_t timeout_milliseconds)
     {
         _buffers.push_back(data);
-        then(thenWriteSpan(spanOf(_buffers.back()), timeout_ms));
+        then(thenWriteSpan(spanOf(_buffers.back()), timeout_milliseconds));
     }
 
-    void Recorder::thenReadUntil(const std::string& delimiter, size_t max, uint32_t timeout_ms)
+    void Recorder::thenReadUntil(const std::string& delimiter, size_t max, uint32_t timeout_milliseconds)
     {
         _buffers.push_back(delimiter);
-        then(thenReadUntilSpan(spanOf(_buffers.back()), max, timeout_ms));
+        then(thenReadUntilSpan(spanOf(_buffers.back()), max, timeout_milliseconds));
     }
 
     size_t Recorder::count(Call call) const
@@ -258,7 +258,7 @@ namespace kiotty_test
 
     KiottyNetCode FakeOwner::notify(int64_t, KiottyNetSpan)
     {
-        return KIOTTY_INVALID_ARGUMENT;
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
     KiottyNetConnectionInfo FakeOwner::info(int64_t) const
@@ -268,19 +268,19 @@ namespace kiotty_test
 
     KiottyNetResult FakeOwner::readStream(int64_t, void*, size_t, uint32_t)
     {
-        KiottyNetResult result = { 0, KIOTTY_INVALID_ARGUMENT };
+        KiottyNetResult result = { 0, KIOTTY_NET_CODE_INVALID_ARGUMENT };
         return result;
     }
 
     KiottyNetResult FakeOwner::writeStream(int64_t, KiottyNetSpan, uint32_t)
     {
-        KiottyNetResult result = { 0, KIOTTY_INVALID_ARGUMENT };
+        KiottyNetResult result = { 0, KIOTTY_NET_CODE_INVALID_ARGUMENT };
         return result;
     }
 
     KiottyNetCode FakeOwner::writeStreamFile(int64_t, const char*, uint64_t, uint64_t, uint32_t)
     {
-        return KIOTTY_INVALID_ARGUMENT;
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
     bool FakeOwner::isStreamOpen(int64_t)
@@ -290,6 +290,6 @@ namespace kiotty_test
 
     KiottyNetCode FakeOwner::closeStream(int64_t, const KiottyNetConnectionAction&)
     {
-        return KIOTTY_INVALID_ARGUMENT;
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 }

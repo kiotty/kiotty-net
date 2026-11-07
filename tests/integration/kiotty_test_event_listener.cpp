@@ -48,7 +48,7 @@ namespace
     {
         KiottyNetEndpoint endpoint;
         std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_TCP;
+        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
         kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), "127.0.0.1");
         endpoint.port = port;
         return endpoint;
@@ -72,7 +72,7 @@ namespace
         {
             return false;
         }
-        ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
+        ActiveSocketResult opened = ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
         if (!opened)
         {
             return false;
@@ -92,11 +92,11 @@ namespace
         return attached == SocketCode::SUCCESS;
     }
 
-    std::vector<IoCompletion> collect(net::EventListener& listener, size_t count, uint32_t timeout_ms)
+    std::vector<IoCompletion> collect(net::EventListener& listener, size_t count, uint32_t timeout_milliseconds)
     {
         std::vector<IoCompletion> collected;
         std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-        while (collected.size() < count && kiotty_test::elapsedMs(started) < timeout_ms)
+        while (collected.size() < count && kiotty_test::elapsedMilliseconds(started) < timeout_milliseconds)
         {
             Span<const IoCompletion> waited = listener.wait(10);
             collected.insert(collected.end(), waited.begin(), waited.end());
@@ -144,7 +144,7 @@ namespace
             std::memset(&_buffer, 0, sizeof(_buffer));
             _buffer.socket = kiotty::net::implementation::INVALID_SOCKET_HANDLE;
 #if defined(_WIN32)
-            ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
+            ActiveSocketResult opened = ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
             EXPECT_TRUE(opened);
             if (opened)
             {
@@ -205,7 +205,7 @@ TEST_F(EventListener, SubmitReadThenPeerSendCompletesWithLengthAndTheSameAction)
     EXPECT_EQ(std::memcmp(buffer, "hello", 5), 0);
     EXPECT_EQ(completion.action.kind, IoActionKind::READ);
     EXPECT_EQ(completion.action.purpose, IoPurpose::USER);
-    EXPECT_EQ(completion.action.timeout_ms, 123u);
+    EXPECT_EQ(completion.action.timeout_milliseconds, 123u);
     EXPECT_EQ(completion.action.as.read.exact, 5u);
 }
 
@@ -243,7 +243,7 @@ TEST_F(EventListener, WaitWithTimeoutAndNothingPendingReturnsEmptySpanAfterTimeo
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     Span<const IoCompletion> waited = listener.wait(50);
     EXPECT_TRUE(waited.empty());
-    EXPECT_GE(kiotty_test::elapsedMs(started), 50u);
+    EXPECT_GE(kiotty_test::elapsedMilliseconds(started), 50u);
 }
 
 TEST_F(EventListener, WaitWithZeroTimeoutReturnsImmediately)
@@ -251,7 +251,7 @@ TEST_F(EventListener, WaitWithZeroTimeoutReturnsImmediately)
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     Span<const IoCompletion> waited = listener.wait(0);
     EXPECT_TRUE(waited.empty());
-    EXPECT_LT(kiotty_test::elapsedMs(started), 50u);
+    EXPECT_LT(kiotty_test::elapsedMilliseconds(started), 50u);
 }
 
 TEST_F(EventListener, WakeFromAnotherThreadReturnsOneWakeCompletion)
@@ -467,7 +467,7 @@ TEST_F(EventListener, SubmitOnEventThatIsAlreadyPendingIsRejectedWithBusy)
     ASSERT_TRUE(link.peer.sendAll("abc", 3));
     std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
     ASSERT_EQ(completions.size(), 1u);
-    EXPECT_EQ(completions[0].action.timeout_ms, 10u);
+    EXPECT_EQ(completions[0].action.timeout_milliseconds, 10u);
     EXPECT_EQ(completions[0].action.as.read.exact, 5u);
 }
 
@@ -545,7 +545,7 @@ TEST_F(EventListener, SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument)
         IoAction::none(),
         IoAction::hold(100),
         IoAction::startWork(),
-        IoAction::close(KIOTTY_CLOSED)
+        IoAction::close(KIOTTY_NET_CODE_CLOSED)
     };
     for (const IoAction& action : rejected)
     {
@@ -585,7 +585,7 @@ TEST_F(EventListener, WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextW
     size_t total = 0;
     size_t largest = 0;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    while (total < 6 && kiotty_test::elapsedMs(started) < WAIT_MS)
+    while (total < 6 && kiotty_test::elapsedMilliseconds(started) < WAIT_MS)
     {
         Span<const IoCompletion> waited = narrow.wait(10);
         EXPECT_LE(waited.length, capacity);
@@ -606,7 +606,7 @@ TEST_F(EventListener, CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused)
     listener.close();
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     EXPECT_TRUE(listener.wait(1000).empty());
-    EXPECT_LT(kiotty_test::elapsedMs(started), 500u);
+    EXPECT_LT(kiotty_test::elapsedMilliseconds(started), 500u);
     EXPECT_EQ(listener.submit(event, IoAction::read(IoPurpose::USER, 0, 1), payloadOf(buffer, sizeof(buffer))), SocketCode::CLOSED);
     EXPECT_EQ(listener.wake(), SocketCode::CLOSED);
     link.socket.close();

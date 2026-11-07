@@ -6,7 +6,7 @@ MISRA 규칙 번호는 2023 원문과 맞춰 보지 않은 것이 있다. 확인
 
 | # | 수칙 / 규칙 | 편차 | 이유 | 완화 | 자리 | 상태 |
 |---|---|---|---|---|---|---|
-| DV1 | MISRA 21.6.1 (미확인), 수칙 1.1 | `create*` 의 `new (std::nothrow)`, EventListener 의 완료 배열 | 메모리를 보장하는 시점이 create 다. 초기화 단계에서만 할당한다 | run 중 할당 0. 실패는 `KIOTTY_OUT_OF_MEMORY` | `context/owner`, `infra/event/backend` | 열림 |
+| DV1 | MISRA 21.6.1 (미확인), 수칙 1.1 | `create*` 의 `new (std::nothrow)`, EventListener 의 완료 배열 | 메모리를 보장하는 시점이 create 다. 초기화 단계에서만 할당한다 | run 중 할당 0. 실패는 `KIOTTY_NET_CODE_OUT_OF_MEMORY` | `context/owner`, `infra/event/backend` | 열림 |
 | DV2 | 수칙 1.1 | OpenSSL 의 자기 malloc | OpenSSL 내부 할당은 막을 수 없다 (설계 v4 19.5) | 연결당 상한 (128 KiB) 을 테스트 `TlsMemory` 가 본다 | `infra/tls/backend/openssl_*` | 열림 |
 | DV3 | 수칙 1.10, 3.2 | backend 의 raw pointer: OVERLAPPED 의 owner, epoll `data.ptr`, ready 목록의 `next`, IoEvent 의 listener 포인터 | OS 가 주소를 들고 있어야 한다 | backend 파일 안에만 둔다. 수칙 2.3 의 `reinterpret_cast` 예외와 같은 범위 | `infra/*/backend` | 열림 |
 | DV4 | 수칙 5.6 | `SocketCode` 는 공개 enum 이 아닌 내부 enum 이다 | WOULD_BLOCK / PENDING 같은 I/O 진행 상태를 담는다. 에러 enum 이 아니다 | 경계를 넘을 때 `toNetCode` 로 공개 `KiottyNetCode` 가 된다 | `infra/error` | 열림 |

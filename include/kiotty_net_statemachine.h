@@ -7,17 +7,17 @@
 extern "C" {
 #endif
 
-#define KIOTTY_ANY_STATE  (-1)
-#define KIOTTY_MAX_NEXT   4
+#define KIOTTY_NET_ANY_STATE  (-1)
+#define KIOTTY_NET_MAX_NEXT   4
 
 typedef enum KiottyNetConnectionEventType
 {
-    KIOTTY_CONNECTION_EVENT_CONNECTED,
-    KIOTTY_CONNECTION_EVENT_READ,
-    KIOTTY_CONNECTION_EVENT_WRITTEN,
-    KIOTTY_CONNECTION_EVENT_WORK_STARTED,
-    KIOTTY_CONNECTION_EVENT_TIMEOUT,
-    KIOTTY_CONNECTION_EVENT_CLOSED
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED
 } KiottyNetConnectionEventType;
 
 typedef struct KiottyNetConnectionEvent
@@ -57,7 +57,7 @@ typedef struct KiottyNetRule
     int32_t                      state;
     KiottyNetConnectionEventType event;
     KiottyNetTransitionAction    transition_action;
-    int32_t                      next[KIOTTY_MAX_NEXT];
+    int32_t                      next[KIOTTY_NET_MAX_NEXT];
     uint32_t                     next_count;
 } KiottyNetRule;
 
@@ -68,9 +68,9 @@ typedef struct KiottyNetStateMachine
     int32_t              initial;
 } KiottyNetStateMachine;
 
-#define KIOTTY_RULE(state, event, transition_action, ...)      { (state), (event), (transition_action), { __VA_ARGS__ }, (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
-#define KIOTTY_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { 0 }, 0 }
-#define KIOTTY_RULE_COUNT(table)                               (sizeof(table) / sizeof((table)[0]))
+#define KIOTTY_NET_RULE(state, event, transition_action, ...)      { (state), (event), (transition_action), { __VA_ARGS__ }, (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
+#define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { 0 }, 0 }
+#define KIOTTY_NET_RULE_COUNT(table)                               (sizeof(table) / sizeof((table)[0]))
 
 KIOTTY_NET_API KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetConnectionAction entry_action);
 
@@ -109,7 +109,7 @@ namespace kiotty
             KiottyNetRule raw;
         };
 
-        static_assert(KIOTTY_MAX_NEXT == 4, "Rule::to overloads assume KIOTTY_MAX_NEXT == 4");
+        static_assert(KIOTTY_NET_MAX_NEXT == 4, "Rule::to overloads assume KIOTTY_NET_MAX_NEXT == 4");
 
         template <size_t N>
         struct Table
@@ -332,7 +332,7 @@ constexpr kiotty::net::From KiottyNet_from(State state)
 
 constexpr kiotty::net::FromWhen KiottyNet_when(KiottyNetConnectionEventType event)
 {
-    return kiotty::net::FromWhen(KIOTTY_ANY_STATE, event);
+    return kiotty::net::FromWhen(KIOTTY_NET_ANY_STATE, event);
 }
 
 template <typename... Rs>

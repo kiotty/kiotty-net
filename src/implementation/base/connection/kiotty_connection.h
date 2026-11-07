@@ -65,9 +65,9 @@ namespace kiotty::net::implementation
         typedef KiottyNetCode           code_type;
         typedef ConnectionConfiguration configuration_type;
 
-        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_TABLE_FULL;
-        static constexpr KiottyNetCode OUT_OF_MEMORY = KIOTTY_OUT_OF_MEMORY;
-        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_PEER_CLOSED;
+        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
+        static constexpr KiottyNetCode OUT_OF_MEMORY = KIOTTY_NET_CODE_OUT_OF_MEMORY;
+        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_PEER_CLOSED;
 
         Connection();
         ~Connection() override;
@@ -135,7 +135,7 @@ namespace kiotty::net::implementation
         IoAction select(std::mutex& notification);
         IoAction encoded(IoAction write, Span<char> plain);
         bool     userActionPending();
-        void     setDeadline(uint32_t timeout_ms);
+        void     setDeadline(uint32_t timeout_milliseconds);
         void     reject(const Handler& handler, KiottyNetCode code, const char* message) const;
         StageBase& receiveStage(IoPurpose purpose);
         KiottyNetConnectionHandle handle(const Handler& handler) const;

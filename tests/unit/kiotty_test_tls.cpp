@@ -60,13 +60,13 @@ namespace
 
     void openDefaults(Profiles& profiles)
     {
-        ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_SUCCESS);
-        ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_SUCCESS);
+        ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
+        ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_NET_CODE_SUCCESS);
     }
 
     void connect(TlsPump& pump, Profiles& profiles)
     {
-        ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+        ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
         pump.handshake();
         ASSERT_TRUE(pump.done());
         Stage<16> plain;
@@ -99,7 +99,7 @@ TEST(TlsProfile, OpenServerWithValidCertAndKeySucceeds)
 {
     REQUIRE_TLS();
     TlsProfile profile;
-    EXPECT_EQ(profile.openServer(serverConfig()), KIOTTY_SUCCESS);
+    EXPECT_EQ(profile.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_TRUE(profile.valid());
     EXPECT_TRUE(profile.server());
 }
@@ -108,7 +108,7 @@ TEST(TlsProfile, OpenServerWithMissingFileReturnsCertificateNotFound)
 {
     REQUIRE_TLS();
     TlsProfile profile;
-    EXPECT_EQ(profile.openServer(serverConfig("missing.pem", "server.key")), KIOTTY_TLS_CERTIFICATE_NOT_FOUND);
+    EXPECT_EQ(profile.openServer(serverConfig("missing.pem", "server.key")), KIOTTY_NET_CODE_TLS_CERTIFICATE_NOT_FOUND);
     EXPECT_FALSE(profile.valid());
 }
 
@@ -116,7 +116,7 @@ TEST(TlsProfile, OpenServerWithKeyThatDoesNotMatchCertReturnsCertificateInvalid)
 {
     REQUIRE_TLS();
     TlsProfile profile;
-    EXPECT_EQ(profile.openServer(serverConfig("server.pem", "client.key")), KIOTTY_TLS_CERTIFICATE_INVALID);
+    EXPECT_EQ(profile.openServer(serverConfig("server.pem", "client.key")), KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID);
     EXPECT_FALSE(profile.valid());
 }
 
@@ -124,20 +124,20 @@ TEST(TlsProfile, OpenServerWithGarbageFileReturnsCertificateInvalid)
 {
     REQUIRE_TLS();
     TlsProfile profile;
-    EXPECT_EQ(profile.openServer(serverConfig("garbage.pem", "server.key")), KIOTTY_TLS_CERTIFICATE_INVALID);
+    EXPECT_EQ(profile.openServer(serverConfig("garbage.pem", "server.key")), KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID);
     EXPECT_FALSE(profile.valid());
 }
 
 TEST(TlsProfile, OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault)
 {
     REQUIRE_TLS();
-    KiottyNetTlsClientConfig config = clientConfig();
+    KiottyNetTlsClientConfiguration config = clientConfig();
     config.trust_store_path[0] = '\0';
     TlsProfile profile;
-    EXPECT_EQ(profile.openClient(config), KIOTTY_SUCCESS);
+    EXPECT_EQ(profile.openClient(config), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_FALSE(profile.server());
     EXPECT_TRUE(profile.verifyHostname());
-    EXPECT_EQ(profile.handshakeTimeoutMs(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MS);
+    EXPECT_EQ(profile.handshakeTimeoutMilliseconds(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MS);
 }
 
 TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
@@ -148,13 +148,13 @@ TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
     }
     TlsProfile server;
     TlsProfile client;
-    EXPECT_EQ(server.openServer(serverConfig()), KIOTTY_TLS_NOT_SUPPORTED);
-    EXPECT_EQ(client.openClient(clientConfig()), KIOTTY_TLS_NOT_SUPPORTED);
+    EXPECT_EQ(server.openServer(serverConfig()), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
+    EXPECT_EQ(client.openClient(clientConfig()), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     EXPECT_FALSE(server.valid());
     EXPECT_FALSE(client.valid());
     TlsEngine engine;
     engine.limit(4096, 4096);
-    EXPECT_EQ(engine.open(server, nullptr), KIOTTY_TLS_NOT_SUPPORTED);
+    EXPECT_EQ(engine.open(server, nullptr), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     EXPECT_FALSE(engine.active());
 }
 
@@ -168,7 +168,7 @@ TEST(TlsEngine, InactiveEngineReportsActiveFalseAndAllocatesNoStage)
     EXPECT_FALSE(engine.active());
     EXPECT_EQ(engine.cipherReceive().capacity(), 0u);
     EXPECT_EQ(engine.cipherSend().capacity(), 0u);
-    EXPECT_EQ(engine.open(profiles.server, nullptr), KIOTTY_INVALID_ARGUMENT);
+    EXPECT_EQ(engine.open(profiles.server, nullptr), KIOTTY_NET_CODE_INVALID_ARGUMENT);
     EXPECT_FALSE(engine.active());
 }
 
@@ -178,7 +178,7 @@ TEST(TlsEngine, ServerFirstStepIsReceiveAndClientFirstStepIsSend)
     Profiles profiles;
     openDefaults(profiles);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(pump.server.handshake(), TlsStep::RECEIVE);
     EXPECT_EQ(pump.server.cipherSend().consumer().readable(), 0u);
     EXPECT_EQ(pump.client.handshake(), TlsStep::SEND);
@@ -191,7 +191,7 @@ TEST(TlsEngine, PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth)
     Profiles profiles;
     openDefaults(profiles);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     int rounds = pump.handshake();
     EXPECT_TRUE(pump.done());
     EXPECT_LE(rounds, 6);
@@ -200,15 +200,15 @@ TEST(TlsEngine, PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth)
 TEST(TlsEngine, Tls12OnlyProfilesAlsoReachDone)
 {
     REQUIRE_TLS();
-    KiottyNetTlsServerConfig server_config = serverConfig();
-    KiottyNetTlsClientConfig client_config = clientConfig();
-    server_config.versions = KIOTTY_TLS_V12;
-    client_config.versions = KIOTTY_TLS_V12;
+    KiottyNetTlsServerConfiguration server_config = serverConfig();
+    KiottyNetTlsClientConfiguration client_config = clientConfig();
+    server_config.versions = KIOTTY_NET_TLS_VERSION_V12;
+    client_config.versions = KIOTTY_NET_TLS_VERSION_V12;
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     EXPECT_TRUE(pump.done());
     EXPECT_EQ(roundTrip(pump.client, pump.server, "tls 1.2", 64), "tls 1.2");
@@ -305,8 +305,8 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.code, KIOTTY_TLS_RECORD_ERROR);
-    EXPECT_EQ(pump.server.lastCode(), KIOTTY_TLS_RECORD_ERROR);
+    EXPECT_EQ(result.code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
+    EXPECT_EQ(pump.server.lastCode(), KIOTTY_NET_CODE_TLS_RECORD_ERROR);
     EXPECT_STRNE(pump.server.lastMessage(), "");
 }
 
@@ -314,27 +314,27 @@ TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
 {
     REQUIRE_TLS();
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(clientConfig("other_ca.pem")), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(clientConfig("other_ca.pem")), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_TLS_VERIFY_FAILED);
+    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
     EXPECT_STRNE(pump.client.lastMessage(), "");
 }
 
 TEST(TlsEngine, ClientWithVerifyServerOffAcceptsUntrustedCa)
 {
     REQUIRE_TLS();
-    KiottyNetTlsClientConfig config = clientConfig("other_ca.pem");
+    KiottyNetTlsClientConfiguration config = clientConfig("other_ca.pem");
     config.skip_server_verification = 1;
     config.skip_hostname_verification = 1;
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(config), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(config), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     EXPECT_TRUE(pump.done());
 }
@@ -343,52 +343,52 @@ TEST(TlsEngine, HostnameMismatchReturnsHostnameMismatch)
 {
     REQUIRE_TLS();
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(serverConfig("server_wrong_host.pem", "server_wrong_host.key")), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(serverConfig("server_wrong_host.pem", "server_wrong_host.key")), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client, "localhost"), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client, "localhost"), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_TLS_HOSTNAME_MISMATCH);
+    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH);
 }
 
 TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
 {
     REQUIRE_TLS();
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(serverConfig("server_expired.pem", "server_expired.key")), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(serverConfig("server_expired.pem", "server_expired.key")), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(clientConfig()), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.lastCode(), KIOTTY_TLS_VERIFY_FAILED);
+    EXPECT_EQ(pump.client.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 }
 
 TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt)
 {
     REQUIRE_TLS();
-    KiottyNetTlsServerConfig server_config = serverConfig();
-    server_config.client_auth = KIOTTY_CLIENT_AUTH_REQUIRED;
+    KiottyNetTlsServerConfiguration server_config = serverConfig();
+    server_config.client_authentication = KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED;
     copyText(server_config.trust_store_path, certPath("ca.pem"));
     TlsProfile server;
-    ASSERT_EQ(server.openServer(server_config), KIOTTY_SUCCESS);
+    ASSERT_EQ(server.openServer(server_config), KIOTTY_NET_CODE_SUCCESS);
 
     TlsProfile anonymous;
-    ASSERT_EQ(anonymous.openClient(clientConfig()), KIOTTY_SUCCESS);
+    ASSERT_EQ(anonymous.openClient(clientConfig()), KIOTTY_NET_CODE_SUCCESS);
     TlsPump rejected;
-    ASSERT_EQ(rejected.open(server, anonymous), KIOTTY_SUCCESS);
+    ASSERT_EQ(rejected.open(server, anonymous), KIOTTY_NET_CODE_SUCCESS);
     rejected.handshake();
     ASSERT_EQ(rejected.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(rejected.server.lastCode(), KIOTTY_TLS_VERIFY_FAILED);
+    EXPECT_EQ(rejected.server.lastCode(), KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 
-    KiottyNetTlsClientConfig client_config = clientConfig();
+    KiottyNetTlsClientConfiguration client_config = clientConfig();
     copyText(client_config.identity.cert_file, certPath("client.pem"));
     copyText(client_config.identity.key_file, certPath("client.key"));
     TlsProfile identified;
-    ASSERT_EQ(identified.openClient(client_config), KIOTTY_SUCCESS);
+    ASSERT_EQ(identified.openClient(client_config), KIOTTY_NET_CODE_SUCCESS);
     TlsPump accepted;
-    ASSERT_EQ(accepted.open(server, identified), KIOTTY_SUCCESS);
+    ASSERT_EQ(accepted.open(server, identified), KIOTTY_NET_CODE_SUCCESS);
     accepted.handshake();
     EXPECT_TRUE(accepted.done());
 }
@@ -396,18 +396,18 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
 TEST(TlsEngine, VersionMismatchReturnsHandshakeFailed)
 {
     REQUIRE_TLS();
-    KiottyNetTlsServerConfig server_config = serverConfig();
-    KiottyNetTlsClientConfig client_config = clientConfig();
-    server_config.versions = KIOTTY_TLS_V13;
-    client_config.versions = KIOTTY_TLS_V12;
+    KiottyNetTlsServerConfiguration server_config = serverConfig();
+    KiottyNetTlsClientConfiguration client_config = clientConfig();
+    server_config.versions = KIOTTY_NET_TLS_VERSION_V13;
+    client_config.versions = KIOTTY_NET_TLS_VERSION_V12;
     Profiles profiles;
-    ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
+    ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.server.lastCode(), KIOTTY_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(pump.server.lastCode(), KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
@@ -417,10 +417,10 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     openDefaults(profiles);
     TlsEngine server;
     server.limit(4096, 4096);
-    ASSERT_EQ(server.open(profiles.server, nullptr), KIOTTY_SUCCESS);
+    ASSERT_EQ(server.open(profiles.server, nullptr), KIOTTY_NET_CODE_SUCCESS);
     put(server.cipherReceive(), "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
-    EXPECT_EQ(server.lastCode(), KIOTTY_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(server.lastCode(), KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, Tls13ServerSendsNoSessionTicketSoItIsDoneRightAfterTheClientFinished)
@@ -429,7 +429,7 @@ TEST(TlsEngine, Tls13ServerSendsNoSessionTicketSoItIsDoneRightAfterTheClientFini
     Profiles profiles;
     openDefaults(profiles);
     TlsPump pump;
-    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+    ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(pump.client.handshake(), TlsStep::SEND);
     move(pump.client, pump.server);
     EXPECT_EQ(pump.server.handshake(), TlsStep::SEND);
@@ -476,7 +476,7 @@ TEST(TlsEngine, CloseNotifyFromPeerDecodesAsPeerClosed)
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.code, KIOTTY_PEER_CLOSED);
+    EXPECT_EQ(result.code, KIOTTY_NET_CODE_PEER_CLOSED);
 }
 
 TEST(TlsEngine, CloseThenOpenReusesTheSslObjectAndHandshakesAgain)
@@ -597,21 +597,21 @@ TEST(TlsEngine, DecodeCompactsCipherReceive)
 TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
 {
     REQUIRE_TLS();
-    const uint32_t versions[] = { KIOTTY_TLS_V12, KIOTTY_TLS_V13 };
+    const uint32_t versions[] = { KIOTTY_NET_TLS_VERSION_V12, KIOTTY_NET_TLS_VERSION_V13 };
     const size_t capacities[] = { 4096, MemoryLimits::SEND_CAPACITY };
     for (uint32_t version : versions)
     {
-        KiottyNetTlsServerConfig server_config = serverConfig();
-        KiottyNetTlsClientConfig client_config = clientConfig();
+        KiottyNetTlsServerConfiguration server_config = serverConfig();
+        KiottyNetTlsClientConfiguration client_config = clientConfig();
         server_config.versions = version;
         client_config.versions = version;
         Profiles profiles;
-        ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_SUCCESS);
-        ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_SUCCESS);
+        ASSERT_EQ(profiles.server.openServer(server_config), KIOTTY_NET_CODE_SUCCESS);
+        ASSERT_EQ(profiles.client.openClient(client_config), KIOTTY_NET_CODE_SUCCESS);
         for (size_t capacity : capacities)
         {
             TlsPump pump(capacity);
-            ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_SUCCESS);
+            ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
             pump.handshake();
             ASSERT_TRUE(pump.done());
             Stage<16> plain;
@@ -646,7 +646,7 @@ TEST(TlsEngine, EncodeOrDecodeOnInactiveEngineIsRejected)
     Stage<64> plain;
     DecodeResult result = engine.decode(plain);
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.code, KIOTTY_INVALID_ARGUMENT);
+    EXPECT_EQ(result.code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
     EXPECT_DEBUG_DEATH(engine.encode(spanOf(std::string("x"))), "");
     EXPECT_EQ(engine.cipherSend().consumer().readable(), 0u);
 }

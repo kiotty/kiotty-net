@@ -179,8 +179,8 @@ static const KiottyNetConnectionHandler STATEFUL_HANDLER = { &statefulOnConnecte
 
 KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetStatefulAppContext* app_context)
 {
-    KiottyNetCode code = validate(app_context);        // NULL, machine NULL, rules NULL → KIOTTY_INVALID_ARGUMENT. 같은 (state, event) 가 두 번 → KIOTTY_DUPLICATE_RULE
-    if (code != KIOTTY_SUCCESS) return code;
+    KiottyNetCode code = validate(app_context);        // NULL, machine NULL, rules NULL → KIOTTY_NET_CODE_INVALID_ARGUMENT. 같은 (state, event) 가 두 번 → KIOTTY_NET_CODE_DUPLICATE_RULE
+    if (code != KIOTTY_NET_CODE_SUCCESS) return code;
     return KiottyNet_runServer(server, &STATEFUL_HANDLER, const_cast<KiottyNetStatefulAppContext*>(app_context));   // 7절 run 그대로. app_context 자리에 사용자의 struct 가 들어간다
 }
 ```
@@ -217,7 +217,7 @@ static const KiottyNetRule* find(const KiottyNetStateMachine& m, int32_t state, 
         const KiottyNetRule& r = m.rules[i];
         if (r.event != event) continue;
         if (r.state == state) return &r;                                        // 정확 일치가 우선
-        if (r.state == KIOTTY_ANY_STATE) any = &r;
+        if (r.state == KIOTTY_NET_ANY_STATE) any = &r;
     }
     return any;
 }
@@ -226,29 +226,29 @@ static void deliver(Connection* c, const KiottyNetConnectionEvent& event)
 {
     const KiottyNetStatefulAppContext& app = *c->_owner->statefulAppContext();
     const KiottyNetRule* rule = find(*app.machine, c->_state, event.type);
-    if (!rule) { fail(c, event, KIOTTY_UNHANDLED_EVENT); return; }
+    if (!rule) { fail(c, event, KIOTTY_NET_CODE_UNHANDLED_EVENT); return; }
 
     KiottyNetTransition t = rule->transition_action(c->_connection_context, c->handle(), event);
-    if (event.type == KIOTTY_CONNECTION_EVENT_CLOSED) return;                  // 마지막 이벤트. Transition 은 무시
+    if (event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED) return;                  // 마지막 이벤트. Transition 은 무시
 #ifndef NDEBUG
-    if (!allowed(*rule, t)) { fail(c, event, KIOTTY_ILLEGAL_TRANSITION); return; }
+    if (!allowed(*rule, t)) { fail(c, event, KIOTTY_NET_CODE_ILLEGAL_TRANSITION); return; }
 #endif
     c->_state = t.next;
-    if (event.type == KIOTTY_CONNECTION_EVENT_WORK_STARTED) { applyToWork(event.as.work_started.work, t.entry_action); return; }
+    if (event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED) { applyToWork(event.as.work_started.work, t.entry_action); return; }
     apply(c, t.entry_action);
 }
 
 static bool allowed(const KiottyNetRule& rule, const KiottyNetTransition& t)
 {
     if (rule.next_count == 0) return true;
-    for (uint32_t i = 0; i < rule.next_count && i < KIOTTY_MAX_NEXT; ++i) if (rule.next[i] == t.next) return true;
+    for (uint32_t i = 0; i < rule.next_count && i < KIOTTY_NET_MAX_NEXT; ++i) if (rule.next[i] == t.next) return true;
     return false;
 }
 
 static void fail(Connection* c, const KiottyNetConnectionEvent& event, KiottyNetCode code)
 {
-    if (event.type == KIOTTY_CONNECTION_EVENT_CLOSED) return;
-    if (event.type == KIOTTY_CONNECTION_EVENT_WORK_STARTED) { KiottyNet_finishWorkWithClose(event.as.work_started.work, code); return; }
+    if (event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED) return;
+    if (event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED) { KiottyNet_finishWorkWithClose(event.as.work_started.work, code); return; }
     KiottyNet_closeConnection(c->handle(), code);
 }
 ```
@@ -260,10 +260,10 @@ onRead / onWritten / onWorkStarted / onTimeout 은 event 를 채워 `deliver` �
 | entry action | Connection 에 (`apply`) | Work 에 (`applyToWork`, WORK_STARTED 에서만) |
 |---|---|---|
 | NONE | 아무것도 안 함. deadline 도 그대로 | Work 를 그대로 둔다. action 이 worker 에게 넘겼다 |
-| READ(exact) | `readConnection(exact)` 뒤 `setConnectionTimeout(timeout_ms)` | `finishWorkWithRead(exact, timeout_ms)` |
+| READ(exact) | `readConnection(exact)` 뒤 `setConnectionTimeout(timeout_milliseconds)` | `finishWorkWithRead(exact, timeout_milliseconds)` |
 | READ_UNTIL(delimiter, max) | `readConnectionUntil` 뒤 `setConnectionTimeout` | `finishWorkWithReadUntil` |
 | WRITE(data) | `writeConnection(data)` 뒤 `setConnectionTimeout` | `finishWorkWithWrite(data)` |
-| START_WORK | `startWork()`. 실패 코드면 `close(code)`. 성공이면 `setConnectionTimeout` | `KIOTTY_INVALID_ARGUMENT` 로 `finishWorkWithClose` |
+| START_WORK | `startWork()`. 실패 코드면 `close(code)`. 성공이면 `setConnectionTimeout` | `KIOTTY_NET_CODE_INVALID_ARGUMENT` 로 `finishWorkWithClose` |
 | CLOSE(reason) | `closeConnection(reason)` | `finishWorkWithClose(reason)` |
 
 - `setConnectionTimeout(0)` 은 deadline 해제다. 그래서 timeout 없는 entry action 은 이전 deadline 을 지운다. NONE 만 예외다.
@@ -277,24 +277,24 @@ static KiottyNetConnectionContext statefulOnConnected(KiottyNetAppContext raw, K
     const KiottyNetStatefulAppContext& app = *static_cast<const KiottyNetStatefulAppContext*>(raw);
     Connection* c = Connection::of(handle);
     KiottyNetConnectionContext session = app.createConnectionContext ? app.createConnectionContext(app.app_context, handle) : nullptr;
-    if (app.createConnectionContext && !session) { KiottyNet_closeConnection(handle, KIOTTY_SESSION_EXHAUSTED); return nullptr; }
+    if (app.createConnectionContext && !session) { KiottyNet_closeConnection(handle, KIOTTY_NET_CODE_SESSION_EXHAUSTED); return nullptr; }
     c->_state              = app.machine->initial;
     c->_connection_context = session;                                           // CONNECTED 행이 보기 전에 붙인다
-    deliver(c, makeEvent(KIOTTY_CONNECTION_EVENT_CONNECTED));
+    deliver(c, makeEvent(KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED));
     return session;
 }
 
 static void statefulOnDisconnected(KiottyNetAppContext raw, KiottyNetConnectionContext session, KiottyNetConnectionHandle handle, KiottyNetCode reason)
 {
     const KiottyNetStatefulAppContext& app = *static_cast<const KiottyNetStatefulAppContext*>(raw);
-    KiottyNetConnectionEvent event = makeEvent(KIOTTY_CONNECTION_EVENT_CLOSED);
+    KiottyNetConnectionEvent event = makeEvent(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED);
     event.as.closed.reason = reason;
     deliver(Connection::of(handle), event);                                     // CLOSED 행. Transition 무시
     if (app.releaseConnectionContext && session) app.releaseConnectionContext(app.app_context, session, handle);
 }
 ```
 
-- create 가 NULL 함수면 session 은 NULL 이고 그대로 진행한다. create 가 있는데 NULL 을 돌려주면 `KIOTTY_SESSION_EXHAUSTED` 로 닫는다. 이때 CONNECTED 행은 돌지 않고 onDisconnected 가 바로 온다. 그 CLOSED 행은 돈다 (session 은 NULL).
+- create 가 NULL 함수면 session 은 NULL 이고 그대로 진행한다. create 가 있는데 NULL 을 돌려주면 `KIOTTY_NET_CODE_SESSION_EXHAUSTED` 로 닫는다. 이때 CONNECTED 행은 돌지 않고 onDisconnected 가 바로 온다. 그 CLOSED 행은 돈다 (session 은 NULL).
 - release 는 CLOSED 행 뒤다. action 이 살아 있는 session 을 마지막으로 본다.
 
 ### 2.6 HTTP / WebSocket 이 얹히는 방법
@@ -318,7 +318,7 @@ frame = length (4 byte, big endian) + body (length byte, 1..1024)
 ```
 
 - 클라이언트가 frame 하나를 보내면 서버가 같은 frame 을 그대로 돌려준다.
-- 서버는 header 를 30 초 안에 받지 못하면 끊는다. body 길이가 0 이거나 1024 를 넘으면 `KIOTTY_PROTOCOL_ERROR` 로 끊는다.
+- 서버는 header 를 30 초 안에 받지 못하면 끊는다. body 길이가 0 이거나 1024 를 넘으면 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 끊는다.
 - 클라이언트는 응답이 보낸 것과 같은지 확인하고 스스로 끊는다.
 
 ```cpp
@@ -384,7 +384,7 @@ static KiottyNetTransition serverOnHeader(KiottyNetConnectionContext connection_
     uint32_t       length = decodeLength(e.as.read.data);
     if (length == 0 || length > MAX_BODY)
     {
-        return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_PROTOCOL_ERROR));
+        return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
     std::memcpy(s.frame, e.as.read.data.data, HEADER_LENGTH);                 // data 는 return 하면 무효라 복사
     s.frame_length = HEADER_LENGTH + length;
@@ -406,7 +406,7 @@ static KiottyNetTransition serverOnWritten(KiottyNetConnectionContext, KiottyNet
 
 static KiottyNetTransition serverOnTimeout(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
 {
-    return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_TIMEOUT));
+    return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_NET_CODE_TIMEOUT));
 }
 
 static KiottyNetTransition serverOnClosed(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
@@ -415,12 +415,12 @@ static KiottyNetTransition serverOnClosed(KiottyNetConnectionContext, KiottyNetC
 }
 
 static constexpr auto SERVER_RULES = KiottyNet_rules(
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CONNECTED)                                  .then(serverOnConnected).to(ServerState::ReadingHeader),
-    KiottyNet_from(ServerState::ReadingHeader).when(KIOTTY_CONNECTION_EVENT_READ)      .then(serverOnHeader)   .to(ServerState::ReadingBody, ServerState::ErrorOccurred),
-    KiottyNet_from(ServerState::ReadingBody)  .when(KIOTTY_CONNECTION_EVENT_READ)      .then(serverOnBody)     .to(ServerState::Writing),
-    KiottyNet_from(ServerState::Writing)      .when(KIOTTY_CONNECTION_EVENT_WRITTEN)   .then(serverOnWritten)  .to(ServerState::ReadingHeader),
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_TIMEOUT)                                    .then(serverOnTimeout),
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CLOSED)                                     .then(serverOnClosed));
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED)                                  .then(serverOnConnected).to(ServerState::ReadingHeader),
+    KiottyNet_from(ServerState::ReadingHeader).when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ)      .then(serverOnHeader)   .to(ServerState::ReadingBody, ServerState::ErrorOccurred),
+    KiottyNet_from(ServerState::ReadingBody)  .when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ)      .then(serverOnBody)     .to(ServerState::Writing),
+    KiottyNet_from(ServerState::Writing)      .when(KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN)   .then(serverOnWritten)  .to(ServerState::ReadingHeader),
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT)                                    .then(serverOnTimeout),
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED)                                     .then(serverOnClosed));
 static constexpr KiottyNetStateMachine SERVER_MACHINE = KiottyNet_makeStateMachine(SERVER_RULES, ServerState::ReadingHeader);
 ```
 
@@ -445,7 +445,7 @@ struct SessionPool
                 return &self.session[i];
             }
         }
-        return nullptr;                                                          // 라이브러리가 KIOTTY_SESSION_EXHAUSTED 로 닫는다
+        return nullptr;                                                          // 라이브러리가 KIOTTY_NET_CODE_SESSION_EXHAUSTED 로 닫는다
     }
 
     static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle)
@@ -460,8 +460,8 @@ int runEchoServer(uint16_t port)
     static SessionPool<ServerSession, 32> sessions = {};
     KiottyNetStatefulAppContext           stateful = { &sessions, &SERVER_MACHINE, &SessionPool<ServerSession, 32>::acquire, &SessionPool<ServerSession, 32>::release };
 
-    KiottyNetServerConfig config;
-    if (KiottyNet_ServerConfigBuilder::tcp(config, "0.0.0.0", port).maxClients(32).build() != KIOTTY_SUCCESS)
+    KiottyNetServerConfiguration config;
+    if (KiottyNet_ServerConfigurationBuilder::tcp(config, "0.0.0.0", port).maxClients(32).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -474,7 +474,7 @@ int runEchoServer(uint16_t port)
     }
 
     std::thread io([&]() { KiottyNet_runStatefulServer(server.handle(), &stateful); });   // stateful 과 sessions 는 io 가 끝날 때까지 살아 있다
-    if (server.await(3000) != KIOTTY_SUCCESS)
+    if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         io.join();
         return 1;
@@ -533,7 +533,7 @@ static KiottyNetTransition clientOnHeader(KiottyNetConnectionContext connection_
     uint32_t       length = decodeLength(e.as.read.data);
     if (length != s.frame_length - HEADER_LENGTH)
     {
-        return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_PROTOCOL_ERROR));
+        return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
     s.expected_body = length;
     return ClientNext::moveToNextState(ClientState::ReadingBody, KiottyNet_EntryAction::read(length).timeout(5000));
@@ -543,12 +543,12 @@ static KiottyNetTransition clientOnBody(KiottyNetConnectionContext connection_co
 {
     ClientSession& s = clientSession(connection_context);
     s.matched = std::memcmp(s.frame + HEADER_LENGTH, e.as.read.data.data, s.expected_body) == 0;
-    return ClientNext::moveToNextState(ClientState::Closed, KiottyNet_EntryAction::close());   // 할 일이 끝났다. CLOSED(KIOTTY_SUCCESS) 가 마지막으로 온다
+    return ClientNext::moveToNextState(ClientState::Closed, KiottyNet_EntryAction::close());   // 할 일이 끝났다. CLOSED(KIOTTY_NET_CODE_SUCCESS) 가 마지막으로 온다
 }
 
 static KiottyNetTransition clientOnTimeout(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
 {
-    return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_TIMEOUT));
+    return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_EntryAction::close(KIOTTY_NET_CODE_TIMEOUT));
 }
 
 static KiottyNetTransition clientOnClosed(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
@@ -557,12 +557,12 @@ static KiottyNetTransition clientOnClosed(KiottyNetConnectionContext, KiottyNetC
 }
 
 static constexpr auto CLIENT_RULES = KiottyNet_rules(
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CONNECTED)                                  .then(clientOnConnected).to(ClientState::Sending),
-    KiottyNet_from(ClientState::Sending)      .when(KIOTTY_CONNECTION_EVENT_WRITTEN)   .then(clientOnWritten)  .to(ClientState::ReadingHeader),
-    KiottyNet_from(ClientState::ReadingHeader).when(KIOTTY_CONNECTION_EVENT_READ)      .then(clientOnHeader)   .to(ClientState::ReadingBody, ClientState::ErrorOccurred),
-    KiottyNet_from(ClientState::ReadingBody)  .when(KIOTTY_CONNECTION_EVENT_READ)      .then(clientOnBody)     .to(ClientState::Closed),
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_TIMEOUT)                                    .then(clientOnTimeout),
-    KiottyNet_when(KIOTTY_CONNECTION_EVENT_CLOSED)                                     .then(clientOnClosed));
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED)                                  .then(clientOnConnected).to(ClientState::Sending),
+    KiottyNet_from(ClientState::Sending)      .when(KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN)   .then(clientOnWritten)  .to(ClientState::ReadingHeader),
+    KiottyNet_from(ClientState::ReadingHeader).when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ)      .then(clientOnHeader)   .to(ClientState::ReadingBody, ClientState::ErrorOccurred),
+    KiottyNet_from(ClientState::ReadingBody)  .when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ)      .then(clientOnBody)     .to(ClientState::Closed),
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT)                                    .then(clientOnTimeout),
+    KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED)                                     .then(clientOnClosed));
 static constexpr KiottyNetStateMachine CLIENT_MACHINE = KiottyNet_makeStateMachine(CLIENT_RULES, ClientState::Sending);
 
 static KiottyNetConnectionContext singleSession(KiottyNetAppContext app_context, KiottyNetConnectionHandle)
@@ -579,8 +579,8 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
 
     KiottyNetStatefulAppContext stateful = { &session, &CLIENT_MACHINE, &singleSession, nullptr };   // release 는 할 일이 없어서 NULL
 
-    KiottyNetClientConfig config;
-    if (KiottyNet_ClientConfigBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_SUCCESS)
+    KiottyNetClientConfiguration config;
+    if (KiottyNet_ClientConfigurationBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -606,13 +606,13 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
 이벤트도 표도 없이 같은 일을 하는 동기 판이다. IO Thread 가 없고 호출한 thread 가 기다린다. 한 번 묻고 한 번 받는 도구에는 이쪽이 짧다.
 
 ```cpp
-static bool readExact(KiottyNet_StreamClient& client, char* buffer, size_t length, uint32_t timeout_ms)
+static bool readExact(KiottyNet_StreamClient& client, char* buffer, size_t length, uint32_t timeout_milliseconds)
 {
     size_t received = 0;
     while (received < length)
     {
-        KiottyNetResult result = client.read(buffer + received, length - received, timeout_ms);   // 최대 length 바이트. 모자라면 다시 부른다
-        if (result.code != KIOTTY_SUCCESS)
+        KiottyNetResult result = client.read(buffer + received, length - received, timeout_milliseconds);   // 최대 length 바이트. 모자라면 다시 부른다
+        if (result.code != KIOTTY_NET_CODE_SUCCESS)
         {
             return false;
         }
@@ -628,22 +628,22 @@ int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
     std::memcpy(frame + HEADER_LENGTH, message.data, message.length);
     KiottyNetSpan request = { frame, HEADER_LENGTH + message.length };
 
-    KiottyNetClientConfig config;
-    if (KiottyNet_ClientConfigBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_SUCCESS)
+    KiottyNetClientConfiguration config;
+    if (KiottyNet_ClientConfigurationBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     KiottyNet_Context      context;
     KiottyNet_StreamClient client(context.handle(), config);
-    if (!context.valid() || !client.valid() || client.connect() != KIOTTY_SUCCESS)
+    if (!context.valid() || !client.valid() || client.connect() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     char header[HEADER_LENGTH];
     char body[MAX_BODY];
-    bool ok = client.write(request, 5000).code == KIOTTY_SUCCESS
+    bool ok = client.write(request, 5000).code == KIOTTY_NET_CODE_SUCCESS
            && readExact(client, header, HEADER_LENGTH, 5000)
            && decodeLength(KiottyNetSpan{ header, HEADER_LENGTH }) == message.length
            && readExact(client, body, message.length, 5000)
@@ -655,7 +655,7 @@ int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
 
 ### 3.5 C 판 EchoServer
 
-같은 표를 C 로 쓰면 이렇다. 행 순서는 아무렇게나 써도 되고, 중복은 run 이 시작할 때 `KIOTTY_DUPLICATE_RULE` 로 걸러진다. 클라이언트 두 가지도 같은 방법으로 옮겨진다.
+같은 표를 C 로 쓰면 이렇다. 행 순서는 아무렇게나 써도 되고, 중복은 run 이 시작할 때 `KIOTTY_NET_CODE_DUPLICATE_RULE` 로 걸러진다. 클라이언트 두 가지도 같은 방법으로 옮겨진다.
 
 ```c
 enum ServerState
@@ -693,7 +693,7 @@ static KiottyNetTransition server_on_header(KiottyNetConnectionContext session, 
     (void)connection;
     if (length == 0 || length > MAX_BODY)
     {
-        return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_PROTOCOL_ERROR));
+        return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
     memcpy(s->frame, event.as.read.data.data, HEADER_LENGTH);
     s->frame_length = HEADER_LENGTH + length;
@@ -724,7 +724,7 @@ static KiottyNetTransition server_on_timeout(KiottyNetConnectionContext session,
     (void)session;
     (void)connection;
     (void)event;
-    return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_TIMEOUT));
+    return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_makeCloseEntryAction(KIOTTY_NET_CODE_TIMEOUT));
 }
 
 static KiottyNetTransition server_on_closed(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
@@ -736,14 +736,14 @@ static KiottyNetTransition server_on_closed(KiottyNetConnectionContext session, 
 }
 
 static const KiottyNetRule SERVER_RULES[] = {
-    KIOTTY_RULE(KIOTTY_ANY_STATE,       KIOTTY_CONNECTION_EVENT_CONNECTED, server_on_connected, SERVER_READING_HEADER),
-    KIOTTY_RULE(SERVER_READING_HEADER,  KIOTTY_CONNECTION_EVENT_READ,      server_on_header,    SERVER_READING_BODY, SERVER_ERROR_OCCURRED),
-    KIOTTY_RULE(SERVER_READING_BODY,    KIOTTY_CONNECTION_EVENT_READ,      server_on_body,      SERVER_WRITING),
-    KIOTTY_RULE(SERVER_WRITING,         KIOTTY_CONNECTION_EVENT_WRITTEN,   server_on_written,   SERVER_READING_HEADER),
-    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_CONNECTION_EVENT_TIMEOUT, server_on_timeout),
-    KIOTTY_RULE_UNCHECKED(KIOTTY_ANY_STATE, KIOTTY_CONNECTION_EVENT_CLOSED,  server_on_closed),
+    KIOTTY_NET_RULE(KIOTTY_NET_ANY_STATE,       KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED, server_on_connected, SERVER_READING_HEADER),
+    KIOTTY_NET_RULE(SERVER_READING_HEADER,  KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,      server_on_header,    SERVER_READING_BODY, SERVER_ERROR_OCCURRED),
+    KIOTTY_NET_RULE(SERVER_READING_BODY,    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,      server_on_body,      SERVER_WRITING),
+    KIOTTY_NET_RULE(SERVER_WRITING,         KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,   server_on_written,   SERVER_READING_HEADER),
+    KIOTTY_NET_RULE_UNCHECKED(KIOTTY_NET_ANY_STATE, KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT, server_on_timeout),
+    KIOTTY_NET_RULE_UNCHECKED(KIOTTY_NET_ANY_STATE, KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED,  server_on_closed),
 };
-static const KiottyNetStateMachine SERVER_MACHINE = { SERVER_RULES, KIOTTY_RULE_COUNT(SERVER_RULES), SERVER_READING_HEADER };
+static const KiottyNetStateMachine SERVER_MACHINE = { SERVER_RULES, KIOTTY_NET_RULE_COUNT(SERVER_RULES), SERVER_READING_HEADER };
 
 static ServerSession sessions[32];
 static bool          in_use[32];
@@ -777,11 +777,11 @@ static const KiottyNetStatefulAppContext SERVER_APP = { NULL, &SERVER_MACHINE, a
 int run_echo_server(uint16_t port)
 {
     KiottyNetContext      context;
-    KiottyNetServerConfig config;
+    KiottyNetServerConfiguration config;
     KiottyNetServerHandle server;
     KiottyNetCode         code;
 
-    if (KiottyNet_initializeTcpServerConfig(&config, "0.0.0.0", port) != KIOTTY_SUCCESS)
+    if (KiottyNet_initializeTcpServerConfiguration(&config, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -800,7 +800,7 @@ int run_echo_server(uint16_t port)
     code = KiottyNet_runStatefulServer(server, &SERVER_APP);                   /* 이 thread 가 IO Thread 다. 다른 thread 의 KiottyNet_closeServer 로 끝난다 */
     KiottyNet_destroyServer(context, server);
     KiottyNet_releaseContext(context);
-    return code == KIOTTY_CLOSED ? 0 : 1;
+    return code == KIOTTY_NET_CODE_CLOSED ? 0 : 1;
 }
 ```
 
@@ -812,7 +812,7 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` 의 구현이다. 사용�
 
 핵심은 세 가지다.
 
-- 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `recv_capacity` (기본 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
+- 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `receive_capacity` (기본 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
 - 응답은 HttpSession 의 응답 버퍼 하나에 쌓이고, 송신할 때 `send_capacity` 크기의 조각으로 write lane 에 옮긴다. 응답 버퍼가 write lane 보다 커도 된다.
 - 메모리는 `KiottyNet_createHttpServer` 가 `max_clients` 분량을 한 번 잡는다. 그 뒤 할당은 없다.
 
@@ -821,19 +821,19 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` 의 구현이다. 사용�
 ```cpp
 struct RouteEntry {                                    // 라우트, 정적 경로, Upgrade 경로가 한 표에 들어간다. 등록 순서 = 매칭 순서
     enum Kind { ROUTE, DIRECTORY, FILE, MEMORY, UPGRADE } kind;
-    uint32_t           methods;                        // KIOTTY_HTTP_METHOD_BIT 의 합. ROUTE 는 비트 하나, 정적 경로는 GET | HEAD
-    char               path[KIOTTY_MAX_URL_LENGTH];    // 등록 때 복사. 끝이 "/*" 면 wildcard, DIRECTORY 는 "/" 로 끝나는 접두
+    uint32_t           methods;                        // KIOTTY_NET_HTTP_METHOD_BIT 의 합. ROUTE 는 비트 하나, 정적 경로는 GET | HEAD
+    char               path[KIOTTY_NET_MAX_URL_LENGTH];    // 등록 때 복사. 끝이 "/*" 면 wildcard, DIRECTORY 는 "/" 로 끝나는 접두
     size_t             path_length;
     KiottyNetHttpRoute route;                          // ROUTE, UPGRADE
-    char               file_path[KIOTTY_MAX_PATH_LENGTH];                // DIRECTORY (디렉토리), FILE (파일)
+    char               file_path[KIOTTY_NET_MAX_PATH_LENGTH];                // DIRECTORY (디렉토리), FILE (파일)
     KiottyNetSpan      memory;                         // MEMORY. 복사하지 않는다. 서버 생명 동안 사용자가 유효하게 둔다
-    char               content_type[KIOTTY_MAX_CONTENT_TYPE_LENGTH];     // MEMORY
+    char               content_type[KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH];     // MEMORY
 };
 
 struct HttpServer {
     KiottyNetContext      _context;
     KiottyNetServerHandle _server;                     // 7절 Server. HttpServer 는 그 위의 프로토콜일 뿐이다
-    KiottyNetServerConfig _config;                     // recv_capacity, send_capacity, max_clients 를 뒤에 참조한다
+    KiottyNetServerConfiguration _configuration;                     // receive_capacity, send_capacity, max_clients 를 뒤에 참조한다
     KiottyNetHttpLimits   _limits;
     RouteEntry*           _routes;                     // limits.max_routes 개
     size_t                _route_count;
@@ -841,7 +841,7 @@ struct HttpServer {
     HttpSession*          _sessions;                   // config.max_clients 개 (4.2)
     int32_t*              _free;                       // 비어 있는 session index 의 stack
     size_t                _free_count;
-    bool                  _running;                    // run 뒤의 등록은 KIOTTY_BUSY
+    bool                  _running;                    // run 뒤의 등록은 KIOTTY_NET_CODE_BUSY
 };
 ```
 
@@ -876,14 +876,14 @@ struct HttpSession {
     int32_t                   _status;                 // 0 = setter 가 하나도 불리지 않음 → 404
     enum BodyKind { BODY_NONE, BODY_COPIED, BODY_REF, BODY_FILE } _body_kind;
     KiottyNetSpan             _body;                   // COPIED : _response_buffer 뒤쪽. REF : 사용자 포인터. FILE : 길이만 (stat 결과)
-    char                      _file_path[KIOTTY_MAX_PATH_LENGTH];
-    char                      _content_type[KIOTTY_MAX_CONTENT_TYPE_LENGTH];
+    char                      _file_path[KIOTTY_NET_MAX_PATH_LENGTH];
+    char                      _content_type[KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH];
     enum Phase { FILLING, WORKING, SENDING } _phase;   // setter 는 FILLING / WORKING 에서만 받는다
 
     // Work (4.6)
     bool                      _work_requested;         // startHttpWork 가 켠다. onRequest 가 return 하면 읽는다
     KiottyNetWorkHandle       _base_work;              // WORK_STARTED 이벤트가 준 base Work. finishHttpWork* 가 쓴다
-    bool                      _work_finished;          // finish 는 한 번. 두 번째는 KIOTTY_BUSY
+    bool                      _work_finished;          // finish 는 한 번. 두 번째는 KIOTTY_NET_CODE_BUSY
 
     // 송신 (4.7)
     size_t                    _sent;                   // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
@@ -900,7 +900,7 @@ acquire / release 는 2.6 의 `createConnectionContext` / `releaseConnectionCont
 static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, KiottyNetConnectionHandle connection)
 {
     HttpServer* server = static_cast<HttpServer*>(app);
-    if (server->_free_count == 0) return nullptr;                                // Stateful 계층이 KIOTTY_SESSION_EXHAUSTED 로 닫는다 (2.5)
+    if (server->_free_count == 0) return nullptr;                                // Stateful 계층이 KIOTTY_NET_CODE_SESSION_EXHAUSTED 로 닫는다 (2.5)
     HttpSession* s = &server->_sessions[server->_free[--server->_free_count]];
     s->_connection = connection;
     beginRequest(s);                                                             // 4.3. generation 을 올리고 요청 / 응답 필드를 비운다
@@ -925,14 +925,14 @@ HTTP 표의 상태다. 사용자 프로토콜의 표와 같은 `KiottyNetStateMa
 
 | 상태 | entry action | READ 가 오면 |
 |---|---|---|
-| `ReadingRequestLine` | `readUntil(CRLF, min(max_header_bytes, recv_capacity))` + `header_timeout_ms` | 줄을 `_header_buffer` 에 복사하고 method / path / query 를 자른다. 모르는 method 는 501, 긴 path 는 414 |
-| `ReadingHeaderLine` | `readUntil(CRLF, min(남은 header 공간, recv_capacity))` (timeout 은 그대로 흐른다) | 빈 줄이면 헤더 끝. 아니면 복사하고 `_headers[n] = { name, value }`. `max_headers` 를 넘으면 431 |
-| `ReadingBody` | `read(min(_body_remaining, recv_capacity))` | `_body_buffer` 에 이어 붙이고 `_body_remaining` 을 줄인다. 0 이 되면 `handle(s)` (아래) |
+| `ReadingRequestLine` | `readUntil(CRLF, min(max_header_bytes, receive_capacity))` + `header_timeout_milliseconds` | 줄을 `_header_buffer` 에 복사하고 method / path / query 를 자른다. 모르는 method 는 501, 긴 path 는 414 |
+| `ReadingHeaderLine` | `readUntil(CRLF, min(남은 header 공간, receive_capacity))` (timeout 은 그대로 흐른다) | 빈 줄이면 헤더 끝. 아니면 복사하고 `_headers[n] = { name, value }`. `max_headers` 를 넘으면 431 |
+| `ReadingBody` | `read(min(_body_remaining, receive_capacity))` | `_body_buffer` 에 이어 붙이고 `_body_remaining` 을 줄인다. 0 이 되면 `handle(s)` (아래) |
 | `ReadingChunkSize` / `ReadingChunkData` / `ReadingChunkTrailer` | chunked 전용. 크기 줄은 `readUntil(CRLF)`, 데이터는 `ReadingBody` 와 같이 조각으로 | 합친 길이가 `max_body_bytes` 를 넘으면 413 |
 | `Working` | `startWork()` | WORK_STARTED 에서 `onWorkStarted` (4.6) |
-| `Sending` | `write(nextChunk(s))` | WRITTEN 마다 다음 조각. 끝나면 keep-alive 면 `ReadingRequestLine` + `keep_alive_timeout_ms`, 아니면 `close(KIOTTY_SUCCESS)` |
+| `Sending` | `write(nextChunk(s))` | WRITTEN 마다 다음 조각. 끝나면 keep-alive 면 `ReadingRequestLine` + `keep_alive_timeout_milliseconds`, 아니면 `close(KIOTTY_NET_CODE_SUCCESS)` |
 
-**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ recv_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ recv_capacity" 뿐이고 헤더 전체 크기는 `_header_buffer` 가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. 줄이 `recv_capacity` 를 넘으면 base 가 `KIOTTY_PROTOCOL_ERROR` 로 닫고, 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
+**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ receive_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ receive_capacity" 뿐이고 헤더 전체 크기는 `_header_buffer` 가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. 줄이 `receive_capacity` 를 넘으면 base 가 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 닫고, 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
 
 ```cpp
 static void beginRequest(HttpSession* s)
@@ -978,12 +978,12 @@ static KiottyNetTransition afterHeaders(HttpSession* s)
     return handle(s);
 }
 
-static size_t lineMax(const HttpSession* s)  { return min(s->_server->_config.recv_capacity, s->_server->_limits.max_header_bytes - s->_header_length + 2); }
-static size_t bodyChunk(const HttpSession* s) { return min(s->_body_remaining, s->_server->_config.recv_capacity); }
+static size_t lineMax(const HttpSession* s)  { return min(s->_server->_configuration.receive_capacity, s->_server->_limits.max_header_bytes - s->_header_length + 2); }
+static size_t bodyChunk(const HttpSession* s) { return min(s->_body_remaining, s->_server->_configuration.receive_capacity); }
 ```
 
 - `_request.path` / `query` / `headers[i].name` / `value` 는 모두 `_header_buffer` 안의 span 이다. 그래서 다음 `beginRequest` 까지, 즉 onRequest 가 return 하거나 Work 가 finish 될 때까지 유효하다. 요구사항 9절의 "request 는 defer 한 뒤 resumed 까지 유효" 가 이것이다.
-- body 는 `recv_capacity` 조각으로 받아 `_body_buffer` 에 이어 붙인다. 조각마다 READ 가 오고 같은 상태로 돌아간다 (`ReadingBody → READ → ReadingBody`). `_request.body = { _body_buffer, _body_length }`.
+- body 는 `receive_capacity` 조각으로 받아 `_body_buffer` 에 이어 붙인다. 조각마다 READ 가 오고 같은 상태로 돌아간다 (`ReadingBody → READ → ReadingBody`). `_request.body = { _body_buffer, _body_length }`.
 - GET / HEAD 에 body 가 와도 같은 길로 읽는다. 읽고 나서 `_request.body` 로 주되 사용자가 보통 보지 않을 뿐이다. 요청 경계를 맞추려면 읽어야 한다.
 - `reject(s, status)` 는 응답 setter 로 status 만 놓고 `_request.keep_alive = 0` 으로 바꾼 뒤 `startSending(s)` 로 간다. 자동 응답도 사용자 응답과 같은 버퍼, 같은 송신 경로다.
 
@@ -998,9 +998,9 @@ static KiottyNetTransition handle(HttpSession* s)
         else                                  s->_status = 404;
         return afterHandle(s);
     }
-    if (!(m->methods & KIOTTY_HTTP_METHOD_BIT(s->_request.method))) {
-        if (s->_request.method == KIOTTY_HTTP_HEAD && (m->methods & KIOTTY_HTTP_METHOD_BIT(KIOTTY_HTTP_GET))) { /* GET 으로 처리 */ }
-        else if (s->_request.method == KIOTTY_HTTP_OPTIONS) { s->_status = 204; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
+    if (!(m->methods & KIOTTY_NET_HTTP_METHOD_BIT(s->_request.method))) {
+        if (s->_request.method == KIOTTY_NET_HTTP_METHOD_HEAD && (m->methods & KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_GET))) { /* GET 으로 처리 */ }
+        else if (s->_request.method == KIOTTY_NET_HTTP_METHOD_OPTIONS) { s->_status = 204; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
         else { s->_status = 405; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
     }
     switch (m->kind) {
@@ -1042,38 +1042,38 @@ _response_buffer
 ```
 
 - `RESPONSE_PREFIX_BYTES` 는 상태줄과 라이브러리가 넣는 헤더 (`Content-Length`, `Connection`, `Date`, `Content-Type`) 의 최대 길이다. 상수 (예: 192) 로 두고 `createHttpServer` 가 `response_bytes > RESPONSE_PREFIX_BYTES + 2` 를 검사한다.
-- 사용자 헤더는 `_header_end` 에서 앞으로 쌓인다. 복사된 body 는 **버퍼 끝에서 뒤로** 놓인다. 그래서 헤더와 body 를 어느 순서로 불러도 서로 밀어내지 않는다. 둘이 만나면 `KIOTTY_BUFFER_FULL` 이다.
+- 사용자 헤더는 `_header_end` 에서 앞으로 쌓인다. 복사된 body 는 **버퍼 끝에서 뒤로** 놓인다. 그래서 헤더와 body 를 어느 순서로 불러도 서로 밀어내지 않는다. 둘이 만나면 `KIOTTY_NET_CODE_BUFFER_FULL` 이다.
 - 송신 직전 `finalizeHeaders(s)` 가 상태줄과 라이브러리 헤더를 stack 의 작은 버퍼에 만들고, 그 길이만큼 `RESPONSE_PREFIX_BYTES` 에서 **오른쪽 정렬**로 복사한다. 그러면 `[_header_start, _header_end)` 가 빈 줄 `\r\n` 까지 포함한 연속된 헤더 블록이 된다. 송신은 이 블록 뒤에 body 를 이어 보낸다.
 
 ```cpp
 static KiottyNetCode setHeader(HttpSession* s, const char* name, const char* value)
 {
-    if (s->_phase == HttpSession::SENDING) return KIOTTY_BUSY;
+    if (s->_phase == HttpSession::SENDING) return KIOTTY_NET_CODE_BUSY;
     size_t n = strnlen(name, s->_server->_limits.response_bytes), v = strnlen(value, s->_server->_limits.response_bytes);
     size_t need = n + 2 + v + 2;                                                 // "name: value\r\n"
-    if (need > bodyStart(s) - s->_header_end - 2) return KIOTTY_BUFFER_FULL;     // 마지막 "\r\n" 자리를 남긴다
+    if (need > bodyStart(s) - s->_header_end - 2) return KIOTTY_NET_CODE_BUFFER_FULL;     // 마지막 "\r\n" 자리를 남긴다
     char* at = s->_response_buffer + s->_header_end;
     memcpy(at, name, n);  memcpy(at + n, ": ", 2);  memcpy(at + n + 2, value, v);  memcpy(at + n + 2 + v, "\r\n", 2);
     s->_header_end += need;
     if (s->_status == 0) s->_status = 200;                                       // setter 가 하나라도 불리면 기본 200
-    return KIOTTY_SUCCESS;
+    return KIOTTY_NET_CODE_SUCCESS;
 }
 
 static KiottyNetCode setBody(HttpSession* s, KiottyNetSpan data, const char* content_type)
 {
-    if (s->_phase == HttpSession::SENDING) return KIOTTY_BUSY;
-    if (data.length > s->_server->_limits.response_bytes - s->_header_end - 2) return KIOTTY_BUFFER_FULL;
+    if (s->_phase == HttpSession::SENDING) return KIOTTY_NET_CODE_BUSY;
+    if (data.length > s->_server->_limits.response_bytes - s->_header_end - 2) return KIOTTY_NET_CODE_BUFFER_FULL;
     char* at = s->_response_buffer + s->_server->_limits.response_bytes - data.length;
     memcpy(at, data.data, data.length);                                          // 이전 body 가 있었으면 덮어쓴다 (셋 중 하나만)
     s->_body_kind = HttpSession::BODY_COPIED;  s->_body = { at, data.length };
-    copyContentType(s, content_type);                                            // NULL 이면 "application/octet-stream". 길이 초과는 KIOTTY_INVALID_ARGUMENT
+    copyContentType(s, content_type);                                            // NULL 이면 "application/octet-stream". 길이 초과는 KIOTTY_NET_CODE_INVALID_ARGUMENT
     if (s->_status == 0) s->_status = 200;
-    return KIOTTY_SUCCESS;
+    return KIOTTY_NET_CODE_SUCCESS;
 }
 ```
 
 - `bodyStart(s)` 는 `BODY_COPIED` 면 `_body.data - _response_buffer`, 아니면 `response_bytes` 다.
-- `setBodyRef` 는 복사 없이 `_body = data` 를 들고 `BODY_REF`. `setFile` 은 경로를 `_file_path` 에 복사하고 `stat` 으로 길이를 얻어 `_body.length` 에 둔다 (`BODY_FILE`). 파일이 없으면 `KIOTTY_NOT_FOUND`, `..` 가 있으면 `KIOTTY_INVALID_ARGUMENT`. 파일은 송신 시작 때 연다.
+- `setBodyRef` 는 복사 없이 `_body = data` 를 들고 `BODY_REF`. `setFile` 은 경로를 `_file_path` 에 복사하고 `stat` 으로 길이를 얻어 `_body.length` 에 둔다 (`BODY_FILE`). 파일이 없으면 `KIOTTY_NET_CODE_NOT_FOUND`, `..` 가 있으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 파일은 송신 시작 때 연다.
 - 공개 함수 `KiottyNet_setHttpStatus` 등은 handle 을 session 으로 바꾸고 (4.5) 이 static 함수를 부른다. `_status` 는 100..599 만 받는다.
 - 자동 응답 (404, 405, 413, 431, 501, 204 + Allow) 도 같은 setter 를 쓴다. 다른 길이 없다.
 - HEAD : 라우트는 GET 으로 실행되고 setter 도 다 동작한다. `finalizeHeaders` 가 `Content-Length` 를 `_body.length` 로 쓰되, 송신 (4.7) 이 body 조각을 내보내지 않는다.
@@ -1085,18 +1085,18 @@ static KiottyNetCode setBody(HttpSession* s, KiottyNetSpan data, const char* con
 ```cpp
 static KiottyNetHttpResponseHandle responseHandle(const HttpSession* s) { return packHandle(s->_generation, s->_index); }
 
-static HttpSession* sessionOf(int64_t handle)                // setter / finish 의 첫 줄. 실패하면 NULL 이고 공개 함수는 KIOTTY_PEER_CLOSED 를 돌려준다
+static HttpSession* sessionOf(int64_t handle)                // setter / finish 의 첫 줄. 실패하면 NULL 이고 공개 함수는 KIOTTY_NET_CODE_PEER_CLOSED 를 돌려준다
 {
     PoolHandle   h      = unpackHandle(handle);
     HttpServer*  server = ownerOf(h.index);                   // Connection handle 과 같은 방식. requirement 9절 미결 "pool handle 을 소유자로 되돌리기" 를 따른다
-    if (!server || slotOf(h.index) >= server->_config.max_clients) return nullptr;
+    if (!server || slotOf(h.index) >= server->_configuration.max_clients) return nullptr;
     HttpSession* s = &server->_sessions[slotOf(h.index)];
     if (s->_generation != h.generation) return nullptr;       // 이전 요청 / 닫힌 연결의 handle
     return s;
 }
 ```
 
-- `_generation` 은 요청마다 (`beginRequest`), 연결이 닫힐 때 (`releaseSession`) 오른다. 그래서 keep-alive 로 같은 session 이 다음 요청을 받으면 이전 응답 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_PEER_CLOSED` 만 받는다.
+- `_generation` 은 요청마다 (`beginRequest`), 연결이 닫힐 때 (`releaseSession`) 오른다. 그래서 keep-alive 로 같은 session 이 다음 요청을 받으면 이전 응답 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_NET_CODE_PEER_CLOSED` 만 받는다.
 - 소유자 (HttpServer) 를 찾는 방법은 base 의 Connection handle 과 같은 방식을 쓴다 (전역 소유자 표 또는 index 상위 비트). 그 결정은 5절 미결이고, 이 모듈은 `ownerOf` / `slotOf` 두 함수 뒤에 숨긴다.
 - `_generation` 은 IO Thread 만 쓴다. worker 는 `sessionOf` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 session 에 아무 일도 하지 않으므로 (5절 Work 규칙) 값이 바뀌지 않고, Work 가 아닐 때 worker 가 handle 을 들고 있다면 그것은 사용자 규칙 위반이다. 그래도 읽기는 int32 하나라 찢어진 값은 없다.
 
@@ -1106,11 +1106,11 @@ static HttpSession* sessionOf(int64_t handle)                // setter / finish 
 KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle handle)
 {
     HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_PEER_CLOSED;
-    if (s->_phase != HttpSession::FILLING || !s->_matched_route) return KIOTTY_BUSY;   // onRequest 안에서만, 한 번만
-    if (!s->_matched_route->onWorkStarted) return KIOTTY_INVALID_ARGUMENT;
+    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
+    if (s->_phase != HttpSession::FILLING || !s->_matched_route) return KIOTTY_NET_CODE_BUSY;   // onRequest 안에서만, 한 번만
+    if (!s->_matched_route->onWorkStarted) return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     s->_work_requested = true;                                                   // 실제 startWork 는 onRequest 가 return 한 뒤 afterHandle 의 entry action 이 한다
-    return KIOTTY_SUCCESS;
+    return KIOTTY_NET_CODE_SUCCESS;
 }
 
 static KiottyNetTransition onWorkStarted(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
@@ -1125,21 +1125,21 @@ static KiottyNetTransition onWorkStarted(KiottyNetConnectionContext session, Kio
 KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle handle)
 {
     HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_PEER_CLOSED;
-    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_BUSY;
+    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
+    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_NET_CODE_BUSY;
     s->_work_finished = true;
     s->_phase = HttpSession::SENDING;
     finalizeHeaders(s);                                                          // 4.4. worker thread 에서 한다. IO Thread 는 이 session 을 안 본다
     KiottyNetCode code = KiottyNet_finishWorkWithWrite(s->_base_work, nextChunk(s));   // 첫 조각. 나머지는 WRITTEN 이벤트가 Sending 상태에서 이어 간다
-    if (code != KIOTTY_SUCCESS) KiottyNet_finishWorkWithClose(s->_base_work, code);
+    if (code != KIOTTY_NET_CODE_SUCCESS) KiottyNet_finishWorkWithClose(s->_base_work, code);
     return code;
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle handle, KiottyNetCode reason)
 {
     HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_PEER_CLOSED;
-    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_BUSY;
+    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
+    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_NET_CODE_BUSY;
     s->_work_finished = true;
     return KiottyNet_finishWorkWithClose(s->_base_work, reason);
 }
@@ -1152,8 +1152,8 @@ bool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle handle)
 ```
 
 - Work 중 worker 가 setter 를 부르는 것이 안전한 이유는 base 의 Work 규칙 그대로다. WORKING 동안 IO Thread 는 이 Connection 에 콜백을 내지 않고 write lane 도 건드리지 않는다. session 의 응답 필드는 write lane 과 같은 소유 규칙을 따른다. RUNNING 이면 IO Thread, WORKING 이면 worker, 동시에 둘인 순간은 없다.
-- 첫 조각이 `send_capacity` 를 넘는 일은 없다. `nextChunk` 가 `send_capacity` 로 자른다. 그래서 `finishWorkWithWrite` 가 `KIOTTY_BUFFER_FULL` 을 돌려주는 경우는 없고, 돌려주는 코드는 `KIOTTY_PEER_CLOSED` 다.
-- Work 중 peer 가 끊으면 base 가 slot 을 붙잡아 두고 finish 뒤 `onDisconnected(KIOTTY_PEER_CLOSED)` 를 낸다. 그때 `releaseSession` 이 돌아 generation 이 오른다. finish 전까지 session 은 살아 있으므로 worker 의 setter 는 안전하다.
+- 첫 조각이 `send_capacity` 를 넘는 일은 없다. `nextChunk` 가 `send_capacity` 로 자른다. 그래서 `finishWorkWithWrite` 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려주는 경우는 없고, 돌려주는 코드는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
+- Work 중 peer 가 끊으면 base 가 slot 을 붙잡아 두고 finish 뒤 `onDisconnected(KIOTTY_NET_CODE_PEER_CLOSED)` 를 낸다. 그때 `releaseSession` 이 돌아 generation 이 오른다. finish 전까지 session 은 살아 있으므로 worker 의 setter 는 안전하다.
 
 ### 4.7 송신 : 응답 버퍼 → write lane 조각
 
@@ -1167,10 +1167,10 @@ static KiottyNetTransition startSending(HttpSession* s)      // IO Thread 경로
 
 static KiottyNetSpan nextChunk(HttpSession* s)               // _sent 부터 최대 send_capacity 바이트. 헤더 블록 → body 순서
 {
-    size_t cap    = s->_server->_config.send_capacity;
+    size_t cap    = s->_server->_configuration.send_capacity;
     size_t header = s->_header_end - s->_header_start;
     if (s->_sent < header) { size_t n = min(cap, header - s->_sent); return { s->_response_buffer + s->_header_start + s->_sent, n }; }
-    if (s->_request.method == KIOTTY_HTTP_HEAD) return { nullptr, 0 };
+    if (s->_request.method == KIOTTY_NET_HTTP_METHOD_HEAD) return { nullptr, 0 };
     size_t off = s->_sent - header;
     switch (s->_body_kind) {
         case HttpSession::BODY_COPIED:
@@ -1187,22 +1187,22 @@ static KiottyNetTransition onSent(KiottyNetConnectionContext session, KiottyNetC
     KiottyNetSpan next = nextChunk(s);
     if (next.length) return Next::moveToNextState(HttpState::Sending, KiottyNet_EntryAction::write(next));
     closeFile(s);
-    if (!s->_request.keep_alive) return Next::moveToNextState(HttpState::Closing, KiottyNet_EntryAction::close(KIOTTY_SUCCESS));
+    if (!s->_request.keep_alive) return Next::moveToNextState(HttpState::Closing, KiottyNet_EntryAction::close(KIOTTY_NET_CODE_SUCCESS));
     beginRequest(s);
-    return Next::moveToNextState(HttpState::ReadingRequestLine, KiottyNet_EntryAction::readUntil(CRLF, lineMax(s)).timeout(s->_server->_limits.keep_alive_timeout_ms));
+    return Next::moveToNextState(HttpState::ReadingRequestLine, KiottyNet_EntryAction::readUntil(CRLF, lineMax(s)).timeout(s->_server->_limits.keep_alive_timeout_milliseconds));
 }
 ```
 
 - 조각이 하나뿐이면 `write → WRITTEN → 다음 요청` 으로 끝난다. 큰 응답은 `Sending → WRITTEN → Sending` 을 돈다. 1.6 의 write lane 규칙 (한 번에 메시지 하나, onWritten 뒤 다음 write) 을 그대로 지킨다.
 - 파일은 `send_capacity` 만큼 읽어 보낸다. staging 은 응답 버퍼의 prefix + 헤더 영역을 재사용하므로 추가 메모리가 없다. `sendfile` / `TransmitFile` 은 Stage 를 거치지 않는 OS 경로라 base 의 drain 과 맞지 않으므로 v0 에서는 쓰지 않는다 (요구사항 9절의 "가능하면" 을 "v0 에서는 하지 않음" 으로 둔다).
-- `write` 의 data 는 `send_capacity` 이하이고 write lane 은 비어 있으므로 (이전 WRITTEN 뒤) `KIOTTY_BUFFER_FULL` 로 닫히는 일은 없다.
+- `write` 의 data 는 `send_capacity` 이하이고 write lane 은 비어 있으므로 (이전 WRITTEN 뒤) `KIOTTY_NET_CODE_BUFFER_FULL` 로 닫히는 일은 없다.
 
 ### 4.8 run
 
 ```cpp
 KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server)
 {
-    if (!server) return KIOTTY_INVALID_ARGUMENT;
+    if (!server) return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     server->_running = true;
     KiottyNetStatefulAppContext stateful = { server, &HTTP_MACHINE, &acquireSession, &releaseSession };   // run 동안만 살아 있으면 된다 (2.1)
     KiottyNetCode code = KiottyNet_runStatefulServer(server->_server, &stateful);
@@ -1211,7 +1211,7 @@ KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server)
 }
 ```
 
-`close` / `await` 는 base 로 그대로 넘긴다. `addHttpRoute` / `serveHttp*` 는 `_running` 이면 `KIOTTY_BUSY` 다. 표는 run 중에 IO Thread 가 읽기만 하고 등록 함수는 run 전에만 쓰므로 lock 이 없다.
+`close` / `await` 는 base 로 그대로 넘긴다. `addHttpRoute` / `serveHttp*` 는 `_running` 이면 `KIOTTY_NET_CODE_BUSY` 다. 표는 run 중에 IO Thread 가 읽기만 하고 등록 함수는 run 전에만 쓰므로 lock 이 없다.
 
 HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `createServer / runStatefulServer / closeServer / awaitServer / destroyServer`, entry action 다섯 가지, `finishWorkWith{Write, Close}`, `isWorkConnected` 뿐이다.
 

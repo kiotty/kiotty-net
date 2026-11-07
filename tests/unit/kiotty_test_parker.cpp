@@ -12,7 +12,7 @@ namespace
 {
     typedef std::chrono::steady_clock Clock;
 
-    long long elapsedMs(Clock::time_point since)
+    long long elapsedMilliseconds(Clock::time_point since)
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - since).count();
     }
@@ -42,7 +42,7 @@ TEST(Parker, ParkWithTimeoutReturnsFalseWhenNothingChanges)
     bool finished = false;
     Clock::time_point start = Clock::now();
     bool ready = parker.park([&finished]() { return finished; }, 50);
-    long long waited = elapsedMs(start);
+    long long waited = elapsedMilliseconds(start);
     EXPECT_FALSE(ready);
     EXPECT_GE(waited, 45);
     EXPECT_LT(waited, 2000);
@@ -71,5 +71,5 @@ TEST(Parker, UnparkBeforeParkIsNotLost)
     parker.unpark([&finished]() { finished = true; });
     Clock::time_point start = Clock::now();
     EXPECT_TRUE(parker.park([&finished]() { return finished; }, 5000));
-    EXPECT_LT(elapsedMs(start), 1000);
+    EXPECT_LT(elapsedMilliseconds(start), 1000);
 }

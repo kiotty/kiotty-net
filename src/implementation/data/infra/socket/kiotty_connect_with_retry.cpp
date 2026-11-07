@@ -13,19 +13,19 @@ namespace kiotty::net::implementation
         const std::chrono::milliseconds STOP_CHECK(10);
 
         bool               waitInterval(uint32_t interval_milliseconds, const std::atomic<bool>& stop);
-        ActiveSocketResult tryOnce(const KiottyNetClientConfig& config);
-        NoDelay            noDelayOf(const KiottyNetClientConfig& config);
+        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& config);
+        NoDelay            noDelayOf(const KiottyNetClientConfiguration& config);
     }
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfig& config, const std::atomic<bool>& stop)
+    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& config, const std::atomic<bool>& stop)
     {
         const uint32_t trials = config.max_trial == 0 ? 1 : config.max_trial;
         SocketCode last = SocketCode::UNKNOWN;
         for (uint32_t trial = 0; trial < trials; ++trial)
         {
-            const bool waited = trial == 0 || waitInterval(config.trial_interval_ms, stop);
-            if (!waited) { return ConnectedResult::failure(KIOTTY_CLOSED); }
-            if (stop.load()) { return ConnectedResult::failure(KIOTTY_CLOSED); }
+            const bool waited = trial == 0 || waitInterval(config.trial_interval_milliseconds, stop);
+            if (!waited) { return ConnectedResult::failure(KIOTTY_NET_CODE_CLOSED); }
+            if (stop.load()) { return ConnectedResult::failure(KIOTTY_NET_CODE_CLOSED); }
             ActiveSocketResult attempt = tryOnce(config);
             if (attempt) { return ConnectedResult::success(std::move(attempt.value)); }
             last = attempt.code;
@@ -50,19 +50,19 @@ namespace kiotty::net::implementation
             }
         }
 
-        ActiveSocketResult tryOnce(const KiottyNetClientConfig& config)
+        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& config)
         {
             ActiveSocketResult opened = ActiveSocket::open(config.endpoint.transport);
             if (!opened) { return opened; }
             ActiveSocket& socket = opened.value;
-            const SocketCode connected = socket.connect(config.endpoint, config.connect_timeout_ms);
+            const SocketCode connected = socket.connect(config.endpoint, config.connect_timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }
             const SocketCode tuned = configureNoDelay(socket, noDelayOf(config));
             if (tuned != SocketCode::SUCCESS) { return ActiveSocketResult::failure(tuned); }
             return ActiveSocketResult::success(std::move(socket));
         }
 
-        NoDelay noDelayOf(const KiottyNetClientConfig& config)
+        NoDelay noDelayOf(const KiottyNetClientConfiguration& config)
         {
             return config.no_delay ? NoDelay::ENABLED : NoDelay::DISABLED;
         }

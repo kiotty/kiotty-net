@@ -19,21 +19,21 @@ namespace kiotty::net::implementation
     {
         if (data.length == 0)
         {
-            return KIOTTY_SUCCESS;
+            return KIOTTY_NET_CODE_SUCCESS;
         }
         if (data.data == nullptr)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         StageBase::Provider provider = stage.provider();
         if (provider.writable() < data.length)
         {
-            return KIOTTY_BUFFER_FULL;
+            return KIOTTY_NET_CODE_BUFFER_FULL;
         }
         char* room = provider.prepare(data.length);
         std::memcpy(room, data.data, data.length);
         provider.commit(data.length);
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     inline void Sender::release(StageBase& stage, size_t length)

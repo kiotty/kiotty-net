@@ -8,9 +8,9 @@
 namespace kiotty_test
 {
     template <typename Predicate>
-    bool waitUntil(Predicate predicate, uint32_t timeout_ms)
+    bool waitUntil(Predicate predicate, uint32_t timeout_milliseconds)
     {
-        std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_milliseconds);
         for (;;)
         {
             if (predicate())
@@ -25,7 +25,7 @@ namespace kiotty_test
         }
     }
 
-    inline uint32_t elapsedMs(std::chrono::steady_clock::time_point since)
+    inline uint32_t elapsedMilliseconds(std::chrono::steady_clock::time_point since)
     {
         std::chrono::steady_clock::duration elapsed = std::chrono::steady_clock::now() - since;
         return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());

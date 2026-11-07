@@ -68,17 +68,17 @@ namespace kiotty::net::implementation
     {
         switch (action.type)
         {
-        case KIOTTY_ACTION_HOLD:
-            return hold(action.timeout_ms);
-        case KIOTTY_ACTION_READ:
-            return read(IoPurpose::USER, action.timeout_ms, action.as.read.exact);
-        case KIOTTY_ACTION_READ_UNTIL:
-            return readUntil(action.timeout_ms, action.as.read_until.delimiter, action.as.read_until.max);
-        case KIOTTY_ACTION_WRITE:
-            return write(IoPurpose::USER, action.timeout_ms, action.as.write.data.length);
-        case KIOTTY_ACTION_START_WORK:
+        case KIOTTY_NET_ACTION_TYPE_HOLD:
+            return hold(action.timeout_milliseconds);
+        case KIOTTY_NET_ACTION_TYPE_READ:
+            return read(IoPurpose::USER, action.timeout_milliseconds, action.as.read.exact);
+        case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
+            return readUntil(action.timeout_milliseconds, action.as.read_until.delimiter, action.as.read_until.max);
+        case KIOTTY_NET_ACTION_TYPE_WRITE:
+            return write(IoPurpose::USER, action.timeout_milliseconds, action.as.write.data.length);
+        case KIOTTY_NET_ACTION_TYPE_START_WORK:
             return startWork();
-        case KIOTTY_ACTION_CLOSE:
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
             return close(action.as.close.reason);
         }
         return none();

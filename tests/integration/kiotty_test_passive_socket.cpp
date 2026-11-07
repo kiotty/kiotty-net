@@ -31,7 +31,7 @@ namespace
 TEST(PassiveSocket, OpenOnPortZeroBindsAnEphemeralPort)
 {
     PassiveSocket listener;
-    KiottyNetEndpoint endpoint = endpointOf(KIOTTY_TCP, "127.0.0.1", 0);
+    KiottyNetEndpoint endpoint = endpointOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", 0);
     ASSERT_EQ(listener.open(endpoint, 8), SocketCode::SUCCESS);
     EXPECT_TRUE(listener.valid());
     EXPECT_GT(listener.port(), 0);
@@ -40,9 +40,9 @@ TEST(PassiveSocket, OpenOnPortZeroBindsAnEphemeralPort)
 TEST(PassiveSocket, OpenOnBusyPortReturnsAddressInUse)
 {
     PassiveSocket first;
-    ASSERT_EQ(first.open(endpointOf(KIOTTY_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
+    ASSERT_EQ(first.open(endpointOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
     PassiveSocket second;
-    EXPECT_EQ(second.open(endpointOf(KIOTTY_TCP, "127.0.0.1", first.port()), 8), SocketCode::ADDRESS_IN_USE);
+    EXPECT_EQ(second.open(endpointOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", first.port()), 8), SocketCode::ADDRESS_IN_USE);
     EXPECT_FALSE(second.valid());
 }
 
@@ -51,7 +51,7 @@ TEST(PassiveSocket, OpenUnixDomainUnlinksStalePathFirst)
     std::string path = kiotty_test::uniqueSocketPath();
     ASSERT_TRUE(kiotty_test::createFile(path.c_str()));
     PassiveSocket listener;
-    EXPECT_EQ(listener.open(endpointOf(KIOTTY_PIPE, path, 0), 8), SocketCode::SUCCESS);
+    EXPECT_EQ(listener.open(endpointOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0), 8), SocketCode::SUCCESS);
     LoopbackPeer peer;
     EXPECT_TRUE(peer.connectUnix(path));
     listener.close();
@@ -62,14 +62,14 @@ TEST(PassiveSocket, OpenWithPathOverLimitReturnsInvalidArgument)
 {
     std::string path(200, 'p');
     PassiveSocket listener;
-    EXPECT_EQ(listener.open(endpointOf(KIOTTY_PIPE, path, 0), 8), SocketCode::INVALID_ARGUMENT);
+    EXPECT_EQ(listener.open(endpointOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0), 8), SocketCode::INVALID_ARGUMENT);
     EXPECT_FALSE(listener.valid());
 }
 
 TEST(PassiveSocket, AcceptAfterPeerConnectReturnsConnectedSocket)
 {
     PassiveSocket listener;
-    ASSERT_EQ(listener.open(endpointOf(KIOTTY_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
+    ASSERT_EQ(listener.open(endpointOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
     LoopbackPeer peer;
     ASSERT_TRUE(peer.connectTcp(listener.port()));
     ActiveSocket accepted;
@@ -93,7 +93,7 @@ TEST(PassiveSocket, AcceptAfterPeerConnectReturnsConnectedSocket)
 TEST(PassiveSocket, AcceptWithNoPendingConnectionReturnsWouldBlock)
 {
     PassiveSocket listener;
-    ASSERT_EQ(listener.open(endpointOf(KIOTTY_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
+    ASSERT_EQ(listener.open(endpointOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", 0), 8), SocketCode::SUCCESS);
     ActiveSocketResult result = listener.accept();
     EXPECT_EQ(result.code, SocketCode::WOULD_BLOCK);
 }

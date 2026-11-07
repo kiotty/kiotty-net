@@ -23,20 +23,20 @@ namespace kiotty_test
 #endif
     }
 
-    bool waitReadable(RawSocket socket, uint32_t timeout_ms)
+    bool waitReadable(RawSocket socket, uint32_t timeout_milliseconds)
     {
 #if defined(_WIN32)
         WSAPOLLFD entry;
         entry.fd = socket;
         entry.events = POLLRDNORM;
         entry.revents = 0;
-        int ready = ::WSAPoll(&entry, 1, static_cast<INT>(timeout_ms));
+        int ready = ::WSAPoll(&entry, 1, static_cast<INT>(timeout_milliseconds));
 #else
         pollfd entry;
         entry.fd = socket;
         entry.events = POLLIN;
         entry.revents = 0;
-        int ready = ::poll(&entry, 1, static_cast<int>(timeout_ms));
+        int ready = ::poll(&entry, 1, static_cast<int>(timeout_milliseconds));
 #endif
         return ready > 0;
     }

@@ -27,7 +27,7 @@ namespace kiotty::net::implementation
 
     int familyOf(KiottyNetTransport transport)
     {
-        if (transport == KIOTTY_PIPE) { return AF_UNIX; }
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return AF_UNIX; }
         return AF_INET;
     }
 
@@ -39,7 +39,7 @@ namespace kiotty::net::implementation
 
     SOCKET createSocket(KiottyNetTransport transport)
     {
-        const int protocol = transport == KIOTTY_TCP ? IPPROTO_TCP : 0;
+        const int protocol = transport == KIOTTY_NET_TRANSPORT_TCP ? IPPROTO_TCP : 0;
         const DWORD flags = WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT;
         return ::WSASocketW(familyOf(transport), SOCK_STREAM, protocol, nullptr, 0, flags);
     }
@@ -54,7 +54,7 @@ namespace kiotty::net::implementation
 
     AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, AddressRole role)
     {
-        if (transport == KIOTTY_PIPE) { return unixAddressOf(endpoint.host); }
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(endpoint.host); }
         return inetAddressOf(endpoint, role);
     }
 

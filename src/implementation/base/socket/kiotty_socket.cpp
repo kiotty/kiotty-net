@@ -10,9 +10,9 @@ namespace kiotty::net::implementation
     {
         const std::chrono::milliseconds STOP_CHECK(10);
 
-        bool waitInterval(uint32_t interval_ms, const std::atomic<bool>& stop)
+        bool waitInterval(uint32_t interval_milliseconds, const std::atomic<bool>& stop)
         {
-            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(interval_ms);
+            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(interval_milliseconds);
             for (;;)
             {
                 if (stop.load())
@@ -31,7 +31,7 @@ namespace kiotty::net::implementation
         }
     }
 
-    Result<ActiveSocket, KiottyNetCode> connectWithRetry(const KiottyNetClientConfig& config, const std::atomic<bool>& stop)
+    Result<ActiveSocket, KiottyNetCode> connectWithRetry(const KiottyNetClientConfiguration& config, const std::atomic<bool>& stop)
     {
         typedef Result<ActiveSocket, KiottyNetCode> Connected;
         uint32_t trials = config.max_trial;
@@ -44,15 +44,15 @@ namespace kiotty::net::implementation
         {
             if (trial > 0)
             {
-                bool waited = waitInterval(config.trial_interval_ms, stop);
+                bool waited = waitInterval(config.trial_interval_milliseconds, stop);
                 if (!waited)
                 {
-                    return Connected::failure(KIOTTY_CLOSED);
+                    return Connected::failure(KIOTTY_NET_CODE_CLOSED);
                 }
             }
             if (stop.load())
             {
-                return Connected::failure(KIOTTY_CLOSED);
+                return Connected::failure(KIOTTY_NET_CODE_CLOSED);
             }
             ActiveSocketResult opened = ActiveSocket::open(config.endpoint.transport);
             if (!opened)
@@ -61,7 +61,7 @@ namespace kiotty::net::implementation
                 continue;
             }
             ActiveSocket& socket = opened.value;
-            SocketCode connected = socket.connect(config.endpoint, config.connect_timeout_ms);
+            SocketCode connected = socket.connect(config.endpoint, config.connect_timeout_milliseconds);
             if (connected != SocketCode::SUCCESS)
             {
                 last = connected;

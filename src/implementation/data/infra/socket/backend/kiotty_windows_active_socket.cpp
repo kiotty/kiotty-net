@@ -20,7 +20,7 @@ namespace kiotty::net::implementation
     ActiveSocket::ActiveSocket()
         : _peer()
         , _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
     {
     }
 

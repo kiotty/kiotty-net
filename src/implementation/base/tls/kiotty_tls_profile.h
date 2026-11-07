@@ -23,14 +23,14 @@ namespace kiotty::net::implementation
         TlsProfile(const TlsProfile&) = delete;
         TlsProfile& operator=(const TlsProfile&) = delete;
 
-        KiottyNetCode openServer(const KiottyNetTlsServerConfig& config);
-        KiottyNetCode openClient(const KiottyNetTlsClientConfig& config);
+        KiottyNetCode openServer(const KiottyNetTlsServerConfiguration& config);
+        KiottyNetCode openClient(const KiottyNetTlsClientConfiguration& config);
         void          close();
 
         bool        valid() const;
         bool        server() const;
         bool        verifyHostname() const;
-        uint32_t    handshakeTimeoutMs() const;
+        uint32_t    handshakeTimeoutMilliseconds() const;
         ssl_ctx_st* context() const;
 
     private:

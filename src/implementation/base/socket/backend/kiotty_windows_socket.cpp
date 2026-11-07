@@ -36,7 +36,7 @@ namespace kiotty::net::implementation
 
         int familyOf(KiottyNetTransport transport)
         {
-            if (transport == KIOTTY_PIPE)
+            if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
                 return AF_UNIX;
             }
@@ -55,7 +55,7 @@ namespace kiotty::net::implementation
         SOCKET createSocket(KiottyNetTransport transport)
         {
             int protocol = 0;
-            if (transport == KIOTTY_TCP)
+            if (transport == KIOTTY_NET_TRANSPORT_TCP)
             {
                 protocol = IPPROTO_TCP;
             }
@@ -120,7 +120,7 @@ namespace kiotty::net::implementation
 
         SocketCode addressOf(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, bool passive, Address& address)
         {
-            if (transport == KIOTTY_PIPE)
+            if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
                 return unixAddressOf(endpoint.host, address);
             }
@@ -146,7 +146,7 @@ namespace kiotty::net::implementation
             return info;
         }
 
-        SocketCode waitReady(SOCKET socket, bool writing, uint32_t timeout_ms)
+        SocketCode waitReady(SOCKET socket, bool writing, uint32_t timeout_milliseconds)
         {
             fd_set ready;
             fd_set failed;
@@ -155,10 +155,10 @@ namespace kiotty::net::implementation
             FD_SET(socket, &ready);
             FD_SET(socket, &failed);
             timeval limit;
-            limit.tv_sec = static_cast<long>(timeout_ms / 1000);
-            limit.tv_usec = static_cast<long>((timeout_ms % 1000) * 1000);
+            limit.tv_sec = static_cast<long>(timeout_milliseconds / 1000);
+            limit.tv_usec = static_cast<long>((timeout_milliseconds % 1000) * 1000);
             timeval* wait = &limit;
-            if (timeout_ms == 0)
+            if (timeout_milliseconds == 0)
             {
                 wait = nullptr;
             }
@@ -176,7 +176,7 @@ namespace kiotty::net::implementation
             return SocketCode::SUCCESS;
         }
 
-        SocketCode waitConnected(SOCKET socket, uint32_t timeout_ms)
+        SocketCode waitConnected(SOCKET socket, uint32_t timeout_milliseconds)
         {
             fd_set writable;
             fd_set failed;
@@ -185,10 +185,10 @@ namespace kiotty::net::implementation
             FD_SET(socket, &writable);
             FD_SET(socket, &failed);
             timeval limit;
-            limit.tv_sec = static_cast<long>(timeout_ms / 1000);
-            limit.tv_usec = static_cast<long>((timeout_ms % 1000) * 1000);
+            limit.tv_sec = static_cast<long>(timeout_milliseconds / 1000);
+            limit.tv_usec = static_cast<long>((timeout_milliseconds % 1000) * 1000);
             timeval* wait = &limit;
-            if (timeout_ms == 0)
+            if (timeout_milliseconds == 0)
             {
                 wait = nullptr;
             }
@@ -213,7 +213,7 @@ namespace kiotty::net::implementation
 
     ActiveSocket::ActiveSocket()
         : _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
         , _peer()
     {
     }
@@ -267,7 +267,7 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
-    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_ms)
+    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
@@ -288,7 +288,7 @@ namespace kiotty::net::implementation
             {
                 return toSocketCode(started);
             }
-            SocketCode connected = waitConnected(socket, timeout_ms);
+            SocketCode connected = waitConnected(socket, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS)
             {
                 return connected;
@@ -304,7 +304,7 @@ namespace kiotty::net::implementation
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        if (_transport == KIOTTY_PIPE)
+        if (_transport == KIOTTY_NET_TRANSPORT_PIPE)
         {
             return SocketCode::SUCCESS;
         }
@@ -370,22 +370,22 @@ namespace kiotty::net::implementation
         return TransferResult::success(static_cast<size_t>(received));
     }
 
-    SocketCode ActiveSocket::waitReadable(uint32_t timeout_ms)
+    SocketCode ActiveSocket::waitReadable(uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        return waitReady(socketOf(_handle), false, timeout_ms);
+        return waitReady(socketOf(_handle), false, timeout_milliseconds);
     }
 
-    SocketCode ActiveSocket::waitWritable(uint32_t timeout_ms)
+    SocketCode ActiveSocket::waitWritable(uint32_t timeout_milliseconds)
     {
         if (!valid())
         {
             return SocketCode::INVALID_ARGUMENT;
         }
-        return waitReady(socketOf(_handle), true, timeout_ms);
+        return waitReady(socketOf(_handle), true, timeout_milliseconds);
     }
 
     SocketCode ActiveSocket::shutdown()
@@ -428,7 +428,7 @@ namespace kiotty::net::implementation
 
     PassiveSocket::PassiveSocket()
         : _handle(INVALID_SOCKET_HANDLE)
-        , _transport(KIOTTY_TCP)
+        , _transport(KIOTTY_NET_TRANSPORT_TCP)
         , _port(0)
     {
     }
@@ -460,7 +460,7 @@ namespace kiotty::net::implementation
             close();
             return prepared;
         }
-        if (_transport == KIOTTY_PIPE)
+        if (_transport == KIOTTY_NET_TRANSPORT_PIPE)
         {
             ::DeleteFileA(endpoint.host);
         }
@@ -483,7 +483,7 @@ namespace kiotty::net::implementation
             close();
             return code;
         }
-        if (_transport == KIOTTY_TCP)
+        if (_transport == KIOTTY_NET_TRANSPORT_TCP)
         {
             sockaddr_storage bound;
             int length = sizeof(bound);

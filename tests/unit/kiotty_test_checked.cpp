@@ -29,7 +29,7 @@ TEST(Checked, AddRefusesAnOverflow)
     const size_t maximum = std::numeric_limits<size_t>::max();
     const auto sum = checkedAdd<size_t>(maximum, 1);
     EXPECT_FALSE(sum);
-    EXPECT_EQ(sum.code, KIOTTY_INVALID_ARGUMENT);
+    EXPECT_EQ(sum.code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
 }
 
 TEST(Checked, MultiplyReturnsTheProductWhenItFits)
@@ -55,5 +55,5 @@ TEST(Checked, MultiplyRefusesAnOverflow)
     const uint32_t half = std::numeric_limits<uint32_t>::max() / 2u + 1u;
     const auto product = checkedMultiply<uint32_t>(half, 2u);
     EXPECT_FALSE(product);
-    EXPECT_EQ(product.code, KIOTTY_INVALID_ARGUMENT);
+    EXPECT_EQ(product.code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
 }

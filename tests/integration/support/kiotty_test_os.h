@@ -36,7 +36,7 @@ namespace kiotty_test
 
     RawSocket toRaw(intptr_t handle);
     void      closeRaw(RawSocket socket);
-    bool      waitReadable(RawSocket socket, uint32_t timeout_ms);
+    bool      waitReadable(RawSocket socket, uint32_t timeout_milliseconds);
     bool      noDelayOf(intptr_t handle);
     bool      setSendBuffer(intptr_t handle, int bytes);
     bool      shutdownBoth(intptr_t handle);

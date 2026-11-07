@@ -41,11 +41,11 @@ TEST(SocketError, EveryOsCodeTheBackendProducesMapsToASocketCode)
 
 TEST(SocketError, ToNetCodeMapsClosedToPeerClosedBusyToBusyAndTheRestToSocketError)
 {
-    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::SUCCESS), KIOTTY_SUCCESS);
-    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CLOSED), KIOTTY_PEER_CLOSED);
-    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CANCELLED), KIOTTY_CLOSED);
-    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::TIMEOUT), KIOTTY_TIMEOUT);
-    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::BUSY), KIOTTY_BUSY);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::SUCCESS), KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CLOSED), KIOTTY_NET_CODE_PEER_CLOSED);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::CANCELLED), KIOTTY_NET_CODE_CLOSED);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::TIMEOUT), KIOTTY_NET_CODE_TIMEOUT);
+    EXPECT_EQ(kiotty::net::implementation::toNetCode(SocketCode::BUSY), KIOTTY_NET_CODE_BUSY);
     SocketCode rest[] =
     {
         SocketCode::WOULD_BLOCK,
@@ -61,6 +61,6 @@ TEST(SocketError, ToNetCodeMapsClosedToPeerClosedBusyToBusyAndTheRestToSocketErr
     };
     for (SocketCode code : rest)
     {
-        EXPECT_EQ(kiotty::net::implementation::toNetCode(code), KIOTTY_SOCKET_ERROR) << static_cast<int>(code);
+        EXPECT_EQ(kiotty::net::implementation::toNetCode(code), KIOTTY_NET_CODE_SOCKET_ERROR) << static_cast<int>(code);
     }
 }

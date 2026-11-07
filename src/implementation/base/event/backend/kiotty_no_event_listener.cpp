@@ -45,9 +45,9 @@ namespace kiotty::net::implementation
         event.pending = false;
     }
 
-    Span<const IoCompletion> EventListener::wait(uint32_t timeout_ms)
+    Span<const IoCompletion> EventListener::wait(uint32_t timeout_milliseconds)
     {
-        (void)timeout_ms;
+        (void)timeout_milliseconds;
         Span<const IoCompletion> completions = { nullptr, 0 };
         return completions;
     }

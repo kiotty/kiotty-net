@@ -21,16 +21,16 @@ namespace kiotty::net::implementation
     {
     }
 
-    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfig& config)
+    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& config)
     {
         (void)config;
-        return KIOTTY_TLS_NOT_SUPPORTED;
+        return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 
-    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfig& config)
+    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& config)
     {
         (void)config;
-        return KIOTTY_TLS_NOT_SUPPORTED;
+        return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 
     void TlsProfile::close()
@@ -52,7 +52,7 @@ namespace kiotty::net::implementation
         return _verify_hostname;
     }
 
-    uint32_t TlsProfile::handshakeTimeoutMs() const
+    uint32_t TlsProfile::handshakeTimeoutMilliseconds() const
     {
         return TLS_HANDSHAKE_TIMEOUT_MS;
     }
@@ -70,7 +70,7 @@ namespace kiotty::net::implementation
     {
         (void)profile;
         (void)hostname;
-        return KIOTTY_TLS_NOT_SUPPORTED;
+        return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 
     void TlsEngine::close()
@@ -80,20 +80,20 @@ namespace kiotty::net::implementation
 
     TlsStep TlsEngine::handshake()
     {
-        return fail(KIOTTY_TLS_NOT_SUPPORTED, "tls: not supported");
+        return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, "tls: not supported");
     }
 
     DecodeResult TlsEngine::decode(StageBase& plain)
     {
         (void)plain;
-        return DecodeResult::failure(KIOTTY_TLS_NOT_SUPPORTED);
+        return DecodeResult::failure(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     }
 
     DecodeResult TlsEngine::decode(char* buffer, size_t length)
     {
         (void)buffer;
         (void)length;
-        return DecodeResult::failure(KIOTTY_TLS_NOT_SUPPORTED);
+        return DecodeResult::failure(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     }
 
     void TlsEngine::encode(KiottyNetSpan plain)
@@ -104,7 +104,7 @@ namespace kiotty::net::implementation
     TlsStep TlsEngine::write(KiottyNetSpan plain)
     {
         (void)plain;
-        return fail(KIOTTY_TLS_NOT_SUPPORTED, "tls: not supported");
+        return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, "tls: not supported");
     }
 
     Span<char> TlsEngine::receiveRoom()

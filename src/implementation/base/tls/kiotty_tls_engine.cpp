@@ -26,7 +26,7 @@ namespace kiotty::net::implementation
         , _network(nullptr)
         , _active(false)
         , _failed(false)
-        , _last_code(KIOTTY_SUCCESS)
+        , _last_code(KIOTTY_NET_CODE_SUCCESS)
         , _last_message("")
     {
     }

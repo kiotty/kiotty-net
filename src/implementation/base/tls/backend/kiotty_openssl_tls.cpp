@@ -26,19 +26,19 @@ namespace kiotty::net::implementation
 
         const SuiteName V12_SUITES[] =
         {
-            { KIOTTY_TLS12_ECDHE_ECDSA_AES256_GCM_SHA384, "ECDHE-ECDSA-AES256-GCM-SHA384" },
-            { KIOTTY_TLS12_ECDHE_RSA_AES256_GCM_SHA384, "ECDHE-RSA-AES256-GCM-SHA384" },
-            { KIOTTY_TLS12_ECDHE_ECDSA_CHACHA20_POLY1305, "ECDHE-ECDSA-CHACHA20-POLY1305" },
-            { KIOTTY_TLS12_ECDHE_RSA_CHACHA20_POLY1305, "ECDHE-RSA-CHACHA20-POLY1305" }
+            { KIOTTY_NET_TLS_V12_CIPHER_SUITE_ECDHE_ECDSA_AES256_GCM_SHA384, "ECDHE-ECDSA-AES256-GCM-SHA384" },
+            { KIOTTY_NET_TLS_V12_CIPHER_SUITE_ECDHE_RSA_AES256_GCM_SHA384, "ECDHE-RSA-AES256-GCM-SHA384" },
+            { KIOTTY_NET_TLS_V12_CIPHER_SUITE_ECDHE_ECDSA_CHACHA20_POLY1305, "ECDHE-ECDSA-CHACHA20-POLY1305" },
+            { KIOTTY_NET_TLS_V12_CIPHER_SUITE_ECDHE_RSA_CHACHA20_POLY1305, "ECDHE-RSA-CHACHA20-POLY1305" }
         };
 
         const SuiteName V13_SUITES[] =
         {
-            { KIOTTY_TLS13_AES_128_GCM_SHA256, "TLS_AES_128_GCM_SHA256" },
-            { KIOTTY_TLS13_AES_256_GCM_SHA384, "TLS_AES_256_GCM_SHA384" },
-            { KIOTTY_TLS13_CHACHA20_POLY1305_SHA256, "TLS_CHACHA20_POLY1305_SHA256" },
-            { KIOTTY_TLS13_AES_128_CCM_SHA256, "TLS_AES_128_CCM_SHA256" },
-            { KIOTTY_TLS13_AES_128_CCM8_SHA256, "TLS_AES_128_CCM_8_SHA256" }
+            { KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_GCM_SHA256, "TLS_AES_128_GCM_SHA256" },
+            { KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_256_GCM_SHA384, "TLS_AES_256_GCM_SHA384" },
+            { KIOTTY_NET_TLS_V13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256, "TLS_CHACHA20_POLY1305_SHA256" },
+            { KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_CCM_SHA256, "TLS_AES_128_CCM_SHA256" },
+            { KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_CCM8_SHA256, "TLS_AES_128_CCM_8_SHA256" }
         };
 
         const size_t SUITE_LIST_BYTES = 256;
@@ -109,11 +109,11 @@ namespace kiotty::net::implementation
 
         KiottyNetCode configureProtocol(SSL_CTX* context, uint32_t versions, uint32_t v12_suites, uint32_t v13_suites)
         {
-            bool v12 = (versions & KIOTTY_TLS_V12) != 0;
-            bool v13 = (versions & KIOTTY_TLS_V13) != 0;
+            bool v12 = (versions & KIOTTY_NET_TLS_VERSION_V12) != 0;
+            bool v13 = (versions & KIOTTY_NET_TLS_VERSION_V13) != 0;
             if (!v12 && !v13)
             {
-                return KIOTTY_INVALID_ARGUMENT;
+                return KIOTTY_NET_CODE_INVALID_ARGUMENT;
             }
             int minimum = v12 ? TLS1_2_VERSION : TLS1_3_VERSION;
             int maximum = v13 ? TLS1_3_VERSION : TLS1_2_VERSION;
@@ -126,7 +126,7 @@ namespace kiotty::net::implementation
                 bool built = buildSuiteList(list, v12_suites, V12_SUITES);
                 if (!built || SSL_CTX_set_cipher_list(context, list) != 1)
                 {
-                    return KIOTTY_INVALID_ARGUMENT;
+                    return KIOTTY_NET_CODE_INVALID_ARGUMENT;
                 }
             }
             if (v13 && v13_suites != 0)
@@ -134,7 +134,7 @@ namespace kiotty::net::implementation
                 bool built = buildSuiteList(list, v13_suites, V13_SUITES);
                 if (!built || SSL_CTX_set_ciphersuites(context, list) != 1)
                 {
-                    return KIOTTY_INVALID_ARGUMENT;
+                    return KIOTTY_NET_CODE_INVALID_ARGUMENT;
                 }
             }
 
@@ -143,7 +143,7 @@ namespace kiotty::net::implementation
             SSL_CTX_set_session_cache_mode(context, SSL_SESS_CACHE_OFF);
             SSL_CTX_set_num_tickets(context, 0);
             SSL_CTX_set_max_cert_list(context, MAX_CERT_LIST_BYTES);
-            return KIOTTY_SUCCESS;
+            return KIOTTY_NET_CODE_SUCCESS;
         }
 
         int passwordCallback(char* buffer, int size, int writing, void* user)
@@ -168,11 +168,11 @@ namespace kiotty::net::implementation
         {
             if (!terminated(identity.cert_file) || !terminated(identity.key_file) || !terminated(identity.key_password))
             {
-                return KIOTTY_INVALID_ARGUMENT;
+                return KIOTTY_NET_CODE_INVALID_ARGUMENT;
             }
             if (!fileExists(identity.cert_file) || !fileExists(identity.key_file))
             {
-                return KIOTTY_TLS_CERTIFICATE_NOT_FOUND;
+                return KIOTTY_NET_CODE_TLS_CERTIFICATE_NOT_FOUND;
             }
             void* password = const_cast<char*>(identity.key_password);
             SSL_CTX_set_default_passwd_cb(context, passwordCallback);
@@ -186,35 +186,35 @@ namespace kiotty::net::implementation
             SSL_CTX_set_default_passwd_cb_userdata(context, nullptr);
             if (keyed != 1)
             {
-                return KIOTTY_TLS_CERTIFICATE_INVALID;
+                return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID;
             }
             if (SSL_CTX_check_private_key(context) != 1)
             {
-                return KIOTTY_TLS_CERTIFICATE_INVALID;
+                return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID;
             }
-            return KIOTTY_SUCCESS;
+            return KIOTTY_NET_CODE_SUCCESS;
         }
 
-        KiottyNetCode loadTrustStore(SSL_CTX* context, const char (&path)[KIOTTY_MAX_PATH_LENGTH])
+        KiottyNetCode loadTrustStore(SSL_CTX* context, const char (&path)[KIOTTY_NET_MAX_PATH_LENGTH])
         {
             if (!terminated(path))
             {
-                return KIOTTY_INVALID_ARGUMENT;
+                return KIOTTY_NET_CODE_INVALID_ARGUMENT;
             }
             if (!pathExists(path))
             {
-                return KIOTTY_TLS_CERTIFICATE_NOT_FOUND;
+                return KIOTTY_NET_CODE_TLS_CERTIFICATE_NOT_FOUND;
             }
             if (SSL_CTX_load_verify_file(context, path) == 1)
             {
-                return KIOTTY_SUCCESS;
+                return KIOTTY_NET_CODE_SUCCESS;
             }
             if (SSL_CTX_load_verify_dir(context, path) == 1)
             {
                 ERR_clear_error();
-                return KIOTTY_SUCCESS;
+                return KIOTTY_NET_CODE_SUCCESS;
             }
-            return KIOTTY_TLS_CERTIFICATE_INVALID;
+            return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID;
         }
 
         void loadDefaultTrustStore(SSL_CTX* context)
@@ -263,37 +263,37 @@ namespace kiotty::net::implementation
         close();
     }
 
-    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfig& config)
+    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& config)
     {
         close();
-        bool authenticates = config.client_auth != KIOTTY_CLIENT_AUTH_NONE;
+        bool authenticates = config.client_authentication != KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
         SSL_CTX* context = SSL_CTX_new(TLS_server_method());
         if (context == nullptr)
         {
             ERR_clear_error();
-            return KIOTTY_TLS_NOT_SUPPORTED;
+            return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
         }
         KiottyNetCode code = configureProtocol(context, config.versions, config.v12_cipher_suites, config.v13_cipher_suites);
-        if (code == KIOTTY_SUCCESS)
+        if (code == KIOTTY_NET_CODE_SUCCESS)
         {
             code = loadIdentity(context, config.identity);
         }
-        if (code == KIOTTY_SUCCESS && authenticates)
+        if (code == KIOTTY_NET_CODE_SUCCESS && authenticates)
         {
             code = loadTrustStore(context, config.trust_store_path);
         }
-        if (code != KIOTTY_SUCCESS)
+        if (code != KIOTTY_NET_CODE_SUCCESS)
         {
             ERR_clear_error();
             SSL_CTX_free(context);
             return code;
         }
         int mode = SSL_VERIFY_NONE;
-        if (config.client_auth == KIOTTY_CLIENT_AUTH_OPTIONAL)
+        if (config.client_authentication == KIOTTY_NET_CLIENT_AUTHENTICATION_OPTIONAL)
         {
             mode = SSL_VERIFY_PEER;
         }
-        if (config.client_auth == KIOTTY_CLIENT_AUTH_REQUIRED)
+        if (config.client_authentication == KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED)
         {
             mode = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
         }
@@ -301,10 +301,10 @@ namespace kiotty::net::implementation
         _context = context;
         _server = true;
         _verify_hostname = false;
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfig& config)
+    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& config)
     {
         close();
         bool verify_server = config.skip_server_verification == 0;
@@ -312,22 +312,22 @@ namespace kiotty::net::implementation
         if (context == nullptr)
         {
             ERR_clear_error();
-            return KIOTTY_TLS_NOT_SUPPORTED;
+            return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
         }
         KiottyNetCode code = configureProtocol(context, config.versions, config.v12_cipher_suites, config.v13_cipher_suites);
-        if (code == KIOTTY_SUCCESS && config.trust_store_path[0] != '\0')
+        if (code == KIOTTY_NET_CODE_SUCCESS && config.trust_store_path[0] != '\0')
         {
             code = loadTrustStore(context, config.trust_store_path);
         }
-        if (code == KIOTTY_SUCCESS && config.trust_store_path[0] == '\0')
+        if (code == KIOTTY_NET_CODE_SUCCESS && config.trust_store_path[0] == '\0')
         {
             loadDefaultTrustStore(context);
         }
-        if (code == KIOTTY_SUCCESS && config.identity.cert_file[0] != '\0')
+        if (code == KIOTTY_NET_CODE_SUCCESS && config.identity.cert_file[0] != '\0')
         {
             code = loadIdentity(context, config.identity);
         }
-        if (code != KIOTTY_SUCCESS)
+        if (code != KIOTTY_NET_CODE_SUCCESS)
         {
             ERR_clear_error();
             SSL_CTX_free(context);
@@ -338,7 +338,7 @@ namespace kiotty::net::implementation
         _context = context;
         _server = false;
         _verify_hostname = verify_server && config.skip_hostname_verification == 0;
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     void TlsProfile::close()
@@ -362,7 +362,7 @@ namespace kiotty::net::implementation
         return _verify_hostname;
     }
 
-    uint32_t TlsProfile::handshakeTimeoutMs() const
+    uint32_t TlsProfile::handshakeTimeoutMilliseconds() const
     {
         return TLS_HANDSHAKE_TIMEOUT_MS;
     }
@@ -383,7 +383,7 @@ namespace kiotty::net::implementation
         bool sized = _cipher_receive.capacity() > 0 && _cipher_send.capacity() > 0;
         if (!sized || !profile.valid())
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         close();
         if (_ssl != nullptr && SSL_get_SSL_CTX(_ssl) != profile.context())
@@ -411,7 +411,7 @@ namespace kiotty::net::implementation
                 SSL_free(_ssl);
                 _ssl = nullptr;
                 ERR_clear_error();
-                return KIOTTY_TLS_NOT_SUPPORTED;
+                return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
             }
             SSL_set_bio(_ssl, internal, internal);
         }
@@ -440,9 +440,9 @@ namespace kiotty::net::implementation
 
         _active = true;
         _failed = false;
-        _last_code = KIOTTY_SUCCESS;
+        _last_code = KIOTTY_NET_CODE_SUCCESS;
         _last_message = "";
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     void TlsEngine::close()
@@ -456,7 +456,7 @@ namespace kiotty::net::implementation
     {
         if (!_active)
         {
-            return fail(KIOTTY_INVALID_ARGUMENT, "tls: engine is not open");
+            return fail(KIOTTY_NET_CODE_INVALID_ARGUMENT, "tls: engine is not open");
         }
         if (_failed)
         {
@@ -477,7 +477,7 @@ namespace kiotty::net::implementation
         }
         if (result != 1 && reason == SSL_ERROR_ZERO_RETURN)
         {
-            return fail(KIOTTY_PEER_CLOSED, "tls: peer closed during handshake");
+            return fail(KIOTTY_NET_CODE_PEER_CLOSED, "tls: peer closed during handshake");
         }
         bool retry = reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE;
         if (result != 1 && !retry)
@@ -489,13 +489,13 @@ namespace kiotty::net::implementation
                 long verify = SSL_get_verify_result(_ssl);
                 const char* message = X509_verify_cert_error_string(verify);
                 bool hostname = verify == X509_V_ERR_HOSTNAME_MISMATCH || verify == X509_V_ERR_IP_ADDRESS_MISMATCH;
-                return fail(hostname ? KIOTTY_TLS_HOSTNAME_MISMATCH : KIOTTY_TLS_VERIFY_FAILED, message);
+                return fail(hostname ? KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH : KIOTTY_NET_CODE_TLS_VERIFY_FAILED, message);
             }
             if (library_reason == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
             {
-                return fail(KIOTTY_TLS_VERIFY_FAILED, lastErrorMessage());
+                return fail(KIOTTY_NET_CODE_TLS_VERIFY_FAILED, lastErrorMessage());
             }
-            return fail(KIOTTY_TLS_HANDSHAKE_FAILED, lastErrorMessage());
+            return fail(KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED, lastErrorMessage());
         }
         StageBase::Consumer waiting = _cipher_send.consumer();
         if (waiting.readable() > 0)
@@ -526,13 +526,13 @@ namespace kiotty::net::implementation
     {
         if (!_active || _failed)
         {
-            _last_code = KIOTTY_INVALID_ARGUMENT;
+            _last_code = KIOTTY_NET_CODE_INVALID_ARGUMENT;
             _last_message = "tls: engine is not open";
-            return DecodeResult::failure(KIOTTY_INVALID_ARGUMENT);
+            return DecodeResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         feed();
         size_t total = 0;
-        KiottyNetCode code = KIOTTY_SUCCESS;
+        KiottyNetCode code = KIOTTY_NET_CODE_SUCCESS;
         while (total < length)
         {
             size_t read = 0;
@@ -564,12 +564,12 @@ namespace kiotty::net::implementation
             }
             if (reason == SSL_ERROR_ZERO_RETURN)
             {
-                code = KIOTTY_PEER_CLOSED;
+                code = KIOTTY_NET_CODE_PEER_CLOSED;
                 _last_message = "tls: close_notify from peer";
             }
             else
             {
-                code = KIOTTY_TLS_RECORD_ERROR;
+                code = KIOTTY_NET_CODE_TLS_RECORD_ERROR;
                 _last_message = lastErrorMessage();
             }
             break;
@@ -581,7 +581,7 @@ namespace kiotty::net::implementation
             SSL_do_handshake(_ssl);
         }
         flush();
-        if (code != KIOTTY_SUCCESS && total == 0)
+        if (code != KIOTTY_NET_CODE_SUCCESS && total == 0)
         {
             _last_code = code;
             return DecodeResult::failure(code);
@@ -638,7 +638,7 @@ namespace kiotty::net::implementation
     {
         if (!_active || _failed)
         {
-            return fail(KIOTTY_INVALID_ARGUMENT, "tls: engine is not open");
+            return fail(KIOTTY_NET_CODE_INVALID_ARGUMENT, "tls: engine is not open");
         }
         if (plain.length == 0)
         {
@@ -656,7 +656,7 @@ namespace kiotty::net::implementation
         {
             return TlsStep::SEND;
         }
-        return fail(KIOTTY_TLS_RECORD_ERROR, lastErrorMessage());
+        return fail(KIOTTY_NET_CODE_TLS_RECORD_ERROR, lastErrorMessage());
     }
 
     Span<char> TlsEngine::receiveRoom()

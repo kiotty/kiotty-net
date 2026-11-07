@@ -50,7 +50,7 @@ namespace kiotty::net::implementation
         SocketCode               attach(IoEvent& event, SocketHandle socket, int32_t slot);
         SocketCode               submit(IoEvent& event, const IoAction& action, IoPayload payload);
         void                     detach(IoEvent& event);
-        Span<const IoCompletion> wait(uint32_t timeout_ms);
+        Span<const IoCompletion> wait(uint32_t timeout_milliseconds);
         SocketCode               wake();
 
     private:

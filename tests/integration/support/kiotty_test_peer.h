@@ -21,13 +21,13 @@ namespace kiotty_test
         bool     listenTcp(uint16_t port);
         bool     listenUnix(const std::string& path);
         uint16_t port() const;
-        bool     accept(uint32_t timeout_ms);
+        bool     accept(uint32_t timeout_milliseconds);
 
         bool connectTcp(uint16_t port);
         bool connectUnix(const std::string& path);
 
         bool sendAll(const void* data, size_t length);
-        bool recvExactly(void* data, size_t length, uint32_t timeout_ms);
+        bool recvExactly(void* data, size_t length, uint32_t timeout_milliseconds);
         bool shutdownWrite();
         bool reset();
         void close();

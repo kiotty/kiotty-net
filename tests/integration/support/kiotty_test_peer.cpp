@@ -99,9 +99,9 @@ namespace kiotty_test
         return _port;
     }
 
-    bool LoopbackPeer::accept(uint32_t timeout_ms)
+    bool LoopbackPeer::accept(uint32_t timeout_milliseconds)
     {
-        if (!waitReadable(_listener, timeout_ms))
+        if (!waitReadable(_listener, timeout_milliseconds))
         {
             return false;
         }
@@ -147,13 +147,13 @@ namespace kiotty_test
         return true;
     }
 
-    bool LoopbackPeer::recvExactly(void* data, size_t length, uint32_t timeout_ms)
+    bool LoopbackPeer::recvExactly(void* data, size_t length, uint32_t timeout_milliseconds)
     {
         char* bytes = static_cast<char*>(data);
         size_t done = 0;
         while (done < length)
         {
-            if (!waitReadable(_connection, timeout_ms))
+            if (!waitReadable(_connection, timeout_milliseconds))
             {
                 return false;
             }

@@ -19,17 +19,17 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.connection_stream    = sizeof(KiottyNetConnectionStream);
     layout.connection_handle_id_offset = offsetof(KiottyNetConnectionHandle, id);
     layout.connection_stream_id_offset = offsetof(KiottyNetConnectionStream, id);
-    layout.server_config        = sizeof(KiottyNetServerConfig);
-    layout.client_config        = sizeof(KiottyNetClientConfig);
-    layout.tls_server_config    = sizeof(KiottyNetTlsServerConfig);
-    layout.tls_client_config    = sizeof(KiottyNetTlsClientConfig);
+    layout.server_config        = sizeof(KiottyNetServerConfiguration);
+    layout.client_config        = sizeof(KiottyNetClientConfiguration);
+    layout.tls_server_config    = sizeof(KiottyNetTlsServerConfiguration);
+    layout.tls_client_config    = sizeof(KiottyNetTlsClientConfiguration);
     layout.context_result       = sizeof(KiottyNetContextResult);
     layout.server_result        = sizeof(KiottyNetServerResult);
     layout.event_client_result  = sizeof(KiottyNetEventClientResult);
     layout.stream_client_result = sizeof(KiottyNetStreamClientResult);
     layout.transition           = sizeof(KiottyNetTransition);
     layout.rule                 = sizeof(KiottyNetRule);
-    layout.last_code            = KIOTTY_OUT_OF_MEMORY;
-    layout.last_action_type     = KIOTTY_ACTION_CLOSE;
+    layout.last_code            = KIOTTY_NET_CODE_OUT_OF_MEMORY;
+    layout.last_action_type     = KIOTTY_NET_ACTION_TYPE_CLOSE;
     return layout;
 }

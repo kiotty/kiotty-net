@@ -23,10 +23,10 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.connection_stream, sizeof(KiottyNetConnectionStream));
     EXPECT_EQ(c.connection_handle_id_offset, offsetof(KiottyNetConnectionHandle, id));
     EXPECT_EQ(c.connection_stream_id_offset, offsetof(KiottyNetConnectionStream, id));
-    EXPECT_EQ(c.server_config, sizeof(KiottyNetServerConfig));
-    EXPECT_EQ(c.client_config, sizeof(KiottyNetClientConfig));
-    EXPECT_EQ(c.tls_server_config, sizeof(KiottyNetTlsServerConfig));
-    EXPECT_EQ(c.tls_client_config, sizeof(KiottyNetTlsClientConfig));
+    EXPECT_EQ(c.server_config, sizeof(KiottyNetServerConfiguration));
+    EXPECT_EQ(c.client_config, sizeof(KiottyNetClientConfiguration));
+    EXPECT_EQ(c.tls_server_config, sizeof(KiottyNetTlsServerConfiguration));
+    EXPECT_EQ(c.tls_client_config, sizeof(KiottyNetTlsClientConfiguration));
     EXPECT_EQ(c.context_result, sizeof(KiottyNetContextResult));
     EXPECT_EQ(c.server_result, sizeof(KiottyNetServerResult));
     EXPECT_EQ(c.event_client_result, sizeof(KiottyNetEventClientResult));
@@ -38,16 +38,16 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
 TEST(Headers, CAndCppSeeTheSameEnumeratorValues)
 {
     KiottyTestHeaderLayout c = kiottyTestHeaderLayoutFromC();
-    EXPECT_EQ(c.last_code, static_cast<int>(KIOTTY_OUT_OF_MEMORY));
-    EXPECT_EQ(c.last_action_type, static_cast<int>(KIOTTY_ACTION_CLOSE));
+    EXPECT_EQ(c.last_code, static_cast<int>(KIOTTY_NET_CODE_OUT_OF_MEMORY));
+    EXPECT_EQ(c.last_action_type, static_cast<int>(KIOTTY_NET_ACTION_TYPE_CLOSE));
 }
 
 TEST(Headers, TransitionCarriesAConnectionAction)
 {
     KiottyNetTransition transition = {};
     KiottyNetConnectionAction& action = transition.entry_action;
-    action.type = KIOTTY_ACTION_WRITE;
-    EXPECT_EQ(transition.entry_action.type, KIOTTY_ACTION_WRITE);
+    action.type = KIOTTY_NET_ACTION_TYPE_WRITE;
+    EXPECT_EQ(transition.entry_action.type, KIOTTY_NET_ACTION_TYPE_WRITE);
 }
 
 TEST(Headers, ConnectionHandleAndStreamAreDistinctTypesWithTheSameFields)

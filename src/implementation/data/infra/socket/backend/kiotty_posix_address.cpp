@@ -33,7 +33,7 @@ namespace kiotty::net::implementation
 
     int familyOf(KiottyNetTransport transport)
     {
-        if (transport == KIOTTY_PIPE) { return AF_UNIX; }
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return AF_UNIX; }
         return AF_INET;
     }
 
@@ -59,7 +59,7 @@ namespace kiotty::net::implementation
 
     AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, AddressRole role)
     {
-        if (transport == KIOTTY_PIPE) { return unixAddressOf(endpoint.host); }
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(endpoint.host); }
         return inetAddressOf(endpoint, role);
     }
 

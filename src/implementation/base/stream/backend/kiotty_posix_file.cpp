@@ -104,35 +104,35 @@ namespace kiotty::net::implementation
         close();
         if (path == nullptr)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        size_t length = strnlen(path, KIOTTY_MAX_PATH_LENGTH);
-        if (length == 0 || length == KIOTTY_MAX_PATH_LENGTH)
+        size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
+        if (length == 0 || length == KIOTTY_NET_MAX_PATH_LENGTH)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
         if (descriptor < 0)
         {
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         struct stat info;
         bool regular = ::fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode);
         if (!regular)
         {
             ::close(descriptor);
-            return KIOTTY_INVALID_ARGUMENT;
+            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
         _handle = descriptor;
         _size = static_cast<uint64_t>(info.st_size);
-        return KIOTTY_SUCCESS;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     FileReadResult InputFile::read(uint64_t offset, char* buffer, size_t length)
     {
         if (!valid())
         {
-            return FileReadResult::failure(KIOTTY_INVALID_ARGUMENT);
+            return FileReadResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         size_t done = 0;
         while (done < length)
@@ -145,7 +145,7 @@ namespace kiotty::net::implementation
             }
             if (got < 0)
             {
-                return FileReadResult::failure(KIOTTY_INVALID_ARGUMENT);
+                return FileReadResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
             }
             if (got == 0)
             {

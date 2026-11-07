@@ -8,13 +8,13 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        IoAction blank(IoActionKind kind, IoPurpose purpose, uint32_t timeout_ms)
+        IoAction blank(IoActionKind kind, IoPurpose purpose, uint32_t timeout_milliseconds)
         {
             IoAction action;
             std::memset(&action, 0, sizeof(action));
             action.kind = kind;
             action.purpose = purpose;
-            action.timeout_ms = timeout_ms;
+            action.timeout_milliseconds = timeout_milliseconds;
             return action;
         }
 
@@ -33,21 +33,21 @@ namespace kiotty::net::implementation
         return blank(IoActionKind::NONE, IoPurpose::USER, 0);
     }
 
-    IoAction IoAction::hold(uint32_t timeout_ms)
+    IoAction IoAction::hold(uint32_t timeout_milliseconds)
     {
-        return blank(IoActionKind::HOLD, IoPurpose::USER, timeout_ms);
+        return blank(IoActionKind::HOLD, IoPurpose::USER, timeout_milliseconds);
     }
 
-    IoAction IoAction::read(IoPurpose purpose, uint32_t timeout_ms, size_t exact)
+    IoAction IoAction::read(IoPurpose purpose, uint32_t timeout_milliseconds, size_t exact)
     {
-        IoAction action = blank(IoActionKind::READ, purpose, timeout_ms);
+        IoAction action = blank(IoActionKind::READ, purpose, timeout_milliseconds);
         action.as.read.exact = exact;
         return action;
     }
 
-    IoAction IoAction::readUntil(uint32_t timeout_ms, KiottyNetSpan delimiter, size_t max)
+    IoAction IoAction::readUntil(uint32_t timeout_milliseconds, KiottyNetSpan delimiter, size_t max)
     {
-        IoAction action = blank(IoActionKind::READ_UNTIL, IoPurpose::USER, timeout_ms);
+        IoAction action = blank(IoActionKind::READ_UNTIL, IoPurpose::USER, timeout_milliseconds);
         action.as.read_until.max = max;
         if (!fitsDelimiter(delimiter))
         {
@@ -58,9 +58,9 @@ namespace kiotty::net::implementation
         return action;
     }
 
-    IoAction IoAction::write(IoPurpose purpose, uint32_t timeout_ms, size_t length)
+    IoAction IoAction::write(IoPurpose purpose, uint32_t timeout_milliseconds, size_t length)
     {
-        IoAction action = blank(IoActionKind::WRITE, purpose, timeout_ms);
+        IoAction action = blank(IoActionKind::WRITE, purpose, timeout_milliseconds);
         action.as.write.length = length;
         return action;
     }
@@ -86,17 +86,17 @@ namespace kiotty::net::implementation
     {
         switch (action.type)
         {
-        case KIOTTY_ACTION_HOLD:
-            return hold(action.timeout_ms);
-        case KIOTTY_ACTION_READ:
-            return read(IoPurpose::USER, action.timeout_ms, action.as.read.exact);
-        case KIOTTY_ACTION_READ_UNTIL:
-            return readUntil(action.timeout_ms, action.as.read_until.delimiter, action.as.read_until.max);
-        case KIOTTY_ACTION_WRITE:
-            return write(IoPurpose::USER, action.timeout_ms, action.as.write.data.length);
-        case KIOTTY_ACTION_START_WORK:
+        case KIOTTY_NET_ACTION_TYPE_HOLD:
+            return hold(action.timeout_milliseconds);
+        case KIOTTY_NET_ACTION_TYPE_READ:
+            return read(IoPurpose::USER, action.timeout_milliseconds, action.as.read.exact);
+        case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
+            return readUntil(action.timeout_milliseconds, action.as.read_until.delimiter, action.as.read_until.max);
+        case KIOTTY_NET_ACTION_TYPE_WRITE:
+            return write(IoPurpose::USER, action.timeout_milliseconds, action.as.write.data.length);
+        case KIOTTY_NET_ACTION_TYPE_START_WORK:
             return startWork();
-        case KIOTTY_ACTION_CLOSE:
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
             return close(action.as.close.reason);
         }
         return none();

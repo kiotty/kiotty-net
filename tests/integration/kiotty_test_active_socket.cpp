@@ -22,7 +22,7 @@ namespace
     {
         KiottyNetEndpoint endpoint;
         std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_TCP;
+        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
         kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), host);
         endpoint.port = port;
         return endpoint;
@@ -30,7 +30,7 @@ namespace
 
     ActiveSocket openTcp()
     {
-        ActiveSocketResult opened = ActiveSocket::open(KIOTTY_TCP);
+        ActiveSocketResult opened = ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
         EXPECT_TRUE(opened);
         return std::move(opened.value);
     }
@@ -91,7 +91,7 @@ TEST(ActiveSocket, ConnectToClosedPortReturnsRefusedBeforeTimeout)
     KiottyNetEndpoint endpoint = tcpEndpoint("127.0.0.1", port);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     EXPECT_EQ(socket.connect(endpoint, 5000), SocketCode::REFUSED);
-    EXPECT_LT(kiotty_test::elapsedMs(started), 5000u);
+    EXPECT_LT(kiotty_test::elapsedMilliseconds(started), 5000u);
 }
 
 TEST(ActiveSocket, ConnectTimeoutExpiresOnUnroutableAddress)
@@ -100,7 +100,7 @@ TEST(ActiveSocket, ConnectTimeoutExpiresOnUnroutableAddress)
     KiottyNetEndpoint endpoint = tcpEndpoint("10.255.255.1", 9);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     SocketCode code = socket.connect(endpoint, 200);
-    uint32_t elapsed = kiotty_test::elapsedMs(started);
+    uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
     if (code != SocketCode::TIMEOUT)
     {
         GTEST_SKIP() << "no unroutable path on this host, code " << static_cast<int>(code);
@@ -120,7 +120,7 @@ TEST(ActiveSocket, SetNoDelayOnTcpIsReflectedByGetsockopt)
 
 TEST(ActiveSocket, SetNoDelayOnUnixDomainSocketReturnsSuccessAndDoesNothing)
 {
-    ActiveSocketResult opened = ActiveSocket::open(KIOTTY_PIPE);
+    ActiveSocketResult opened = ActiveSocket::open(KIOTTY_NET_TRANSPORT_PIPE);
     ASSERT_TRUE(opened);
     EXPECT_EQ(opened.value.setNoDelay(true), SocketCode::SUCCESS);
     EXPECT_EQ(opened.value.setNoDelay(false), SocketCode::SUCCESS);
