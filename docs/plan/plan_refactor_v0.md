@@ -171,6 +171,35 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+7단계에서 한 것 (2026-11-07):
+
+- 옛 파일: `base/` 는 6단계에서 이미 없어졌다. `src/kiotty_net_{base,http,websocket}.cpp` (빈 파일) 와 `single_header/kiotty_net.hpp` 는 공개 API 의 자리라 둔다.
+- 검사 도구: `tools/check_rules.py` (수칙 4.1 의 줄, 파일, 함수, 중첩, 인자, public 메서드 수, 2.8 default, 2.3 금지 함수, 4.9 주석, 4.14 매크로를 어림으로 본다) 와 `tools/wrap_parameters.py` (긴 선언을 인자 한 줄씩). `src/implementation` 은 MACRO (DV10) 말고 결과가 없다.
+- TLS: `kiotty_openssl_tls.cpp` (835 줄) 를 `openssl_context / openssl_session / openssl_tls_engine / openssl_tls_pipe / openssl_tls_profile` 로 나눴다. `TlsEngine` public 은 `open (profile, hostname, TlsCapacity) / close / handshake / decode (StageBase&, Span<char>) / encode / status / stages`. `active + failure` 는 `TlsStatus status()`, `cipherReceive + cipherSend` 는 `TlsStages stages()`, `limit` 은 `open` 안으로. 시험용 `debugKeyUpdate / debugShutdown` 은 `TlsPipe::requestKeyUpdate / sendCloseNotify`. `TlsProfile` 의 `server / verifyHostname / handshakeTimeoutMilliseconds` 는 `TlsSettings settings()`.
+- event: epoll (596 줄), iocp (475 줄) listener 를 `*_event_state.h`, `*_event_submit.cpp`, `*_event_wait.cpp`, `*_event_listener.cpp` 로 나눴다. iocp `dequeue` 와 epoll `handle` 의 출력 인자를 없앴다. 초기화 안 된 지역 변수 (`struct stat`, `sigset_t`, `fd_set`, `LARGE_INTEGER` 등) 를 `{}` 로. AcceptEx 의 `128 + 16` 은 이름 붙은 상수.
+- `WorkContext` 를 thread 로 나눴다: IO thread 쪽 `WorkContext (request / abandon / start / state / takeOutcome / reset)`, work thread 쪽 `WorkReporter (verify / finish)`. `requested / finished / working` 은 `State state()` 하나로.
+- 길이 없는 포인터 짝을 `Span<char>` 로: `KiottyNetConnectionOwner::readStream`, `ConnectionStream::read`, `InputFile::read`, `StageBase` 생성자.
+- 100 자 넘는 줄: `src/implementation` 182 줄, `include/` 267 줄을 모두 접었다.
+- `docs/deviations.md` 에 DV10 (Windows 헤더 매크로, `KIOTTY_NET_HAS_EVENT_BACKEND`), DV11 (public 메서드 세는 법), DV12 (`const char*` 문자열), DV13 (공개 API 의 bool 인자, 약어 인자, 긴 헤더, wrapper 의 인자와 메서드 수) 를 더했다.
+- build skill 의 경로와 WSL 배포판 이름을 이 머신에 맞췄다. MSVC 가 14.52 로 올라 옛 `build/msvc*` 캐시는 지우고 다시 configure 해야 한다.
+- 체크리스트 15 항목: 1 (DV1), 2 (`ReusablePoolBase::get` 이 generation 을 본다), 3 / 10 (`parse*` 는 아직 없다. HTTP 단계에서), 4 (`const char*` 는 DV12), 5, 6 (외부 길이는 `writeFile` 의 범위 검사가 넘칠 수 없게 쓴다), 8, 9, 11, 12, 13, 14, 15 (`SocketCode` 는 DV4) 를 보았다. 7 은 새 struct (`TlsStatus`, `TlsFailure`, `TlsCapacity`, `TlsSettings`, event state) 에 `static_assert` 를 달았다. 플랫폼마다 크기가 다른 옛 struct (`Address`, `IoEvent`) 는 달지 않았다.
+- 남은 것 (다음 사이클로): `kiotty_receive_flow.cpp` 의 `std::memcmp` (Span 비교로), Apple 쪽 `sendRange` 의 4096 바이트 stack buffer (수칙 1.7), TLS engine 내부의 수칙 4.11 (멤버를 직접 쓰는 `drain / feed / flush`), `ConnectionState` 복사 비용 (IoLoop 때).
+- `LazyReusablePool` 은 7단계 도중 `std::vector<T>` 위로 바꿨다 (commit `ada2830`): `initialize(LazyReusablePoolConfiguration)` 가 객체를 모두 만들고, `acquire` 는 할당하지 않는다.
+- `.claude/worktrees/` 를 `.gitignore` 에 넣었다.
+- 확인 (`tools/check_rules.py` 는 MACRO 10 건만, 모두 DV10):
+
+| 빌드 | 결과 |
+|---|---|
+| MSVC Debug TLS OFF | 307 통과 |
+| MSVC Debug TLS ON | 307 통과 |
+| WSL gcc Debug TLS ON | 308 통과 |
+| WSL gcc Debug TLS OFF | 308 통과 |
+| WSL clang Debug TLS ON | 308 통과 |
+| WSL clang Debug TLS OFF | 308 통과 |
+| WSL clang Release TLS ON | 307 통과 (death test 는 NDEBUG 에서 빠진다) |
+| WSL clang address,undefined TLS ON | 308 통과 |
+| WSL clang thread TLS ON | 308 통과 |
+
 6단계에서 한 것 (2026-11-07):
 
 - `base/connection` 을 `data/repository/connection/`, `base/stream` 을 `data/repository/stream/`, `base/context/kiotty_owner.*` 를 `context/` 로 옮겼다 (`git mv`). 빈 `base/io_loop/kiotty_io_loop.h` 와 `base/` 를 지웠다. include guard 는 `#pragma once` 로.
@@ -236,5 +265,5 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 4 | 끝 | 아래 "4단계에서 한 것" |
 | 5 | 끝 | 아래 "5단계에서 한 것". 남은 것은 7단계 |
 | 6 | 끝 | 아래 "6단계에서 한 것". 100 자 줄은 7단계 |
-| 7 | 시작 안 함 | |
+| 7 | 끝 (push 와 CI 는 남음) | 위 "7단계에서 한 것" |
 | 8 | 시작 안 함 | |

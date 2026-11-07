@@ -22,9 +22,11 @@ namespace kiotty::net::implementation
     TransferResult send(const ActiveSocket& socket, Span<const char> data)
     {
         if (!socket.valid()) { return TransferResult::failure(SocketCode::INVALID_ARGUMENT); }
+        const int descriptor = descriptorOf(socket.handle());
+        const int flags = sendFlags();
         for (;;)
         {
-            const ssize_t sent = ::send(descriptorOf(socket.handle()), data.data, data.length, sendFlags());
+            const ssize_t sent = ::send(descriptor, data.data, data.length, flags);
             if (sent >= 0) { return TransferResult::success(static_cast<size_t>(sent)); }
             if (errno != EINTR) { return TransferResult::failure(lastSocketCode()); }
         }
@@ -65,7 +67,9 @@ namespace kiotty::net::implementation
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
         if (socket.transport() == KIOTTY_NET_TRANSPORT_PIPE) { return SocketCode::SUCCESS; }
         const int value = no_delay == NoDelay::ENABLED ? 1 : 0;
-        const int set = ::setsockopt(descriptorOf(socket.handle()), IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value));
+        const int descriptor = descriptorOf(socket.handle());
+        const int set =
+            ::setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value));
         if (set < 0) { return lastSocketCode(); }
         return SocketCode::SUCCESS;
     }
@@ -75,11 +79,13 @@ namespace kiotty::net::implementation
         TransferResult receiveWith(const ActiveSocket& socket, Span<char> buffer, int flags)
         {
             if (!socket.valid()) { return TransferResult::failure(SocketCode::INVALID_ARGUMENT); }
+            const int descriptor = descriptorOf(socket.handle());
             for (;;)
             {
-                const ssize_t received = ::recv(descriptorOf(socket.handle()), buffer.data, buffer.length, flags);
+                const ssize_t received = ::recv(descriptor, buffer.data, buffer.length, flags);
                 if (received > 0) { return TransferResult::success(static_cast<size_t>(received)); }
-                if (received == 0 && buffer.length > 0) { return TransferResult::failure(SocketCode::CLOSED); }
+                const bool is_closed = received == 0 && buffer.length > 0;
+                if (is_closed) { return TransferResult::failure(SocketCode::CLOSED); }
                 if (received == 0) { return TransferResult::success(static_cast<size_t>(0)); }
                 if (errno != EINTR) { return TransferResult::failure(lastSocketCode()); }
             }

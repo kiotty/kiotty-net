@@ -39,8 +39,10 @@ namespace kiotty::net::implementation
         uint64_t remaining = timeout_milliseconds;
         while (remaining > 0)
         {
-            const uint64_t slice = remaining < MAX_SLICE_MILLISECONDS ? remaining : MAX_SLICE_MILLISECONDS;
-            const std::chrono::milliseconds wait(static_cast<std::chrono::milliseconds::rep>(slice));
+            using Count = std::chrono::milliseconds::rep;
+            const bool is_short = remaining < MAX_SLICE_MILLISECONDS;
+            const uint64_t slice = is_short ? remaining : MAX_SLICE_MILLISECONDS;
+            const std::chrono::milliseconds wait(static_cast<Count>(slice));
             const bool satisfied = _condition.wait_for(lock, wait, ready);
             if (satisfied) { return true; }
             remaining -= slice;

@@ -4,6 +4,7 @@
 #include "data/infra/socket/kiotty_socket_transfer.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_result.h"
+#include "core/kiotty_span.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
@@ -29,7 +30,7 @@ namespace kiotty::net::implementation
         InputFile& operator=(const InputFile&) = delete;
 
         KiottyNetCode  open(const char* path);
-        FileReadResult read(uint64_t offset, char* buffer, size_t length);
+        FileReadResult read(uint64_t offset, Span<char> target);
         void           close();
 
         bool     valid() const;
@@ -41,5 +42,6 @@ namespace kiotty::net::implementation
         uint64_t _size;
     };
 
-    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range, const Deadline& deadline);
+    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range,
+        const Deadline& deadline);
 }

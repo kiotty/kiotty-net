@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/kiotty_span.h"
+
 #include <cstddef>
 
 namespace kiotty::net::implementation
@@ -45,7 +47,7 @@ namespace kiotty::net::implementation
         void     limit(size_t capacity);
 
     protected:
-        StageBase(char* buffer, size_t maximum);
+        explicit StageBase(Span<char> storage);
         ~StageBase() = default;
 
     private:
@@ -69,7 +71,7 @@ namespace kiotty::net::implementation
         static constexpr size_t MAXIMUM = N;
 
         Stage()
-            : StageBase(this->bytes, N)
+            : StageBase(Span<char>{ this->bytes, N })
         {
         }
     };

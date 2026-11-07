@@ -35,13 +35,15 @@ namespace kiotty::net::implementation
     {
         AdoptResult adoptRead(const KiottyNetConnectionAction& returned)
         {
-            if (returned.as.read.exact == 0) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            const bool is_empty = returned.as.read.exact == 0;
+            if (is_empty) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             return AdoptResult::success(IoAction::from(returned));
         }
 
         AdoptResult adoptReadUntil(const KiottyNetConnectionAction& returned)
         {
-            const bool valid = isValidDelimiter(returned.as.read_until.delimiter, returned.as.read_until.max);
+            const KiottyNetSpan delimiter = returned.as.read_until.delimiter;
+            const bool valid = isValidDelimiter(delimiter, returned.as.read_until.max);
             if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             return AdoptResult::success(IoAction::from(returned));
         }

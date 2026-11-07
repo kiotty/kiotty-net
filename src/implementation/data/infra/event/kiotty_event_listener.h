@@ -27,7 +27,10 @@ namespace kiotty::net::implementation
 {
     struct AcceptBuffer
     {
-        static const size_t ADDRESS_LENGTH = 128 + 16;
+        static constexpr size_t SOCKET_ADDRESS_BYTES = 128;
+        static constexpr size_t ACCEPT_ADDRESS_PADDING_BYTES = 16;
+        static constexpr size_t ADDRESS_LENGTH =
+            SOCKET_ADDRESS_BYTES + ACCEPT_ADDRESS_PADDING_BYTES;
 
         SocketHandle socket;
         char         addresses[2 * ADDRESS_LENGTH];

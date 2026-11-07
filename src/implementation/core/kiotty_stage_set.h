@@ -18,7 +18,9 @@ namespace kiotty::net::implementation
     };
 
     template <size_t Receive, size_t Send, size_t Notify>
-    void StageSet<Receive, Send, Notify>::limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity)
+    void StageSet<Receive, Send, Notify>::limit(size_t receive_capacity,
+                                                size_t send_capacity,
+                                                size_t notify_capacity)
     {
         receive.limit(receive_capacity);
         send.limit(send_capacity);

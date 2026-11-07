@@ -13,6 +13,15 @@ namespace kiotty::net::implementation
 
     bool tlsSupported();
 
+    struct TlsSettings
+    {
+        uint32_t handshake_timeout_milliseconds;
+        bool     is_server;
+        bool     has_hostname_verification;
+    };
+
+    static_assert(sizeof(TlsSettings) == 8, "TlsSettings: unexpected padding");
+
     class TlsProfile
     {
     public:
@@ -27,14 +36,11 @@ namespace kiotty::net::implementation
         void          close();
 
         bool        valid() const;
-        bool        server() const;
-        bool        verifyHostname() const;
-        uint32_t    handshakeTimeoutMilliseconds() const;
+        TlsSettings settings() const;
         ssl_ctx_st* context() const;
 
     private:
         ssl_ctx_st* _context;
-        bool        _server;
-        bool        _verify_hostname;
+        TlsSettings _settings;
     };
 }

@@ -14,7 +14,8 @@ namespace kiotty::net::implementation
     namespace
     {
         SocketCode pendingError(SOCKET socket);
-        SocketCode startConnect(SOCKET socket, const Address& address, uint32_t timeout_milliseconds);
+        SocketCode startConnect(SOCKET socket, const Address& address,
+            uint32_t timeout_milliseconds);
     }
 
     ActiveSocket::ActiveSocket()
@@ -65,12 +66,14 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
-    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds)
+    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint,
+        uint32_t timeout_milliseconds)
     {
         if (!valid()) { return SocketCode::INVALID_ARGUMENT; }
         const AddressResult resolved = resolveAddress(_transport, endpoint, AddressRole::ACTIVE);
         if (!resolved) { return resolved.code; }
-        const SocketCode connected = startConnect(socketOf(_handle), resolved.value, timeout_milliseconds);
+        const SOCKET socket = socketOf(_handle);
+        const SocketCode connected = startConnect(socket, resolved.value, timeout_milliseconds);
         if (connected != SocketCode::SUCCESS) { return connected; }
         _peer = infoOf(resolved.value.storage);
         return SocketCode::SUCCESS;
@@ -109,12 +112,14 @@ namespace kiotty::net::implementation
         {
             int error = 0;
             int length = sizeof(error);
-            const int fetched = ::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length);
+            char* const value = reinterpret_cast<char*>(&error);
+            const int fetched = ::getsockopt(socket, SOL_SOCKET, SO_ERROR, value, &length);
             if (fetched != 0) { return lastSocketCode(); }
             return toSocketCode(error);
         }
 
-        SocketCode startConnect(SOCKET socket, const Address& address, uint32_t timeout_milliseconds)
+        SocketCode startConnect(SOCKET socket, const Address& address,
+            uint32_t timeout_milliseconds)
         {
             const sockaddr* target = reinterpret_cast<const sockaddr*>(&address.storage);
             const int connected = ::connect(socket, target, address.length);

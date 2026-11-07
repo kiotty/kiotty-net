@@ -47,9 +47,11 @@ namespace kiotty::net::implementation
     int                     clampLength(size_t length);
     SOCKET                  createSocket(KiottyNetTransport transport);
     SocketCode              prepareSocket(SOCKET socket);
-    AddressResult           resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, AddressRole role);
+    AddressResult           resolveAddress(KiottyNetTransport transport,
+                                const KiottyNetEndpoint& endpoint, AddressRole role);
     KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage);
-    SocketCode              waitReady(SOCKET socket, WaitDirection direction, uint32_t timeout_milliseconds);
+    SocketCode              waitReady(SOCKET socket, WaitDirection direction,
+                                uint32_t timeout_milliseconds);
 }
 
 #endif

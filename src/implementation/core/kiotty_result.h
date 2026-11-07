@@ -10,9 +10,11 @@ namespace kiotty::net::implementation
     template <typename Value, typename Code>
     struct [[nodiscard]] Result
     {
-        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value, "Result: Code must be an enum or an integral type");
+        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value,
+                      "Result: Code must be an enum or an integral type");
         static_assert(!std::is_same<Code, bool>::value, "Result: Code must not be bool");
-        static_assert(std::is_default_constructible<Value>::value, "Result: a failed result holds a default Value");
+        static_assert(std::is_default_constructible<Value>::value,
+                      "Result: a failed result holds a default Value");
 
         Code  code;
         Value value;
@@ -26,7 +28,8 @@ namespace kiotty::net::implementation
     template <typename Value, typename Code>
     class [[nodiscard]] Result<Value&, Code>
     {
-        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value, "Result: Code must be an enum or an integral type");
+        static_assert(std::is_enum<Code>::value || std::is_integral<Code>::value,
+                      "Result: Code must be an enum or an integral type");
         static_assert(!std::is_same<Code, bool>::value, "Result: Code must not be bool");
 
     public:

@@ -4,12 +4,18 @@
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        bool isReadyToWork(WorkContext::State state, const IoEvent& read, const IoEvent& write);
+    }
+
     WorkFlow::WorkFlow(const ConnectionParts& parts)
         : _receive(parts.receive)
         , _send(parts.send)
         , _tls(parts.tls)
         , _socket(parts.socket)
         , _work(parts.work)
+        , _reporter(parts.work)
         , _read_event(parts.read_event)
         , _write_event(parts.write_event)
         , _phase(parts.phase)
@@ -18,7 +24,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode WorkFlow::verify(int32_t generation) const
     {
-        return _work.verify(generation);
+        return _reporter.verify(generation);
     }
 
     ConnectionStream WorkFlow::stream()
@@ -28,12 +34,13 @@ namespace kiotty::net::implementation
 
     KiottyNetCode WorkFlow::closeStream(int32_t generation, const KiottyNetConnectionAction& then)
     {
-        const KiottyNetCode verified = _work.verify(generation);
+        const KiottyNetCode verified = _reporter.verify(generation);
         if (verified != KIOTTY_NET_CODE_SUCCESS) { return verified; }
-        if (then.type == KIOTTY_NET_ACTION_TYPE_START_WORK) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const bool starts_work = then.type == KIOTTY_NET_ACTION_TYPE_START_WORK;
+        if (starts_work) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const AdoptResult outcome = adoptAction(then, _send);
         if (!outcome) { return outcome.code; }
-        _work.finish(outcome.value);
+        _reporter.finish(outcome.value);
         const Phase phase = _phase.load();
         if (phase == Phase::CLOSING)
         {
@@ -44,22 +51,31 @@ namespace kiotty::net::implementation
 
     IoAction WorkFlow::takeOutcome()
     {
-        return _work.onFinished();
+        return _work.takeOutcome();
     }
 
     bool WorkFlow::isReady() const
     {
-        const bool requested = _work.requested();
-        return requested && !_read_event.pending && !_write_event.pending;
+        return isReadyToWork(_work.state(), _read_event, _write_event);
     }
 
     bool WorkFlow::isFinished() const
     {
-        return _work.finished();
+        return _work.state() == WorkContext::State::DONE;
     }
 
     bool WorkFlow::isWorking() const
     {
-        return _work.working();
+        return _work.state() != WorkContext::State::IDLE;
+    }
+
+    namespace
+    {
+        bool isReadyToWork(WorkContext::State state, const IoEvent& read, const IoEvent& write)
+        {
+            const bool requested = state == WorkContext::State::REQUESTED;
+            const bool events_idle = !read.pending && !write.pending;
+            return requested && events_idle;
+        }
     }
 }

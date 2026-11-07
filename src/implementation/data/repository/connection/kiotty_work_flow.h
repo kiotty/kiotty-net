@@ -6,6 +6,7 @@
 #include "data/infra/tls/kiotty_tls_engine.h"
 #include "data/repository/connection/kiotty_connection_parts.h"
 #include "data/repository/connection/kiotty_work_context.h"
+#include "data/repository/connection/kiotty_work_reporter.h"
 #include "data/repository/stream/kiotty_connection_stream.h"
 #include "domain/entity/kiotty_io_action.h"
 #include "domain/entity/kiotty_phase.h"
@@ -37,6 +38,7 @@ namespace kiotty::net::implementation
         TlsEngine&                _tls;
         ActiveSocket&             _socket;
         WorkContext&              _work;
+        WorkReporter              _reporter;
         const IoEvent&            _read_event;
         const IoEvent&            _write_event;
         const std::atomic<Phase>& _phase;

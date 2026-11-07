@@ -24,42 +24,44 @@ namespace kiotty::net::implementation
         , _cipher_send()
         , _ssl(nullptr)
         , _network(nullptr)
-        , _failure{ "", KIOTTY_NET_CODE_SUCCESS }
-        , _active(false)
+        , _status{ TlsFailure{ "", KIOTTY_NET_CODE_SUCCESS }, false }
         , _failed(false)
     {
     }
 
-    bool TlsEngine::active() const
+    DecodeResult TlsEngine::decode(StageBase& plain)
     {
-        return _active;
+        StageBase::Provider provider = plain.provider();
+        const size_t room = provider.writable();
+        char* target = provider.prepare(room);
+        const DecodeResult decoded = decode(Span<char>{ target, room });
+        if (decoded)
+        {
+            provider.commit(decoded.value);
+        }
+        return decoded;
     }
 
-    void TlsEngine::limit(size_t receive_capacity, size_t send_capacity)
+    TlsStatus TlsEngine::status() const
     {
-        _cipher_receive.limit(receive_capacity);
-        _cipher_send.limit(tlsCipherCapacity(send_capacity));
+        return _status;
     }
 
-    StageBase& TlsEngine::cipherReceive()
+    TlsStages TlsEngine::stages()
     {
-        return _cipher_receive;
+        return TlsStages{ _cipher_receive, _cipher_send };
     }
 
-    StageBase& TlsEngine::cipherSend()
+    void TlsEngine::limit(TlsCapacity capacity)
     {
-        return _cipher_send;
-    }
-
-    TlsFailure TlsEngine::failure() const
-    {
-        return _failure;
+        _cipher_receive.limit(capacity.receive);
+        _cipher_send.limit(tlsCipherCapacity(capacity.send));
     }
 
     TlsStep TlsEngine::fail(KiottyNetCode code, const char* message)
     {
         _failed = true;
-        _failure = TlsFailure{ message, code };
+        _status.failure = TlsFailure{ message, code };
         return TlsStep::FAILED;
     }
 }

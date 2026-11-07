@@ -67,8 +67,12 @@ namespace kiotty::net::implementation
     template <typename Source>
     inline bool Span<T>::copyFrom(Span<Source> source) const
     {
-        static_assert(std::is_same<typename std::remove_const<T>::type, typename std::remove_const<Source>::type>::value, "Span::copyFrom: element types must match");
-        static_assert(std::is_trivially_copyable<T>::value, "Span::copyFrom: elements must be trivially copyable");
+        using Target = typename std::remove_const<T>::type;
+        using Origin = typename std::remove_const<Source>::type;
+        static_assert(std::is_same<Target, Origin>::value,
+                      "Span::copyFrom: element types must match");
+        static_assert(std::is_trivially_copyable<T>::value,
+                      "Span::copyFrom: elements must be trivially copyable");
         if (source.length > length) { return false; }
         if (source.length == 0) { return true; }
         std::memcpy(data, source.data, source.length * sizeof(T));

@@ -16,13 +16,6 @@ namespace kiotty::net::implementation
         return false;
     }
 
-    TlsProfile::TlsProfile()
-        : _context(nullptr)
-        , _server(false)
-        , _verify_hostname(false)
-    {
-    }
-
     TlsProfile::~TlsProfile()
     {
     }
@@ -43,45 +36,22 @@ namespace kiotty::net::implementation
     {
     }
 
-    bool TlsProfile::valid() const
-    {
-        return false;
-    }
-
-    bool TlsProfile::server() const
-    {
-        return _server;
-    }
-
-    bool TlsProfile::verifyHostname() const
-    {
-        return _verify_hostname;
-    }
-
-    uint32_t TlsProfile::handshakeTimeoutMilliseconds() const
-    {
-        return TLS_HANDSHAKE_TIMEOUT_MILLISECONDS;
-    }
-
-    ssl_ctx_st* TlsProfile::context() const
-    {
-        return _context;
-    }
-
     TlsEngine::~TlsEngine()
     {
     }
 
-    KiottyNetCode TlsEngine::open(TlsProfile& profile, const char* hostname)
+    KiottyNetCode TlsEngine::open(const TlsProfile& profile, const char* hostname,
+                                  TlsCapacity capacity)
     {
         (void)profile;
         (void)hostname;
+        (void)capacity;
         return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 
     void TlsEngine::close()
     {
-        _active = false;
+        _status.is_active = false;
     }
 
     TlsStep TlsEngine::handshake()
@@ -89,16 +59,9 @@ namespace kiotty::net::implementation
         return fail(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED, NOT_SUPPORTED_MESSAGE);
     }
 
-    DecodeResult TlsEngine::decode(StageBase& plain)
+    DecodeResult TlsEngine::decode(Span<char> plain)
     {
         (void)plain;
-        return DecodeResult::failure(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
-    }
-
-    DecodeResult TlsEngine::decode(char* buffer, size_t length)
-    {
-        (void)buffer;
-        (void)length;
         return DecodeResult::failure(KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     }
 
@@ -106,16 +69,6 @@ namespace kiotty::net::implementation
     {
         (void)plain;
     }
-
-#if defined(KIOTTY_NET_TESTING)
-    void TlsEngine::debugKeyUpdate()
-    {
-    }
-
-    void TlsEngine::debugShutdown()
-    {
-    }
-#endif
 
     TlsPipe::TlsPipe(TlsEngine& engine)
         : _engine(engine)
@@ -147,6 +100,16 @@ namespace kiotty::net::implementation
     {
         (void)length;
     }
+
+#if defined(KIOTTY_NET_TESTING)
+    void TlsPipe::requestKeyUpdate()
+    {
+    }
+
+    void TlsPipe::sendCloseNotify()
+    {
+    }
+#endif
 }
 
 #endif

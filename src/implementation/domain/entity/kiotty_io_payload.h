@@ -10,5 +10,6 @@ namespace kiotty::net::implementation
         size_t length;
     };
 
-    static_assert(sizeof(IoPayload) == sizeof(void*) + sizeof(size_t), "IoPayload: unexpected padding");
+    static_assert(sizeof(IoPayload) == sizeof(void*) + sizeof(size_t),
+                  "IoPayload: unexpected padding");
 }

@@ -31,10 +31,10 @@ namespace kiotty::net::implementation
 
     IoPayload SendFlow::payload(const IoAction& write)
     {
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (secure)
         {
-            StageBase::Consumer cipher = _tls.cipherSend().consumer();
+            StageBase::Consumer cipher = _tls.stages().send.consumer();
             return IoPayload{ cipher.peek(), cipher.readable() };
         }
         StageBase& plain = write.purpose == IoPurpose::NOTIFY ? _notify : _send;
@@ -43,10 +43,10 @@ namespace kiotty::net::implementation
 
     void SendFlow::release(const IoCompletion& sent, std::mutex& notification)
     {
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (secure)
         {
-            _tls.cipherSend().consumer().commit(sent.length);
+            _tls.stages().send.consumer().commit(sent.length);
         }
         const size_t plain = sent.action.as.write.length;
         switch (sent.action.purpose)
@@ -82,7 +82,8 @@ namespace kiotty::net::implementation
         const bool cipher_waiting = hasCipherWaiting(_tls);
         if (cipher_waiting)
         {
-            const IoPurpose purpose = phase == Phase::HANDSHAKING ? IoPurpose::HANDSHAKE : IoPurpose::CONTROL;
+            const bool is_handshaking = phase == Phase::HANDSHAKING;
+            const IoPurpose purpose = is_handshaking ? IoPurpose::HANDSHAKE : IoPurpose::CONTROL;
             return IoAction::write(purpose, 0, 0);
         }
         if (phase == Phase::HANDSHAKING)
@@ -116,7 +117,7 @@ namespace kiotty::net::implementation
 
     IoAction SendFlow::encoded(IoAction write, Span<char> plain)
     {
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (secure)
         {
             _tls.encode(KiottyNetSpan{ plain.data, plain.length });
@@ -127,7 +128,7 @@ namespace kiotty::net::implementation
     bool SendFlow::isBlocked() const
     {
         const bool alive = isAlive(_phase.load());
-        const bool working = _work.working();
+        const bool working = _work.state() != WorkContext::State::IDLE;
         return !alive || working || _write_event.pending;
     }
 
@@ -135,12 +136,12 @@ namespace kiotty::net::implementation
     {
         bool hasCipherWaiting(TlsEngine& tls)
         {
-            const bool secure = tls.active();
+            const bool secure = tls.status().is_active;
             if (!secure)
             {
                 return false;
             }
-            return tls.cipherSend().consumer().readable() > 0;
+            return tls.stages().send.consumer().readable() > 0;
         }
     }
 }

@@ -4,7 +4,8 @@
 
 namespace kiotty::net::implementation
 {
-    NotificationDesk::NotificationDesk(ReusablePoolBase<Connection>& connections, std::mutex& notification)
+    NotificationDesk::NotificationDesk(ReusablePoolBase<Connection>& connections,
+                                       std::mutex& notification)
         : _connections(connections)
         , _notification(notification)
     {
@@ -54,7 +55,8 @@ namespace kiotty::net::implementation
         return found;
     }
 
-    KiottyNetCode NotificationDesk::closeStream(PoolHandle id, const KiottyNetConnectionAction& then)
+    KiottyNetCode NotificationDesk::closeStream(PoolHandle id,
+                                                const KiottyNetConnectionAction& then)
     {
         const ConnectionResult found = find(id);
         if (!found) { return found.code; }

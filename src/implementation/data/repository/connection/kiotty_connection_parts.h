@@ -24,5 +24,6 @@ namespace kiotty::net::implementation
         ActiveSocket&       socket;
     };
 
-    static_assert(sizeof(ConnectionParts) == 9 * sizeof(void*), "ConnectionParts: unexpected padding");
+    static_assert(sizeof(ConnectionParts) == 9 * sizeof(void*),
+                  "ConnectionParts: unexpected padding");
 }

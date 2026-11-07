@@ -15,7 +15,8 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        void       releasePath(KiottyNetTransport transport, int descriptor, const KiottyNetEndpoint& endpoint);
+        void       releasePath(KiottyNetTransport transport, int descriptor,
+                       const KiottyNetEndpoint& endpoint);
         SocketCode bindAndListen(int descriptor, const Address& address, int backlog);
         uint16_t   boundPort(int descriptor);
         int        acceptOnce(int listening, sockaddr_storage& peer);
@@ -36,7 +37,8 @@ namespace kiotty::net::implementation
     SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
     {
         close();
-        const AddressResult resolved = resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
+        const AddressResult resolved =
+            resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
         if (!resolved) { return resolved.code; }
         const int descriptor = ::socket(familyOf(endpoint.transport), SOCK_STREAM, 0);
         if (descriptor < 0) { return lastSocketCode(); }
@@ -100,7 +102,8 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        void releasePath(KiottyNetTransport transport, int descriptor, const KiottyNetEndpoint& endpoint)
+        void releasePath(KiottyNetTransport transport, int descriptor,
+            const KiottyNetEndpoint& endpoint)
         {
             if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
@@ -133,9 +136,10 @@ namespace kiotty::net::implementation
         int acceptOnce(int listening, sockaddr_storage& peer)
         {
             socklen_t length = sizeof(peer);
+            sockaddr* const address = reinterpret_cast<sockaddr*>(&peer);
             for (;;)
             {
-                const int descriptor = ::accept(listening, reinterpret_cast<sockaddr*>(&peer), &length);
+                const int descriptor = ::accept(listening, address, &length);
                 if (descriptor >= 0 || errno != EINTR) { return descriptor; }
             }
         }

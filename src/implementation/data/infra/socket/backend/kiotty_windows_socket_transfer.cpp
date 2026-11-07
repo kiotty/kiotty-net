@@ -58,7 +58,8 @@ namespace kiotty::net::implementation
         if (socket.transport() == KIOTTY_NET_TRANSPORT_PIPE) { return SocketCode::SUCCESS; }
         const BOOL value = no_delay == NoDelay::ENABLED ? TRUE : FALSE;
         const char* option = reinterpret_cast<const char*>(&value);
-        const int set = ::setsockopt(socketOf(socket.handle()), IPPROTO_TCP, TCP_NODELAY, option, sizeof(value));
+        const SOCKET native = socketOf(socket.handle());
+        const int set = ::setsockopt(native, IPPROTO_TCP, TCP_NODELAY, option, sizeof(value));
         if (set != 0) { return lastSocketCode(); }
         return SocketCode::SUCCESS;
     }
@@ -68,9 +69,12 @@ namespace kiotty::net::implementation
         TransferResult receiveWith(const ActiveSocket& socket, Span<char> buffer, int flags)
         {
             if (!socket.valid()) { return TransferResult::failure(SocketCode::INVALID_ARGUMENT); }
-            const int received = ::recv(socketOf(socket.handle()), buffer.data, clampLength(buffer.length), flags);
+            const SOCKET native = socketOf(socket.handle());
+            const int length = clampLength(buffer.length);
+            const int received = ::recv(native, buffer.data, length, flags);
             if (received == SOCKET_ERROR) { return TransferResult::failure(lastSocketCode()); }
-            if (received == 0 && buffer.length > 0) { return TransferResult::failure(SocketCode::CLOSED); }
+            const bool is_closed = received == 0 && buffer.length > 0;
+            if (is_closed) { return TransferResult::failure(SocketCode::CLOSED); }
             return TransferResult::success(static_cast<size_t>(received));
         }
     }

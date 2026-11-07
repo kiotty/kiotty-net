@@ -4,3 +4,4 @@
 /.vs/
 /.cache/
 CMakeUserPresets.json
+/.claude/worktrees/

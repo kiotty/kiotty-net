@@ -16,5 +16,8 @@ namespace kiotty::net::implementation
         TlsProfile&                profile;
     };
 
-    static_assert(sizeof(ConnectionConfiguration) == sizeof(ActiveSocket) + sizeof(ConnectionLimits) + 3 * sizeof(void*), "ConnectionConfiguration: unexpected padding");
+    static constexpr size_t CONNECTION_CONFIGURATION_BYTES =
+        sizeof(ActiveSocket) + sizeof(ConnectionLimits) + 3 * sizeof(void*);
+    static_assert(sizeof(ConnectionConfiguration) == CONNECTION_CONFIGURATION_BYTES,
+                  "ConnectionConfiguration: unexpected padding");
 }

@@ -78,7 +78,7 @@ namespace kiotty_test
     public:
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
-        KiottyNetResult         readStream(int64_t id, void* buffer, size_t length, uint32_t timeout_milliseconds) override;
+        KiottyNetResult         readStream(int64_t id, kiotty::net::implementation::Span<char> buffer, uint32_t timeout_milliseconds) override;
         KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) override;
         KiottyNetCode           writeStreamFile(int64_t id, const char* path, FileRange range, uint32_t timeout_milliseconds) override;
         bool                    isStreamOpen(int64_t id) override;

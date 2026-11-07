@@ -79,8 +79,8 @@ namespace kiotty_test
 
     inline size_t move(TlsEngine& from, TlsEngine& to, size_t limit = static_cast<size_t>(-1))
     {
-        StageBase& source = from.cipherSend();
-        StageBase& target = to.cipherReceive();
+        StageBase& source = from.stages().send;
+        StageBase& target = to.stages().receive;
         size_t length = source.consumer().readable();
         size_t room = target.provider().writable();
         if (length > room)
@@ -107,21 +107,20 @@ namespace kiotty_test
         explicit TlsPump(size_t capacity = kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY)
             : server()
             , client()
+            , _capacity{ capacity, capacity }
         {
-            server.limit(capacity, capacity);
-            client.limit(capacity, capacity);
         }
 
         KiottyNetCode open(TlsProfile& server_profile, TlsProfile& client_profile, const char* hostname = "localhost")
         {
             server_steps.clear();
             client_steps.clear();
-            KiottyNetCode code = server.open(server_profile, nullptr);
+            KiottyNetCode code = server.open(server_profile, nullptr, _capacity);
             if (code != KIOTTY_NET_CODE_SUCCESS)
             {
                 return code;
             }
-            return client.open(client_profile, hostname);
+            return client.open(client_profile, hostname, _capacity);
         }
 
         int handshake(int limit = 20)
@@ -154,6 +153,8 @@ namespace kiotty_test
         std::vector<TlsStep>  client_steps;
 
     private:
+        kiotty::net::implementation::TlsCapacity _capacity;
+
         static TlsStep last(const std::vector<TlsStep>& steps)
         {
             if (steps.empty())

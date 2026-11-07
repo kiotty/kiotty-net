@@ -8,7 +8,8 @@ namespace kiotty::net::implementation
     {
         using Milliseconds = std::chrono::milliseconds;
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        const Milliseconds elapsed = std::chrono::duration_cast<Milliseconds>(now.time_since_epoch());
+        const std::chrono::steady_clock::duration since_epoch = now.time_since_epoch();
+        const Milliseconds elapsed = std::chrono::duration_cast<Milliseconds>(since_epoch);
         return static_cast<uint64_t>(elapsed.count());
     }
 }

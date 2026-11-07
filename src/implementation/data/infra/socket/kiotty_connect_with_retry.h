@@ -10,5 +10,6 @@ namespace kiotty::net::implementation
 {
     using ConnectedResult = Result<ActiveSocket, KiottyNetCode>;
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& config, const std::atomic<bool>& stop);
+    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& config,
+        const std::atomic<bool>& stop);
 }

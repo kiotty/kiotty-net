@@ -50,7 +50,10 @@ typedef struct KiottyNetTransition
     KiottyNetConnectionAction entry_action;
 } KiottyNetTransition;
 
-typedef KiottyNetTransition (*KiottyNetTransitionAction)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event);
+typedef KiottyNetTransition (*KiottyNetTransitionAction)(
+    KiottyNetConnectionContext connection_context,
+    KiottyNetConnectionHandle connection,
+    KiottyNetConnectionEvent event);
 
 typedef struct KiottyNetRule
 {
@@ -68,22 +71,36 @@ typedef struct KiottyNetStateMachine
     int32_t              initial;
 } KiottyNetStateMachine;
 
-#define KIOTTY_NET_RULE(state, event, transition_action, ...)      { (state), (event), (transition_action), { __VA_ARGS__ }, (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
-#define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { 0 }, 0 }
-#define KIOTTY_NET_RULE_COUNT(table)                               (sizeof(table) / sizeof((table)[0]))
+#define KIOTTY_NET_RULE(state, event, transition_action, ...) \
+    { (state), (event), (transition_action), { __VA_ARGS__ }, \
+      (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
+#define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) \
+    { (state), (event), (transition_action), { 0 }, 0 }
+#define KIOTTY_NET_RULE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
 
-KIOTTY_NET_API KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetConnectionAction entry_action);
+KIOTTY_NET_API KiottyNetTransition KiottyNet_moveToNextState(
+    int32_t next,
+    KiottyNetConnectionAction entry_action);
 
 typedef struct KiottyNetStatefulAppContext
 {
     KiottyNetAppContext          app_context;
     const KiottyNetStateMachine* machine;
-    KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);
-    void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);
+    KiottyNetConnectionContext (*createConnectionContext)(
+        KiottyNetAppContext app_context,
+        KiottyNetConnectionInfo info);
+    void (*releaseConnectionContext)(
+        KiottyNetAppContext app_context,
+        KiottyNetConnectionContext connection_context,
+        KiottyNetConnectionHandle connection);
 } KiottyNetStatefulAppContext;
 
-KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetStatefulAppContext* app_context);
-KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client, const KiottyNetStatefulAppContext* app_context);
+KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulServer(
+    KiottyNetServerHandle server,
+    const KiottyNetStatefulAppContext* app_context);
+KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulEventClient(
+    KiottyNetEventClientHandle client,
+    const KiottyNetStatefulAppContext* app_context);
 
 #ifdef __cplusplus
 }
@@ -94,8 +111,19 @@ namespace kiotty
     {
         struct Rule
         {
-            constexpr Rule(int32_t state, KiottyNetConnectionEventType event, KiottyNetTransitionAction transition_action);
-            constexpr Rule(int32_t state, KiottyNetConnectionEventType event, KiottyNetTransitionAction transition_action, uint32_t next_count, int32_t n0, int32_t n1, int32_t n2, int32_t n3);
+            constexpr Rule(
+                int32_t state,
+                KiottyNetConnectionEventType event,
+                KiottyNetTransitionAction transition_action);
+            constexpr Rule(
+                int32_t state,
+                KiottyNetConnectionEventType event,
+                KiottyNetTransitionAction transition_action,
+                uint32_t next_count,
+                int32_t n0,
+                int32_t n1,
+                int32_t n2,
+                int32_t n3);
 
             template <typename State>
             constexpr Rule to(State a) const;
@@ -109,7 +137,9 @@ namespace kiotty
             KiottyNetRule raw;
         };
 
-        static_assert(KIOTTY_NET_MAX_NEXT == 4, "Rule::to overloads assume KIOTTY_NET_MAX_NEXT == 4");
+        static_assert(
+            KIOTTY_NET_MAX_NEXT == 4,
+            "Rule::to overloads assume KIOTTY_NET_MAX_NEXT == 4");
 
         template <size_t N>
         struct Table
@@ -159,10 +189,18 @@ namespace kiotty
         constexpr size_t insertPosition(const Table<N>& table, const KiottyNetRule& rule, size_t i);
 
         template <size_t N>
-        constexpr KiottyNetRule pick(const Table<N>& table, const KiottyNetRule& rule, size_t position, size_t k);
+        constexpr KiottyNetRule pick(
+            const Table<N>& table,
+            const KiottyNetRule& rule,
+            size_t position,
+            size_t k);
 
         template <size_t N, size_t... I>
-        constexpr Table<N + 1> insertAt(const Table<N>& table, const KiottyNetRule& rule, size_t position, Seq<I...>);
+        constexpr Table<N + 1> insertAt(
+            const Table<N>& table,
+            const KiottyNetRule& rule,
+            size_t position,
+            Seq<I...>);
 
         template <size_t N>
         constexpr Table<N + 1> insert(const Table<N>& table, const KiottyNetRule& rule);
@@ -195,21 +233,36 @@ constexpr kiotty::net::From KiottyNet_from(State state);
 constexpr kiotty::net::FromWhen KiottyNet_when(KiottyNetConnectionEventType event);
 
 template <typename... Rs>
-constexpr kiotty::net::Table<1 + sizeof...(Rs)> KiottyNet_rules(const kiotty::net::Rule& first, Rs... rest);
+constexpr kiotty::net::Table<1 + sizeof...(Rs)> KiottyNet_rules(
+    const kiotty::net::Rule& first,
+    Rs... rest);
 
 template <size_t N, typename State>
-constexpr KiottyNetStateMachine KiottyNet_makeStateMachine(const kiotty::net::Table<N>& table, State initial);
+constexpr KiottyNetStateMachine KiottyNet_makeStateMachine(
+    const kiotty::net::Table<N>& table,
+    State initial);
 
 namespace kiotty
 {
     namespace net
     {
-        constexpr Rule::Rule(int32_t state, KiottyNetConnectionEventType event, KiottyNetTransitionAction transition_action)
+        constexpr Rule::Rule(
+            int32_t state,
+            KiottyNetConnectionEventType event,
+            KiottyNetTransitionAction transition_action)
             : raw{ state, event, transition_action, { 0, 0, 0, 0 }, 0 }
         {
         }
 
-        constexpr Rule::Rule(int32_t state, KiottyNetConnectionEventType event, KiottyNetTransitionAction transition_action, uint32_t next_count, int32_t n0, int32_t n1, int32_t n2, int32_t n3)
+        constexpr Rule::Rule(
+            int32_t state,
+            KiottyNetConnectionEventType event,
+            KiottyNetTransitionAction transition_action,
+            uint32_t next_count,
+            int32_t n0,
+            int32_t n1,
+            int32_t n2,
+            int32_t n3)
             : raw{ state, event, transition_action, { n0, n1, n2, n3 }, next_count }
         {
         }
@@ -217,25 +270,57 @@ namespace kiotty
         template <typename State>
         constexpr Rule Rule::to(State a) const
         {
-            return Rule(raw.state, raw.event, raw.transition_action, 1, static_cast<int32_t>(a), 0, 0, 0);
+            return Rule(
+                raw.state,
+                raw.event,
+                raw.transition_action,
+                1,
+                static_cast<int32_t>(a),
+                0,
+                0,
+                0);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b) const
         {
-            return Rule(raw.state, raw.event, raw.transition_action, 2, static_cast<int32_t>(a), static_cast<int32_t>(b), 0, 0);
+            return Rule(
+                raw.state,
+                raw.event,
+                raw.transition_action,
+                2,
+                static_cast<int32_t>(a),
+                static_cast<int32_t>(b),
+                0,
+                0);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b, State c) const
         {
-            return Rule(raw.state, raw.event, raw.transition_action, 3, static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), 0);
+            return Rule(
+                raw.state,
+                raw.event,
+                raw.transition_action,
+                3,
+                static_cast<int32_t>(a),
+                static_cast<int32_t>(b),
+                static_cast<int32_t>(c),
+                0);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b, State c, State d) const
         {
-            return Rule(raw.state, raw.event, raw.transition_action, 4, static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), static_cast<int32_t>(d));
+            return Rule(
+                raw.state,
+                raw.event,
+                raw.transition_action,
+                4,
+                static_cast<int32_t>(a),
+                static_cast<int32_t>(b),
+                static_cast<int32_t>(c),
+                static_cast<int32_t>(d));
         }
 
         constexpr FromWhen::FromWhen(int32_t state_, KiottyNetConnectionEventType event_)
@@ -272,17 +357,26 @@ namespace kiotty
         template <size_t N>
         constexpr size_t insertPosition(const Table<N>& table, const KiottyNetRule& rule, size_t i)
         {
-            return i == N ? N : (precedes(rule, table.rule[i]) ? i : insertPosition(table, rule, i + 1));
+            return i == N ? N : (
+                precedes(rule, table.rule[i]) ? i : insertPosition(table, rule, i + 1));
         }
 
         template <size_t N>
-        constexpr KiottyNetRule pick(const Table<N>& table, const KiottyNetRule& rule, size_t position, size_t k)
+        constexpr KiottyNetRule pick(
+            const Table<N>& table,
+            const KiottyNetRule& rule,
+            size_t position,
+            size_t k)
         {
             return k < position ? table.rule[k] : (k == position ? rule : table.rule[k - 1]);
         }
 
         template <size_t N, size_t... I>
-        constexpr Table<N + 1> insertAt(const Table<N>& table, const KiottyNetRule& rule, size_t position, Seq<I...>)
+        constexpr Table<N + 1> insertAt(
+            const Table<N>& table,
+            const KiottyNetRule& rule,
+            size_t position,
+            Seq<I...>)
         {
             return Table<N + 1>{ { pick(table, rule, position, I)... } };
         }
@@ -290,13 +384,18 @@ namespace kiotty
         template <size_t N>
         constexpr Table<N + 1> insert(const Table<N>& table, const KiottyNetRule& rule)
         {
-            return insertAt(table, rule, insertPosition(table, rule, 0), typename MakeSeq<N + 1>::type());
+            return insertAt(
+                table,
+                rule,
+                insertPosition(table, rule, 0),
+                typename MakeSeq<N + 1>::type());
         }
 
         template <size_t N>
         constexpr bool unique(const Table<N>& table, size_t i)
         {
-            return i + 1 >= N ? true : (!sameKey(table.rule[i], table.rule[i + 1]) && unique(table, i + 1));
+            return i + 1 >= N ? true : (
+                !sameKey(table.rule[i], table.rule[i + 1]) && unique(table, i + 1));
         }
 
         template <size_t N>
@@ -319,7 +418,9 @@ namespace kiotty
 }
 
 template <typename State>
-inline KiottyNetTransition KiottyNet_Transition<State>::moveToNextState(State next, KiottyNetConnectionAction entry_action)
+inline KiottyNetTransition KiottyNet_Transition<State>::moveToNextState(
+    State next,
+    KiottyNetConnectionAction entry_action)
 {
     return KiottyNet_moveToNextState(static_cast<int32_t>(next), entry_action);
 }
@@ -336,13 +437,17 @@ constexpr kiotty::net::FromWhen KiottyNet_when(KiottyNetConnectionEventType even
 }
 
 template <typename... Rs>
-constexpr kiotty::net::Table<1 + sizeof...(Rs)> KiottyNet_rules(const kiotty::net::Rule& first, Rs... rest)
+constexpr kiotty::net::Table<1 + sizeof...(Rs)> KiottyNet_rules(
+    const kiotty::net::Rule& first,
+    Rs... rest)
 {
     return kiotty::net::checked(kiotty::net::sorted(first, rest...));
 }
 
 template <size_t N, typename State>
-constexpr KiottyNetStateMachine KiottyNet_makeStateMachine(const kiotty::net::Table<N>& table, State initial)
+constexpr KiottyNetStateMachine KiottyNet_makeStateMachine(
+    const kiotty::net::Table<N>& table,
+    State initial)
 {
     return KiottyNetStateMachine{ table.rule, N, static_cast<int32_t>(initial) };
 }

@@ -20,6 +20,11 @@ namespace kiotty::net::implementation
         Span<const char> outgoing();
         void             sent(size_t length);
 
+#if defined(KIOTTY_NET_TESTING)
+        void requestKeyUpdate();
+        void sendCloseNotify();
+#endif
+
     private:
         TlsEngine& _engine;
     };

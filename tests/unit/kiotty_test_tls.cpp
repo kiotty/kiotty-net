@@ -1,5 +1,6 @@
 #include "support/kiotty_test_openssl_memory.h"
 #include "support/kiotty_test_tls.h"
+#include "data/infra/tls/kiotty_tls_pipe.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +12,9 @@ using kiotty::net::implementation::Stage;
 using kiotty::net::implementation::StageBase;
 using kiotty::net::implementation::MemoryLimits;
 using kiotty::net::implementation::DecodeResult;
+using kiotty::net::implementation::TlsCapacity;
 using kiotty::net::implementation::TlsEngine;
+using kiotty::net::implementation::TlsPipe;
 using kiotty::net::implementation::TlsProfile;
 using kiotty::net::implementation::TlsStep;
 using kiotty_test::OpenSslMemory;
@@ -81,7 +84,7 @@ namespace
         std::string received;
         Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY> plain;
         plain.limit(plain_capacity);
-        while (from.cipherSend().consumer().readable() > 0)
+        while (from.stages().send.consumer().readable() > 0)
         {
             move(from, to);
             DecodeResult result = to.decode(plain);
@@ -101,7 +104,7 @@ TEST(TlsProfile, OpenServerWithValidCertAndKeySucceeds)
     TlsProfile profile;
     EXPECT_EQ(profile.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_TRUE(profile.valid());
-    EXPECT_TRUE(profile.server());
+    EXPECT_TRUE(profile.settings().is_server);
 }
 
 TEST(TlsProfile, OpenServerWithMissingFileReturnsCertificateNotFound)
@@ -135,9 +138,9 @@ TEST(TlsProfile, OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault)
     config.trust_store_path[0] = '\0';
     TlsProfile profile;
     EXPECT_EQ(profile.openClient(config), KIOTTY_NET_CODE_SUCCESS);
-    EXPECT_FALSE(profile.server());
-    EXPECT_TRUE(profile.verifyHostname());
-    EXPECT_EQ(profile.handshakeTimeoutMilliseconds(), kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
+    EXPECT_FALSE(profile.settings().is_server);
+    EXPECT_TRUE(profile.settings().has_hostname_verification);
+    EXPECT_EQ(profile.settings().handshake_timeout_milliseconds, kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
 }
 
 TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
@@ -153,9 +156,8 @@ TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
     EXPECT_FALSE(server.valid());
     EXPECT_FALSE(client.valid());
     TlsEngine engine;
-    engine.limit(4096, 4096);
-    EXPECT_EQ(engine.open(server, nullptr), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
-    EXPECT_FALSE(engine.active());
+    EXPECT_EQ(engine.open(server, nullptr, TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
+    EXPECT_FALSE(engine.status().is_active);
 }
 
 TEST(TlsEngine, InactiveEngineReportsActiveFalseAndAllocatesNoStage)
@@ -164,12 +166,10 @@ TEST(TlsEngine, InactiveEngineReportsActiveFalseAndAllocatesNoStage)
     Profiles profiles;
     openDefaults(profiles);
     TlsEngine engine;
-    engine.limit(0, 0);
-    EXPECT_FALSE(engine.active());
-    EXPECT_EQ(engine.cipherReceive().capacity(), 0u);
-    EXPECT_EQ(engine.cipherSend().capacity(), 0u);
-    EXPECT_EQ(engine.open(profiles.server, nullptr), KIOTTY_NET_CODE_INVALID_ARGUMENT);
-    EXPECT_FALSE(engine.active());
+    EXPECT_EQ(engine.open(profiles.server, nullptr, TlsCapacity{ 0, 0 }), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(engine.stages().receive.capacity(), 0u);
+    EXPECT_EQ(engine.stages().send.capacity(), 0u);
+    EXPECT_FALSE(engine.status().is_active);
 }
 
 TEST(TlsEngine, ServerFirstStepIsReceiveAndClientFirstStepIsSend)
@@ -180,9 +180,9 @@ TEST(TlsEngine, ServerFirstStepIsReceiveAndClientFirstStepIsSend)
     TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(pump.server.handshake(), TlsStep::RECEIVE);
-    EXPECT_EQ(pump.server.cipherSend().consumer().readable(), 0u);
+    EXPECT_EQ(pump.server.stages().send.consumer().readable(), 0u);
     EXPECT_EQ(pump.client.handshake(), TlsStep::SEND);
-    EXPECT_GT(pump.client.cipherSend().consumer().readable(), 0u);
+    EXPECT_GT(pump.client.stages().send.consumer().readable(), 0u);
 }
 
 TEST(TlsEngine, PumpingCipherBytesBetweenClientAndServerReachesDoneOnBoth)
@@ -243,7 +243,7 @@ TEST(TlsEngine, EncodeLargerThanOneRecordProducesMultipleRecordsThatDecodeInOrde
     connect(pump, profiles);
     std::string text = pattern(MemoryLimits::SEND_CAPACITY);
     pump.client.encode(spanOf(text));
-    EXPECT_GT(pump.client.cipherSend().consumer().readable(), text.size() + 2 * 5);
+    EXPECT_GT(pump.client.stages().send.consumer().readable(), text.size() + 2 * 5);
     EXPECT_EQ(roundTrip(pump.client, pump.server, "", MemoryLimits::RECEIVE_CAPACITY), text);
 }
 
@@ -256,7 +256,7 @@ TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
     connect(pump, profiles);
     std::string text = pattern(1000);
     pump.client.encode(spanOf(text));
-    size_t record = pump.client.cipherSend().consumer().readable();
+    size_t record = pump.client.stages().send.consumer().readable();
     Stage<4096> plain;
     move(pump.client, pump.server, record / 2);
     DecodeResult first = pump.server.decode(plain);
@@ -280,7 +280,7 @@ TEST(TlsEngine, DecodeWithOneByteAtATimeEventuallyYieldsTheRecord)
     pump.client.encode(spanOf(text));
     Stage<4096> plain;
     std::string received;
-    while (pump.client.cipherSend().consumer().readable() > 0)
+    while (pump.client.stages().send.consumer().readable() > 0)
     {
         move(pump.client, pump.server, 1);
         DecodeResult result = pump.server.decode(plain);
@@ -298,7 +298,7 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     TlsPump pump;
     connect(pump, profiles);
     pump.client.encode(spanOf(std::string("hello")));
-    StageBase& cipher = pump.client.cipherSend();
+    StageBase& cipher = pump.client.stages().send;
     size_t length = cipher.consumer().readable();
     cipher.consumer().peek()[length - 1] ^= 0x01;
     move(pump.client, pump.server);
@@ -306,8 +306,8 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
-    EXPECT_EQ(pump.server.failure().code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
-    EXPECT_STRNE(pump.server.failure().message, "");
+    EXPECT_EQ(pump.server.status().failure.code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
+    EXPECT_STRNE(pump.server.status().failure.message, "");
 }
 
 TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
@@ -320,8 +320,8 @@ TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
-    EXPECT_STRNE(pump.client.failure().message, "");
+    EXPECT_EQ(pump.client.status().failure.code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_STRNE(pump.client.status().failure.message, "");
 }
 
 TEST(TlsEngine, ClientWithVerifyServerOffAcceptsUntrustedCa)
@@ -349,7 +349,7 @@ TEST(TlsEngine, HostnameMismatchReturnsHostnameMismatch)
     ASSERT_EQ(pump.open(profiles.server, profiles.client, "localhost"), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH);
+    EXPECT_EQ(pump.client.status().failure.code, KIOTTY_NET_CODE_TLS_HOSTNAME_MISMATCH);
 }
 
 TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
@@ -362,7 +362,7 @@ TEST(TlsEngine, ExpiredServerCertReturnsVerifyFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.client_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.client.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_EQ(pump.client.status().failure.code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 }
 
 TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt)
@@ -380,7 +380,7 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
     ASSERT_EQ(rejected.open(server, anonymous), KIOTTY_NET_CODE_SUCCESS);
     rejected.handshake();
     ASSERT_EQ(rejected.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(rejected.server.failure().code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
+    EXPECT_EQ(rejected.server.status().failure.code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 
     KiottyNetTlsClientConfiguration client_config = clientConfig();
     copyText(client_config.identity.cert_file, certPath("client.pem"));
@@ -407,7 +407,7 @@ TEST(TlsEngine, VersionMismatchReturnsHandshakeFailed)
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
     ASSERT_EQ(pump.server_steps.back(), TlsStep::FAILED);
-    EXPECT_EQ(pump.server.failure().code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(pump.server.status().failure.code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
@@ -416,11 +416,10 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     Profiles profiles;
     openDefaults(profiles);
     TlsEngine server;
-    server.limit(4096, 4096);
-    ASSERT_EQ(server.open(profiles.server, nullptr), KIOTTY_NET_CODE_SUCCESS);
-    put(server.cipherReceive(), "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    ASSERT_EQ(server.open(profiles.server, nullptr, TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_SUCCESS);
+    put(server.stages().receive, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
-    EXPECT_EQ(server.failure().code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
+    EXPECT_EQ(server.status().failure.code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);
 }
 
 TEST(TlsEngine, Tls13ServerSendsNoSessionTicketSoItIsDoneRightAfterTheClientFinished)
@@ -437,8 +436,8 @@ TEST(TlsEngine, Tls13ServerSendsNoSessionTicketSoItIsDoneRightAfterTheClientFini
     EXPECT_EQ(pump.client.handshake(), TlsStep::SEND);
     move(pump.client, pump.server);
     EXPECT_EQ(pump.server.handshake(), TlsStep::DONE);
-    EXPECT_EQ(pump.server.cipherSend().consumer().readable(), 0u);
-    EXPECT_EQ(pump.client.cipherReceive().consumer().readable(), 0u);
+    EXPECT_EQ(pump.server.stages().send.consumer().readable(), 0u);
+    EXPECT_EQ(pump.client.stages().receive.consumer().readable(), 0u);
     EXPECT_EQ(pump.client.handshake(), TlsStep::DONE);
 }
 
@@ -449,14 +448,14 @@ TEST(TlsEngine, KeyUpdateFromPeerLeavesTheReplyInCipherSendAfterDecode)
     openDefaults(profiles);
     TlsPump pump;
     connect(pump, profiles);
-    pump.client.debugKeyUpdate();
-    ASSERT_GT(pump.client.cipherSend().consumer().readable(), 0u);
+    TlsPipe(pump.client).requestKeyUpdate();
+    ASSERT_GT(pump.client.stages().send.consumer().readable(), 0u);
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result);
     EXPECT_EQ(result.value, 0u);
-    EXPECT_GT(pump.server.cipherSend().consumer().readable(), 0u);
+    EXPECT_GT(pump.server.stages().send.consumer().readable(), 0u);
     move(pump.server, pump.client);
     DecodeResult reply = pump.client.decode(plain);
     ASSERT_TRUE(reply);
@@ -471,7 +470,7 @@ TEST(TlsEngine, CloseNotifyFromPeerDecodesAsPeerClosed)
     openDefaults(profiles);
     TlsPump pump;
     connect(pump, profiles);
-    pump.client.debugShutdown();
+    TlsPipe(pump.client).sendCloseNotify();
     move(pump.client, pump.server);
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
@@ -489,7 +488,7 @@ TEST(TlsEngine, CloseThenOpenReusesTheSslObjectAndHandshakesAgain)
     EXPECT_EQ(roundTrip(pump.client, pump.server, "first", 64), "first");
     pump.server.close();
     pump.client.close();
-    EXPECT_FALSE(pump.server.active());
+    EXPECT_FALSE(pump.server.status().is_active);
     connect(pump, profiles);
     EXPECT_EQ(roundTrip(pump.client, pump.server, "second", 64), "second");
 }
@@ -589,7 +588,7 @@ TEST(TlsEngine, DecodeCompactsCipherReceive)
     Stage<4096> plain;
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result);
-    StageBase& cipher = pump.server.cipherReceive();
+    StageBase& cipher = pump.server.stages().receive;
     EXPECT_EQ(cipher.consumer().readable(), 0u);
     EXPECT_EQ(cipher.provider().writable(), cipher.capacity());
 }
@@ -618,7 +617,7 @@ TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
             ASSERT_TRUE(pump.client.decode(plain));
             std::string text = pattern(capacity);
             pump.server.encode(spanOf(text));
-            EXPECT_GT(pump.server.cipherSend().consumer().readable(), capacity) << version << " " << capacity;
+            EXPECT_GT(pump.server.stages().send.consumer().readable(), capacity) << version << " " << capacity;
             EXPECT_EQ(roundTrip(pump.server, pump.client, "", capacity), text);
         }
     }
@@ -633,20 +632,19 @@ TEST(TlsEngine, EncodeIntoAFullCipherSendAssertsInDebugAndWritesNothingInRelease
     connect(pump, profiles);
     std::string text = pattern(4096);
     pump.client.encode(spanOf(text));
-    size_t before = pump.client.cipherSend().consumer().readable();
+    size_t before = pump.client.stages().send.consumer().readable();
     EXPECT_DEBUG_DEATH(pump.client.encode(spanOf(text)), "");
-    EXPECT_EQ(pump.client.cipherSend().consumer().readable(), before);
+    EXPECT_EQ(pump.client.stages().send.consumer().readable(), before);
 }
 
 TEST(TlsEngine, EncodeOrDecodeOnInactiveEngineIsRejected)
 {
     REQUIRE_TLS();
     TlsEngine engine;
-    engine.limit(4096, 4096);
     Stage<64> plain;
     DecodeResult result = engine.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
     EXPECT_DEBUG_DEATH(engine.encode(spanOf(std::string("x"))), "");
-    EXPECT_EQ(engine.cipherSend().consumer().readable(), 0u);
+    EXPECT_EQ(engine.stages().send.consumer().readable(), 0u);
 }

@@ -73,10 +73,19 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/socket/backend/kiotty_windows_socket_transfer.cpp
     src/implementation/domain/entity/kiotty_io_action.cpp
     src/implementation/data/infra/event/backend/kiotty_epoll_event_listener.cpp
+    src/implementation/data/infra/event/backend/kiotty_epoll_event_submit.cpp
+    src/implementation/data/infra/event/backend/kiotty_epoll_event_wait.cpp
     src/implementation/data/infra/event/backend/kiotty_iocp_event_listener.cpp
+    src/implementation/data/infra/event/backend/kiotty_iocp_event_submit.cpp
+    src/implementation/data/infra/event/backend/kiotty_iocp_event_wait.cpp
     src/implementation/data/infra/event/backend/kiotty_no_event_listener.cpp
     src/implementation/data/infra/tls/kiotty_tls_engine.cpp
-    src/implementation/data/infra/tls/backend/kiotty_openssl_tls.cpp
+    src/implementation/data/infra/tls/kiotty_tls_profile.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_context.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_session.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_tls_engine.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_tls_pipe.cpp
+    src/implementation/data/infra/tls/backend/kiotty_openssl_tls_profile.cpp
     src/implementation/data/infra/tls/backend/kiotty_stub_tls.cpp
     src/implementation/data/repository/stream/kiotty_connection_stream.cpp
     src/implementation/data/infra/file/backend/kiotty_posix_file.cpp

@@ -71,7 +71,8 @@ namespace kiotty::net::implementation
 
     IoAction ReceiveFlow::deliver(KiottyNetSpan data, const Caller& caller)
     {
-        const KiottyNetConnectionAction next = caller.handler.callbacks.onRead(caller.context, caller.handle(), data);
+        const KiottyNetConnectionAction next =
+            caller.handler.callbacks.onRead(caller.context, caller.handle(), data);
         _receive.consumer().commit(data.length);
         return caller.admit(next);
     }
@@ -80,7 +81,7 @@ namespace kiotty::net::implementation
     {
         _receive.compact();
         size_t produced = 0;
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (secure)
         {
             const DecodeResult decoded = _tls.decode(_receive);
@@ -88,13 +89,14 @@ namespace kiotty::net::implementation
             produced = decoded.value;
         }
         const size_t writable = _receive.provider().writable();
-        if (produced == 0 && writable == 0) { return RefillResult::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE); }
+        const bool is_stuck = produced == 0 && writable == 0;
+        if (is_stuck) { return RefillResult::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE); }
         return RefillResult::success(produced);
     }
 
     IoAction ReceiveFlow::refuse(KiottyNetCode code, const Caller& caller)
     {
-        const TlsFailure failed = _tls.failure();
+        const TlsFailure failed = _tls.status().failure;
         const bool is_full = code == KIOTTY_NET_CODE_REQUEST_TOO_LARGE;
         const char* message = is_full ? STAGE_FULL_MESSAGE : failed.message;
         caller.reject(code, message);
@@ -103,10 +105,10 @@ namespace kiotty::net::implementation
 
     StageBase& ReceiveFlow::stageFor(IoPurpose purpose)
     {
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (purpose == IoPurpose::HANDSHAKE || secure)
         {
-            return _tls.cipherReceive();
+            return _tls.stages().receive;
         }
         return _receive;
     }
@@ -148,7 +150,8 @@ namespace kiotty::net::implementation
         ReadyResult exactly(const IoAction& action, StageBase& stage)
         {
             const size_t exact = action.as.read.exact;
-            if (exact > stage.capacity()) { return ReadyResult::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE); }
+            const bool is_too_large = exact > stage.capacity();
+            if (is_too_large) { return ReadyResult::failure(KIOTTY_NET_CODE_REQUEST_TOO_LARGE); }
             StageBase::Consumer in = stage.consumer();
             const size_t readable = in.readable();
             if (readable < exact)
@@ -182,7 +185,9 @@ namespace kiotty::net::implementation
             size_t position = action.as.read_until.scanned;
             while (position + length <= scanned.length)
             {
-                const int compared = std::memcmp(scanned.data + position, action.as.read_until.delimiter, length);
+                const char* candidate = scanned.data + position;
+                const char* delimiter = action.as.read_until.delimiter;
+                const int compared = std::memcmp(candidate, delimiter, length);
                 if (compared == 0)
                 {
                     return position;

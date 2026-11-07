@@ -31,7 +31,8 @@ namespace kiotty::net::implementation
     int                     familyOf(KiottyNetTransport transport);
     int                     sendFlags();
     SocketCode              prepareDescriptor(int descriptor);
-    AddressResult           resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, AddressRole role);
+    AddressResult           resolveAddress(KiottyNetTransport transport,
+                                const KiottyNetEndpoint& endpoint, AddressRole role);
     KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage);
     SocketCode              waitFor(int descriptor, short events, uint32_t timeout_milliseconds);
 }

@@ -23,8 +23,12 @@ namespace kiotty::net::implementation
         };
 
         template <class T>
-        struct HasInitialize<T, std::void_t<typename T::code_type, typename T::configuration_type, decltype(std::declval<T&>().initialize(std::declval<PoolHandle>(), std::declval<typename T::configuration_type>()))>>
-            : std::is_same<decltype(std::declval<T&>().initialize(std::declval<PoolHandle>(), std::declval<typename T::configuration_type>())), typename T::code_type>
+        using InitializeCall = decltype(std::declval<T&>().initialize(
+            std::declval<PoolHandle>(), std::declval<typename T::configuration_type>()));
+
+        template <class T>
+        struct HasInitialize<T, std::void_t<typename T::code_type, InitializeCall<T>>>
+            : std::is_same<InitializeCall<T>, typename T::code_type>
         {
         };
 
@@ -34,8 +38,12 @@ namespace kiotty::net::implementation
         };
 
         template <class T>
-        struct HasReset<T, std::void_t<decltype(std::declval<T&>().reset())>>
-            : std::integral_constant<bool, std::is_same<decltype(std::declval<T&>().reset()), void>::value && noexcept(std::declval<T&>().reset())>
+        using ResetCall = decltype(std::declval<T&>().reset());
+
+        template <class T>
+        struct HasReset<T, std::void_t<ResetCall<T>>>
+            : std::bool_constant<std::is_same<ResetCall<T>, void>::value
+                                 && noexcept(std::declval<T&>().reset())>
         {
         };
 

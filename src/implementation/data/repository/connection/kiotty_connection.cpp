@@ -44,14 +44,14 @@ namespace kiotty::net::implementation
         const bool notify = fits(limits.notify, _plain.notify.maximum());
         if (!receive || !send || !notify) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _plain.limit(limits.receive, limits.send, limits.notify);
-        _tls.limit(limits.receive, largerOf(limits.send, limits.notify));
         _id = id;
         _socket = std::move(configuration.socket);
         _info = _socket.peer();
         _context = configuration.context;
         _deadline.store(0);
         _receive_flow.setMachineState(0);
-        return open(configuration.profile, configuration.hostname);
+        const TlsCapacity capacity{ limits.receive, largerOf(limits.send, limits.notify) };
+        return open(configuration.profile, configuration.hostname, capacity);
     }
 
     void Connection::reset() noexcept
@@ -69,7 +69,7 @@ namespace kiotty::net::implementation
 
     IoAction Connection::onOpened(const Handler& handler)
     {
-        const bool secure = _tls.active();
+        const bool secure = _tls.status().is_active;
         if (secure)
         {
             setDeadline(TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
@@ -78,23 +78,18 @@ namespace kiotty::net::implementation
         return apply(onReady(handler), handler);
     }
 
-    IoAction Connection::dispatch(const IoCompletion& completion, const Handler& handler, std::mutex& notification)
+    IoAction Connection::dispatch(const IoCompletion& completion, const Handler& handler,
+                                  std::mutex& notification)
     {
         const bool alive = isAlive(_phase.load());
-        if (!alive)
-        {
-            return IoAction::none();
-        }
+        if (!alive) { return IoAction::none(); }
         return apply(react(completion, handler, notification), handler);
     }
 
     IoAction Connection::close(KiottyNetCode reason, const Handler& handler)
     {
         const bool alive = isAlive(_phase.load());
-        if (!alive)
-        {
-            return IoAction::none();
-        }
+        if (!alive) { return IoAction::none(); }
         return apply(IoAction::close(reason), handler);
     }
 
@@ -176,7 +171,7 @@ namespace kiotty::net::implementation
         (void)implementation::shutdownWrite(_socket);
     }
 
-    KiottyNetCode Connection::open(TlsProfile& profile, const char* hostname)
+    KiottyNetCode Connection::open(TlsProfile& profile, const char* hostname, TlsCapacity capacity)
     {
         const bool secure = profile.valid();
         if (!secure)
@@ -185,13 +180,14 @@ namespace kiotty::net::implementation
             return KIOTTY_NET_CODE_SUCCESS;
         }
         const char* name = hostname == nullptr ? "" : hostname;
-        const KiottyNetCode opened = _tls.open(profile, name);
+        const KiottyNetCode opened = _tls.open(profile, name, capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
         _phase.store(Phase::HANDSHAKING);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    IoAction Connection::react(const IoCompletion& completion, const Handler& handler, std::mutex& notification)
+    IoAction Connection::react(const IoCompletion& completion, const Handler& handler,
+                               std::mutex& notification)
     {
         switch (completion.kind)
         {
@@ -223,7 +219,8 @@ namespace kiotty::net::implementation
         return _receive_flow.drive(completion.action, callerFor(handler));
     }
 
-    IoAction Connection::onSent(const IoCompletion& completion, const Handler& handler, std::mutex& notification)
+    IoAction Connection::onSent(const IoCompletion& completion, const Handler& handler,
+                                std::mutex& notification)
     {
         if (completion.code != SocketCode::SUCCESS) { return closedBy(completion.code); }
         _send_flow.release(completion, notification);
@@ -243,7 +240,8 @@ namespace kiotty::net::implementation
     IoAction Connection::onWritten(size_t length, const Handler& handler)
     {
         const Caller caller = callerFor(handler);
-        const KiottyNetConnectionAction returned = handler.callbacks.onWritten(_context, caller.handle(), length);
+        const KiottyNetConnectionAction returned =
+            handler.callbacks.onWritten(_context, caller.handle(), length);
         return _receive_flow.drive(caller.admit(returned), caller);
     }
 
@@ -257,7 +255,8 @@ namespace kiotty::net::implementation
             caller.reject(KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT, HANDSHAKE_TIMEOUT_MESSAGE);
             return IoAction::close(KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT);
         }
-        const KiottyNetConnectionAction returned = handler.callbacks.onTimeout(_context, caller.handle());
+        const KiottyNetConnectionAction returned =
+            handler.callbacks.onTimeout(_context, caller.handle());
         const bool pending = isUserActionPending();
         if (pending)
         {
@@ -288,7 +287,7 @@ namespace kiotty::net::implementation
         case TlsStep::FAILED:
             break;
         }
-        const TlsFailure rejected = _tls.failure();
+        const TlsFailure rejected = _tls.status().failure;
         callerFor(handler).reject(rejected.code, rejected.message);
         return IoAction::close(rejected.code);
     }
@@ -296,7 +295,8 @@ namespace kiotty::net::implementation
     IoAction Connection::onReady(const Handler& handler)
     {
         const Caller caller = callerFor(handler);
-        const KiottyNetConnectionAction returned = handler.callbacks.onReady(_context, caller.handle());
+        const KiottyNetConnectionAction returned =
+            handler.callbacks.onReady(_context, caller.handle());
         return _receive_flow.drive(caller.admit(returned), caller);
     }
 
@@ -349,7 +349,8 @@ namespace kiotty::net::implementation
         _deadline.store(0);
         _phase.store(Phase::CLOSING);
         _work.abandon();
-        handler.callbacks.onDisconnected(handler.app_context, _context, callerFor(handler).handle(), reason);
+        const KiottyNetConnectionHandle caller = callerFor(handler).handle();
+        handler.callbacks.onDisconnected(handler.app_context, _context, caller, reason);
     }
 
     bool Connection::isUserActionPending()
@@ -375,7 +376,8 @@ namespace kiotty::net::implementation
 
     ConnectionParts Connection::parts()
     {
-        return ConnectionParts{ _phase, _work, _read_event, _write_event, _plain.receive, _plain.send, _plain.notify, _tls, _socket };
+        return ConnectionParts{ _phase, _work, _read_event, _write_event,
+                                _plain.receive, _plain.send, _plain.notify, _tls, _socket };
     }
 
     namespace
@@ -387,10 +389,8 @@ namespace kiotty::net::implementation
 
         IoAction closedBy(SocketCode code)
         {
-            if (code == SocketCode::CLOSED)
-            {
-                return IoAction::close(KIOTTY_NET_CODE_PEER_CLOSED);
-            }
+            const bool is_peer_closed = code == SocketCode::CLOSED;
+            if (is_peer_closed) { return IoAction::close(KIOTTY_NET_CODE_PEER_CLOSED); }
             return IoAction::close(KIOTTY_NET_CODE_SOCKET_ERROR);
         }
     }

@@ -27,6 +27,33 @@ namespace kiotty::net::implementation
         KiottyNetCode code;
     };
 
+    static_assert(sizeof(TlsFailure) == 2 * sizeof(void*), "TlsFailure: unexpected padding");
+
+    struct TlsStatus
+    {
+        TlsFailure failure;
+        bool       is_active;
+    };
+
+    static_assert(sizeof(TlsStatus) == sizeof(TlsFailure) + sizeof(void*),
+                  "TlsStatus: unexpected padding");
+
+    struct TlsCapacity
+    {
+        size_t receive;
+        size_t send;
+    };
+
+    static_assert(sizeof(TlsCapacity) == 2 * sizeof(size_t), "TlsCapacity: unexpected padding");
+
+    struct TlsStages
+    {
+        StageBase& receive;
+        StageBase& send;
+    };
+
+    static_assert(sizeof(TlsStages) == 2 * sizeof(void*), "TlsStages: unexpected padding");
+
     class TlsPipe;
 
     class TlsEngine
@@ -38,25 +65,14 @@ namespace kiotty::net::implementation
         TlsEngine(const TlsEngine&) = delete;
         TlsEngine& operator=(const TlsEngine&) = delete;
 
-        KiottyNetCode open(TlsProfile& profile, const char* hostname);
+        KiottyNetCode open(const TlsProfile& profile, const char* hostname, TlsCapacity capacity);
         void          close();
-        bool          active() const;
-        void          limit(size_t receive_capacity, size_t send_capacity);
-
-        StageBase& cipherReceive();
-        StageBase& cipherSend();
-
-        TlsStep      handshake();
-        DecodeResult decode(StageBase& plain);
-        DecodeResult decode(char* buffer, size_t length);
-        void         encode(KiottyNetSpan plain);
-
-        TlsFailure failure() const;
-
-#if defined(KIOTTY_NET_TESTING)
-        void debugKeyUpdate();
-        void debugShutdown();
-#endif
+        TlsStep       handshake();
+        DecodeResult  decode(StageBase& plain);
+        DecodeResult  decode(Span<char> plain);
+        void          encode(KiottyNetSpan plain);
+        TlsStatus     status() const;
+        TlsStages     stages();
 
     private:
         friend class TlsPipe;
@@ -73,7 +89,9 @@ namespace kiotty::net::implementation
             KiottyNetCode code;
         };
 
+        void          limit(TlsCapacity capacity);
         TlsStep       fail(KiottyNetCode code, const char* message);
+        KiottyNetCode prepareSsl(ssl_ctx_st* context);
         KiottyNetCode createSsl(ssl_ctx_st* context);
         Outcome       driveHandshake();
         Drained       drain(Span<char> target);
@@ -86,10 +104,9 @@ namespace kiotty::net::implementation
 
         Stage<CIPHER_RECEIVE_BYTES> _cipher_receive;
         Stage<CIPHER_SEND_BYTES>    _cipher_send;
-        ssl_st*       _ssl;
-        bio_st*       _network;
-        TlsFailure    _failure;
-        bool          _active;
-        bool          _failed;
+        ssl_st*                     _ssl;
+        bio_st*                     _network;
+        TlsStatus                   _status;
+        bool                        _failed;
     };
 }

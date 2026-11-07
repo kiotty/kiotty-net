@@ -13,5 +13,6 @@ namespace kiotty::net::implementation
         WorkFlow&    work;
     };
 
-    static_assert(sizeof(ConnectionFlows) == 3 * sizeof(void*), "ConnectionFlows: unexpected padding");
+    static_assert(sizeof(ConnectionFlows) == 3 * sizeof(void*),
+                  "ConnectionFlows: unexpected padding");
 }

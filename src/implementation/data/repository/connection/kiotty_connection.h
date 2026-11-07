@@ -47,7 +47,9 @@ namespace kiotty::net::implementation
         KiottyNetCode   initialize(PoolHandle id, ConnectionConfiguration&& configuration);
         void            reset() noexcept;
         IoAction        onOpened(const Handler& handler);
-        IoAction        dispatch(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
+        IoAction        dispatch(const IoCompletion& completion,
+                                 const Handler& handler,
+                                 std::mutex& notification);
         IoAction        close(KiottyNetCode reason, const Handler& handler);
         ConnectionState state() const;
         ConnectionFlows flows();
@@ -61,12 +63,18 @@ namespace kiotty::net::implementation
         void         shutdown() override;
 
     private:
-        using PlainStages = StageSet<MemoryLimits::RECEIVE_CAPACITY, MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY>;
+        using PlainStages = StageSet<MemoryLimits::RECEIVE_CAPACITY,
+                                     MemoryLimits::SEND_CAPACITY,
+                                     MemoryLimits::PUSH_CAPACITY>;
 
-        KiottyNetCode   open(TlsProfile& profile, const char* hostname);
-        IoAction        react(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
+        KiottyNetCode   open(TlsProfile& profile, const char* hostname, TlsCapacity capacity);
+        IoAction        react(const IoCompletion& completion,
+                              const Handler& handler,
+                              std::mutex& notification);
         IoAction        onReceived(const IoCompletion& completion, const Handler& handler);
-        IoAction        onSent(const IoCompletion& completion, const Handler& handler, std::mutex& notification);
+        IoAction        onSent(const IoCompletion& completion,
+                               const Handler& handler,
+                               std::mutex& notification);
         IoAction        onWritten(size_t length, const Handler& handler);
         IoAction        onTimeout(const Handler& handler);
         IoAction        onWorkReady(const Handler& handler);

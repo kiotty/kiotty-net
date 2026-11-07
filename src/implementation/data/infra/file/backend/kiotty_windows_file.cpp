@@ -14,6 +14,7 @@
 #include <mswsock.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace kiotty::net::implementation
@@ -23,6 +24,8 @@ namespace kiotty::net::implementation
         const intptr_t NO_FILE = -1;
         const DWORD    READ_CHUNK_BYTES = 1u << 30;
         const DWORD    TRANSMIT_CHUNK_BYTES = 0x7FFFFFFEu;
+        const uint64_t LOW_WORD_MASK = 0xFFFFFFFFu;
+        const uint32_t HIGH_WORD_SHIFT = 32;
 
         HANDLE fileOf(intptr_t handle)
         {
@@ -62,12 +65,31 @@ namespace kiotty::net::implementation
             HANDLE _event;
         };
 
+        struct Transmission
+        {
+            LPFN_TRANSMITFILE  transmit;
+            const ManualEvent& done;
+            HANDLE             file;
+            SOCKET             out;
+        };
+
+        using Transmitted = Result<DWORD, SocketCode>;
+
+        OVERLAPPED overlappedAt(uint64_t position)
+        {
+            OVERLAPPED at{};
+            at.Offset = static_cast<DWORD>(position & LOW_WORD_MASK);
+            at.OffsetHigh = static_cast<DWORD>(position >> HIGH_WORD_SHIFT);
+            return at;
+        }
+
         LPFN_TRANSMITFILE transmitFileOf(SOCKET socket)
         {
             GUID id = WSAID_TRANSMITFILE;
             LPFN_TRANSMITFILE function = nullptr;
             DWORD returned = 0;
-            int loaded = ::WSAIoctl(socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &id, sizeof(id), &function, sizeof(function), &returned, nullptr, nullptr);
+            const int loaded = ::WSAIoctl(socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &id,
+                sizeof(id), &function, sizeof(function), &returned, nullptr, nullptr);
             if (loaded != 0)
             {
                 return nullptr;
@@ -81,54 +103,62 @@ namespace kiotty::net::implementation
             return deadline.remaining();
         }
 
-        struct Transmission
+        Transmitted finishPiece(const Transmission& transmission, OVERLAPPED& request,
+            const Deadline& deadline)
         {
-            LPFN_TRANSMITFILE  transmit;
-            const ManualEvent& done;
-            HANDLE             file;
-            SOCKET             out;
-        };
-
-        using Transmitted = Result<DWORD, SocketCode>;
-
-        Transmitted finishPiece(const Transmission& transmission, OVERLAPPED& request, const Deadline& deadline)
-        {
-            const DWORD waited = ::WaitForSingleObject(transmission.done.handle(), waitMillisecondsOf(deadline));
+            const HANDLE done = transmission.done.handle();
+            const DWORD waited = ::WaitForSingleObject(done, waitMillisecondsOf(deadline));
             const bool timed_out = waited == WAIT_TIMEOUT;
             if (timed_out)
             {
                 ::CancelIoEx(reinterpret_cast<HANDLE>(transmission.out), &request);
-                ::WaitForSingleObject(transmission.done.handle(), INFINITE);
+                ::WaitForSingleObject(done, INFINITE);
             }
             DWORD moved = 0;
             DWORD flags = 0;
-            const BOOL finished = ::WSAGetOverlappedResult(transmission.out, &request, &moved, FALSE, &flags);
+            const BOOL finished =
+                ::WSAGetOverlappedResult(transmission.out, &request, &moved, FALSE, &flags);
             if (timed_out) { return Transmitted::failure(SocketCode::TIMEOUT); }
             if (finished == FALSE) { return Transmitted::failure(lastSocketCode()); }
             if (moved == 0) { return Transmitted::failure(SocketCode::INVALID_ARGUMENT); }
             return Transmitted::success(moved);
         }
 
-        Transmitted transmitPiece(const Transmission& transmission, uint64_t position, DWORD piece, const Deadline& deadline)
+        Transmitted transmitPiece(const Transmission& transmission, uint64_t position, DWORD piece,
+            const Deadline& deadline)
         {
-            OVERLAPPED request{};
-            request.Offset = static_cast<DWORD>(position & 0xFFFFFFFFu);
-            request.OffsetHigh = static_cast<DWORD>(position >> 32);
+            OVERLAPPED request = overlappedAt(position);
             request.hEvent = transmission.done.withoutPort();
             ::ResetEvent(transmission.done.handle());
-            const BOOL started = transmission.transmit(transmission.out, transmission.file, piece, 0, &request, nullptr, 0);
-            if (started == FALSE)
-            {
-                const int error = ::WSAGetLastError();
-                if (error != WSA_IO_PENDING) { return Transmitted::failure(toSocketCode(error)); }
-            }
+            const BOOL started = transmission.transmit(transmission.out, transmission.file, piece,
+                0, &request, nullptr, 0);
+            const int error = started == FALSE ? ::WSAGetLastError() : 0;
+            const bool is_failed = started == FALSE && error != WSA_IO_PENDING;
+            if (is_failed) { return Transmitted::failure(toSocketCode(error)); }
             return finishPiece(transmission, request, deadline);
         }
 
-        bool widen(const char* path, wchar_t (&wide)[KIOTTY_NET_MAX_PATH_LENGTH])
+        bool isUsablePath(const char* path)
         {
-            int written = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, KIOTTY_NET_MAX_PATH_LENGTH);
-            return written > 0;
+            if (path == nullptr)
+            {
+                return false;
+            }
+            const size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
+            return length > 0 && length < KIOTTY_NET_MAX_PATH_LENGTH;
+        }
+
+        HANDLE openForRead(const char* path)
+        {
+            wchar_t wide[KIOTTY_NET_MAX_PATH_LENGTH] = {};
+            const int written = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                wide, KIOTTY_NET_MAX_PATH_LENGTH);
+            if (written <= 0)
+            {
+                return INVALID_HANDLE_VALUE;
+            }
+            return ::CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
         }
     }
 
@@ -146,26 +176,16 @@ namespace kiotty::net::implementation
     KiottyNetCode InputFile::open(const char* path)
     {
         close();
-        if (path == nullptr)
+        if (!isUsablePath(path))
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
-        if (length == 0 || length == KIOTTY_NET_MAX_PATH_LENGTH)
-        {
-            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-        }
-        wchar_t wide[KIOTTY_NET_MAX_PATH_LENGTH];
-        if (!widen(path, wide))
-        {
-            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-        }
-        HANDLE file = ::CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const HANDLE file = openForRead(path);
         if (file == INVALID_HANDLE_VALUE)
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        LARGE_INTEGER size;
+        LARGE_INTEGER size{};
         if (::GetFileSizeEx(file, &size) == FALSE)
         {
             ::CloseHandle(file);
@@ -176,23 +196,21 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    FileReadResult InputFile::read(uint64_t offset, char* buffer, size_t length)
+    FileReadResult InputFile::read(uint64_t offset, Span<char> target)
     {
         if (!valid())
         {
             return FileReadResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         size_t done = 0;
-        while (done < length)
+        while (done < target.length)
         {
-            uint64_t position = offset + done;
-            OVERLAPPED at{};
-            at.Offset = static_cast<DWORD>(position & 0xFFFFFFFFu);
-            at.OffsetHigh = static_cast<DWORD>(position >> 32);
-            size_t left = length - done;
-            DWORD request = left < READ_CHUNK_BYTES ? static_cast<DWORD>(left) : READ_CHUNK_BYTES;
+            OVERLAPPED at = overlappedAt(offset + done);
+            const size_t left = target.length - done;
+            const DWORD request = static_cast<DWORD>(std::min<size_t>(left, READ_CHUNK_BYTES));
             DWORD got = 0;
-            BOOL completed = ::ReadFile(fileOf(_handle), buffer + done, request, &got, &at);
+            char* const into = target.data + done;
+            const BOOL completed = ::ReadFile(fileOf(_handle), into, request, &got, &at);
             if (completed == FALSE && ::GetLastError() != ERROR_HANDLE_EOF)
             {
                 return FileReadResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
@@ -232,7 +250,8 @@ namespace kiotty::net::implementation
         return _handle;
     }
 
-    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range, const Deadline& deadline)
+    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range,
+        const Deadline& deadline)
     {
         if (!socket.valid() || !file.valid()) { return SocketCode::INVALID_ARGUMENT; }
         const SOCKET out = static_cast<SOCKET>(socket.handle());
@@ -244,8 +263,10 @@ namespace kiotty::net::implementation
         while (sent < range.length)
         {
             const uint64_t left = range.length - sent;
-            const DWORD piece = left < TRANSMIT_CHUNK_BYTES ? static_cast<DWORD>(left) : TRANSMIT_CHUNK_BYTES;
-            const Transmitted moved = transmitPiece(transmission, range.offset + sent, piece, deadline);
+            const uint64_t capped = std::min<uint64_t>(left, TRANSMIT_CHUNK_BYTES);
+            const DWORD piece = static_cast<DWORD>(capped);
+            const uint64_t position = range.offset + sent;
+            const Transmitted moved = transmitPiece(transmission, position, piece, deadline);
             if (!moved) { return moved.code; }
             sent += moved.value;
         }

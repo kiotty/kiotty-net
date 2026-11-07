@@ -1,7 +1,6 @@
 #pragma once
 
 #include "domain/entity/kiotty_io_action.h"
-#include "kiotty_net_base.h"
 
 #include <atomic>
 #include <cstdint>
@@ -26,16 +25,13 @@ namespace kiotty::net::implementation
         void     request();
         void     abandon();
         void     start(int32_t generation);
-        bool     requested() const;
-        bool     finished() const;
-        IoAction onFinished();
-        bool     working() const;
+        State    state() const;
+        IoAction takeOutcome();
         void     reset();
 
-        KiottyNetCode verify(int32_t generation) const;
-        void          finish(IoAction outcome);
-
     private:
+        friend class WorkReporter;
+
         void move(State from, State to);
 
         IoAction           _outcome;
@@ -50,12 +46,6 @@ namespace kiotty::net::implementation
     {
     }
 
-    inline void WorkContext::move(State from, State to)
-    {
-        State expected = from;
-        _state.compare_exchange_strong(expected, to, std::memory_order_acq_rel, std::memory_order_acquire);
-    }
-
     inline void WorkContext::request()
     {
         move(State::IDLE, State::REQUESTED);
@@ -68,7 +58,7 @@ namespace kiotty::net::implementation
 
     inline void WorkContext::start(int32_t generation)
     {
-        const State current = _state.load(std::memory_order_acquire);
+        const State current = state();
         if (current != State::REQUESTED)
         {
             return;
@@ -77,20 +67,15 @@ namespace kiotty::net::implementation
         _state.store(State::WORKING, std::memory_order_release);
     }
 
-    inline bool WorkContext::requested() const
+    inline WorkContext::State WorkContext::state() const
     {
-        return _state.load(std::memory_order_acquire) == State::REQUESTED;
+        return _state.load(std::memory_order_acquire);
     }
 
-    inline bool WorkContext::finished() const
+    inline IoAction WorkContext::takeOutcome()
     {
-        return _state.load(std::memory_order_acquire) == State::DONE;
-    }
-
-    inline IoAction WorkContext::onFinished()
-    {
-        const bool done = finished();
-        if (!done)
+        const State current = state();
+        if (current != State::DONE)
         {
             return IoAction::none();
         }
@@ -100,11 +85,6 @@ namespace kiotty::net::implementation
         return outcome;
     }
 
-    inline bool WorkContext::working() const
-    {
-        return _state.load(std::memory_order_acquire) != State::IDLE;
-    }
-
     inline void WorkContext::reset()
     {
         _generation = 0;
@@ -112,17 +92,11 @@ namespace kiotty::net::implementation
         _state.store(State::IDLE, std::memory_order_release);
     }
 
-    inline KiottyNetCode WorkContext::verify(int32_t generation) const
+    inline void WorkContext::move(State from, State to)
     {
-        const State current = _state.load(std::memory_order_acquire);
-        if (current != State::WORKING) { return KIOTTY_NET_CODE_BUSY; }
-        if (_generation != generation) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    inline void WorkContext::finish(IoAction outcome)
-    {
-        _outcome = outcome;
-        move(State::WORKING, State::DONE);
+        State expected = from;
+        const std::memory_order success = std::memory_order_acq_rel;
+        const std::memory_order failure = std::memory_order_acquire;
+        _state.compare_exchange_strong(expected, to, success, failure);
     }
 }

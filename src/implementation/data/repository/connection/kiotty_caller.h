@@ -22,5 +22,7 @@ namespace kiotty::net::implementation
         IoAction                  admit(const KiottyNetConnectionAction& returned) const;
     };
 
-    static_assert(sizeof(Caller) == 3 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle), "Caller: unexpected padding");
+    static constexpr size_t CALLER_BYTES =
+        3 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle);
+    static_assert(sizeof(Caller) == CALLER_BYTES, "Caller: unexpected padding");
 }

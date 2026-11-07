@@ -23,11 +23,18 @@ namespace kiotty::net::implementation
         static constexpr size_t OWNERS = SERVERS + STREAM_CLIENTS + EVENT_CLIENTS;
     };
 
-    static_assert(MemoryLimits::SERVERS > 0 && MemoryLimits::SERVERS <= OWNERS_PER_TYPE_LIMIT, "servers must be 1 to 16");
-    static_assert(MemoryLimits::STREAM_CLIENTS > 0 && MemoryLimits::STREAM_CLIENTS <= OWNERS_PER_TYPE_LIMIT, "stream clients must be 1 to 16");
-    static_assert(MemoryLimits::EVENT_CLIENTS > 0 && MemoryLimits::EVENT_CLIENTS <= OWNERS_PER_TYPE_LIMIT, "event clients must be 1 to 16");
-    static_assert(MemoryLimits::CONNECTIONS_PER_SERVER > 0, "a server needs at least one connection");
-    static_assert(MemoryLimits::CONNECTIONS_PER_SERVER <= CONNECTIONS_PER_SERVER_LIMIT, "a server holds at most 1024 connections");
+    static_assert(MemoryLimits::SERVERS > 0, "servers must be 1 to 16");
+    static_assert(MemoryLimits::SERVERS <= OWNERS_PER_TYPE_LIMIT, "servers must be 1 to 16");
+    static_assert(MemoryLimits::STREAM_CLIENTS > 0, "stream clients must be 1 to 16");
+    static_assert(MemoryLimits::STREAM_CLIENTS <= OWNERS_PER_TYPE_LIMIT,
+                  "stream clients must be 1 to 16");
+    static_assert(MemoryLimits::EVENT_CLIENTS > 0, "event clients must be 1 to 16");
+    static_assert(MemoryLimits::EVENT_CLIENTS <= OWNERS_PER_TYPE_LIMIT,
+                  "event clients must be 1 to 16");
+    static_assert(MemoryLimits::CONNECTIONS_PER_SERVER > 0,
+                  "a server needs at least one connection");
+    static_assert(MemoryLimits::CONNECTIONS_PER_SERVER <= CONNECTIONS_PER_SERVER_LIMIT,
+                  "a server holds at most 1024 connections");
     static_assert(MemoryLimits::RECEIVE_CAPACITY > 0, "the receive stage needs capacity");
     static_assert(MemoryLimits::SEND_CAPACITY > 0, "the send stage needs capacity");
     static_assert(MemoryLimits::PUSH_CAPACITY > 0, "the push stage needs capacity");

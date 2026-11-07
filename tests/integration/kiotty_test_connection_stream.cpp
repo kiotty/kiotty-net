@@ -74,8 +74,8 @@ namespace
             , engine()
             , receive()
             , send()
+            , tls_capacity{ capacity, capacity }
         {
-            engine.limit(capacity, capacity);
             receive.limit(capacity);
             send.limit(capacity);
         }
@@ -89,6 +89,7 @@ namespace
         TlsEngine                            engine;
         Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY>  receive;
         Stage<kiotty::net::implementation::MemoryLimits::SEND_CAPACITY>  send;
+        kiotty::net::implementation::TlsCapacity                       tls_capacity;
     };
 
     bool connect(LoopbackPeer& peer, Side& side)
@@ -159,11 +160,11 @@ namespace
         {
             return false;
         }
-        if (server.engine.open(profiles.server, nullptr) != KIOTTY_NET_CODE_SUCCESS)
+        if (server.engine.open(profiles.server, nullptr, server.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
         {
             return false;
         }
-        if (client.engine.open(profiles.client, "localhost") != KIOTTY_NET_CODE_SUCCESS)
+        if (client.engine.open(profiles.client, "localhost", client.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
         {
             return false;
         }
@@ -184,7 +185,7 @@ namespace
         char buffer[CAPACITY];
         while (received.size() < length)
         {
-            KiottyNetResult result = stream.read(buffer, sizeof(buffer), WAIT_MS);
+            KiottyNetResult result = stream.read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
             if (result.code != KIOTTY_NET_CODE_SUCCESS)
             {
                 break;
@@ -225,12 +226,12 @@ namespace
         size_t at = 0;
         for (;;)
         {
-            StageBase& incoming = engine.cipherReceive();
+            StageBase& incoming = engine.stages().receive;
             size_t room = incoming.provider().writable();
             size_t piece = cipher.size() - at < room ? cipher.size() - at : room;
             kiotty_test::put(incoming, cipher.substr(at, piece));
             at += piece;
-            DecodeResult decoded = engine.decode(buffer, sizeof(buffer));
+            DecodeResult decoded = engine.decode(Span<char>{ buffer, sizeof(buffer) });
             if (!decoded)
             {
                 break;
@@ -279,10 +280,10 @@ TEST(ConnectionStream, ReadReturnsStagedPlaintextBeforeTouchingSocket)
     ASSERT_TRUE(peer.sendAll("xyz", 3));
     ASSERT_EQ(waitReadable(side.socket, WAIT_MS), SocketCode::SUCCESS);
     char buffer[16];
-    KiottyNetResult staged = side.stream().read(buffer, sizeof(buffer), WAIT_MS);
+    KiottyNetResult staged = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
     ASSERT_EQ(staged.code, KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(std::string(buffer, static_cast<size_t>(staged.bytes)), "abc");
-    KiottyNetResult fresh = side.stream().read(buffer, sizeof(buffer), WAIT_MS);
+    KiottyNetResult fresh = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
     ASSERT_EQ(fresh.code, KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(std::string(buffer, static_cast<size_t>(fresh.bytes)), "xyz");
 }
@@ -298,7 +299,7 @@ TEST(ConnectionStream, ReadBlocksUntilPeerSendsThenReturnsUpToLength)
         peer.sendAll("hello world", 11);
     });
     char buffer[4];
-    KiottyNetResult result = side.stream().read(buffer, sizeof(buffer), WAIT_MS);
+    KiottyNetResult result = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
     uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
     sender.join();
     ASSERT_EQ(result.code, KIOTTY_NET_CODE_SUCCESS);
@@ -313,7 +314,7 @@ TEST(ConnectionStream, ReadTimesOut)
     ASSERT_TRUE(connect(peer, side));
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     char buffer[4];
-    KiottyNetResult result = side.stream().read(buffer, sizeof(buffer), 100);
+    KiottyNetResult result = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, 100);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_TIMEOUT);
     EXPECT_EQ(result.bytes, 0);
     EXPECT_GE(kiotty_test::elapsedMilliseconds(started), 90u);
@@ -326,7 +327,7 @@ TEST(ConnectionStream, ReadReturnsPeerClosedWhenThePeerShutsDown)
     ASSERT_TRUE(connect(peer, side));
     ASSERT_TRUE(peer.shutdownWrite());
     char buffer[4];
-    KiottyNetResult result = side.stream().read(buffer, sizeof(buffer), WAIT_MS);
+    KiottyNetResult result = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_PEER_CLOSED);
     EXPECT_EQ(result.bytes, 0);
 }
@@ -337,8 +338,8 @@ TEST(ConnectionStream, ReadAndWriteRejectEmptyOrMissingBuffers)
     Side side;
     ASSERT_TRUE(connect(peer, side));
     char buffer[4];
-    EXPECT_EQ(side.stream().read(nullptr, sizeof(buffer), WAIT_MS).code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
-    EXPECT_EQ(side.stream().read(buffer, 0, WAIT_MS).code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().read(Span<char>{ nullptr, sizeof(buffer) }, WAIT_MS).code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().read(Span<char>{ buffer, 0 }, WAIT_MS).code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
     KiottyNetSpan missing = { nullptr, 4 };
     EXPECT_EQ(side.stream().write(missing, WAIT_MS).code, KIOTTY_NET_CODE_INVALID_ARGUMENT);
 }
@@ -461,7 +462,7 @@ TEST(ConnectionStream, WriteTlsSendsFullRecordsStraightFromTheEngine)
     ASSERT_EQ(sent.code, KIOTTY_NET_CODE_SUCCESS);
     EXPECT_EQ(static_cast<size_t>(sent.bytes), data.size());
     EXPECT_EQ(applicationRecords(cipher), (data.size() + TLS_RECORD - 1) / TLS_RECORD);
-    EXPECT_EQ(client->engine.cipherSend().consumer().readable(), 0u);
+    EXPECT_EQ(client->engine.stages().send.consumer().readable(), 0u);
     EXPECT_EQ(client->send.consumer().readable(), 0u);
     EXPECT_EQ(decodeAll(server->engine, cipher), data);
 }
@@ -482,7 +483,7 @@ TEST(ConnectionStream, ReadTlsDecodesStraightIntoTheCallersBuffer)
     bool staged = false;
     while (received.size() < data.size())
     {
-        KiottyNetResult result = client->stream().read(&buffer[0], buffer.size(), WAIT_MS);
+        KiottyNetResult result = client->stream().read(Span<char>{ &buffer[0], buffer.size() }, WAIT_MS);
         if (result.code != KIOTTY_NET_CODE_SUCCESS)
         {
             break;
@@ -493,7 +494,7 @@ TEST(ConnectionStream, ReadTlsDecodesStraightIntoTheCallersBuffer)
     sender.join();
     EXPECT_EQ(received, data);
     EXPECT_FALSE(staged);
-    EXPECT_EQ(client->engine.cipherReceive().consumer().readable(), 0u);
+    EXPECT_EQ(client->engine.stages().receive.consumer().readable(), 0u);
 }
 
 TEST(ConnectionStream, WriteFileOverTlsSendsExactRange)
@@ -525,9 +526,9 @@ TEST(ConnectionStream, FlushSendsLeftoverCipherSendFirst)
     std::unique_ptr<Side> client(new Side());
     ASSERT_TRUE(handshake(profiles, *server, *client));
     client->engine.encode(spanOf(std::string("first")));
-    ASSERT_GT(client->engine.cipherSend().consumer().readable(), 0u);
+    ASSERT_GT(client->engine.stages().send.consumer().readable(), 0u);
     KiottyNetResult sent = client->stream().write(spanOf(std::string("second")), WAIT_MS);
     EXPECT_EQ(sent.code, KIOTTY_NET_CODE_SUCCESS);
-    EXPECT_EQ(client->engine.cipherSend().consumer().readable(), 0u);
+    EXPECT_EQ(client->engine.stages().send.consumer().readable(), 0u);
     EXPECT_EQ(readExactly(server->stream(), 11), "firstsecond");
 }

@@ -21,7 +21,14 @@ namespace kiotty::net::implementation
         bool isExpired(uint64_t now) const;
     };
 
-    static_assert(sizeof(ConnectionState) == sizeof(uint64_t) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle) + sizeof(KiottyNetConnectionInfo) + 4, "ConnectionState: unexpected padding");
+    static constexpr size_t CONNECTION_STATE_TAIL_BYTES = 4;
+    static constexpr size_t CONNECTION_STATE_BYTES = sizeof(uint64_t)
+                                                   + sizeof(KiottyNetConnectionContext)
+                                                   + sizeof(PoolHandle)
+                                                   + sizeof(KiottyNetConnectionInfo)
+                                                   + CONNECTION_STATE_TAIL_BYTES;
+    static_assert(sizeof(ConnectionState) == CONNECTION_STATE_BYTES,
+                  "ConnectionState: unexpected padding");
 
     inline bool ConnectionState::isExpired(uint64_t now) const
     {

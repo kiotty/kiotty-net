@@ -19,7 +19,9 @@ namespace kiotty::net::implementation
     template <class T>
     class ReusablePoolBase
     {
-        static_assert(is_reusable<T>::value, "ReusablePool needs a default constructible, non copyable, non movable T with initialize and noexcept reset");
+        static_assert(is_reusable<T>::value,
+                      "ReusablePool needs a default constructible, non copyable, non movable T "
+                      "with initialize and noexcept reset");
 
     public:
         using code_type = typename T::code_type;
@@ -75,7 +77,9 @@ namespace kiotty::net::implementation
     };
 
     template <class T>
-    ReusablePoolBase<T>::ReusablePoolBase(Span<T> objects, Span<SlotState> states, Span<int32_t> generations)
+    ReusablePoolBase<T>::ReusablePoolBase(Span<T> objects,
+                                          Span<SlotState> states,
+                                          Span<int32_t> generations)
         : _objects(objects)
         , _states(states)
         , _generations(generations)
@@ -96,7 +100,8 @@ namespace kiotty::net::implementation
     }
 
     template <class T>
-    typename ReusablePoolBase<T>::AcquireResult ReusablePoolBase<T>::acquire(configuration_type configuration)
+    typename ReusablePoolBase<T>::AcquireResult
+    ReusablePoolBase<T>::acquire(configuration_type configuration)
     {
         for (size_t i = 0; i < _objects.length; ++i)
         {
@@ -131,7 +136,8 @@ namespace kiotty::net::implementation
     typename ReusablePoolBase<T>::AcquireResult ReusablePoolBase<T>::get(PoolHandle id)
     {
         const size_t index = slotOf(id);
-        if (index == _objects.length) { return AcquireResult::failure(static_cast<code_type>(T::INVALID_HANDLE)); }
+        const code_type invalid = static_cast<code_type>(T::INVALID_HANDLE);
+        if (index == _objects.length) { return AcquireResult::failure(invalid); }
         return AcquireResult::success(_objects[index]);
     }
 
@@ -139,7 +145,8 @@ namespace kiotty::net::implementation
     typename ReusablePoolBase<T>::ConstResult ReusablePoolBase<T>::get(PoolHandle id) const
     {
         const size_t index = slotOf(id);
-        if (index == _objects.length) { return ConstResult::failure(static_cast<code_type>(T::INVALID_HANDLE)); }
+        const code_type invalid = static_cast<code_type>(T::INVALID_HANDLE);
+        if (index == _objects.length) { return ConstResult::failure(invalid); }
         return ConstResult::success(_objects[index]);
     }
 
@@ -149,7 +156,9 @@ namespace kiotty::net::implementation
         if (id.index < 0) { return _objects.length; }
         const size_t index = static_cast<size_t>(id.index);
         if (index >= _objects.length) { return _objects.length; }
-        if (_states[index] != SlotState::ACTIVE || _generations[index] != id.generation) { return _objects.length; }
+        const bool is_active = _states[index] == SlotState::ACTIVE;
+        const bool is_current = _generations[index] == id.generation;
+        if (!is_active || !is_current) { return _objects.length; }
         return index;
     }
 
@@ -188,8 +197,10 @@ namespace kiotty::net::implementation
     {
         const T* address = &object;
         const T* begin = _objects.data;
+        const T* end = begin + _objects.length;
         const std::less<const T*> before;
-        if (before(address, begin) || !before(address, begin + _objects.length)) { return _objects.length; }
+        const bool is_inside = !before(address, begin) && before(address, end);
+        if (!is_inside) { return _objects.length; }
         return static_cast<size_t>(address - begin);
     }
 
@@ -206,7 +217,9 @@ namespace kiotty::net::implementation
     template <class T, size_t N>
     ReusablePool<T, N>::ReusablePool()
         : ReusablePoolStorage<T, N>()
-        , ReusablePoolBase<T>(Span<T>{ this->objects.data(), N }, Span<SlotState>{ this->states.data(), N }, Span<int32_t>{ this->generations.data(), N })
+        , ReusablePoolBase<T>(Span<T>{ this->objects.data(), N },
+                              Span<SlotState>{ this->states.data(), N },
+                              Span<int32_t>{ this->generations.data(), N })
     {
     }
 }

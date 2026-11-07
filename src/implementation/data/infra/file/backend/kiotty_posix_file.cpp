@@ -13,6 +13,7 @@
 #include <sys/sendfile.h>
 #endif
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <ctime>
@@ -44,7 +45,7 @@ namespace kiotty::net::implementation
             {
                 sigemptyset(&_blocked);
                 sigaddset(&_blocked, SIGPIPE);
-                sigset_t waiting;
+                sigset_t waiting{};
                 sigemptyset(&waiting);
                 sigpending(&waiting);
                 _pending = sigismember(&waiting, SIGPIPE) == 1;
@@ -77,9 +78,9 @@ namespace kiotty::net::implementation
             off_t position = static_cast<off_t>(offset);
             return ::sendfile(socket, file, &position, length);
 #else
-            char buffer[COPY_BUFFER_BYTES];
-            size_t want = length < COPY_BUFFER_BYTES ? length : COPY_BUFFER_BYTES;
-            ssize_t loaded = ::pread(file, buffer, want, static_cast<off_t>(offset));
+            char buffer[COPY_BUFFER_BYTES] = {};
+            const size_t want = std::min(length, COPY_BUFFER_BYTES);
+            const ssize_t loaded =::pread(file, buffer, want, static_cast<off_t>(offset));
             if (loaded <= 0)
             {
                 return loaded;
@@ -91,12 +92,14 @@ namespace kiotty::net::implementation
         Result<uint64_t, SocketCode> sendPiece(int out, int in, uint64_t position, uint64_t left)
         {
             using Moved = Result<uint64_t, SocketCode>;
-            const size_t piece = left < SEND_CHUNK_BYTES ? static_cast<size_t>(left) : SEND_CHUNK_BYTES;
+            const uint64_t capped = std::min<uint64_t>(left, SEND_CHUNK_BYTES);
+            const size_t piece = static_cast<size_t>(capped);
             const ssize_t moved = sendRange(out, in, position, piece);
             if (moved > 0) { return Moved::success(static_cast<uint64_t>(moved)); }
             if (moved == 0) { return Moved::failure(SocketCode::INVALID_ARGUMENT); }
             if (errno == EINTR) { return Moved::success(0); }
-            if (errno != EAGAIN && errno != EWOULDBLOCK) { return Moved::failure(lastSocketCode()); }
+            const bool is_would_block = errno == EAGAIN || errno == EWOULDBLOCK;
+            if (!is_would_block) { return Moved::failure(lastSocketCode()); }
             return Moved::failure(SocketCode::WOULD_BLOCK);
         }
 
@@ -125,18 +128,18 @@ namespace kiotty::net::implementation
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
+        const size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
         if (length == 0 || length == KIOTTY_NET_MAX_PATH_LENGTH)
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
+        const int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
         if (descriptor < 0)
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        struct stat info;
-        bool regular = ::fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode);
+        struct stat info{};
+        const bool regular = ::fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode);
         if (!regular)
         {
             ::close(descriptor);
@@ -147,17 +150,18 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    FileReadResult InputFile::read(uint64_t offset, char* buffer, size_t length)
+    FileReadResult InputFile::read(uint64_t offset, Span<char> target)
     {
         if (!valid())
         {
             return FileReadResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         size_t done = 0;
-        while (done < length)
+        while (done < target.length)
         {
-            off_t position = static_cast<off_t>(offset + done);
-            ssize_t got = ::pread(descriptorOf(_handle), buffer + done, length - done, position);
+            const off_t position = static_cast<off_t>(offset + done);
+            const ssize_t got =
+                ::pread(descriptorOf(_handle), target.data + done, target.length - done, position);
             if (got < 0 && errno == EINTR)
             {
                 continue;
@@ -201,7 +205,8 @@ namespace kiotty::net::implementation
         return _handle;
     }
 
-    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range, const Deadline& deadline)
+    SocketCode sendFile(const ActiveSocket& socket, const InputFile& file, FileRange range,
+        const Deadline& deadline)
     {
         if (!socket.valid() || !file.valid()) { return SocketCode::INVALID_ARGUMENT; }
 #if defined(__linux__)
@@ -212,8 +217,14 @@ namespace kiotty::net::implementation
         uint64_t sent = 0;
         while (sent < range.length)
         {
-            const Result<uint64_t, SocketCode> moved = sendPiece(out, in, range.offset + sent, range.length - sent);
-            if (moved) { sent += moved.value; continue; }
+            const uint64_t position = range.offset + sent;
+            const uint64_t left = range.length - sent;
+            const Result<uint64_t, SocketCode> moved = sendPiece(out, in, position, left);
+            if (moved)
+            {
+                sent += moved.value;
+                continue;
+            }
             if (moved.code != SocketCode::WOULD_BLOCK) { return moved.code; }
             const SocketCode waited = awaitWritable(socket, deadline);
             if (waited != SocketCode::SUCCESS) { return waited; }

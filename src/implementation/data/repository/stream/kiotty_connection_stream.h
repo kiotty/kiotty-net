@@ -22,9 +22,12 @@ namespace kiotty::net::implementation
         ConnectionStream(const ConnectionStream& other) = default;
         ConnectionStream& operator=(const ConnectionStream&) = delete;
 
-        KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
+        KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
-        KiottyNetCode   writeFile(const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds);
+        KiottyNetCode   writeFile(const char* path,
+                                  uint64_t offset,
+                                  uint64_t length,
+                                  uint32_t timeout_milliseconds);
         bool            connected() const;
         KiottyNetCode   handshake(uint32_t timeout_milliseconds);
 
@@ -35,7 +38,8 @@ namespace kiotty::net::implementation
             SocketCode code;
         };
 
-        static_assert(sizeof(Sent) == 2 * sizeof(size_t), "ConnectionStream::Sent: unexpected padding");
+        static_assert(sizeof(Sent) == 2 * sizeof(size_t),
+                      "ConnectionStream::Sent: unexpected padding");
 
         KiottyNetResult readInto(Span<char> target, const Deadline& deadline);
         KiottyNetResult readOnce(Span<char> target, const Deadline& deadline);

@@ -13,7 +13,8 @@ cmake 와 ninja 가 PATH 에 없다. VS 18 Insiders 의 `vcvars64.bat` 가 둘�
 
 ```bat
 call "C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Build\vcvars64.bat" >nul
-cd /d D:\repo\kiotty-net
+cd /d C:\repository\private\kiotty-net
+epositoryprivatekiotty-net
 cmake -B build\msvc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF
 cmake --build build\msvc
 ctest --test-dir build\msvc -L "unit|integration" --output-on-failure
@@ -21,10 +22,10 @@ ctest --test-dir build\msvc -L "unit|integration" --output-on-failure
 
 TLS 를 켜면 `-DKIOTTY_NET_USE_TLS=ON`. 시스템 OpenSSL 은 쓰지 않는다. prebuilt 는 `build/<이름>/_deps/openssl-cmake-build/prebuilt/<triple>/` 에 한 번만 받는다 (Windows x64 MSVC, Linux x64, Android 만. macOS / iOS 는 `-DKIOTTY_NET_OPENSSL_PREBUILT=OFF` 나 TLS OFF).
 
-## WSL Ubuntu 24.04 (배포판 이름 `Ubuntu-24.04`, gcc 13 / clang 18, epoll)
+## WSL Ubuntu 24.04 (배포판 이름 `Ubuntu`, gcc 13 / clang 18, epoll)
 
 ```bash
-wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/d/repo/kiotty-net && cmake -B build/wsl-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF && cmake --build build/wsl-gcc && ctest --test-dir build/wsl-gcc -L "unit|integration" --output-on-failure' | tr -d '\0'
+wsl -d Ubuntu -- bash -lc 'cd /mnt/c/repository/private/kiotty-net && cmake -B build/wsl-gcc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=OFF && cmake --build build/wsl-gcc && ctest --test-dir build/wsl-gcc -L "unit|integration" --output-on-failure' | tr -d '\0'
 ```
 
 clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl-clang`. sanitizer 는 `-DKIOTTY_NET_SANITIZER=address,undefined` 또는 `thread`. WSL 의 출력에는 NUL 이 섞이므로 `tr -d '\0'` 를 붙인다. TLS 는 시스템 OpenSSL 없이 ON 이 된다 (openssl-cmake 의 Linux x64 prebuilt). 로컬 matrix 는 gcc / clang × TLS ON / OFF, Release TLS, asan,undefined TLS, thread TLS 일곱 벌이다.
@@ -33,10 +34,10 @@ clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl
 
 - CMake 는 소스를 운영체제로 나누지 않고 전부 나열한다. backend `.cpp` 는 파일 전체를 `#if defined(_WIN32)` / `#if !defined(_WIN32)` / `#if defined(__linux__)` 로 감싼다. 테스트가 backend 유무를 볼 때는 헤더의 매크로 (`KIOTTY_NET_HAS_EVENT_BACKEND`) 를 쓴다. 링크 라이브러리 (`ws2_32`, `ntdll`) 만 CMake 의 `if(WIN32)` 다.
 
-- WSL 의 `/mnt/d` 에서 openssl-cmake 의 prebuilt 압축 해제 뒤 `file(RENAME)` 이 가끔 실패한다 (DrvFs). 그 빌드 디렉터리를 지우고 다시 configure 하면 된다.
+- WSL 의 `/mnt/c` 에서 openssl-cmake 의 prebuilt 압축 해제 뒤 `file(RENAME)` 이 가끔 실패한다 (DrvFs). 그 빌드 디렉터리를 지우고 다시 configure 하면 된다.
 
 - integration 테스트의 Unix domain socket 경로는 POSIX 에서 `/tmp` 아래다. WSL 의 `/mnt/c` (DrvFs) 는 socket 파일을 만들 수 없다 (NOT_SUPPORTED).
-- Git Bash 에서 `wsl -- bash -lc '...'` 로 넘기면 `$변수` 가 사라질 수 있다. 긴 명령은 스크립트 파일로 만들고 `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-24.04 -- bash /mnt/c/.../script.sh` 로 돌린다.
+- Git Bash 에서 `wsl -- bash -lc '...'` 로 넘기면 `$변수` 가 사라질 수 있다. 긴 명령은 스크립트 파일로 만들고 `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash /mnt/c/.../script.sh` 로 돌린다.
 
 - 경고는 오류다 (`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-compare -Wshadow -Wswitch`). 경고를 끄지 말고 코드를 고친다.
 - 라이브러리와 테스트 모두 C++17 (`CMAKE_CXX_STANDARD 17`, MSVC `/permissive-`). 라이브러리는 RTTI 와 예외 없이 (`-fno-rtti -fno-exceptions`, MSVC `/GR- /EHs-c- _HAS_EXCEPTIONS=0`), `-fstack-protector-strong`, Release 에서 `_FORTIFY_SOURCE=2`. 테스트는 예외를 켠다.

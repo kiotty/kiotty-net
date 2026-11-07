@@ -11,5 +11,6 @@ namespace kiotty::net::implementation
         size_t notify;
     };
 
-    static_assert(sizeof(ConnectionLimits) == 3 * sizeof(size_t), "ConnectionLimits: unexpected padding");
+    static_assert(sizeof(ConnectionLimits) == 3 * sizeof(size_t),
+                  "ConnectionLimits: unexpected padding");
 }

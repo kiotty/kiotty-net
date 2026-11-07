@@ -57,7 +57,8 @@ namespace kiotty::net::implementation
         return disableSigpipe(descriptor);
     }
 
-    AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint, AddressRole role)
+    AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint,
+        AddressRole role)
     {
         if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(endpoint.host); }
         return inetAddressOf(endpoint, role);
@@ -106,7 +107,8 @@ namespace kiotty::net::implementation
             Address address{};
             sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&address.storage);
             const size_t length = strnlen(path, sizeof(unix_address->sun_path));
-            if (length == 0 || length >= sizeof(unix_address->sun_path)) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
+            const bool is_fitting = length > 0 && length < sizeof(unix_address->sun_path);
+            if (!is_fitting) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
             unix_address->sun_family = AF_UNIX;
             const Span<char> target{ unix_address->sun_path, sizeof(unix_address->sun_path) };
             const Span<const char> source{ path, length };
@@ -124,10 +126,13 @@ namespace kiotty::net::implementation
             const char* host = endpoint.host[0] == '\0' ? nullptr : endpoint.host;
             addrinfo* found = nullptr;
             const int resolved = ::getaddrinfo(host, nullptr, &hints, &found);
-            if (resolved != 0 || found == nullptr) { return AddressResult::failure(SocketCode::UNREACHABLE); }
+            const bool is_found = resolved == 0 && found != nullptr;
+            if (!is_found) { return AddressResult::failure(SocketCode::UNREACHABLE); }
             Address address{};
-            const Span<char> target{ reinterpret_cast<char*>(&address.storage), sizeof(address.storage) };
-            const Span<const char> source{ reinterpret_cast<const char*>(found->ai_addr), found->ai_addrlen };
+            char* const storage = reinterpret_cast<char*>(&address.storage);
+            const char* const found_address = reinterpret_cast<const char*>(found->ai_addr);
+            const Span<char> target{ storage, sizeof(address.storage) };
+            const Span<const char> source{ found_address, found->ai_addrlen };
             const bool copied = target.copyFrom(source);
             address.length = static_cast<socklen_t>(found->ai_addrlen);
             ::freeaddrinfo(found);

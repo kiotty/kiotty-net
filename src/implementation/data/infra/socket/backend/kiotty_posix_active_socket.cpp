@@ -17,7 +17,8 @@ namespace kiotty::net::implementation
     namespace
     {
         SocketCode pendingError(int descriptor);
-        SocketCode startConnect(int descriptor, const Address& address, uint32_t timeout_milliseconds);
+        SocketCode startConnect(int descriptor, const Address& address,
+            uint32_t timeout_milliseconds);
     }
 
     ActiveSocket::ActiveSocket()
@@ -68,12 +69,14 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
-    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds)
+    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint,
+        uint32_t timeout_milliseconds)
     {
         if (!valid()) { return SocketCode::INVALID_ARGUMENT; }
         const AddressResult resolved = resolveAddress(_transport, endpoint, AddressRole::ACTIVE);
         if (!resolved) { return resolved.code; }
-        const SocketCode connected = startConnect(descriptorOf(_handle), resolved.value, timeout_milliseconds);
+        const int descriptor = descriptorOf(_handle);
+        const SocketCode connected = startConnect(descriptor, resolved.value, timeout_milliseconds);
         if (connected != SocketCode::SUCCESS) { return connected; }
         _peer = infoOf(resolved.value.storage);
         return SocketCode::SUCCESS;
@@ -117,7 +120,8 @@ namespace kiotty::net::implementation
             return toSocketCode(error);
         }
 
-        SocketCode startConnect(int descriptor, const Address& address, uint32_t timeout_milliseconds)
+        SocketCode startConnect(int descriptor, const Address& address,
+            uint32_t timeout_milliseconds)
         {
             const sockaddr* target = reinterpret_cast<const sockaddr*>(&address.storage);
             const int connected = ::connect(descriptor, target, address.length);

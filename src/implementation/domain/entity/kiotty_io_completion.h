@@ -34,7 +34,8 @@ namespace kiotty::net::implementation
         static IoCompletion workDone(int32_t slot, const IoAction& outcome);
     };
 
-    static_assert(sizeof(IoCompletion) == sizeof(IoAction) + sizeof(size_t) + 8, "IoCompletion: unexpected padding");
+    static_assert(sizeof(IoCompletion) == sizeof(IoAction) + sizeof(size_t) + 8,
+                  "IoCompletion: unexpected padding");
 
     inline IoCompletion IoCompletion::of(IoKind kind, int32_t slot, const IoAction& action)
     {

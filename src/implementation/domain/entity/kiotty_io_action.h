@@ -60,7 +60,9 @@ namespace kiotty::net::implementation
         static IoAction none();
         static IoAction hold(uint32_t timeout_milliseconds);
         static IoAction read(IoPurpose purpose, uint32_t timeout_milliseconds, size_t exact);
-        static IoAction readUntil(uint32_t timeout_milliseconds, KiottyNetSpan delimiter, size_t max);
+        static IoAction readUntil(uint32_t timeout_milliseconds,
+                                  KiottyNetSpan delimiter,
+                                  size_t max);
         static IoAction write(IoPurpose purpose, uint32_t timeout_milliseconds, size_t length);
         static IoAction startWork();
         static IoAction close(KiottyNetCode reason);

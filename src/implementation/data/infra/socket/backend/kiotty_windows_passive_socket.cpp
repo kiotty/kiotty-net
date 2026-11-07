@@ -13,7 +13,8 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        void       releasePath(KiottyNetTransport transport, SOCKET socket, const KiottyNetEndpoint& endpoint);
+        void       releasePath(KiottyNetTransport transport, SOCKET socket,
+                       const KiottyNetEndpoint& endpoint);
         SocketCode bindAndListen(SOCKET socket, const Address& address, int backlog);
         uint16_t   boundPort(SOCKET socket);
     }
@@ -33,7 +34,8 @@ namespace kiotty::net::implementation
     SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
     {
         close();
-        const AddressResult resolved = resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
+        const AddressResult resolved =
+            resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
         if (!resolved) { return resolved.code; }
         const SOCKET created = createSocket(endpoint.transport);
         if (created == INVALID_SOCKET) { return lastSocketCode(); }
@@ -64,7 +66,8 @@ namespace kiotty::net::implementation
         if (!valid()) { return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT); }
         sockaddr_storage peer{};
         int length = sizeof(peer);
-        const SOCKET accepted = ::accept(socketOf(_handle), reinterpret_cast<sockaddr*>(&peer), &length);
+        sockaddr* const address = reinterpret_cast<sockaddr*>(&peer);
+        const SOCKET accepted = ::accept(socketOf(_handle), address, &length);
         if (accepted == INVALID_SOCKET) { return ActiveSocketResult::failure(lastSocketCode()); }
         ActiveSocket socket(static_cast<SocketHandle>(accepted), _transport);
         const SocketCode prepared = prepareSocket(accepted);
@@ -98,7 +101,8 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        void releasePath(KiottyNetTransport transport, SOCKET socket, const KiottyNetEndpoint& endpoint)
+        void releasePath(KiottyNetTransport transport, SOCKET socket,
+            const KiottyNetEndpoint& endpoint)
         {
             if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {

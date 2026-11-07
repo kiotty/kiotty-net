@@ -53,10 +53,10 @@ namespace kiotty::net::implementation
         _stage._begin_position += accepted;
     }
 
-    StageBase::StageBase(char* buffer, size_t maximum)
-        : _buffer(buffer)
-        , _maximum(maximum)
-        , _capacity(maximum)
+    StageBase::StageBase(Span<char> storage)
+        : _buffer(storage.data)
+        , _maximum(storage.length)
+        , _capacity(storage.length)
         , _begin_position(0)
         , _end_position(0)
     {

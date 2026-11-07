@@ -266,7 +266,7 @@ namespace kiotty_test
         return KiottyNetConnectionInfo();
     }
 
-    KiottyNetResult FakeOwner::readStream(int64_t, void*, size_t, uint32_t)
+    KiottyNetResult FakeOwner::readStream(int64_t, kiotty::net::implementation::Span<char>, uint32_t)
     {
         KiottyNetResult result = { 0, KIOTTY_NET_CODE_INVALID_ARGUMENT };
         return result;
