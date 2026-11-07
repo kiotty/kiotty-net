@@ -379,6 +379,7 @@ public:
 
     // step (IO Thread, 콜백 있음). handler 는 run 의 것, notification 은 host 의 mutex
     IoAction onOpened(const Handler& handler);                                                             // initialize 직후. 평문 : onReady. TLS : onHandshake
+    IoAction close(KiottyNetCode reason, const Handler& handler);                                        // Owner close, IoLoop shutdown. alive 면 apply(CLOSE). WORKING 이어도 (9.7, 5a)
     IoAction dispatch(const IoCompletion& completion, const Handler& handler, std::mutex& notification);   // phase 라우팅 → kind 별 on* 하나 → apply
 
     // drain (IO Thread, 콜백 없음)
@@ -403,7 +404,8 @@ public:
     KiottyNetCode              stageNotification(KiottyNetSpan data);           // Sender::stage(_plain.notify, data)
 
     // worker (WORKING 동안만)
-    Result<KiottyNetCode, ConnectionStream> stream(int32_t generation);         // _work.verify(generation) 이 SUCCESS 일 때만 값 (9.7)
+    KiottyNetCode    verifyWork(int32_t generation) const;      // _work.verify(generation) (9.7)
+    ConnectionStream stream();                                   // verifyWork 가 SUCCESS 일 때만 (9.7)
     KiottyNetCode closeStream(int32_t generation, const KiottyNetConnectionAction& then);   // 9.7. wake 는 Owner 가
 
 private:
@@ -414,7 +416,8 @@ private:
     IoAction onWorkFinished(const IoCompletion& completion, const Handler& handler);
     IoAction onHandshake(const Handler& handler);
     IoAction onPeerGone(SocketCode code);
-    IoAction adopt(const KiottyNetConnectionAction& returned);                            // return → IoAction 변환 한 걸음. WRITE 는 여기서 Sender::stage 하고 HOLD 가 된다. 콜백 없음, 재귀 없음
+    Result<KiottyNetCode, IoAction> adopt(const KiottyNetConnectionAction& returned);    // 검사와 변환 한 걸음. WRITE 는 여기서 Sender::stage 하고 HOLD 가 된다. 콜백 없음, 재귀 없음. closeStream 도 쓴다 (5a)
+    IoAction admit(const KiottyNetConnectionAction& returned, const Handler& handler);   // 콜백의 return 자리. adopt 가 실패하면 CLOSE(code), INVALID_ARGUMENT 면 그 앞에 onError (5a)
     IoAction drive(IoAction action, const Handler& handler);                              // READ 계열이면 receive Stage 에 대 보고 찼으면 onRead. switch 하나의 loop. 깊이 상수
     IoAction extend(const KiottyNetConnectionAction& returned, const Handler& handler);   // onTimeout 에 사용자 action 이 진행 중일 때 (11절)
     Result<KiottyNetCode, size_t> refill();                                               // receive Stage 를 compact 하고 TLS 면 SSL 에 남은 평문을 꺼낸다. 늘어난 길이
@@ -669,6 +672,7 @@ Result<KiottyNetCode, size_t> Connection::refill()
 - `receiveStage(HANDSHAKE)` 와 `receiveStage(USER, TLS)` 는 cipherReceive, 평문 USER 는 `_plain.receive`. `resolve(READ)` 는 그 Stage 의 `provider().prepare(writable)`. refill 이 compact 를 끝낸 뒤라 writable 은 0 이 아니다.
 - decode 가 한 자리 (refill) 에만 있다. onReceived, onHandshake DONE, onSent(USER), onTimeout, onWorkFinished 가 전부 drive 를 지나므로 "SSL 안에 평문이 남은 채 READ 를 건다" 가 생기지 않는다. 평문 연결은 refill 이 compact 만 한다.
 - call stack 의 깊이는 상수다: dispatch → on* → drive → handler 콜백. adopt 는 변환이고 drive 는 loop 하나라 서로 부르지 않는다. 사용자의 WRITE 는 adopt 에서 stage 되어 HOLD(timeout) 로 바뀌므로 **step 의 output 에 WRITE 가 나타나지 않는다.** WRITE 를 거는 쪽은 drain 하나다 (10절).
+- **action 의 검사는 adopt 한 자리다 (5a).** `exact == 0`, delimiter 가 NULL 이거나 길이 0 또는 5 이상이거나 `max` 가 delimiter 보다 짧음, write 의 data 가 NULL 이거나 길이 0, 모르는 type 은 `INVALID_ARGUMENT` 이고 write 가 send Stage 에 안 들어가면 `BUFFER_FULL` 이다. 콜백의 return 은 `admit` 이 받아 실패면 `CLOSE(code)` 를 돌려주고, `INVALID_ARGUMENT` 일 때만 그 앞에 `onError(INVALID_ARGUMENT, "action rejected: invalid argument")` 를 낸다. `exact > recv_capacity` (REQUEST_TOO_LARGE) 와 max 안에 delimiter 없음 (PROTOCOL_ERROR) 은 drive 의 `satisfied` 가 본다. worker 의 closeStream 도 같은 adopt 를 지나고, 실패하면 그 code 를 돌려주며 Stream 은 남는다. onTimeout 의 extend 가 모르는 type 을 받으면 같은 onError 뒤 CLOSE 다.
 
 | Phase | RECEIVE | SEND | TIMEOUT | WORK_READY | WORK_DONE |
 |---|---|---|---|---|---|
@@ -807,14 +811,14 @@ private:
     StageBase&    _send;
 };
 
-Result<KiottyNetCode, ConnectionStream> Connection::stream(int32_t generation)     // worker
+KiottyNetCode Connection::verifyWork(int32_t generation) const   // worker. ConnectionStream 은 참조를 들어 Result 의 값이 되지 못하므로 검사와 만들기를 나눈다 (5a)
 {
-    KiottyNetCode verified = _work.verify(generation);
-    if (verified != KIOTTY_SUCCESS)
-    {
-        return error(verified);
-    }
-    return ok(ConnectionStream(_socket, _tls, _plain.receive, _plain.send));      // 포인터 넷을 적는 것뿐이라 비용이 없다
+    return _work.verify(generation);
+}
+
+ConnectionStream Connection::stream()                            // verifyWork 가 SUCCESS 일 때만 부른다
+{
+    return ConnectionStream(_socket, _tls, _plain.receive, _plain.send);      // 참조 넷을 적는 것뿐이라 비용이 없다
 }
 
 KiottyNetCode Connection::closeStream(int32_t generation, const KiottyNetConnectionAction& then)   // worker
@@ -828,17 +832,12 @@ KiottyNetCode Connection::closeStream(int32_t generation, const KiottyNetConnect
     {
         return KIOTTY_INVALID_ARGUMENT;
     }
-    IoAction outcome = IoAction::from(then);
-    if (then.type == KIOTTY_ACTION_WRITE)
+    Result<KiottyNetCode, IoAction> outcome = adopt(then);         // 콜백의 return 과 같은 검사와 변환. WRITE 는 worker 가 send Stage 에 stage 하고 HOLD 가 된다 (WORKING 동안 send Stage 는 worker 의 것)
+    if (!outcome.isOk())
     {
-        KiottyNetCode staged = Sender::stage(_plain.send, then.as.write.data);   // WORKING 동안 send Stage 는 worker 의 것. 데이터를 가진 thread 가 stage 한다 (adopt 와 같은 규칙)
-        if (staged != KIOTTY_SUCCESS)
-        {
-            return staged;                      // BUFFER_FULL. Stream 은 유효하게 남는다
-        }
-        outcome = IoAction::hold(then.timeout_ms);                  // adopt 와 같다. stage 된 WRITE 는 read lane 에서 HOLD 다
+        return outcome.code();                 // BUFFER_FULL, INVALID_ARGUMENT. Stream 은 유효하게 남는다
     }
-    _work.finish(outcome);                      // → DONE. stepLocalEvents 가 WORK_DONE 에 실어 drive 로 보낸다. wake 는 Owner::closeStream 이 (9.8)
+    _work.finish(outcome.value());             // → DONE. stepLocalEvents 가 WORK_DONE 에 실어 drive 로 보낸다. wake 는 Owner::closeStream 이 (9.8)
     if (_phase == Phase::CLOSING)
     {
         return KIOTTY_CLOSED;                   // Owner 가 먼저 닫았다. Work 는 끝났고 settle 이 반납한다
@@ -885,7 +884,7 @@ class ConnectionHost                            // connection/kiotty_connection_
 {
 public:
     void initialize(ConnectionLimits limits);   // Owner::initialize 가. 이 뒤로 상수
-    Result<KiottyNetCode, Connection&> acquire(ConnectionConfiguration&& configuration);   // IO Thread. EMPTY 칸 → Connection::initialize. 실패면 reset 하고 code
+    Result<KiottyNetCode, Connection&> acquire(ConnectionConfiguration&& configuration);   // IO Thread. EMPTY 칸 → Connection::initialize. 실패면 reset 하고 code   lock 안에서 (아무 thread 의 notify 가 find 로 같은 표를 읽는다. 5a)
     void          release(Connection& c);       // IO Thread. lock 안에서 c.reset() → EMPTY. notify Stage 를 비우는 줄이 lock 안이어야 해서 (아래)
     Connection&   at(int32_t slot);
     int32_t       capacity() const;
@@ -897,7 +896,7 @@ public:
     KiottyNetCode broadcast(KiottyNetSpan data);                  // lock 안에서 전부 검사 → 전부 stage. 하나라도 모자라면 아무 데도 안 쓴다
     KiottyNetConnectionInfo info(PoolHandle id) const;            // 없으면 빈 값
     // worker
-    Result<KiottyNetCode, ConnectionStream> stream(PoolHandle id);                          // find → c.stream(generation). 없으면 PEER_CLOSED
+    Result<KiottyNetCode, Connection&> working(PoolHandle id);                              // lock 안의 find → c.verifyWork(generation). 없으면 PEER_CLOSED. Owner 가 받은 Connection 의 stream() 을 쓴다 (5a)
     KiottyNetCode closeStream(PoolHandle id, const KiottyNetConnectionAction& then);
 private:
     std::mutex                  _notification;  // 모든 연결의 notify Stage 를 한 mutex 가 지킨다

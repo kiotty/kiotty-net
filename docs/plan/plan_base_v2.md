@@ -154,4 +154,4 @@ v0 12절의 일곱 가지와 v1 4절의 다섯 가지는 그대로다. 19절로 
 
 ## 5. 지금 할 일
 
-R4, R5 (11-04), R6, R7, R8, 4b (11-05) 끝. R8 의 TlsMemory 는 만들었다가 뺐다 (OpenSSL 은 자기 malloc). 다음은 5a.
+R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a (11-07) 끝. R8 의 TlsMemory 는 만들었다가 뺐다 (OpenSSL 은 자기 malloc). 다음은 5b (`docs/progress/261107_progress_base_5a.md` 의 "5b 로 넘긴 것" 포함).

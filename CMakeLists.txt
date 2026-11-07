@@ -49,6 +49,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/stream/kiotty_connection_stream.cpp
     src/implementation/base/stream/backend/kiotty_posix_file.cpp
     src/implementation/base/stream/backend/kiotty_windows_file.cpp
+    src/implementation/base/connection/kiotty_connection.cpp
+    src/implementation/base/context/kiotty_owner.cpp
 )
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
