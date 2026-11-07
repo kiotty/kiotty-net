@@ -41,7 +41,8 @@ namespace kiotty_test
         {
             TABLE_FULL = 10,
             OUT_OF_MEMORY = 11,
-            INVALID_HANDLE = 12
+            INVALID_HANDLE = 12,
+            INVALID_ARGUMENT = 13
         };
 
         Reusable()
