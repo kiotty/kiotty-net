@@ -5,6 +5,7 @@
 #include "data/infra/socket/kiotty_active_socket.h"
 #include "data/infra/tls/kiotty_tls_engine.h"
 #include "data/repository/connection/kiotty_connection_parts.h"
+#include "data/repository/connection/kiotty_connection_state.h"
 #include "data/repository/connection/kiotty_work_context.h"
 #include "data/repository/connection/kiotty_work_reporter.h"
 #include "data/repository/stream/kiotty_connection_stream.h"
@@ -30,7 +31,7 @@ namespace kiotty::net::implementation
         IoAction         takeOutcome();
         bool             isReady() const;
         bool             isFinished() const;
-        bool             isWorking() const;
+        uint8_t          pending() const;
 
     private:
         StageBase&                _receive;

@@ -83,8 +83,6 @@ namespace kiotty::net::implementation
         SocketCode checkAccept(IoPayload payload)
         {
             if (payload.length != sizeof(AcceptBuffer)) { return SocketCode::INVALID_ARGUMENT; }
-            const AcceptBuffer* const buffer = static_cast<const AcceptBuffer*>(payload.buffer);
-            if (buffer->socket == INVALID_SOCKET_HANDLE) { return SocketCode::INVALID_ARGUMENT; }
             return SocketCode::SUCCESS;
         }
 
@@ -146,12 +144,10 @@ namespace kiotty::net::implementation
 
         SocketCode startAccept(IoEvent& event, IoPayload payload)
         {
-            const SocketCode loaded = loadAcceptEx(event);
-            if (loaded != SocketCode::SUCCESS)
-            {
-                return loaded;
-            }
             AcceptBuffer* const buffer = static_cast<AcceptBuffer*>(payload.buffer);
+            if (buffer->socket == INVALID_SOCKET_HANDLE) { return SocketCode::INVALID_ARGUMENT; }
+            const SocketCode loaded = loadAcceptEx(event);
+            if (loaded != SocketCode::SUCCESS) { return loaded; }
             const SOCKET accepted_socket = static_cast<SOCKET>(buffer->socket);
             const DWORD address_length = static_cast<DWORD>(AcceptBuffer::ADDRESS_LENGTH);
             DWORD received = 0;

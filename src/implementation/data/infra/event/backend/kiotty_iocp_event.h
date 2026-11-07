@@ -15,6 +15,7 @@
 #include <winsock2.h>
 #include <mswsock.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -34,7 +35,7 @@ namespace kiotty::net::implementation
         IoEvent(const IoEvent&) = delete;
         IoEvent& operator=(const IoEvent&) = delete;
 
-        bool                      pending;
+        std::atomic<bool>         pending;
         IoAction                  action;
         const EventListenerState* listener;
         uint32_t                  generation;

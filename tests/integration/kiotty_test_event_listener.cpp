@@ -658,6 +658,26 @@ TEST_F(EventListener_Iocp, AcceptExBufferReceivesBothAddressesAndUpdateContextSu
     int peer_length = sizeof(peer);
     EXPECT_EQ(::getpeername(accepted, reinterpret_cast<sockaddr*>(&peer), &peer_length), 0);
 }
+
+TEST_F(EventListener_Iocp, AcceptWithoutAPreparedSocketIsDeliveredAsAnErrorCompletion)
+{
+    PassiveSocket passive;
+    ASSERT_EQ(passive.open(loopback(0), 4), SocketCode::SUCCESS);
+    IoEvent event;
+    ASSERT_TRUE(attach(listener, event, passive.handle(), -1));
+    AcceptBuffer buffer;
+    std::memset(&buffer, 0, sizeof(buffer));
+    buffer.socket = kiotty::net::implementation::INVALID_SOCKET_HANDLE;
+    ASSERT_EQ(listener.submit(event, IoAction::accept(), payloadOf(&buffer, sizeof(buffer))), SocketCode::SUCCESS);
+    EXPECT_TRUE(event.pending);
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].kind, IoKind::ACCEPT);
+    EXPECT_EQ(completions[0].slot, -1);
+    EXPECT_EQ(completions[0].code, SocketCode::INVALID_ARGUMENT);
+    EXPECT_FALSE(event.pending);
+    listener.detach(event);
+}
 #endif
 
 #if defined(__linux__)

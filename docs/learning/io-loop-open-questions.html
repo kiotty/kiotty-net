@@ -179,6 +179,14 @@ Windows:  socket 을 만든다 → [AcceptEx(그 socket) 를 건다] → (연결
 <tr><td>3</td><td>Windows 에서 accept 준비가 실패하면 서버가 조용히 새 연결을 안 받는다</td><td>Windows 는 accept 전에 socket 을 미리 만들어야 하고, 그 실패만 "완료" 가 아니라 "반환값" 으로 나온다</td><td>그 실패도 오류 완료로 돌려주게 IOCP backend 를 고친다</td></tr>
 </table>
 
+<h2>7. 결정 (2026-11-08)</h2>
+<table>
+<tr><th>#</th><th>결정</th><th>코드</th></tr>
+<tr><td>1</td><td>추천 C 가 아니라 B 의 변형. READING, WRITING, WORKING 은 모두 IO thread 가 다른 작업 주체 (OS 의 I/O, worker thread) 에 넘긴 것이다. 그래서 <code>ConnectionState</code> 에 그 셋의 비트 <code>pending</code> 을 두고, 셋 다 아닐 때만 반납한다</td><td><code>PENDING_READING = 1 &lt;&lt; 1</code>, <code>PENDING_WRITING = 1 &lt;&lt; 2</code>, <code>PENDING_WORKING = 1 &lt;&lt; 3</code>. <code>ConnectionState::pending</code> 과 <code>isSettled()</code> (= <code>pending == PENDING_NONE</code>). 비트는 <code>WorkFlow::pending()</code> 이 만들고 (옛 <code>isWorking()</code> 자리), settle 은 <code>phase == CLOSING &amp;&amp; state().isSettled()</code>. 3.4 의 data race 는 <code>IoEvent::pending</code> 을 <code>std::atomic&lt;bool&gt;</code> 로 바꿔 없앴다 (쓰는 것은 여전히 IO thread 의 listener 뿐)</td></tr>
+<tr><td>2</td><td>A. <code>full()</code>, <code>empty()</code> 가 더 읽기 쉽다</td><td><code>ConnectionHost::full / empty</code>. public 8 개라 편차 DV14 로 적었다</td></tr>
+<tr><td>3</td><td>B</td><td>IOCP 의 <code>startAccept</code> 가 무효 socket 을 보면 <code>INVALID_ARGUMENT</code> 를 돌려주고, submit 은 다른 즉시 실패처럼 그것을 ACCEPT 완료로 올린다. 테스트 <code>EventListener_Iocp.AcceptWithoutAPreparedSocketIsDeliveredAsAnErrorCompletion</code>. <code>onError</code> 를 매번 부를지는 IoLoop (6) 에서 정한다</td></tr>
+</table>
+
 </main>
 </body>
 </html>

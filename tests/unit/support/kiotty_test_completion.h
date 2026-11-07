@@ -128,12 +128,12 @@ namespace kiotty_test
 
         bool empty() const
         {
-            return pool->count() == 0;
+            return host.empty();
         }
 
         bool full() const
         {
-            return pool->count() == pool->capacity();
+            return host.full();
         }
 
         std::unique_ptr<Pool>                               pool;
@@ -154,6 +154,11 @@ namespace kiotty_test
     inline kiotty::net::implementation::IoEvent& writeEventOf(kiotty::net::implementation::Connection& connection)
     {
         return connection.eventFor(kiotty::net::implementation::IoAction::write(kiotty::net::implementation::IoPurpose::USER, 0, 1));
+    }
+
+    inline bool isWorking(const kiotty::net::implementation::Connection& connection)
+    {
+        return (connection.state().pending & kiotty::net::implementation::PENDING_WORKING) != 0U;
     }
 }
 

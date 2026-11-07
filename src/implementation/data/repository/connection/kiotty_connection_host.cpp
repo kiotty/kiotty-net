@@ -40,6 +40,16 @@ namespace kiotty::net::implementation
         return static_cast<int32_t>(_connections.capacity());
     }
 
+    bool ConnectionHost::full() const
+    {
+        return _connections.count() == _connections.capacity();
+    }
+
+    bool ConnectionHost::empty() const
+    {
+        return _connections.count() == 0;
+    }
+
     std::mutex& ConnectionHost::notificationMutex()
     {
         return _notification;

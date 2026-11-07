@@ -64,9 +64,13 @@ namespace kiotty::net::implementation
         return _work.state() == WorkContext::State::DONE;
     }
 
-    bool WorkFlow::isWorking() const
+    uint8_t WorkFlow::pending() const
     {
-        return _work.state() != WorkContext::State::IDLE;
+        const bool working = _work.state() != WorkContext::State::IDLE;
+        const uint8_t reading = _read_event.pending ? PENDING_READING : PENDING_NONE;
+        const uint8_t writing = _write_event.pending ? PENDING_WRITING : PENDING_NONE;
+        const uint8_t worked = working ? PENDING_WORKING : PENDING_NONE;
+        return static_cast<uint8_t>(reading | writing | worked);
     }
 
     namespace

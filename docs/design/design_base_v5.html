@@ -121,7 +121,7 @@
 <tr><td>IoLoop 인자</td><td>참조 다섯 (host, listener, acceptor, profile, handler). struct 로 묶지 않는다</td><td><code>LoopParts</code> 참조 묶음 하나 (결정 D2)</td><td>10</td></tr>
 <tr><td>bool / 출력 인자</td><td><code>setNoDelay(bool)</code>, <code>stop_when_empty</code>, <code>sendAll(..., size_t&amp; sent)</code></td><td><code>enum class NoDelay</code>, <code>enum class StopPolicy</code>, 반환값</td><td>7, 10</td></tr>
 <tr><td>LazyReusablePool</td><td><code>&lt;T, N&gt;</code>, <code>unique_ptr</code> 를 lazy 로</td><td><code>&lt;T&gt;</code>, <code>initialize(LazyReusablePoolConfiguration)</code> 가 <code>std::vector&lt;T&gt;</code> 로 전부 만든다. acquire 는 할당하지 않는다</td><td>19.2</td></tr>
-<tr><td>편차</td><td>없음 (MISRA 메모만)</td><td><code>docs/deviations.md</code> DV1 ~ DV13</td><td>18</td></tr>
+<tr><td>편차</td><td>없음 (MISRA 메모만)</td><td><code>docs/deviations.md</code> DV1 ~ DV14</td><td>18</td></tr>
 </table>
 
 <p>코드의 범위: <code>core/</code>, <code>domain/entity/</code>, <code>data/</code> 전부 (5b 의 <code>Acceptor</code> 포함) 와 <code>context/kiotty_owner.h</code> 가 코드다 <span class="tag code-done">코드</span>. <code>IoLoop</code>, Server / EventClient / StreamClient, <code>Context</code>, config / action 번역, <code>kiotty_net_base.cpp</code> 는 설계다 <span class="tag design">설계</span>. 설계 부분은 v4 의 내용을 새 이름과 수칙으로 옮겨 적은 것이고, 만들 때 다시 확정한다.</p>
@@ -505,15 +505,16 @@ public:
 struct AcceptBuffer { SocketHandle socket; char addresses[2 * ADDRESS_LENGTH]; };   // ADDRESS_LENGTH = 128 + 16 (이름 붙은 상수)
 
 struct IoEvent      // backend/kiotty_iocp_event.h. 멤버 public (MISRA 14.1.1), 복사 없음
-{ bool pending; IoAction action; const EventListenerState* listener; uint32_t generation; SOCKET socket;
+{ std::atomic&lt;bool&gt; pending; IoAction action; const EventListenerState* listener; uint32_t generation; SOCKET socket;
   int32_t slot; SocketCode failure; IocpRequest request /* { OVERLAPPED overlapped; IoEvent* owner; } */; LPFN_ACCEPTEX accept_ex; };
 struct IoEvent      // backend/kiotty_epoll_event.h. 소멸자가 ready 목록에서 빼고 DEL + close
-{ bool pending; IoAction action; EventListenerState* listener; uint32_t generation; int fd; int32_t slot;
+{ std::atomic&lt;bool&gt; pending; IoAction action; EventListenerState* listener; uint32_t generation; int fd; int32_t slot;
   bool registered; bool queued; SocketCode result; IoPayload payload; size_t done; IoEvent* next; };
 // 그 밖의 OS: backend/kiotty_no_event.h (pending 과 action 만). KIOTTY_NET_HAS_EVENT_BACKEND 가 0 (DV10)</code></pre>
 <ul>
   <li>계약은 v4 7절 그대로: WRITE 완료의 length 는 payload 전체다 (epoll 은 남으면 <code>EPOLLOUT | EPOLLONESHOT</code> 으로 이어 보낸다). detach 의 CANCELLED, 즉시 실패, submit 에서 바로 끝난 WRITE 는 ready 목록으로 다음 wait 가 먼저 돌려준다. 할당은 open 의 배열 둘뿐이다.</li>
-  <li>v4 의 <code>pending()</code> 메서드는 public 필드 <code>pending</code> 이다 (값 struct, 수칙 4.16).</li>
+  <li>v4 의 <code>pending()</code> 메서드는 public 필드 <code>pending</code> 이다 (값 struct, 수칙 4.16). 쓰는 것은 IO thread 의 listener 뿐이고, <code>std::atomic&lt;bool&gt;</code> 인 것은 다른 thread 가 <code>Connection::state()</code> 로 읽기 때문이다 (9.2 의 <code>pending</code>).</li>
+  <li>IOCP 의 ACCEPT 에서 <code>AcceptBuffer::socket</code> 이 무효면 (Acceptor 의 <code>prepare</code> 실패) submit 은 반환값이 아니라 <code>INVALID_ARGUMENT</code> 가 담긴 ACCEPT 완료로 돌려준다 (다른 즉시 실패와 같은 길). 반환값의 <code>INVALID_ARGUMENT</code> 는 payload 길이처럼 부른 쪽의 잘못에만 남는다.</li>
   <li>listener 는 epoll 596 줄, iocp 475 줄의 한 파일이었다. v5 는 backend 마다 <code>*_event_state.h</code> (상태 struct), <code>*_event_submit.cpp</code>, <code>*_event_wait.cpp</code>, <code>*_event_listener.cpp</code> (open / close / attach / detach / wake) 넷이다 (수칙 4.1 의 400 줄). iocp <code>dequeue</code> 와 epoll <code>handle</code> 의 출력 인자는 없어졌다.</li>
   <li>OS 가 주소를 들고 있는 raw pointer (<code>IocpRequest::owner</code>, <code>data.ptr</code>, <code>next</code>, <code>listener</code>) 는 DV3 다.</li>
 </ul>
@@ -609,7 +610,7 @@ public:
     │                         _deadline (atomic), _context, _id, _phase (atomic)
     ├── ReceiveFlow   drive / room / commit / machineState / setMachineState      receive Stage, cipherReceive
     ├── SendFlow      pick / payload / release / notificationWritable / stageNotification   send, notify, cipherSend
-    └── WorkFlow      verify / stream / closeStream / takeOutcome / isReady / isFinished / isWorking</div>
+    └── WorkFlow      verify / stream / closeStream / takeOutcome / isReady / isFinished / pending</div>
 
 <pre><code>class Connection : public IoSource              // is_reusable. 기본 생성자만
 {
@@ -636,9 +637,12 @@ private:
 struct ConnectionState                          // 읽기 전용 getter 를 모은 값. 옛 id / generation / alive / phase / deadline / info / context
 {
     uint64_t deadline; KiottyNetConnectionContext context; PoolHandle id; KiottyNetConnectionInfo info;
-    Phase phase; bool is_alive; uint8_t _padding[2];
+    Phase phase; bool is_alive; uint8_t pending; uint8_t _padding[1];
     bool isExpired(uint64_t now) const;         // deadline != 0 &amp;&amp; now &gt;= deadline
+    bool isSettled() const;                     // pending == PENDING_NONE
 };
+// pending: IO thread 가 다른 작업 주체 (OS 의 I/O, worker) 에 넘겨 둔 것의 비트. WorkFlow::pending 이 만든다
+static constexpr uint8_t PENDING_NONE = 0U, PENDING_READING = 1U &lt;&lt; 1U, PENDING_WRITING = 1U &lt;&lt; 2U, PENDING_WORKING = 1U &lt;&lt; 3U;
 struct ConnectionConfiguration                  // accept / admit 마다 하나. 크기 순
 {
     ActiveSocket socket; ConnectionLimits limits; KiottyNetConnectionContext context; const char* hostname; TlsProfile&amp; profile;
@@ -652,7 +656,7 @@ struct ConnectionFlows { ReceiveFlow&amp; receive; SendFlow&amp; send; WorkFlow&
 <tr><td><code>_phase</code></td><td><code>std::atomic&lt;Phase&gt;</code></td><td>수명</td><td>initialize (<code>open</code>), onHandshake DONE, apply(CLOSE) 의 enterClosing, reset</td><td>dispatch 첫 줄, SendFlow::isBlocked, settle, <code>state()</code> (다른 thread)</td></tr>
 <tr><td><code>_deadline</code></td><td><code>std::atomic&lt;uint64_t&gt;</code>, 0 이면 없음</td><td>timeout</td><td>apply (setDeadline), onTimeout (0 으로), enterClosing</td><td><code>state().isExpired(now)</code>, waitTimeout</td></tr>
 <tr><td><code>_work</code></td><td><code>WorkContext</code></td><td>Work</td><td>apply(START_WORK) request, enterClosing abandon, onWorkReady start, worker 의 WorkReporter::finish, WorkFlow::takeOutcome, reset</td><td>WorkFlow, SendFlow::isBlocked</td></tr>
-<tr><td><code>_read_event</code>, <code>_write_event</code></td><td><code>IoEvent</code></td><td>방향마다 요청 하나</td><td>listener 만</td><td>SendFlow::isBlocked, isUserActionPending, WorkFlow::isReady, settle</td></tr>
+<tr><td><code>_read_event</code>, <code>_write_event</code></td><td><code>IoEvent</code></td><td>방향마다 요청 하나</td><td>listener 만</td><td>SendFlow::isBlocked, isUserActionPending, WorkFlow::isReady / pending (<code>state().pending</code>, 다른 thread 도)</td></tr>
 <tr><td><code>_plain</code></td><td><code>StageSet&lt;RECEIVE, SEND, PUSH&gt;</code></td><td>저장 공간 셋</td><td>send: adoptAction(WRITE) 의 <code>Sender::stage</code>, SendFlow::release(USER). notify: NotificationDesk 가 lock 안에서 <code>stageNotification</code>, SendFlow::release(NOTIFY) 가 lock 안에서</td><td>SendFlow (notify 는 lock 안), ConnectionStream (WORKING)</td></tr>
 <tr><td><code>_tls</code></td><td><code>TlsEngine</code></td><td>TLS</td><td>onHandshake, ReceiveFlow::refill 의 decode, SendFlow::encoded, SendFlow::release 의 cipherSend commit</td><td>ReceiveFlow::room, SendFlow::payload, ConnectionStream (WORKING)</td></tr>
 <tr><td><code>_socket</code>, <code>_id</code>, <code>_context</code>, <code>_info</code></td><td></td><td>수명과 사용자 값</td><td>initialize, reset</td><td><code>state()</code></td></tr>
@@ -824,7 +828,7 @@ public:
     IoAction         takeOutcome();
     bool isReady() const;                       // REQUESTED 이고 두 event 가 비었음
     bool isFinished() const;                    // DONE
-    bool isWorking() const;                     // IDLE 이 아님
+    uint8_t pending() const;                    // read / write event 의 pending, work 가 IDLE 이 아님 (옛 isWorking) 을 비트로
 };
 
 KiottyNetCode WorkFlow::closeStream(int32_t generation, const KiottyNetConnectionAction&amp; then)   // worker
@@ -872,7 +876,9 @@ public:
     void             release(Connection&amp; connection);                   // lock 안에서 풀의 release (= reset)
     Connection&amp;      at(int32_t slot);
     int32_t          capacity() const;
-    std::mutex&amp;      notificationMutex();
+    bool             full() const;                                       // 풀의 count == capacity
+    bool             empty() const;                                      // 풀의 count == 0
+    std::mutex&amp;      notificationMutex();                                // public 8 개 (DV14)
 private:
     ReusablePoolBase&lt;Connection&gt;&amp; _connections; ConnectionLimits _limits; std::mutex _notification;
 };
@@ -889,7 +895,7 @@ public:
 };</code></pre>
 <ul>
   <li>v4 의 <code>ConnectionHost&lt;N&gt;</code> 는 풀을 멤버로 들었다. v5 는 Owner 가 <code>ReusablePool&lt;Connection, N&gt;</code> 를 갖고 host 와 desk 둘에 <code>ReusablePoolBase&lt;Connection&gt;&amp;</code> 로 넘긴다. N 을 아는 것은 Owner 의 멤버 하나다 (수칙 4.15).</li>
-  <li><code>full / empty</code> 는 부르는 곳이 테스트뿐이라 지웠다. IoLoop 의 settle 이 쓸 때는 풀의 <code>count / capacity</code> 다.</li>
+  <li><code>full / empty</code> 는 6단계에서 부르는 곳이 테스트뿐이라 지웠다가, IoLoop 의 settle 이 부르므로 다시 더했다 (2026-11-08, DV14).</li>
   <li><code>find</code> (포인터) 는 <code>get</code> (<code>Result&lt;Connection&amp;, KiottyNetCode&gt;</code>) 이다. 실패 code 는 <code>Connection::INVALID_HANDLE</code> (PEER_CLOSED).</li>
   <li>wake 는 Owner 가 한다 (listener 는 Owner 의 멤버고 host / desk 는 listener 를 모른다).</li>
   <li><code>release</code> 가 lock 을 잡는 이유는 v4 그대로: 다른 thread 의 notify 가 <code>is_alive</code> 를 통과한 뒤 CLOSING 이 될 수 있다.</li>
@@ -914,7 +920,7 @@ private:
 ActiveSocketResult PassiveSocket::prepare();                          // Windows: AcceptEx 에 줄 socket 을 연다. POSIX: 빈 ActiveSocket
 ActiveSocketResult PassiveSocket::accept(ActiveSocket&amp;&amp; prepared);    // Windows: SO_UPDATE_ACCEPT_CONTEXT + getpeername. POSIX: prepared 를 닫고 accept()</code></pre>
 <ul>
-  <li><code>resolve(ACCEPT)</code> 가 준비한 socket 이 없으면 <code>prepare</code> 한다 (Windows 는 accept 마다 새 socket). 준비가 실패하면 <code>_buffer.socket</code> 이 무효이고 IOCP 의 submit 이 <code>INVALID_ARGUMENT</code> 를 돌려준다. epoll 은 payload 를 보지 않는다.</li>
+  <li><code>resolve(ACCEPT)</code> 가 준비한 socket 이 없으면 <code>prepare</code> 한다 (Windows 는 accept 마다 새 socket). 준비가 실패하면 <code>_buffer.socket</code> 이 무효이고 IOCP 는 <code>INVALID_ARGUMENT</code> 가 담긴 ACCEPT 완료를 돌려준다 (7절). 그래서 accept 의 실패는 OS 와 상관없이 늘 완료로 온다. epoll 은 payload 를 보지 않는다.</li>
   <li>open 은 <code>SocketCode</code> 를 돌려준다. 공개 code 로 바꾸는 것은 Server 다 (<code>toNetCode</code>).</li>
   <li>EventClient 는 open 하지 않는 Acceptor 를 하나 들고 IoLoop 에 넘긴다.</li>
 </ul>
@@ -964,10 +970,10 @@ private:
 <tr><th>v4</th><th>v5</th></tr>
 <tr><td><code>c.pickWrite(host.notificationMutex())</code></td><td><code>c.flows().send.pick(host.notificationMutex())</code></td></tr>
 <tr><td><code>c.expireDeadline(now)</code></td><td><code>c.state().isExpired(now)</code> (0 으로 돌리는 것은 TIMEOUT 의 onTimeout)</td></tr>
-<tr><td><code>c.workReady()</code>, <code>c.workFinished()</code>, <code>c.takeWorkOutcome()</code>, <code>c.working()</code></td><td><code>flows().work.isReady() / isFinished() / takeOutcome() / isWorking()</code></td></tr>
+<tr><td><code>c.workReady()</code>, <code>c.workFinished()</code>, <code>c.takeWorkOutcome()</code>, <code>c.working()</code></td><td><code>flows().work.isReady() / isFinished() / takeOutcome()</code>, <code>(state().pending &amp; PENDING_WORKING) != 0</code></td></tr>
 <tr><td><code>c.phase()</code>, <code>c.deadline()</code></td><td><code>c.state().phase</code>, <code>c.state().deadline</code></td></tr>
-<tr><td><code>c.readEvent().pending()</code>, <code>c.writeEvent().pending()</code></td><td>settle 이 보는 "두 event 가 비었고 working 이 아니다" 를 하나로 묻는 자리가 필요하다. <code>WorkFlow::isReady</code> 의 보조 함수와 같은 모양으로 IoLoop 를 만들 때 정한다</td></tr>
-<tr><td><code>host.full()</code>, <code>host.empty()</code></td><td>Owner 의 풀 <code>count() == capacity()</code>, <code>count() == 0</code>. host 에 다시 더할지 IoLoop 를 만들 때 정한다</td></tr>
+<tr><td><code>c.readEvent().pending() || c.writeEvent().pending() || c.working()</code></td><td><code>!c.state().isSettled()</code>. settle 은 <code>phase == CLOSING &amp;&amp; isSettled()</code> 일 때 반납한다</td></tr>
+<tr><td><code>host.full()</code>, <code>host.empty()</code></td><td>그대로 (DV14)</td></tr>
 <tr><td><code>monotonicMs()</code></td><td><code>monotonicMilliseconds()</code></td></tr>
 </table>
 
@@ -1070,7 +1076,7 @@ private:
 <tr><td>Connection</td><td><code>state()</code> 아무 thread. 나머지 IO thread</td></tr>
 <tr><td>ReceiveFlow</td><td>IO thread. <code>machineState / setMachineState</code> 는 아무 thread (atomic)</td></tr>
 <tr><td>SendFlow</td><td><code>stageNotification / notificationWritable</code> 은 lock 안의 아무 thread. 나머지 IO thread</td></tr>
-<tr><td>WorkFlow</td><td><code>verify / stream / closeStream</code> worker. <code>takeOutcome / isReady / isFinished / isWorking</code> IO thread</td></tr>
+<tr><td>WorkFlow</td><td><code>verify / stream / closeStream</code> worker. <code>takeOutcome / isReady / isFinished</code> IO thread. <code>pending</code> 은 <code>Connection::state()</code> 를 거쳐 아무 thread (읽는 것이 atomic 뿐)</td></tr>
 <tr><td>WorkContext / WorkReporter</td><td>앞은 IO thread, 뒤는 worker</td></tr>
 <tr><td>Sender (send Stage)</td><td>RUNNING 이면 IO thread, WORKING 이면 worker</td></tr>
 <tr><td>Sender (notify Stage)</td><td>stage 아무 thread, release IO thread. 전부 host 의 mutex 안</td></tr>
@@ -1177,6 +1183,7 @@ private:
 <tr><td>DV11</td><td>4.1</td><td>생성자, 연산자, 이름 붙은 static 생성자는 세지 않고 overload 는 하나로 센다</td><td><code>domain/entity/kiotty_io_action.h</code></td></tr>
 <tr><td>DV12</td><td>2.2, 2.6</td><td>null 종료 <code>const char*</code> (hostname, 경로, TLS 메시지 상수). <code>strnlen</code> + 상한</td><td><code>repository/stream</code>, <code>infra/file</code>, <code>infra/tls</code></td></tr>
 <tr><td>DV13</td><td>4.1, 4.5, 4.6</td><td>공개 API 의 bool 인자, 약어 인자, 긴 헤더, wrapper 의 인자와 메서드 수</td><td><code>include/</code></td></tr>
+<tr><td>DV14</td><td>4.1</td><td><code>ConnectionHost</code> 의 public 8 개 (<code>full / empty</code>)</td><td><code>repository/connection</code></td></tr>
 </table>
 
 <!-- ============================================================ -->
@@ -1244,7 +1251,7 @@ template &lt;class T&gt; class LazyReusablePool      // std::vector&lt;T&gt; 셋
 <h2 id="s20">20. 다음</h2>
 <ul>
   <li><code>plan_base_v2.md</code> 5b 부터 이 구조 위에서 이어 간다. 5b 의 Acceptor 는 <code>data/repository/connection/kiotty_acceptor.h</code> 다.</li>
-  <li>IoLoop (<code>domain/usecases/io_loop/</code>) 을 만들 때 정할 것: settle 이 묻는 "반납해도 되나" 의 자리, host 의 <code>count</code> 노출, <code>ConnectionState</code> 복사 비용, 수칙 3.5 의 cache line.</li>
+  <li>IoLoop (<code>domain/usecases/io_loop/</code>) 을 만들 때 정할 것: <code>ConnectionState</code> 복사 비용, 수칙 3.5 의 cache line.</li>
   <li>Context 를 만들 때 정할 것: <code>LazyReusablePool</code> 의 선할당이 바꾼 메모리 보장 시점 (19.1).</li>
   <li>17절 끝의 "아직 맞추지 않은 것".</li>
 </ul>

@@ -15,6 +15,7 @@ namespace net = kiotty::net::implementation;
 using kiotty_test::Call;
 using kiotty_test::ConnectionBench;
 using kiotty_test::limitsOf;
+using kiotty_test::isWorking;
 using kiotty_test::readEventOf;
 using kiotty_test::spanOf;
 using kiotty_test::thenClose;
@@ -67,7 +68,7 @@ TEST(Connection, FreshConnectionIsIdleNotAliveWithBothEventsEmpty)
     EXPECT_EQ(net::Phase::IDLE, connection.state().phase);
     EXPECT_FALSE(connection.state().is_alive);
     EXPECT_EQ(0u, connection.state().deadline);
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_FALSE(readEventOf(connection).pending);
     EXPECT_FALSE(writeEventOf(connection).pending);
 }
@@ -737,7 +738,7 @@ TEST(Connection, TimeoutAfterHoldAppliesWhateverHandlerReturns)
     working.opened(worker);
     net::IoAction requested = working.complete(worker, completion::timeout());
     EXPECT_EQ(net::IoActionKind::START_WORK, requested.kind);
-    EXPECT_TRUE(worker.flows().work.isWorking());
+    EXPECT_TRUE(isWorking(worker));
     EXPECT_TRUE(worker.flows().work.isReady());
 }
 
@@ -856,7 +857,7 @@ TEST_P(ConnectionPendingUserAction, TimeoutWithUserActionPendingAndWorkReturnedR
     EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.recorder.last(Call::ON_ERROR).code);
     EXPECT_EQ(net::IoActionKind::HOLD, extended.kind);
     EXPECT_EQ(0u, connection.state().deadline);
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_WORK_STARTED));
 }
 
@@ -890,7 +891,7 @@ TEST(Connection, ApplyStartWorkOnlyMarksRequestedAndClearsDeadline)
     net::IoAction requested = bench.deliver(connection, read, "x");
     EXPECT_EQ(net::IoActionKind::START_WORK, requested.kind);
     EXPECT_EQ(0u, connection.state().deadline);
-    EXPECT_TRUE(connection.flows().work.isWorking());
+    EXPECT_TRUE(isWorking(connection));
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_WORK_STARTED));
 }
 
@@ -914,6 +915,28 @@ TEST(Connection, WorkReadyIsTrueOnlyWhenRequestedAndBothEventsAreEmpty)
     EXPECT_FALSE(connection.flows().work.isReady());
 }
 
+TEST(Connection, StatePendingFlagsEachHandOffAndIsSettledOnlyWhenNoneIsSet)
+{
+    Bench bench(smallLimits());
+    net::Connection& connection = bench.open();
+    bench.recorder.then(thenHold(0));
+    bench.recorder.then(thenWork());
+    bench.opened(connection);
+    EXPECT_EQ(net::PENDING_NONE, connection.state().pending);
+    EXPECT_TRUE(connection.state().isSettled());
+    readEventOf(connection).pending = true;
+    EXPECT_EQ(net::PENDING_READING, connection.state().pending);
+    writeEventOf(connection).pending = true;
+    const uint8_t both = static_cast<uint8_t>(net::PENDING_READING | net::PENDING_WRITING);
+    EXPECT_EQ(both, connection.state().pending);
+    EXPECT_FALSE(connection.state().isSettled());
+    readEventOf(connection).pending = false;
+    writeEventOf(connection).pending = false;
+    bench.complete(connection, completion::timeout());
+    EXPECT_EQ(net::PENDING_WORKING, connection.state().pending);
+    EXPECT_FALSE(connection.state().isSettled());
+}
+
 TEST(Connection, WorkReadyCompletionStartsWorkAndCallsOnWorkStartedWithStreamHandle)
 {
     Bench bench(smallLimits());
@@ -927,7 +950,7 @@ TEST(Connection, WorkReadyCompletionStartsWorkAndCallsOnWorkStartedWithStreamHan
     EXPECT_EQ(&bench.recorder, work.connection_context);
     EXPECT_EQ(&bench.owner, work.stream.owner);
     EXPECT_EQ(connection.state().id.value(), work.stream.id);
-    EXPECT_TRUE(connection.flows().work.isWorking());
+    EXPECT_TRUE(isWorking(connection));
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.flows().work.verify(connection.state().id.generation));
 }
 
@@ -942,12 +965,12 @@ TEST(Connection, ApplyCloseAbandonsRequestedWork)
     net::IoAction push = bench.pick(connection);
     writeEventOf(connection).pending = true;
     bench.complete(connection, completion::timeout());
-    ASSERT_TRUE(connection.flows().work.isWorking());
+    ASSERT_TRUE(isWorking(connection));
     ASSERT_FALSE(connection.flows().work.isReady());
     writeEventOf(connection).pending = false;
     net::IoAction closed = bench.complete(connection, completion::sent(push, 0, net::SocketCode::RESET));
     EXPECT_EQ(net::IoActionKind::CLOSE, closed.kind);
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_FALSE(connection.flows().work.isReady());
     EXPECT_EQ(0u, bench.recorder.count(Call::ON_WORK_STARTED));
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
@@ -963,7 +986,7 @@ TEST(Connection, ApplyCloseDuringWorkingKeepsWorkUntilCloseStream)
     EXPECT_EQ(net::Phase::CLOSING, connection.state().phase);
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, bench.recorder.last(Call::ON_DISCONNECTED).code);
-    EXPECT_TRUE(connection.flows().work.isWorking());
+    EXPECT_TRUE(isWorking(connection));
     EXPECT_EQ(net::IoActionKind::NONE, connection.close(KIOTTY_NET_CODE_CLOSED, bench.handler).kind);
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
 }
@@ -1035,7 +1058,7 @@ TEST(Connection, WorkDoneDrivesTheOutcomeThatCloseStreamStored)
     startWork(bench, connection);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.flows().work.closeStream(connection.state().id.generation, thenRead(4, 700)));
     net::IoAction outcome = connection.flows().work.takeOutcome();
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_FALSE(connection.flows().work.isFinished());
     uint64_t before = kiotty::net::implementation::monotonicMilliseconds();
     net::IoAction read = bench.complete(connection, completion::workDone(outcome));
@@ -1117,7 +1140,7 @@ TEST(Connection, CloseStreamDuringClosingReturnsClosedButGoesDone)
     EXPECT_TRUE(connection.flows().work.isFinished());
     net::IoAction outcome = connection.flows().work.takeOutcome();
     EXPECT_EQ(net::IoActionKind::NONE, bench.complete(connection, completion::workDone(outcome)).kind);
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
 }
 
@@ -1221,18 +1244,18 @@ TEST(Connection, ReleaseReturnsToIdleClearsStagesAndResetsWork)
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push"));
     bench.recorder.then(thenWork());
     bench.complete(connection, completion::sent(net::IoAction::write(net::IoPurpose::USER, 0, 4), 4));
-    ASSERT_TRUE(connection.flows().work.isWorking());
+    ASSERT_TRUE(isWorking(connection));
     int32_t before = connection.state().id.generation;
     bench.host.release(connection);
     EXPECT_EQ(net::Phase::IDLE, connection.state().phase);
     EXPECT_FALSE(connection.state().is_alive);
-    EXPECT_FALSE(connection.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(connection));
     EXPECT_EQ(0u, connection.state().deadline);
     net::Connection& reopened = bench.open();
     EXPECT_NE(before, reopened.state().id.generation);
     bench.opened(reopened);
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(reopened).kind);
-    EXPECT_FALSE(reopened.flows().work.isWorking());
+    EXPECT_FALSE(isWorking(reopened));
 }
 
 TEST(Connection, MachineStateStartsAtZeroAndIsClearedOnRelease)

@@ -5,6 +5,7 @@
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -19,7 +20,7 @@ namespace kiotty::net::implementation
         IoEvent(const IoEvent&) = delete;
         IoEvent& operator=(const IoEvent&) = delete;
 
-        bool                pending;
+        std::atomic<bool>   pending;
         IoAction            action;
         EventListenerState* listener;
         uint32_t            generation;

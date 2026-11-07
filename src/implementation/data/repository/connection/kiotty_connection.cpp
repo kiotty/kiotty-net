@@ -102,6 +102,7 @@ namespace kiotty::net::implementation
         snapshot.info = _info;
         snapshot.phase = _phase.load();
         snapshot.is_alive = isAlive(snapshot.phase);
+        snapshot.pending = _work_flow.pending();
         return snapshot;
     }
 

@@ -22,6 +22,8 @@ namespace kiotty::net::implementation
         void             release(Connection& connection);
         Connection&      at(int32_t slot);
         int32_t          capacity() const;
+        bool             full() const;
+        bool             empty() const;
         std::mutex&      notificationMutex();
 
     private:
