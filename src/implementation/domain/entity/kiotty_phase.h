@@ -11,4 +11,9 @@ namespace kiotty::net::implementation
         READY,
         CLOSING
     };
+
+    inline bool isAlive(Phase phase)
+    {
+        return phase == Phase::HANDSHAKING || phase == Phase::READY;
+    }
 }

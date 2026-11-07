@@ -1,8 +1,10 @@
 #if !defined(KIOTTY_TEST_COMPLETION_H)
 #define KIOTTY_TEST_COMPLETION_H
 
-#include "base/connection/kiotty_connection.h"
-#include "base/connection/kiotty_connection_host.h"
+#include "data/repository/connection/kiotty_connection.h"
+#include "data/repository/connection/kiotty_connection_host.h"
+#include "data/repository/connection/kiotty_notification_desk.h"
+#include "core/pool/kiotty_reusable_pool.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_handler.h"
 
@@ -60,23 +62,25 @@ namespace kiotty_test
     class ConnectionBench
     {
     public:
-        typedef kiotty::net::implementation::ConnectionHost<N> Host;
+        typedef kiotty::net::implementation::ReusablePool<kiotty::net::implementation::Connection, N> Pool;
 
         explicit ConnectionBench(kiotty::net::implementation::ConnectionLimits limits)
-            : host(new Host())
+            : pool(new Pool())
+            , host(*pool)
+            , desk(*pool, host.notificationMutex())
             , profile()
             , owner()
             , recorder()
             , callbacks(Recorder::callbacks())
             , handler(callbacks, &recorder, owner)
         {
-            host->initialize(limits);
+            host.initialize(limits);
         }
 
         kiotty::net::implementation::ConnectionResult acquire()
         {
-            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), &recorder, "", limitsOf(0, 0, 0), profile };
-            return host->acquire(std::move(configuration));
+            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), limitsOf(0, 0, 0), &recorder, "", profile };
+            return host.acquire(std::move(configuration));
         }
 
         kiotty::net::implementation::Connection& open()
@@ -92,7 +96,7 @@ namespace kiotty_test
 
         kiotty::net::implementation::IoAction complete(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoCompletion& done)
         {
-            return connection.dispatch(done, handler, host->notificationMutex());
+            return connection.dispatch(done, handler, host.notificationMutex());
         }
 
         size_t place(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoAction& read, const std::string& bytes)
@@ -114,20 +118,32 @@ namespace kiotty_test
 
         kiotty::net::implementation::IoAction pick(kiotty::net::implementation::Connection& connection)
         {
-            return connection.pickWrite(host->notificationMutex());
+            return connection.flows().send.pick(host.notificationMutex());
         }
 
         KiottyNetCode notify(kiotty::net::implementation::Connection& connection, const std::string& bytes)
         {
-            return host->notify(connection.id(), spanOf(bytes));
+            return desk.notify(connection.state().id, spanOf(bytes));
         }
 
-        std::unique_ptr<Host>            host;
-        kiotty::net::implementation::TlsProfile          profile;
-        FakeOwner                        owner;
-        Recorder                         recorder;
-        const KiottyNetConnectionHandler callbacks;
-        kiotty::net::implementation::Handler             handler;
+        bool empty() const
+        {
+            return pool->count() == 0;
+        }
+
+        bool full() const
+        {
+            return pool->count() == pool->capacity();
+        }
+
+        std::unique_ptr<Pool>                               pool;
+        kiotty::net::implementation::ConnectionHost         host;
+        kiotty::net::implementation::NotificationDesk       desk;
+        kiotty::net::implementation::TlsProfile             profile;
+        FakeOwner                                           owner;
+        Recorder                                            recorder;
+        const KiottyNetConnectionHandler                    callbacks;
+        kiotty::net::implementation::Handler                handler;
     };
 
     inline kiotty::net::implementation::IoEvent& readEventOf(kiotty::net::implementation::Connection& connection)

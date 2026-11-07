@@ -1,0 +1,76 @@
+#include "data/repository/connection/kiotty_adopt_action.h"
+
+#include "data/repository/connection/kiotty_sender.h"
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        AdoptResult adoptRead(const KiottyNetConnectionAction& returned);
+        AdoptResult adoptReadUntil(const KiottyNetConnectionAction& returned);
+        AdoptResult adoptWrite(const KiottyNetConnectionAction& returned, StageBase& send);
+        bool        isValidDelimiter(KiottyNetSpan delimiter, size_t max);
+        bool        isValidWrite(KiottyNetSpan data);
+    }
+
+    AdoptResult adoptAction(const KiottyNetConnectionAction& returned, StageBase& send)
+    {
+        switch (returned.type)
+        {
+        case KIOTTY_NET_ACTION_TYPE_HOLD:
+        case KIOTTY_NET_ACTION_TYPE_START_WORK:
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
+            return AdoptResult::success(IoAction::from(returned));
+        case KIOTTY_NET_ACTION_TYPE_READ:
+            return adoptRead(returned);
+        case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
+            return adoptReadUntil(returned);
+        case KIOTTY_NET_ACTION_TYPE_WRITE:
+            return adoptWrite(returned, send);
+        }
+        return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    }
+
+    namespace
+    {
+        AdoptResult adoptRead(const KiottyNetConnectionAction& returned)
+        {
+            if (returned.as.read.exact == 0) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            return AdoptResult::success(IoAction::from(returned));
+        }
+
+        AdoptResult adoptReadUntil(const KiottyNetConnectionAction& returned)
+        {
+            const bool valid = isValidDelimiter(returned.as.read_until.delimiter, returned.as.read_until.max);
+            if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            return AdoptResult::success(IoAction::from(returned));
+        }
+
+        AdoptResult adoptWrite(const KiottyNetConnectionAction& returned, StageBase& send)
+        {
+            const bool valid = isValidWrite(returned.as.write.data);
+            if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            const KiottyNetCode staged = Sender::stage(send, returned.as.write.data);
+            if (staged != KIOTTY_NET_CODE_SUCCESS) { return AdoptResult::failure(staged); }
+            return AdoptResult::success(IoAction::hold(returned.timeout_milliseconds));
+        }
+
+        bool isValidDelimiter(KiottyNetSpan delimiter, size_t max)
+        {
+            if (delimiter.data == nullptr)
+            {
+                return false;
+            }
+            if (delimiter.length == 0 || delimiter.length > IoAction::MAX_DELIMITER_LENGTH)
+            {
+                return false;
+            }
+            return max >= delimiter.length;
+        }
+
+        bool isValidWrite(KiottyNetSpan data)
+        {
+            return data.data != nullptr && data.length > 0;
+        }
+    }
+}

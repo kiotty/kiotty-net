@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_WORK_CONTEXT_H)
-#define KIOTTY_WORK_CONTEXT_H
+#pragma once
 
 #include "domain/entity/kiotty_io_action.h"
 #include "kiotty_net_base.h"
@@ -39,15 +38,15 @@ namespace kiotty::net::implementation
     private:
         void move(State from, State to);
 
-        std::atomic<State> _state;
-        int32_t            _generation;
         IoAction           _outcome;
+        int32_t            _generation;
+        std::atomic<State> _state;
     };
 
     inline WorkContext::WorkContext()
-        : _state(State::IDLE)
+        : _outcome(IoAction::none())
         , _generation(0)
-        , _outcome(IoAction::none())
+        , _state(State::IDLE)
     {
     }
 
@@ -69,7 +68,8 @@ namespace kiotty::net::implementation
 
     inline void WorkContext::start(int32_t generation)
     {
-        if (_state.load(std::memory_order_acquire) != State::REQUESTED)
+        const State current = _state.load(std::memory_order_acquire);
+        if (current != State::REQUESTED)
         {
             return;
         }
@@ -89,11 +89,12 @@ namespace kiotty::net::implementation
 
     inline IoAction WorkContext::onFinished()
     {
-        if (!finished())
+        const bool done = finished();
+        if (!done)
         {
             return IoAction::none();
         }
-        IoAction outcome = _outcome;
+        const IoAction outcome = _outcome;
         _outcome = IoAction::none();
         _state.store(State::IDLE, std::memory_order_release);
         return outcome;
@@ -113,14 +114,9 @@ namespace kiotty::net::implementation
 
     inline KiottyNetCode WorkContext::verify(int32_t generation) const
     {
-        if (_state.load(std::memory_order_acquire) != State::WORKING)
-        {
-            return KIOTTY_NET_CODE_BUSY;
-        }
-        if (_generation != generation)
-        {
-            return KIOTTY_NET_CODE_PEER_CLOSED;
-        }
+        const State current = _state.load(std::memory_order_acquire);
+        if (current != State::WORKING) { return KIOTTY_NET_CODE_BUSY; }
+        if (_generation != generation) { return KIOTTY_NET_CODE_PEER_CLOSED; }
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -130,5 +126,3 @@ namespace kiotty::net::implementation
         move(State::WORKING, State::DONE);
     }
 }
-
-#endif

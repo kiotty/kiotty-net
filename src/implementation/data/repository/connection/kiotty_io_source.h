@@ -1,5 +1,4 @@
-#if !defined(KIOTTY_IO_SOURCE_H)
-#define KIOTTY_IO_SOURCE_H
+#pragma once
 
 #include "data/infra/event/kiotty_event_listener.h"
 
@@ -26,5 +25,3 @@ namespace kiotty::net::implementation
         IoSource& operator=(const IoSource&) = delete;
     };
 }
-
-#endif

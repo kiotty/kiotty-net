@@ -1,4 +1,4 @@
-#include "base/connection/kiotty_connection_host.h"
+#include "data/repository/connection/kiotty_connection_host.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 
@@ -52,22 +52,22 @@ TEST(ConnectionHost, ReleaseResetsInsideTheNotificationLock)
     std::atomic<bool> stop(false);
     std::atomic<int64_t> current(0);
     net::Connection& first = bench.open();
-    current.store(first.id().value());
+    current.store(first.state().id.value());
     std::thread pusher([&]() {
         for (int i = 0; i < 1000; ++i)
         {
-            (void)bench.host->notify(PoolHandle::fromValue(current.load()), spanOf("x"));
+            (void)bench.desk.notify(PoolHandle::fromValue(current.load()), spanOf("x"));
         }
         stop.store(true);
     });
     while (!stop.load())
     {
-        net::Connection& connection = bench.host->at(0);
-        bench.host->release(connection);
+        net::Connection& connection = bench.host.at(0);
+        bench.host.release(connection);
         EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
         net::Connection& reopened = bench.open();
         EXPECT_EQ(net::IoActionKind::NONE, bench.pick(reopened).kind);
-        current.store(reopened.id().value());
+        current.store(reopened.state().id.value());
     }
     pusher.join();
 }
@@ -76,15 +76,15 @@ TEST(ConnectionHost, NotifyWithAPastGenerationReturnsPeerClosed)
 {
     ConnectionBench<2> bench(smallLimits());
     net::Connection& connection = bench.open();
-    PoolHandle old_id = connection.id();
-    bench.host->release(connection);
+    PoolHandle old_id = connection.state().id;
+    bench.host.release(connection);
     net::Connection& reopened = bench.open();
     ASSERT_EQ(&connection, &reopened);
-    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->notify(old_id, spanOf("x")));
-    PoolHandle outside = { reopened.generation(), 7 };
-    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->notify(outside, spanOf("x")));
-    PoolHandle negative = { reopened.generation(), -1 };
-    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->notify(negative, spanOf("x")));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.notify(old_id, spanOf("x")));
+    PoolHandle outside = { reopened.state().id.generation, 7 };
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.notify(outside, spanOf("x")));
+    PoolHandle negative = { reopened.state().id.generation, -1 };
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.notify(negative, spanOf("x")));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(reopened).kind);
 }
 
@@ -94,12 +94,12 @@ TEST(ConnectionHost, AcquireFailureResetsTheConnectionAndLeavesTheSlotEmpty)
     net::ConnectionResult failed = bench.acquire();
     EXPECT_FALSE(failed);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, failed.code);
-    EXPECT_TRUE(bench.host->empty());
-    EXPECT_EQ(net::Phase::IDLE, bench.host->at(0).phase());
-    bench.host->initialize(smallLimits());
+    EXPECT_TRUE(bench.empty());
+    EXPECT_EQ(net::Phase::IDLE, bench.host.at(0).state().phase);
+    bench.host.initialize(smallLimits());
     net::ConnectionResult acquired = bench.acquire();
     ASSERT_TRUE(acquired);
-    EXPECT_EQ(&bench.host->at(0), &acquired.value());
+    EXPECT_EQ(&bench.host.at(0), &acquired.value());
 }
 
 TEST(ConnectionHost, AcquireRejectsLimitsAboveTheCompiledMaximum)
@@ -107,7 +107,7 @@ TEST(ConnectionHost, AcquireRejectsLimitsAboveTheCompiledMaximum)
     ConnectionBench<1> bench(limitsOf(64, net::MemoryLimits::SEND_CAPACITY + 1, 64));
     net::ConnectionResult failed = bench.acquire();
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, failed.code);
-    EXPECT_TRUE(bench.host->empty());
+    EXPECT_TRUE(bench.empty());
 }
 
 TEST(ConnectionHost, AcquireHandsOutEveryIdleSlotThenNull)
@@ -117,7 +117,7 @@ TEST(ConnectionHost, AcquireHandsOutEveryIdleSlotThenNull)
     {
         ASSERT_TRUE(bench.acquire());
     }
-    EXPECT_TRUE(bench.host->full());
+    EXPECT_TRUE(bench.full());
     net::ConnectionResult refused = bench.acquire();
     EXPECT_FALSE(refused);
     EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, refused.code);
@@ -141,12 +141,12 @@ TEST(ConnectionHost, ReleaseMakesTheSlotAcquirableAgainAndCountIsConsistent)
         else
         {
             size_t index = random() % open.size();
-            bench.host->release(*open[index]);
+            bench.host.release(*open[index]);
             open.erase(open.begin() + static_cast<std::ptrdiff_t>(index));
         }
-        ASSERT_EQ(open.empty(), bench.host->empty());
-        ASSERT_EQ(open.size() == slots, bench.host->full());
-        if (bench.host->full())
+        ASSERT_EQ(open.empty(), bench.empty());
+        ASSERT_EQ(open.size() == slots, bench.full());
+        if (bench.full())
         {
             ASSERT_EQ(KIOTTY_NET_CODE_TABLE_FULL, bench.acquire().code);
         }
@@ -158,10 +158,10 @@ TEST(ConnectionHost, FindWithCurrentHandleReturnsTheConnection)
     ConnectionBench<2> bench(smallLimits());
     (void)bench.acquire();
     net::Connection& connection = bench.open();
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.host->notify(connection.id(), spanOf("hi")));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.notify(connection.state().id, spanOf("hi")));
     EXPECT_EQ("hi", pickedNotification(bench, connection));
-    KiottyNetConnectionInfo info = bench.host->info(connection.id());
-    KiottyNetConnectionInfo expected = connection.info();
+    KiottyNetConnectionInfo info = bench.desk.info(connection.state().id);
+    KiottyNetConnectionInfo expected = connection.state().info;
     EXPECT_EQ(expected.port, info.port);
     EXPECT_STREQ(expected.hostname, info.hostname);
 }
@@ -170,17 +170,17 @@ TEST(ConnectionHost, FindWithStaleGenerationOrIdleSlotOrOutOfRangeSlotReturnsNul
 {
     ConnectionBench<2> bench(smallLimits());
     net::Connection& connection = bench.open();
-    PoolHandle stale = connection.id();
+    PoolHandle stale = connection.state().id;
     stale.generation += 1;
     PoolHandle idle = { 1, 1 };
-    PoolHandle outside = { connection.generation(), 2 };
+    PoolHandle outside = { connection.state().id.generation, 2 };
     PoolHandle handles[] = { stale, idle, outside };
     for (const PoolHandle& id : handles)
     {
-        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->notify(id, spanOf("x")));
-        EXPECT_EQ(0, bench.host->info(id).port);
-        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->working(id).code);
-        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.host->closeStream(id, thenHold(0)));
+        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.notify(id, spanOf("x")));
+        EXPECT_EQ(0, bench.desk.info(id).port);
+        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.working(id).code);
+        EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, bench.desk.closeStream(id, thenHold(0)));
     }
 }
 
@@ -190,14 +190,14 @@ TEST(ConnectionHost, WorkingAndCloseStreamGoThroughTheCurrentHandleOnly)
     net::Connection& connection = bench.open();
     bench.recorder.then(thenWork());
     bench.opened(connection);
-    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.host->working(connection.id()).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.desk.working(connection.state().id).code);
     bench.complete(connection, completion::workReady());
-    net::ConnectionResult working = bench.host->working(connection.id());
+    net::ConnectionResult working = bench.desk.working(connection.state().id);
     ASSERT_TRUE(working);
     EXPECT_EQ(&connection, &working.value());
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.host->closeStream(connection.id(), thenHold(0)));
-    EXPECT_TRUE(connection.workFinished());
-    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.host->closeStream(connection.id(), thenHold(0)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.closeStream(connection.state().id, thenHold(0)));
+    EXPECT_TRUE(connection.flows().work.isFinished());
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, bench.desk.closeStream(connection.state().id, thenHold(0)));
 }
 
 TEST(ConnectionHost, BroadcastStagesToEveryAliveConnectionAndSkipsIdleAndClosing)
@@ -213,17 +213,17 @@ TEST(ConnectionHost, BroadcastStagesToEveryAliveConnectionAndSkipsIdleAndClosing
     }
     for (size_t i = 0; i < slots; i += 4)
     {
-        bench.host->release(*connections[i]);
+        bench.host.release(*connections[i]);
     }
     for (size_t i = 1; i < slots; i += 4)
     {
         connections[i]->close(KIOTTY_NET_CODE_CLOSED, bench.handler);
     }
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.host->broadcast(spanOf("all")));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.broadcast(spanOf("all")));
     for (size_t i = 0; i < slots; ++i)
     {
         net::Connection& connection = *connections[i];
-        if (connection.alive())
+        if (connection.state().is_alive)
         {
             EXPECT_EQ("all", pickedNotification(bench, connection)) << i;
         }
@@ -241,7 +241,7 @@ TEST(ConnectionHost, BroadcastReturnsBufferFullAndWritesNowhereWhenOneConnection
     net::Connection& second = bench.open();
     net::Connection& third = bench.open();
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(second, "123456"));
-    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.host->broadcast(spanOf("abc")));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.desk.broadcast(spanOf("abc")));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(first).kind);
     EXPECT_EQ("123456", pickedNotification(bench, second));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(third).kind);
@@ -250,21 +250,21 @@ TEST(ConnectionHost, BroadcastReturnsBufferFullAndWritesNowhereWhenOneConnection
 TEST(ConnectionHost, BroadcastWithNoAliveConnectionReturnsSuccess)
 {
     ConnectionBench<2> bench(smallLimits());
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.host->broadcast(spanOf("nobody")));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.broadcast(spanOf("nobody")));
 }
 
 TEST(ConnectionHost, AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck)
 {
     ConnectionBench<4> bench(smallLimits());
     bench.open();
-    for (int32_t slot = 1; slot < bench.host->capacity(); ++slot)
+    for (int32_t slot = 1; slot < bench.host.capacity(); ++slot)
     {
-        net::Connection& idle = bench.host->at(slot);
-        EXPECT_FALSE(idle.expireDeadline(UINT64_MAX));
-        EXPECT_FALSE(idle.workReady());
-        EXPECT_FALSE(idle.workFinished());
+        net::Connection& idle = bench.host.at(slot);
+        EXPECT_FALSE(idle.state().isExpired(UINT64_MAX));
+        EXPECT_FALSE(idle.flows().work.isReady());
+        EXPECT_FALSE(idle.flows().work.isFinished());
         EXPECT_EQ(net::IoActionKind::NONE, bench.pick(idle).kind);
-        EXPECT_NE(net::Phase::CLOSING, idle.phase());
+        EXPECT_NE(net::Phase::CLOSING, idle.state().phase);
         EXPECT_EQ(net::IoActionKind::NONE, bench.complete(idle, completion::timeout()).kind);
     }
     EXPECT_EQ(0u, bench.recorder.total());

@@ -1,6 +1,6 @@
-#if !defined(KIOTTY_OWNER_H)
-#define KIOTTY_OWNER_H
+#pragma once
 
+#include "data/infra/file/kiotty_input_file.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
@@ -13,18 +13,18 @@ struct KiottyNetConnectionOwner
     KiottyNetConnectionOwner& operator=(const KiottyNetConnectionOwner&) = delete;
     virtual ~KiottyNetConnectionOwner();
 
+    using FileRange = kiotty::net::implementation::FileRange;
+
     virtual KiottyNetCode           notify(int64_t id, KiottyNetSpan data) = 0;
     virtual KiottyNetConnectionInfo info(int64_t id) const = 0;
     virtual KiottyNetResult         readStream(int64_t id, void* buffer, size_t length, uint32_t timeout_milliseconds) = 0;
     virtual KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) = 0;
-    virtual KiottyNetCode           writeStreamFile(int64_t id, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds) = 0;
+    virtual KiottyNetCode           writeStreamFile(int64_t id, const char* path, FileRange range, uint32_t timeout_milliseconds) = 0;
     virtual bool                    isStreamOpen(int64_t id) = 0;
     virtual KiottyNetCode           closeStream(int64_t id, const KiottyNetConnectionAction& then) = 0;
 };
 
 namespace kiotty::net::implementation
 {
-    typedef ::KiottyNetConnectionOwner Owner;
+    using Owner = ::KiottyNetConnectionOwner;
 }
-
-#endif

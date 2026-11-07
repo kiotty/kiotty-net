@@ -1,11 +1,10 @@
-#if !defined(KIOTTY_SENDER_H)
-#define KIOTTY_SENDER_H
+#pragma once
 
+#include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
-#include <cstring>
 
 namespace kiotty::net::implementation
 {
@@ -21,17 +20,13 @@ namespace kiotty::net::implementation
         {
             return KIOTTY_NET_CODE_SUCCESS;
         }
-        if (data.data == nullptr)
-        {
-            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-        }
+        if (data.data == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         StageBase::Provider provider = stage.provider();
-        if (provider.writable() < data.length)
-        {
-            return KIOTTY_NET_CODE_BUFFER_FULL;
-        }
-        char* room = provider.prepare(data.length);
-        std::memcpy(room, data.data, data.length);
+        const size_t writable = provider.writable();
+        if (writable < data.length) { return KIOTTY_NET_CODE_BUFFER_FULL; }
+        const Span<char> room{ provider.prepare(data.length), data.length };
+        const bool copied = room.copyFrom(Span<const char>{ data.data, data.length });
+        if (!copied) { return KIOTTY_NET_CODE_BUFFER_FULL; }
         provider.commit(data.length);
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -42,5 +37,3 @@ namespace kiotty::net::implementation
         stage.compact();
     }
 }
-
-#endif

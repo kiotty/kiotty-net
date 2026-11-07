@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_TEST_HANDLER_H)
 #define KIOTTY_TEST_HANDLER_H
 
-#include "base/context/kiotty_owner.h"
+#include "context/kiotty_owner.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
@@ -80,7 +80,7 @@ namespace kiotty_test
         KiottyNetConnectionInfo info(int64_t id) const override;
         KiottyNetResult         readStream(int64_t id, void* buffer, size_t length, uint32_t timeout_milliseconds) override;
         KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) override;
-        KiottyNetCode           writeStreamFile(int64_t id, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds) override;
+        KiottyNetCode           writeStreamFile(int64_t id, const char* path, FileRange range, uint32_t timeout_milliseconds) override;
         bool                    isStreamOpen(int64_t id) override;
         KiottyNetCode           closeStream(int64_t id, const KiottyNetConnectionAction& then) override;
     };

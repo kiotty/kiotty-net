@@ -171,6 +171,23 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 
 ## 8. 상태
 
+6단계에서 한 것 (2026-11-07):
+
+- `base/connection` 을 `data/repository/connection/`, `base/stream` 을 `data/repository/stream/`, `base/context/kiotty_owner.*` 를 `context/` 로 옮겼다 (`git mv`). 빈 `base/io_loop/kiotty_io_loop.h` 와 `base/` 를 지웠다. include guard 는 `#pragma once` 로.
+- 새 파일: `kiotty_connection_configuration.h` (`ConnectionConfiguration`, 멤버를 크기 순으로: socket, limits, context, hostname, profile), `kiotty_connection_state.h`, `kiotty_connection_parts.h` (flow 가 받는 참조 묶음), `kiotty_connection_flows.h`, `kiotty_caller.h/.cpp` (콜백을 부르고 돌려받은 action 을 admit), `kiotty_adopt_action.h/.cpp` (옛 `adopt`, 자유 함수), `kiotty_receive_flow`, `kiotty_send_flow`, `kiotty_work_flow`, `kiotty_connection_host.cpp`, `kiotty_notification_desk.h/.cpp`.
+- `Connection` 의 public 은 `initialize / reset / onOpened / dispatch / close / state / flows` 7 개와 `IoSource` override 7 개 (DV9). `id / generation / alive / phase / deadline / info / context` 는 `ConnectionState state()` 의 필드 (`deadline, context, id, info, phase, is_alive`) 가 됐다. `_deadline` 은 다른 thread 의 `info` 가 같은 값을 복사하므로 atomic 이 됐다. `readEvent / writeEvent` 는 지웠다 (테스트는 `eventFor`). `expireDeadline(now)` 는 `ConnectionState::isExpired(now)` 로 읽고, TIMEOUT 의 dispatch 가 deadline 을 0 으로 돌린다.
+- `flows()` 는 `ConnectionFlows { receive, send, work }` 참조 묶음을 돌려준다.
+  - `ReceiveFlow`: `drive / room / commit / machineState / setMachineState`. `refill / deliver / refuse` 는 private, `satisfied / exactly / until` 은 익명 namespace. StateMachine 값 쌍은 Connection 의 7 개 한계 때문에 여기로 왔다 (DV6).
+  - `SendFlow`: `pick` (옛 `pickWrite`) `/ payload / release / notificationWritable / stageNotification`. `select / encoded` 는 private.
+  - `WorkFlow`: `verify / stream / closeStream / takeOutcome / isReady / isFinished / isWorking`.
+  - flow 끼리는 부르지 않는다 (수칙 6.5). 받는 맥락 `drive` 를 부르는 것은 Connection 뿐이다.
+- `ConnectionHost` 는 template 을 없애고 `ReusablePoolBase<Connection>&` 를 받는다. public 은 `initialize / acquire / release / at / capacity / notificationMutex`. `full / empty` 는 부르는 곳이 테스트뿐이라 지웠다 (테스트는 풀의 `count`). 아무 thread 쪽은 `NotificationDesk (pool&, mutex&)`: `notify / broadcast / info / working / closeStream`. mutex 는 host 가 가진다.
+- `ConnectionStream`: `sendAll(..., size_t& sent)` 의 출력 인자를 없애고 보낸 길이와 code 를 담은 private `Sent` 를 돌려준다 (실패해도 보낸 길이를 commit 해야 하므로 `Result` 가 아니다). 30 줄 넘던 `read / writeFile / handshake / flush / send` 를 나눴다. `memcpy` 는 `Span::copyFrom`. `stop_when_empty` 같은 bool 인자는 이 범위에 없었다 (IoLoop 이 생길 때 `StopPolicy`).
+- `Owner::writeStreamFile` 의 인자를 `(id, path, FileRange, timeout)` 4 개로. `Sender::stage` 의 `memcpy` 는 `Span::copyFrom`. `domain/entity/kiotty_phase.h` 에 `isAlive(Phase)`.
+- 테스트: 같은 테스트를 새 API 로 옮겼다. `ConnectionBench` 가 `ReusablePool<Connection, N>` 을 갖고 host 와 desk 에 넘긴다. 새 테스트 하나 (`MachineStateStartsAtZeroAndIsClearedOnRelease`).
+- 7단계로 넘긴 것: 이 단계의 파일에 100 자 넘는 줄이 48 개 (주로 함수 선언). `ConnectionState` 를 IO loop 이 연결마다 복사하는 비용 (약 288 바이트) 은 IoLoop 을 만들 때 다시 본다.
+- 확인: MSVC Debug TLS OFF 304, TLS ON 304, WSL gcc Debug TLS ON 305 초록. `len.sh data/repository context` 출력 없음.
+
 5단계에서 한 것 (2026-11-07):
 
 - `base/event`, `base/tls`, `base/stream` 의 파일 부분을 `data/infra/{event,tls,file}` 로 옮기고 include guard 를 `#pragma once` 로 바꿨다.
@@ -218,6 +235,6 @@ Q1 은 추천과 다르게 "이번에 바꾼다" 로 정했다 (D7). Q2 ~ Q7 은
 | 3 | 끝 | 아래 "3단계에서 한 것" |
 | 4 | 끝 | 아래 "4단계에서 한 것" |
 | 5 | 끝 | 아래 "5단계에서 한 것". 남은 것은 7단계 |
-| 6 | 시작 안 함 | 2.2 분할 확정 |
+| 6 | 끝 | 아래 "6단계에서 한 것". 100 자 줄은 7단계 |
 | 7 | 시작 안 함 | |
 | 8 | 시작 안 함 | |

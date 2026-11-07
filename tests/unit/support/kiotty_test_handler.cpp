@@ -278,7 +278,7 @@ namespace kiotty_test
         return result;
     }
 
-    KiottyNetCode FakeOwner::writeStreamFile(int64_t, const char*, uint64_t, uint64_t, uint32_t)
+    KiottyNetCode FakeOwner::writeStreamFile(int64_t, const char*, FileRange, uint32_t)
     {
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }

@@ -78,11 +78,18 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/tls/kiotty_tls_engine.cpp
     src/implementation/data/infra/tls/backend/kiotty_openssl_tls.cpp
     src/implementation/data/infra/tls/backend/kiotty_stub_tls.cpp
-    src/implementation/base/stream/kiotty_connection_stream.cpp
+    src/implementation/data/repository/stream/kiotty_connection_stream.cpp
     src/implementation/data/infra/file/backend/kiotty_posix_file.cpp
     src/implementation/data/infra/file/backend/kiotty_windows_file.cpp
-    src/implementation/base/connection/kiotty_connection.cpp
-    src/implementation/base/context/kiotty_owner.cpp
+    src/implementation/data/repository/connection/kiotty_adopt_action.cpp
+    src/implementation/data/repository/connection/kiotty_caller.cpp
+    src/implementation/data/repository/connection/kiotty_receive_flow.cpp
+    src/implementation/data/repository/connection/kiotty_send_flow.cpp
+    src/implementation/data/repository/connection/kiotty_work_flow.cpp
+    src/implementation/data/repository/connection/kiotty_connection.cpp
+    src/implementation/data/repository/connection/kiotty_connection_host.cpp
+    src/implementation/data/repository/connection/kiotty_notification_desk.cpp
+    src/implementation/context/kiotty_owner.cpp
 )
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
