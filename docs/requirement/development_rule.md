@@ -186,7 +186,7 @@ Result<ServerHandle, ErrorCode> createServer(Context& context, const Configurati
 
 - 크기·길이·오프셋은 `size_t`.
 - 외부에서 온 정수는 `[min, max]` 검사 후 사용한다. enum 으로 바꿀 때도 같다.
-- 덧셈·곱셈은 `core/checked.hpp` 의 `checkedAdd`, `checkedMultiply` 를 쓴다. 넘치면 `Result` 실패.
+- 덧셈·곱셈은 `core/<organization>_checked.h` 의 `checkedAdd`, `checkedMultiply` 를 쓴다. 넘치면 `Result` 실패.
 - 부호가 다른 비교는 컴파일 에러로 막는다 (`-Wsign-compare -Werror`).
 
 ### 2.5 외부에는 포인터를 내보내지 않는다. 외부는 Context 와 Handle 만 가진다.
@@ -329,7 +329,7 @@ ServerResult createServer(Context& context, const ServerConfiguration& configura
 | private 멤버 | `_` 접두 | `_free_count` |
 | 상수, enum 멤버 | UPPER_SNAKE | `MAX_SESSIONS`, `POOL_IS_FULL` |
 | 클래스, enum, 타입 | PascalCase | `LazyPool`, `ErrorCode` |
-| 파일 | snake_case(클래스명), 파일 하나 = 클래스 하나 | `lazy_pool.hpp` |
+| 파일 | `<organization>_snake_case(클래스명).h` / `.cpp`, 파일 하나 = 클래스 하나. 조직 이름 접두사로 다른 라이브러리 헤더와 겹치지 않게 한다 | `kiotty_lazy_pool.h`, `kiotty_lazy_pool.cpp` |
 | namespace | `<organization>::<project>::implementation`. 예: `kiotty::spec::implementation`. 조직·프로젝트 이름은 사용자가 정한다. | |
 
 - 약어를 쓰지 않는다. 이름은 네 단어 이하.
@@ -481,9 +481,9 @@ void                            closeCursor(Context& context, CursorHandle curso
 
 ```cpp
 #ifdef _WIN32
-#include "backend/windows_socket.hpp"
+#include "backend/kiotty_windows_socket.h"
 #else
-#include "backend/posix_socket.hpp"
+#include "backend/kiotty_posix_socket.h"
 #endif
 
 class Socket
@@ -518,7 +518,7 @@ src/
             repository/     # 기능 단위 보관 클래스. module1/, module2/
             states/         # repository 의 상태
             datasource/     # 메모리 공급. 고정 크기 풀, Local DB, Remote DB
-            infra/          # 플랫폼 구현. class1/backend/, class1/class1.hpp
+            infra/          # 플랫폼 구현. class1/backend/, class1/<organization>_class1.h
 single_header/              # 스크립트로만 생성
 ```
 
