@@ -34,6 +34,7 @@ namespace kiotty
                 return static_cast<int>(handle);
             }
 
+#if defined(__linux__)
             class SigpipeBlock
             {
             public:
@@ -69,6 +70,7 @@ namespace kiotty
                 sigset_t _previous;
                 bool     _pending;
             };
+#endif
 
             ssize_t sendRange(int socket, int file, uint64_t offset, size_t length)
             {
@@ -189,7 +191,9 @@ namespace kiotty
             {
                 return SocketCode::INVALID_ARGUMENT;
             }
+#if defined(__linux__)
             SigpipeBlock block;
+#endif
             int out = static_cast<int>(socket.handle());
             int in = descriptorOf(file.handle());
             while (sent < length)
