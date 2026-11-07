@@ -7,6 +7,7 @@ kiotty_net_add_test_target(kiotty_net_integration_tests integration
     kiotty_test_connect_with_retry.cpp
     kiotty_test_event_listener.cpp
     kiotty_test_connection_stream.cpp
+    kiotty_test_acceptor.cpp
 )
 
 target_include_directories(kiotty_net_integration_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/unit)

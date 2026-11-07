@@ -6,6 +6,7 @@
 #include "data/infra/socket/backend/kiotty_windows_address.h"
 
 #include <windows.h>
+#include <mswsock.h>
 
 #include <utility>
 
@@ -17,6 +18,10 @@ namespace kiotty::net::implementation
                        const KiottyNetEndpoint& endpoint);
         SocketCode bindAndListen(SOCKET socket, const Address& address, int backlog);
         uint16_t   boundPort(SOCKET socket);
+        using PeerResult = Result<KiottyNetConnectionInfo, SocketCode>;
+
+        SocketCode inheritListening(SOCKET accepted, SOCKET listening);
+        PeerResult readPeer(SOCKET accepted);
     }
 
     PassiveSocket::PassiveSocket()
@@ -76,6 +81,26 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
+    ActiveSocketResult PassiveSocket::prepare()
+    {
+        if (!valid()) { return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT); }
+        return ActiveSocket::open(_transport);
+    }
+
+    ActiveSocketResult PassiveSocket::accept(ActiveSocket&& prepared)
+    {
+        ActiveSocket socket(std::move(prepared));
+        const bool ready = valid() && socket.valid();
+        if (!ready) { return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT); }
+        const SOCKET accepted = socketOf(socket.handle());
+        const SocketCode inherited = inheritListening(accepted, socketOf(_handle));
+        if (inherited != SocketCode::SUCCESS) { return ActiveSocketResult::failure(inherited); }
+        const PeerResult named = readPeer(accepted);
+        if (!named) { return ActiveSocketResult::failure(named.code); }
+        socket._peer = named.value;
+        return ActiveSocketResult::success(std::move(socket));
+    }
+
     void PassiveSocket::close()
     {
         if (!valid()) { return; }
@@ -131,6 +156,25 @@ namespace kiotty::net::implementation
             ::getsockname(socket, reinterpret_cast<sockaddr*>(&bound), &length);
             const KiottyNetConnectionInfo info = infoOf(bound);
             return static_cast<uint16_t>(info.port);
+        }
+
+        SocketCode inheritListening(SOCKET accepted, SOCKET listening)
+        {
+            const char* option = reinterpret_cast<const char*>(&listening);
+            const int updated = ::setsockopt(accepted, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
+                option, sizeof(listening));
+            if (updated != 0) { return lastSocketCode(); }
+            return SocketCode::SUCCESS;
+        }
+
+        PeerResult readPeer(SOCKET accepted)
+        {
+            sockaddr_storage address{};
+            int length = sizeof(address);
+            sockaddr* const named_address = reinterpret_cast<sockaddr*>(&address);
+            const int named = ::getpeername(accepted, named_address, &length);
+            if (named != 0) { return PeerResult::failure(lastSocketCode()); }
+            return PeerResult::success(infoOf(address));
         }
     }
 }

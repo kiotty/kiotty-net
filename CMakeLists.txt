@@ -90,6 +90,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/stream/kiotty_connection_stream.cpp
     src/implementation/data/infra/file/backend/kiotty_posix_file.cpp
     src/implementation/data/infra/file/backend/kiotty_windows_file.cpp
+    src/implementation/data/repository/connection/kiotty_acceptor.cpp
     src/implementation/data/repository/connection/kiotty_adopt_action.cpp
     src/implementation/data/repository/connection/kiotty_caller.cpp
     src/implementation/data/repository/connection/kiotty_receive_flow.cpp

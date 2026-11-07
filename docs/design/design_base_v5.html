@@ -124,7 +124,7 @@
 <tr><td>편차</td><td>없음 (MISRA 메모만)</td><td><code>docs/deviations.md</code> DV1 ~ DV13</td><td>18</td></tr>
 </table>
 
-<p>코드의 범위: <code>core/</code>, <code>domain/entity/</code>, <code>data/</code> 전부와 <code>context/kiotty_owner.h</code> 가 코드다 <span class="tag code-done">코드</span>. <code>Acceptor</code>, <code>IoLoop</code>, Server / EventClient / StreamClient, <code>Context</code>, config / action 번역, <code>kiotty_net_base.cpp</code> 는 설계다 <span class="tag design">설계</span>. 설계 부분은 v4 의 내용을 새 이름과 수칙으로 옮겨 적은 것이고, 만들 때 다시 확정한다.</p>
+<p>코드의 범위: <code>core/</code>, <code>domain/entity/</code>, <code>data/</code> 전부 (5b 의 <code>Acceptor</code> 포함) 와 <code>context/kiotty_owner.h</code> 가 코드다 <span class="tag code-done">코드</span>. <code>IoLoop</code>, Server / EventClient / StreamClient, <code>Context</code>, config / action 번역, <code>kiotty_net_base.cpp</code> 는 설계다 <span class="tag design">설계</span>. 설계 부분은 v4 의 내용을 새 이름과 수칙으로 옮겨 적은 것이고, 만들 때 다시 확정한다.</p>
 
 <!-- ============================================================ -->
 <h2 id="s1">1. 폴더</h2>
@@ -180,7 +180,7 @@ src/
                     kiotty_work_context.h  kiotty_work_reporter.h  kiotty_sender.h
                     kiotty_caller.h/.cpp  kiotty_adopt_action.h/.cpp
                     kiotty_connection_host.h/.cpp  kiotty_notification_desk.h/.cpp
-                    kiotty_acceptor.h/.cpp                      설계 (9.9)
+                    kiotty_acceptor.h/.cpp
                 stream/  kiotty_connection_stream.h/.cpp   동기 통로
         context/
             kiotty_owner.h/.cpp     KiottyNetConnectionOwner (C 경계의 불투명 struct)
@@ -895,8 +895,29 @@ public:
   <li><code>release</code> 가 lock 을 잡는 이유는 v4 그대로: 다른 thread 의 notify 가 <code>is_alive</code> 를 통과한 뒤 CLOSING 이 될 수 있다.</li>
 </ul>
 
-<h3>9.9 Acceptor <span class="tag design">설계</span></h3>
-<p><code>data/repository/connection/kiotty_acceptor.h</code>. <code>IoSource</code> 를 구현하고 <code>PassiveSocket</code>, <code>IoEvent</code> 하나, <code>AcceptBuffer</code>, <code>NoDelay</code> 를 든다 (v4 의 <code>bool _no_delay</code> 는 enum). <code>listening()</code> 은 open 하지 않았거나 close 된 Acceptor 에서 거짓이다. EventClient 는 open 하지 않는 Acceptor 를 하나 들고 IoLoop 에 넘긴다.</p>
+<h3>9.9 Acceptor <span class="tag code-done">코드</span></h3>
+<pre><code>class Acceptor : public IoSource                // data/repository/connection/kiotty_acceptor.h. slot -1, event 하나
+{
+public:
+    SocketCode         open(const KiottyNetEndpoint&amp; endpoint, int backlog, NoDelay no_delay);
+    void               close();
+    ActiveSocketResult accept();                // ACCEPT 완료 뒤. 준비한 socket 을 PassiveSocket::accept(prepared) 로 마무리하고 NoDelay 를 건다
+    bool               listening() const;       // open 하지 않았거나 close / shutdown 뒤면 거짓
+    bool               isPending() const;       // settle 이 "다시 걸까" 를 본다
+    uint16_t           port() const;
+    // IoSource 7 개. resolve(ACCEPT) = { &amp;_buffer, sizeof(AcceptBuffer) }. shutdown = close (listening socket 을 닫는다)
+private:
+    AcceptBuffer _buffer; IoEvent _event; ActiveSocket _prepared; PassiveSocket _socket; NoDelay _no_delay;
+};
+
+// PassiveSocket 에 더한 둘. OS 차이는 여기서 끝난다
+ActiveSocketResult PassiveSocket::prepare();                          // Windows: AcceptEx 에 줄 socket 을 연다. POSIX: 빈 ActiveSocket
+ActiveSocketResult PassiveSocket::accept(ActiveSocket&amp;&amp; prepared);    // Windows: SO_UPDATE_ACCEPT_CONTEXT + getpeername. POSIX: prepared 를 닫고 accept()</code></pre>
+<ul>
+  <li><code>resolve(ACCEPT)</code> 가 준비한 socket 이 없으면 <code>prepare</code> 한다 (Windows 는 accept 마다 새 socket). 준비가 실패하면 <code>_buffer.socket</code> 이 무효이고 IOCP 의 submit 이 <code>INVALID_ARGUMENT</code> 를 돌려준다. epoll 은 payload 를 보지 않는다.</li>
+  <li>open 은 <code>SocketCode</code> 를 돌려준다. 공개 code 로 바꾸는 것은 Server 다 (<code>toNetCode</code>).</li>
+  <li>EventClient 는 open 하지 않는 Acceptor 를 하나 들고 IoLoop 에 넘긴다.</li>
+</ul>
 
 <!-- ============================================================ -->
 <h2 id="s10">10. io_loop <span class="tag design">설계</span></h2>

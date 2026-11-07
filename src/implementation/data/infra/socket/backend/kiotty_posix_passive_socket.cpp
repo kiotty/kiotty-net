@@ -77,6 +77,18 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
+    ActiveSocketResult PassiveSocket::prepare()
+    {
+        if (!valid()) { return ActiveSocketResult::failure(SocketCode::INVALID_ARGUMENT); }
+        return ActiveSocketResult::success(ActiveSocket());
+    }
+
+    ActiveSocketResult PassiveSocket::accept(ActiveSocket&& prepared)
+    {
+        prepared.close();
+        return accept();
+    }
+
     void PassiveSocket::close()
     {
         if (!valid()) { return; }
