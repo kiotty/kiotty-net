@@ -4,6 +4,7 @@
 #include "domain/entity/kiotty_phase.h"
 #include "kiotty_net_base.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation

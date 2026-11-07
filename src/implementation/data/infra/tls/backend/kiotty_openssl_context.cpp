@@ -9,6 +9,7 @@
 
 #include <sys/stat.h>
 
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 
