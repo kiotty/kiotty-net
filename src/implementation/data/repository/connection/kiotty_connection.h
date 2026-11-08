@@ -13,6 +13,7 @@
 #include "data/repository/connection/kiotty_connection_flows.h"
 #include "data/repository/connection/kiotty_connection_parts.h"
 #include "data/repository/connection/kiotty_connection_state.h"
+#include "data/repository/connection/kiotty_connection_status.h"
 #include "data/repository/connection/kiotty_io_source.h"
 #include "data/repository/connection/kiotty_work_context.h"
 #include "domain/entity/kiotty_handler.h"
@@ -51,8 +52,9 @@ namespace kiotty::net::implementation
                                  const Handler& handler,
                                  std::mutex& notification);
         IoAction        close(KiottyNetCode reason, const Handler& handler);
-        ConnectionState state() const;
-        ConnectionFlows flows();
+        ConnectionState  state() const;
+        ConnectionStatus status() const;
+        ConnectionFlows  flows();
 
         SocketHandle socket() const override;
         int32_t      slot() const override;
@@ -103,6 +105,15 @@ namespace kiotty::net::implementation
         PoolHandle                 _id;
         std::atomic<Phase>         _phase;
     };
+
+    inline ConnectionStatus Connection::status() const
+    {
+        ConnectionStatus snapshot{};
+        snapshot.deadline = _deadline.load();
+        snapshot.phase = _phase.load();
+        snapshot.pending = _work_flow.pending();
+        return snapshot;
+    }
 
     using ConnectionResult = Result<Connection&, KiottyNetCode>;
 }

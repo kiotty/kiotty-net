@@ -99,6 +99,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/connection/kiotty_connection.cpp
     src/implementation/data/repository/connection/kiotty_connection_host.cpp
     src/implementation/data/repository/connection/kiotty_notification_desk.cpp
+    src/implementation/domain/usecases/io_loop/kiotty_io_loop.cpp
+    src/implementation/domain/usecases/io_loop/kiotty_io_loop_step.cpp
+    src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_owner.cpp
 )
 
