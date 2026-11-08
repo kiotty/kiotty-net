@@ -96,7 +96,7 @@ TEST(ConnectionHost, AcquireFailureResetsTheConnectionAndLeavesTheSlotEmpty)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, failed.code);
     EXPECT_TRUE(bench.empty());
     EXPECT_EQ(net::Phase::IDLE, bench.host.at(0).state().phase);
-    bench.host.initialize(smallLimits());
+    bench.host.initialize(smallLimits(), 1);
     net::ConnectionResult acquired = bench.acquire();
     ASSERT_TRUE(acquired);
     EXPECT_EQ(&bench.host.at(0), &acquired.value());
@@ -268,4 +268,15 @@ TEST(ConnectionHost, AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck)
         EXPECT_EQ(net::IoActionKind::NONE, bench.complete(idle, completion::timeout()).kind);
     }
     EXPECT_EQ(0u, bench.recorder.total());
+}
+
+TEST(ConnectionHost, MaxConnectionsBelowCapacityMakesTheHostFullEarly)
+{
+    ConnectionBench<4> bench(smallLimits());
+    bench.host.initialize(smallLimits(), 2);
+    ASSERT_TRUE(bench.acquire());
+    ASSERT_TRUE(bench.acquire());
+    EXPECT_TRUE(bench.full());
+    net::ConnectionResult refused = bench.acquire();
+    EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, refused.code);
 }

@@ -74,7 +74,7 @@ namespace kiotty_test
             , callbacks(Recorder::callbacks())
             , handler(callbacks, &recorder, owner)
         {
-            host.initialize(limits);
+            host.initialize(limits, N);
         }
 
         kiotty::net::implementation::ConnectionResult acquire()

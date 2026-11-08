@@ -20,6 +20,14 @@ namespace kiotty::net::implementation
         return true;
     }
 
+    KiottyNetCode initializeTlsLibrary()
+    {
+        const uint64_t options = OPENSSL_INIT_NO_ATEXIT | OPENSSL_INIT_LOAD_SSL_STRINGS;
+        const int initialized = OPENSSL_init_ssl(options, nullptr);
+        if (initialized != 1) { return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED; }
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
     TlsProfile::~TlsProfile()
     {
         close();

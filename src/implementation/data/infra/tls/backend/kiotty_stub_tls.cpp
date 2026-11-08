@@ -16,6 +16,11 @@ namespace kiotty::net::implementation
         return false;
     }
 
+    KiottyNetCode initializeTlsLibrary()
+    {
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
     TlsProfile::~TlsProfile()
     {
     }

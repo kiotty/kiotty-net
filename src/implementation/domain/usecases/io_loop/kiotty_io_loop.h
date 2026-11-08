@@ -27,6 +27,7 @@ namespace kiotty::net::implementation
 
         KiottyNetCode run(const LoopParts& parts, StopPolicy policy);
         void          stop();
+        void          reset();
         bool          isIoThread() const;
         void          admit(const LoopParts& parts, ActiveSocket&& socket, const char* hostname);
 

@@ -63,6 +63,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_windows_socket_error.cpp
     src/implementation/data/infra/socket/kiotty_connect_with_retry.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_socket_startup.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_socket_startup.cpp
     src/implementation/data/infra/socket/backend/kiotty_posix_address.cpp
     src/implementation/data/infra/socket/backend/kiotty_posix_active_socket.cpp
     src/implementation/data/infra/socket/backend/kiotty_posix_passive_socket.cpp
@@ -103,6 +105,15 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_step.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_owner.cpp
+    src/implementation/context/kiotty_configuration.cpp
+    src/implementation/context/kiotty_tls_configuration.cpp
+    src/implementation/context/kiotty_action.cpp
+    src/implementation/context/kiotty_run_gate.cpp
+    src/implementation/context/kiotty_connection_access.cpp
+    src/implementation/context/kiotty_server.cpp
+    src/implementation/context/kiotty_event_client.cpp
+    src/implementation/context/kiotty_stream_client.cpp
+    src/implementation/context/kiotty_context.cpp
 )
 
 add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})

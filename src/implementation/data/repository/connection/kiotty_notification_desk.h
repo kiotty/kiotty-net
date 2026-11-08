@@ -21,6 +21,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionInfo info(PoolHandle id) const;
         ConnectionResult        working(PoolHandle id);
         KiottyNetCode           closeStream(PoolHandle id, const KiottyNetConnectionAction& then);
+        PoolHandle              findReady() const;
 
     private:
         ConnectionResult find(PoolHandle id);

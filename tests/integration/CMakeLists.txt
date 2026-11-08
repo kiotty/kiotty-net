@@ -9,6 +9,8 @@ kiotty_net_add_test_target(kiotty_net_integration_tests integration
     kiotty_test_connection_stream.cpp
     kiotty_test_acceptor.cpp
     kiotty_test_io_loop.cpp
+    kiotty_test_context.cpp
+    kiotty_test_owner.cpp
     ${PROJECT_SOURCE_DIR}/tests/unit/support/kiotty_test_handler.cpp
 )
 

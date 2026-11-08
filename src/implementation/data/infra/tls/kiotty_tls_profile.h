@@ -11,7 +11,8 @@ namespace kiotty::net::implementation
 {
     inline constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MILLISECONDS = 10000;
 
-    bool tlsSupported();
+    bool          tlsSupported();
+    KiottyNetCode initializeTlsLibrary();
 
     struct TlsSettings
     {

@@ -1,5 +1,7 @@
 #include "data/repository/connection/kiotty_notification_desk.h"
 
+#include "domain/entity/kiotty_phase.h"
+
 #include <cstddef>
 
 namespace kiotty::net::implementation
@@ -61,6 +63,18 @@ namespace kiotty::net::implementation
         const ConnectionResult found = find(id);
         if (!found) { return found.code; }
         return found.value().flows().work.closeStream(id.generation, then);
+    }
+
+    PoolHandle NotificationDesk::findReady() const
+    {
+        const std::lock_guard<std::mutex> lock(_notification);
+        for (size_t i = 0; i < _connections.capacity(); ++i)
+        {
+            const bool is_ready = _connections.active(i)
+                                  && _connections.at(i).status().phase == Phase::READY;
+            if (is_ready) { return _connections.at(i).state().id; }
+        }
+        return PoolHandle{ 0, 0 };
     }
 
     ConnectionResult NotificationDesk::find(PoolHandle id)

@@ -365,7 +365,7 @@ namespace
         , loop()
         , _opened(false)
     {
-        host.initialize(net::ConnectionLimits{ STAGE_BYTES, STAGE_BYTES, STAGE_BYTES });
+        host.initialize(net::ConnectionLimits{ STAGE_BYTES, STAGE_BYTES, STAGE_BYTES }, POOL_SLOTS);
         probe.host = &host;
         probe.desk = &desk;
         probe.loop = &loop;

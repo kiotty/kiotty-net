@@ -5,6 +5,7 @@
 #include "data/repository/connection/kiotty_connection_configuration.h"
 #include "domain/entity/kiotty_connection_limits.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 
@@ -17,7 +18,7 @@ namespace kiotty::net::implementation
         ConnectionHost(const ConnectionHost&) = delete;
         ConnectionHost& operator=(const ConnectionHost&) = delete;
 
-        void             initialize(ConnectionLimits limits);
+        void             initialize(ConnectionLimits limits, size_t max_connections);
         ConnectionResult acquire(ConnectionConfiguration&& configuration);
         void             release(Connection& connection);
         Connection&      at(int32_t slot);
@@ -29,6 +30,7 @@ namespace kiotty::net::implementation
     private:
         ReusablePoolBase<Connection>& _connections;
         ConnectionLimits              _limits;
+        size_t                        _max_connections;
         std::mutex                    _notification;
     };
 }

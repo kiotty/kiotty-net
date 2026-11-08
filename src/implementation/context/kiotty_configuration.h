@@ -1,0 +1,54 @@
+#pragma once
+
+#include "core/kiotty_result.h"
+#include "core/kiotty_span.h"
+#include "data/infra/socket/kiotty_socket_transfer.h"
+#include "kiotty_net_base.h"
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    inline constexpr uint32_t INITIALIZATION_MARK = 0x4B4E4554u;
+
+    using TextLength = Result<size_t, KiottyNetCode>;
+
+    KiottyNetCode initializeTcpServerConfiguration(KiottyNetServerConfiguration& configuration,
+                                                   const char* host,
+                                                   uint16_t port);
+    KiottyNetCode initializePipeServerConfiguration(KiottyNetServerConfiguration& configuration,
+                                                    const char* pipe_name);
+    KiottyNetCode configureServerMaxClients(KiottyNetServerConfiguration& configuration,
+                                            size_t max_clients);
+    KiottyNetCode configureServerBufferCapacity(KiottyNetServerConfiguration& configuration,
+                                                size_t receive_capacity,
+                                                size_t send_capacity,
+                                                size_t push_capacity);
+    KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
+                                         NoDelay no_delay);
+
+    KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
+                                                   const char* host,
+                                                   uint16_t port);
+    KiottyNetCode initializePipeClientConfiguration(KiottyNetClientConfiguration& configuration,
+                                                    const char* pipe_name);
+    KiottyNetCode configureClientBufferCapacity(KiottyNetClientConfiguration& configuration,
+                                                size_t receive_capacity,
+                                                size_t send_capacity,
+                                                size_t push_capacity);
+    KiottyNetCode configureClientConnectTimeout(KiottyNetClientConfiguration& configuration,
+                                                uint32_t timeout_milliseconds);
+    KiottyNetCode configureClientRetry(KiottyNetClientConfiguration& configuration,
+                                       uint32_t max_trial,
+                                       uint32_t trial_interval_milliseconds);
+    KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
+                                         NoDelay no_delay);
+
+    bool        isInitialized(const KiottyNetServerConfiguration& configuration);
+    bool        isInitialized(const KiottyNetClientConfiguration& configuration);
+    const char* hostnameOf(const KiottyNetClientConfiguration& configuration);
+
+    TextLength measureText(const char* text, size_t capacity);
+    void       writeText(Span<char> target, const char* text, size_t length);
+}

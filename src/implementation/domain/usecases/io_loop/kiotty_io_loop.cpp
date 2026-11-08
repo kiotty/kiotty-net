@@ -44,6 +44,12 @@ namespace kiotty::net::implementation
         _stopped.store(true);
     }
 
+    void IoLoop::reset()
+    {
+        _stopped.store(false);
+        _accept_retry_at = 0;
+    }
+
     bool IoLoop::isIoThread() const
     {
         return _io_thread.load() == std::this_thread::get_id();
