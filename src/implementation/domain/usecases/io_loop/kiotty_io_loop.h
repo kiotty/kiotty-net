@@ -28,13 +28,10 @@ namespace kiotty::net::implementation
         KiottyNetCode run(const LoopParts& parts, StopPolicy policy);
         void          stop();
         bool          isIoThread() const;
-        void          admit(const LoopParts& parts,
-                            ActiveSocket&& socket,
-                            const char* hostname,
-                            KiottyNetConnectionContext context);
+        void          admit(const LoopParts& parts, ActiveSocket&& socket, const char* hostname);
 
     private:
-        static constexpr uint64_t ACCEPT_RETRY_MILLISECONDS = 100;
+        static constexpr uint64_t ACCEPT_RETRY_MILLISECONDS = 1000;
 
         void runOnce(const LoopParts& parts, StopPolicy policy);
         void drain(const LoopParts& parts);
@@ -51,7 +48,7 @@ namespace kiotty::net::implementation
         bool stepSlot(const LoopParts& parts, int32_t slot, uint64_t now);
         void step(const IoCompletion& completion, const LoopParts& parts);
         void access(const IoCompletion& completion, const LoopParts& parts);
-        void admitAccepted(ActiveSocket&& socket, const LoopParts& parts);
+        void welcome(ActiveSocket&& socket, const char* hostname, const LoopParts& parts);
         void open(ConnectionConfiguration&& configuration, const LoopParts& parts);
         void submitTo(Connection& connection, const IoAction& action, const LoopParts& parts);
         void reportAcceptFailure(KiottyNetCode code, const LoopParts& parts);

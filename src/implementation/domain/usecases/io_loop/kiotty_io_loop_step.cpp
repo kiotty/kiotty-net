@@ -10,7 +10,7 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        const char* const ACCEPT_FAILED_MESSAGE = "accept failed. retrying";
+        const char* const ACCEPT_FAILED_MESSAGE = "accept failed. retrying every second";
         const char* const TABLE_FULL_MESSAGE = "accept rejected: connection table is full";
         const char* const OPEN_FAILED_MESSAGE = "connection open failed";
     }
@@ -100,10 +100,11 @@ namespace kiotty::net::implementation
             reportAcceptFailure(toNetCode(accepted.code), parts);
             return;
         }
-        admitAccepted(std::move(accepted.value), parts);
+        _accept_retry_at = 0;
+        welcome(std::move(accepted.value), "", parts);
     }
 
-    void IoLoop::admitAccepted(ActiveSocket&& socket, const LoopParts& parts)
+    void IoLoop::welcome(ActiveSocket&& socket, const char* hostname, const LoopParts& parts)
     {
         const KiottyNetConnectionInfo info = socket.peer();
         if (_stopped.load())
@@ -125,7 +126,7 @@ namespace kiotty::net::implementation
         ConnectionConfiguration configuration = { std::move(socket),
                                                   ConnectionLimits{ 0, 0, 0 },
                                                   decision.connection_context,
-                                                  "",
+                                                  hostname,
                                                   parts.profile };
         open(std::move(configuration), parts);
     }
@@ -163,7 +164,12 @@ namespace kiotty::net::implementation
 
     void IoLoop::reportAcceptFailure(KiottyNetCode code, const LoopParts& parts)
     {
+        const bool is_first_failure = _accept_retry_at == 0;
         _accept_retry_at = monotonicMilliseconds() + ACCEPT_RETRY_MILLISECONDS;
+        if (!is_first_failure)
+        {
+            return;
+        }
         parts.handler.callbacks.onError(parts.handler.app_context, KiottyNetConnectionInfo{},
                                         code, ACCEPT_FAILED_MESSAGE);
     }

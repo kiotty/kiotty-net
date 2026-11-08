@@ -718,7 +718,7 @@ TEST(IoLoop, AdmittedConnectionStartsWorkBeforeTheFirstWait)
     net::ActiveSocketResult opened = net::ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
     ASSERT_TRUE(opened);
     ASSERT_EQ(opened.value.connect(loopbackEndpoint(server.port()), WAIT_MS), net::SocketCode::SUCCESS);
-    rig.loop.admit(rig.parts(), std::move(opened.value), LOOPBACK_HOST, &rig.probe);
+    rig.loop.admit(rig.parts(), std::move(opened.value), LOOPBACK_HOST);
 
     std::thread worker([&]() {
         if (!waitForWorkStart(rig.probe))

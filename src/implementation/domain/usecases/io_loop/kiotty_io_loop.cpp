@@ -49,17 +49,9 @@ namespace kiotty::net::implementation
         return _io_thread.load() == std::this_thread::get_id();
     }
 
-    void IoLoop::admit(const LoopParts& parts,
-                       ActiveSocket&& socket,
-                       const char* hostname,
-                       KiottyNetConnectionContext context)
+    void IoLoop::admit(const LoopParts& parts, ActiveSocket&& socket, const char* hostname)
     {
-        ConnectionConfiguration configuration = { std::move(socket),
-                                                  ConnectionLimits{ 0, 0, 0 },
-                                                  context,
-                                                  hostname,
-                                                  parts.profile };
-        open(std::move(configuration), parts);
+        welcome(std::move(socket), hostname, parts);
     }
 
     void IoLoop::runOnce(const LoopParts& parts, StopPolicy policy)
@@ -123,7 +115,6 @@ namespace kiotty::net::implementation
         {
             return;
         }
-        _accept_retry_at = 0;
         armAccept(parts);
     }
 

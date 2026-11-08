@@ -384,6 +384,47 @@ bool A::doSomething(int32_t a, int32_t b)
 - 멤버 변수에 접근하는 method 는 꼭 필요한 경우에만 만든다. 다른 layer 가 값을 읽어야 하고 동작으로 대신할 수 없을 때가 필요한 경우다.
 - 예외: `core/` 의 자료구조 클래스는 `length()`, `capacity()` 같은 접근 method 를 쓸 수 있다.
 
+### 4.19 한 클래스의 기능이 너무 많아지면, 그 클래스의 멤버 변수 reference 를 생성자로 받는 세부 클래스에 기능을 나눠 맡긴다.
+
+- 세부 클래스는 멤버를 소유하지 않는다. 멤버는 원래 클래스에 그대로 있고, 세부 클래스는 그 reference 만 든다.
+- 원래 클래스는 세부 클래스를 만들어 돌려주는 짧은 method (`sink()`, `flow()`) 를 둔다. 호출자는 그 세부 클래스의 method 를 부른다.
+- 세부 클래스는 쓰는 쪽, 읽는 쪽처럼 한 맥락으로 나눈다 (6.3). public 메서드 7 개 (4.1) 는 세부 클래스마다 센다.
+- 세부 클래스는 원래 클래스보다 오래 살지 않는다. 멤버 변수로 저장하지 않고, 부른 자리에서 쓰고 버린다.
+
+```cpp
+template <typename T>
+class Sink                                         // 쓰는 쪽
+{
+public:
+    Sink(T& value, Subscribers<T>& subscribers);
+    void update(const T& value);                   // _value 를 바꾸고 구독자에게 알린다
+private:
+    T&              _value;
+    Subscribers<T>& _subscribers;
+};
+
+template <typename T>
+class Flow                                         // 읽는 쪽
+{
+public:
+    explicit Flow(Subscribers<T>& subscribers);
+    void subscribe(void (*callback)(void* user_context, const T& value), void* user_context);
+private:
+    Subscribers<T>& _subscribers;
+};
+
+template <typename T>
+class MutableFlow                                  // 멤버를 소유한다
+{
+public:
+    Sink<T> sink() { return Sink<T>(_value, _subscribers); }
+    Flow<T> flow() { return Flow<T>(_subscribers); }
+private:
+    T              _value;
+    Subscribers<T> _subscribers;
+};
+```
+
 ---
 
 ## 5. 에러 처리
