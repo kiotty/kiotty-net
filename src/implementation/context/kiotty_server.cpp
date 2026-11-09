@@ -24,6 +24,7 @@ namespace kiotty::net::implementation
         , _profile()
         , _loop()
         , _gate()
+        , _is_abandoned(false)
         , _configuration()
     {
     }
@@ -53,6 +54,7 @@ namespace kiotty::net::implementation
         _listener.close();
         _profile.close();
         _gate.clear();
+        _is_abandoned.store(false);
     }
 
     KiottyNetCode Server::run(const KiottyNetConnectionHandler& callbacks,
@@ -87,6 +89,11 @@ namespace kiotty::net::implementation
         if (staged != KIOTTY_NET_CODE_SUCCESS) { return staged; }
         (void)_listener.wake();
         return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    RunLifetime Server::lifetime()
+    {
+        return RunLifetime(_gate, _is_abandoned);
     }
 
     KiottyNetCode Server::notify(int64_t id, KiottyNetSpan data)

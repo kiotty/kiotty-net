@@ -3,6 +3,7 @@
 #include "context/kiotty_connection_access.h"
 #include "context/kiotty_owner.h"
 #include "context/kiotty_run_gate.h"
+#include "context/kiotty_run_lifetime.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/datasource/kiotty_memory_limits.h"
@@ -15,6 +16,7 @@
 #include "domain/usecases/io_loop/kiotty_io_loop.h"
 #include "kiotty_net_base.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -51,6 +53,7 @@ namespace kiotty::net::implementation
         void          close();
         KiottyNetCode await(uint64_t timeout_milliseconds);
         KiottyNetCode broadcast(KiottyNetSpan data);
+        RunLifetime   lifetime();
 
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
@@ -85,6 +88,7 @@ namespace kiotty::net::implementation
         TlsProfile                                                      _profile;
         IoLoop                                                          _loop;
         RunGate                                                         _gate;
+        std::atomic<bool>                                               _is_abandoned;
         KiottyNetServerConfiguration                                    _configuration;
     };
 }

@@ -44,6 +44,9 @@ namespace kiotty::net::implementation
         size_t        capacity() const;
         size_t        count() const;
 
+        template <class Visit>
+        void forEachActive(Visit visit);
+
     private:
         size_t findSlot(SlotState state) const;
         size_t indexOf(const T& object) const;
@@ -139,6 +142,16 @@ namespace kiotty::net::implementation
     size_t LazyReusablePool<T>::count() const
     {
         return _count;
+    }
+
+    template <class T>
+    template <class Visit>
+    void LazyReusablePool<T>::forEachActive(Visit visit)
+    {
+        for (size_t i = 0; i < _objects.size(); ++i)
+        {
+            if (_states[i] == SlotState::ACTIVE) { visit(_objects[i]); }
+        }
     }
 
     template <class T>

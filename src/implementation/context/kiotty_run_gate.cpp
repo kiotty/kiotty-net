@@ -10,6 +10,7 @@ namespace kiotty::net::implementation
     RunGate::RunGate()
         : _parker()
         , _is_running(false)
+        , _runner()
         , _code(KIOTTY_NET_CODE_SUCCESS)
         , _phase(RunPhase::IDLE)
     {
@@ -19,6 +20,7 @@ namespace kiotty::net::implementation
     {
         const bool was_running = _is_running.exchange(true);
         if (was_running) { return false; }
+        _runner.store(std::this_thread::get_id());
         _parker.unpark([this]() { _phase = RunPhase::IDLE; });
         return true;
     }
@@ -34,6 +36,7 @@ namespace kiotty::net::implementation
             _code = code;
             _phase = RunPhase::FINISHED;
             _is_running.store(false);
+            _runner.store(std::thread::id());
         });
     }
 
@@ -60,5 +63,10 @@ namespace kiotty::net::implementation
             _code = KIOTTY_NET_CODE_SUCCESS;
             _phase = RunPhase::IDLE;
         });
+    }
+
+    std::thread::id RunGate::runner() const
+    {
+        return _runner.load();
     }
 }

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owner destroy 의 교착 : 언제 멈추고 어떻게 풀까</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1f2328;--muted:#59636e;--line:#d8dee4;--code-bg:#f3f5f7;--accent:#0b6bcb;--note:#e8f1fb;--tip:#e9f7ee;--warn:#fdf1e1;--th:#eef1f4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",Roboto,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+main{max-width:960px;margin:0 auto;padding:32px 16px 96px}
+h1{font-size:1.8rem;line-height:1.3;margin:0 0 10px}
+h2{font-size:1.35rem;margin:44px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:1.1rem;margin:26px 0 8px}
+p,li{margin:8px 0}
+.sub{color:var(--muted)}
+code,pre{font-family:"Cascadia Code",Consolas,"D2Coding",monospace;font-size:.88em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre{background:var(--code-bg);padding:12px 14px;border-radius:6px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:10px 0 16px;font-size:.95rem}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--th)}
+.box{border-radius:6px;padding:10px 14px;margin:12px 0}
+.note{background:var(--note)}
+.tip{background:var(--tip)}
+.warn{background:var(--warn)}
+.q{border-left:4px solid var(--accent);padding:6px 14px;margin:14px 0;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Owner destroy 의 교착 : 언제 멈추고 어떻게 풀까</h1>
+<p class="sub">2026-11-09. 7단계 (커밋 <code>42e09a1</code>) 의 <code>Context::destroy</code> 와 <code>Context::release</code> 가 멈출 수 있는 경우를 정리한 노트다. 1 ~ 2절은 지금 코드가 무엇을 기다리는지, 3절은 멈추는 경우 넷, 4절은 고칠 길, 5절은 추천이다.</p>
+
+<h2>1. destroy 가 기다리는 것</h2>
+
+<p>지금 destroy 는 세 단계를 <b>Context mutex 를 쥔 채</b> 한 번에 한다 (<code>context/kiotty_context.cpp</code>).</p>
+
+<pre><code>Context::destroy(server)
+  lock(Context::_mutex)                    ← 여기서부터
+    _servers.release(server)
+      Server::reset()
+        close()        : loop 에 stop 을 걸고 listener 를 깨운다
+        _gate.join()   : run() 이 돌아올 때까지 잔다      ← 기다림
+        _loop.reset(), _listener.close(), _profile.close()
+  unlock                                   ← 여기까지</code></pre>
+
+<p><code>Context::release</code> 도 같다. 풀 셋의 <code>clear()</code> 가 ACTIVE 인 Owner 마다 <code>reset()</code> 을 부르므로, 실행 중인 Owner 모두의 run 이 끝날 때까지 mutex 를 쥐고 잔다.</p>
+
+<h2>2. run 이 끝나려면 무엇이 필요한가</h2>
+
+<p>stop 이 걸린 IoLoop 은 바로 끝나지 않는다. <code>IoLoop::shutdown</code> 이 모든 연결에 close 를 건 다음, <b>풀이 빌 때까지</b> 바퀴를 더 돈다 (<code>kiotty_io_loop.cpp</code> 의 <code>while (!parts.host.empty() || ...)</code>).</p>
+
+<p>연결 칸은 두 조건이 모두 맞아야 비워진다.</p>
+<ul>
+<li>OS 에 걸어 둔 읽기 / 쓰기가 모두 돌아왔다 (취소 완료 포함).</li>
+<li>Work 로 worker 에 넘어간 연결이면, worker 가 <code>KiottyNet_closeConnectionStream</code> 을 불렀다. 테스트 <code>ServerCloseWaitsForWorkerCloseStream</code> 이 이 동작을 확인한다.</li>
+</ul>
+
+<p>또 연결을 닫을 때 loop thread 가 사용자 콜백 (<code>onDisconnected</code> 등) 을 부른다. 콜백이 돌아와야 loop 가 다음 걸음으로 간다.</p>
+
+<div class="box warn"><b>정리하면</b> destroy 를 부른 thread 는 Context mutex 를 쥔 채 아래 둘을 기다린다.
+<ol>
+<li>loop thread 가 부르는 콜백이 모두 돌아오는 것</li>
+<li>Work 를 받은 worker 모두가 closeConnectionStream 을 부르는 것</li>
+</ol>
+둘 중 누구라도 Context mutex 를 원하거나 destroy 하는 thread 자신이면 영원히 멈춘다.</div>
+
+<h2>3. 멈추는 경우 넷</h2>
+
+<h3>3.1 worker 가 closeStream 전에 Context 를 부른다 (thread 둘)</h3>
+<pre><code>thread A                               worker W (Server S 의 연결 하나를 Work 로 받음)
+────────                               ────────
+destroy(S)
+  lock(mutex)  ✔
+  S.reset → join … W 의 closeStream 을 기다림
+                                       createEventClient(...)   // 받은 요청을 다른 서버로 전달하려고
+                                         lock(mutex) … A 를 기다림
+                                       closeConnectionStream(...)  // 여기까지 못 감</code></pre>
+<p>A 는 W 를, W 는 A 를 기다린다. W 가 부르는 것이 create 든 다른 Owner 의 destroy 든 Context mutex 를 쓰면 같다.</p>
+
+<h3>3.2 loop thread 의 콜백이 Context 를 부른다 (thread 둘, Work 없이도)</h3>
+<pre><code>thread A                               loop thread of S
+────────                               ────────────────
+destroy(S)
+  lock(mutex)  ✔
+  S.reset → join … run 이 끝나기를 기다림
+                                       shutdown 중 onDisconnected 콜백
+                                         destroy(어떤 EventClient)   // 연결이 끊기면 짝 클라이언트도 정리
+                                           lock(mutex) … A 를 기다림</code></pre>
+<p>Work 를 쓰지 않는 사용자도 걸린다. 콜백 안에서 다른 Owner 를 만들거나 지우는 것은 흔한 사용법이라 3.1 보다 더 자주 생길 수 있다.</p>
+
+<h3>3.3 자기 자신을 destroy 한다 (thread 하나)</h3>
+<ul>
+<li><b>콜백 안에서 자기 Server 를 destroy</b>: loop thread 가 join 으로 자기 run 이 끝나기를 기다린다. run 은 이 콜백이 돌아와야 끝난다.</li>
+<li><b>worker 가 closeStream 전에 그 Server 를 destroy</b>: join 이 worker 자신의 closeStream 을 기다린다.</li>
+</ul>
+<p>이 경우는 mutex 와 상관없다. mutex 밖에서 join 해도 멈춘다.</p>
+
+<h3>3.4 release 가 위 셋을 모두 가진다</h3>
+<p><code>KiottyNet_releaseContext</code> 는 실행 중인 Owner 모두를 차례로 reset 한다. 위 세 경우가 Owner 어느 하나에서라도 생기면 멈춘다. 프로그램 끝에서 부르는 함수라 종료가 멈춘 채로 남는다.</p>
+
+<h3>3.5 정리</h3>
+<table>
+<tr><th>경우</th><th>필요한 것</th><th>mutex 를 join 밖으로 빼면</th></tr>
+<tr><td>3.1 worker 가 Context 호출</td><td>Work, 다른 thread 의 destroy</td><td>풀린다</td></tr>
+<tr><td>3.2 콜백이 Context 호출</td><td>다른 thread 의 destroy</td><td>풀린다</td></tr>
+<tr><td>3.3 자기 destroy (콜백)</td><td>콜백 안의 destroy(자기)</td><td>안 풀린다</td></tr>
+<tr><td>3.3 자기 destroy (worker)</td><td>closeStream 전의 destroy(자기)</td><td>안 풀린다</td></tr>
+<tr><td>3.4 release</td><td>위 어느 것이든</td><td>3.1, 3.2 몫은 풀린다</td></tr>
+</table>
+
+<h2>4. 고칠 길</h2>
+
+<h3>4.1 destroy 를 두 번에 나눈다 (join 을 mutex 밖으로)</h3>
+<pre><code>destroy(S)
+  lock    : 칸 상태 ACTIVE → CLOSING   (create 가 이 칸을 못 잡는다)
+  unlock
+  S.close(); S.join()                  (mutex 없이 기다린다)
+  lock    : S.reset(), 칸 상태 CLOSING → RETIRED
+  unlock</code></pre>
+<ul>
+<li>3.1, 3.2 가 풀린다. 기다리는 동안 다른 thread 가 Context 를 자유롭게 쓴다.</li>
+<li>같은 Owner 를 두 thread 가 동시에 destroy 하면, 두 번째는 CLOSING 을 보고 바로 돌아간다 (assert 로 잡는다).</li>
+<li>바뀌는 곳: <code>LazyReusablePool</code> 에 <code>SlotState::CLOSING</code> 과 <code>retire / finish</code> 두 단계, <code>Context::destroy</code> 셋, <code>release</code>. release 는 "모두 CLOSING 으로, unlock, 모두 close, 모두 join, lock, clear" 로 바뀐다. 모두에 먼저 close 를 걸고 join 하므로 Owner 여럿을 차례로 기다리던 지금보다 빨리 끝난다.</li>
+</ul>
+
+<h3>4.2 loop thread 의 자기 destroy 는 미룬다</h3>
+<p><code>IoLoop::isIoThread()</code> 가 이미 있다. destroy 를 부른 thread 가 그 Owner 의 loop thread 면 join 하지 않고 "run 이 끝나면 칸을 돌려준다" 표시만 하고 돌아간다. run 의 마지막 (<code>leave</code>) 이 표시를 보고 칸을 RETIRED 로 돌린다.</p>
+<ul>
+<li>libuv 의 <code>uv_close</code> 도 같은 모양이다. 닫기를 요청만 하고, 실제 정리는 loop 가 다음 바퀴에 끝낸 뒤 close callback 으로 알린다.</li>
+<li>사용자 입장에서는 destroy 가 바로 돌아오고, 그 뒤 handle 을 쓰지 않으면 된다. 지금도 같은 약속이다.</li>
+</ul>
+
+<h3>4.3 worker 의 자기 destroy 는 규칙으로 막는다</h3>
+<p>worker thread 는 사용자의 thread 라 라이브러리가 알아볼 수 없다. 두 길이 있다.</p>
+<table>
+<tr><th>길</th><th>좋은 점</th><th>나쁜 점</th></tr>
+<tr><td><b>A. 문서로 금지</b>: "Work 로 받은 stream 을 closeConnectionStream 하기 전에 그 Owner 를 destroy 하지 않는다"</td><td>코드가 바뀌지 않는다</td><td>어기면 멈춘다. 사용자가 원인을 찾기 어렵다</td></tr>
+<tr><td><b>B. stop 때 stream 을 강제로 끊는다</b>: shutdown 이 Work 연결도 socket 을 닫고 칸을 돌려준다. worker 의 다음 read / write / closeStream 은 연결 id 의 generation 이 맞지 않아 실패 code 를 받는다</td><td>어떤 순서로 불러도 멈추지 않는다. 3.1 의 남은 가능성도 사라진다</td><td>worker 가 socket 을 쓰는 중에 IO thread 가 닫는다. 지금 Work 의 약속 ("worker 가 돌려줄 때까지 IO thread 는 socket 을 만지지 않는다") 을 깬다. 칸이 다른 연결에 다시 쓰이는 경쟁을 따로 막아야 한다</td></tr>
+</table>
+
+<h3>4.4 destroy 에 timeout 을 둔다 (추천하지 않음)</h3>
+<p>join 을 일정 시간만 기다리고 실패를 돌려주는 길이다. C API 의 destroy 는 <code>void</code> 라 실패를 알릴 곳이 없고, 기다림을 포기하면 실행 중인 Owner 의 칸을 다시 쓸 수 없어 결국 누수다.</p>
+
+<h2>5. 추천</h2>
+
+<div class="box tip">
+<b>4.1 + 4.2 + 4.3 A</b>.
+<ul>
+<li>4.1 로 thread 둘 사이의 교착 (3.1, 3.2) 을 없앤다. 사용자가 실수하지 않아도 생기던 경우다.</li>
+<li>4.2 로 콜백 안의 자기 destroy (3.3 첫째) 를 안전하게 만든다. libuv 와 같은 모양이다.</li>
+<li>worker 의 자기 destroy (3.3 둘째) 는 문서로 금지하고 debug 빌드에서 assert 로 알린다. 강제 끊기 (4.3 B) 는 Work 의 약속을 바꾸는 일이라 따로 정한다.</li>
+</ul>
+바뀌는 범위는 <code>LazyReusablePool</code>, <code>Context</code>, Owner 셋의 <code>reset</code> / <code>leave</code> 와 테스트 셋 (3.1, 3.2, 3.3 첫째의 재현) 이다. 8단계 (base.cpp) 전에 넣는 것이 좋다. base.cpp 의 <code>KiottyNet_destroy*</code> 가 이 동작을 그대로 내보내기 때문이다.
+</div>
+
+<h3>정할 것</h3>
+<div class="q">1. 4.1 + 4.2 를 8단계 전에 넣을까?</div>
+<div class="q">2. worker 의 자기 destroy 는 문서 금지 (A) 로 둘까, stop 때 강제로 끊을까 (B)?</div>
+
+<h2>6. 정한 것과 넣은 모양 (2026-11-09)</h2>
+
+<div class="box tip">
+<b>4.1 + 4.2 + 4.3 A</b> 로 정했다.
+<ul>
+<li><code>RunGate</code> 가 run 하는 thread 의 id (<code>runner()</code>) 를 들고, <code>RunLifetime</code> (Owner 의 <code>lifetime()</code>) 이 그것을 읽는다: <code>isRunner / abandon / isReleasable / join</code>.</li>
+<li><code>Context::destroy</code> (Server, EventClient): <code>close()</code> 를 mutex 없이 부른다. 부른 thread 가 그 Owner 의 loop thread 면 <code>abandon()</code> 만 하고 돌아간다 (칸은 ACTIVE 로 남는다). 아니면 mutex 없이 <code>join()</code> 한 뒤 mutex 를 잡고 칸을 돌려준다.</li>
+<li>버려진 칸은 다음 <code>create*</code> 가 mutex 안에서 쓸어 담는다 (<code>forEachActive</code> 로 <code>isReleasable()</code> 인 것을 <code>release</code>). run 이 이미 끝났으므로 reset 의 join 은 바로 돌아온다.</li>
+<li><code>release</code>: phase 를 RELEASING 으로 바꾸고 mutex 를 놓은 채 모든 Server / EventClient 를 close, join 한다. 그 사이의 <code>create*</code> 와 <code>open</code> 은 INVALID_ARGUMENT, <code>destroy</code> 는 close / join 만 하고 칸은 건드리지 않는다. 마지막에 mutex 안에서 풀을 비우고 CLOSED 로 둔다.</li>
+<li>StreamClient 는 loop 가 없어 reset 이 짧으므로 mutex 안에서 그대로 돌려준다.</li>
+</ul>
+</div>
+
+<div class="box warn">
+<b>사용자가 하면 안 되는 것</b>
+<ul>
+<li>worker 가 자기 Stream 의 <code>closeStream</code> 전에 그 Stream 의 Owner 를 destroy 한다 (3.3 둘째). destroy 가 그 closeStream 을 기다리므로 영원히 멈춘다.</li>
+<li>콜백 (loop thread) 이나 worker 에서 <code>release</code> 를 부른다. release 는 모든 run 의 끝을 기다린다. debug 빌드는 loop thread 에서 부르면 assert 로 알린다.</li>
+</ul>
+</div>
+
+</main>
+</body>
+</html>

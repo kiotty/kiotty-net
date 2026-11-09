@@ -7,11 +7,19 @@
 #include "core/pool/kiotty_lazy_reusable_pool.h"
 #include "kiotty_net_base.h"
 
+#include <cstdint>
 #include <mutex>
 
 namespace kiotty::net::implementation
 {
     class Context;
+
+    enum class ContextPhase : uint8_t
+    {
+        CLOSED,
+        OPEN,
+        RELEASING
+    };
 
     using ContextResult = Result<Context&, KiottyNetCode>;
     using ServerResult = Result<Server&, KiottyNetCode>;
@@ -45,11 +53,15 @@ namespace kiotty::net::implementation
 
         KiottyNetCode initialize();
         KiottyNetCode reservePools();
+        void          finishRelease();
+
+        template <class Owner>
+        void retire(LazyReusablePool<Owner>& pool, Owner& owner);
 
         LazyReusablePool<Server>       _servers;
         LazyReusablePool<StreamClient> _stream_clients;
         LazyReusablePool<EventClient>  _event_clients;
         std::mutex                     _mutex;
-        bool                           _is_initialized;
+        ContextPhase                   _phase;
     };
 }

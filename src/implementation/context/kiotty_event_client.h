@@ -4,6 +4,7 @@
 #include "context/kiotty_connection_access.h"
 #include "context/kiotty_owner.h"
 #include "context/kiotty_run_gate.h"
+#include "context/kiotty_run_lifetime.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/infra/event/kiotty_event_listener.h"
@@ -46,7 +47,7 @@ namespace kiotty::net::implementation
         void                      close();
         KiottyNetCode             await(uint64_t timeout_milliseconds);
         KiottyNetConnectionHandle connection();
-        KiottyNetCode             notify(KiottyNetSpan data);
+        RunLifetime               lifetime();
 
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
@@ -82,5 +83,6 @@ namespace kiotty::net::implementation
         RunGate                               _gate;
         KiottyNetClientConfiguration          _configuration;
         std::atomic<bool>                     _is_closing;
+        std::atomic<bool>                     _is_abandoned;
     };
 }

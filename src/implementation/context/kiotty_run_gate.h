@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <thread>
 
 namespace kiotty::net::implementation
 {
@@ -22,17 +23,19 @@ namespace kiotty::net::implementation
         RunGate(const RunGate&) = delete;
         RunGate& operator=(const RunGate&) = delete;
 
-        bool          enter();
-        void          start();
-        void          finish(KiottyNetCode code);
-        KiottyNetCode await(uint64_t timeout_milliseconds);
-        void          join();
-        void          clear();
+        bool            enter();
+        void            start();
+        void            finish(KiottyNetCode code);
+        KiottyNetCode   await(uint64_t timeout_milliseconds);
+        void            join();
+        void            clear();
+        std::thread::id runner() const;
 
     private:
-        Parker            _parker;
-        std::atomic<bool> _is_running;
-        KiottyNetCode     _code;
-        RunPhase          _phase;
+        Parker                       _parker;
+        std::atomic<bool>            _is_running;
+        std::atomic<std::thread::id> _runner;
+        KiottyNetCode                _code;
+        RunPhase                     _phase;
     };
 }

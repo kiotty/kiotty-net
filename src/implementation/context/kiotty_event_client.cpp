@@ -28,6 +28,7 @@ namespace kiotty::net::implementation
         , _gate()
         , _configuration()
         , _is_closing(false)
+        , _is_abandoned(false)
     {
     }
 
@@ -57,6 +58,7 @@ namespace kiotty::net::implementation
         _listener.close();
         _profile.close();
         _gate.clear();
+        _is_abandoned.store(false);
     }
 
     KiottyNetCode EventClient::run(const KiottyNetConnectionHandler& callbacks,
@@ -95,10 +97,9 @@ namespace kiotty::net::implementation
         return KiottyNetConnectionHandle{ this, ready.value() };
     }
 
-    KiottyNetCode EventClient::notify(KiottyNetSpan data)
+    RunLifetime EventClient::lifetime()
     {
-        const PoolHandle ready = _desk.findReady();
-        return access().notify(ready.value(), data);
+        return RunLifetime(_gate, _is_abandoned);
     }
 
     KiottyNetCode EventClient::notify(int64_t id, KiottyNetSpan data)

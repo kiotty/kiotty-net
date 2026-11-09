@@ -5,8 +5,37 @@
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "domain/entity/kiotty_socket_code.h"
 
+#include <cassert>
+
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        template <class Owner>
+        void sweep(LazyReusablePool<Owner>& pool)
+        {
+            pool.forEachActive([&pool](Owner& owner) {
+                if (owner.lifetime().isReleasable()) { pool.release(owner); }
+            });
+        }
+
+        template <class Owner>
+        void closeAll(LazyReusablePool<Owner>& pool)
+        {
+            pool.forEachActive([](Owner& owner) { owner.close(); });
+        }
+
+        template <class Owner>
+        void joinAll(LazyReusablePool<Owner>& pool)
+        {
+            pool.forEachActive([](Owner& owner) {
+                RunLifetime life = owner.lifetime();
+                assert(!life.isRunner());
+                if (!life.isRunner()) { life.join(); }
+            });
+        }
+    }
+
     ContextResult Context::open()
     {
         static Context context;
@@ -18,20 +47,27 @@ namespace kiotty::net::implementation
 
     void Context::release()
     {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        if (!_is_initialized) { return; }
-        _servers.clear();
-        _stream_clients.clear();
-        _event_clients.clear();
-        stopSockets();
-        _is_initialized = false;
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            if (_phase != ContextPhase::OPEN) { return; }
+            _phase = ContextPhase::RELEASING;
+        }
+        closeAll(_servers);
+        closeAll(_event_clients);
+        joinAll(_servers);
+        joinAll(_event_clients);
+        finishRelease();
     }
 
     ServerResult Context::createServer(const KiottyNetServerConfiguration& configuration,
                                        const KiottyNetTlsServerConfiguration* tls)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        if (!_is_initialized) { return ServerResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+        if (_phase != ContextPhase::OPEN)
+        {
+            return ServerResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+        }
+        sweep(_servers);
         return _servers.acquire(ServerConfiguration{ configuration, tls });
     }
 
@@ -40,7 +76,7 @@ namespace kiotty::net::implementation
         const KiottyNetTlsClientConfiguration* tls)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        if (!_is_initialized)
+        if (_phase != ContextPhase::OPEN)
         {
             return StreamClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
@@ -51,29 +87,29 @@ namespace kiotty::net::implementation
                                                  const KiottyNetTlsClientConfiguration* tls)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        if (!_is_initialized)
+        if (_phase != ContextPhase::OPEN)
         {
             return EventClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
+        sweep(_event_clients);
         return _event_clients.acquire(ClientConfiguration{ configuration, tls });
     }
 
     void Context::destroy(Server& server)
     {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        _servers.release(server);
+        retire(_servers, server);
     }
 
     void Context::destroy(StreamClient& client)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN) { return; }
         _stream_clients.release(client);
     }
 
     void Context::destroy(EventClient& client)
     {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        _event_clients.release(client);
+        retire(_event_clients, client);
     }
 
     Context::Context()
@@ -81,15 +117,32 @@ namespace kiotty::net::implementation
         , _stream_clients()
         , _event_clients()
         , _mutex()
-        , _is_initialized(false)
+        , _phase(ContextPhase::CLOSED)
     {
     }
 
     Context::~Context() = default;
 
+    template <class Owner>
+    void Context::retire(LazyReusablePool<Owner>& pool, Owner& owner)
+    {
+        RunLifetime life = owner.lifetime();
+        owner.close();
+        if (life.isRunner())
+        {
+            life.abandon();
+            return;
+        }
+        life.join();
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN) { return; }
+        pool.release(owner);
+    }
+
     KiottyNetCode Context::initialize()
     {
-        if (_is_initialized) { return KIOTTY_NET_CODE_SUCCESS; }
+        if (_phase == ContextPhase::OPEN) { return KIOTTY_NET_CODE_SUCCESS; }
+        if (_phase == ContextPhase::RELEASING) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const SocketCode started = startSockets();
         if (started != SocketCode::SUCCESS) { return toNetCode(started); }
         const KiottyNetCode secured = initializeTlsLibrary();
@@ -100,7 +153,7 @@ namespace kiotty::net::implementation
             stopSockets();
             return failed;
         }
-        _is_initialized = true;
+        _phase = ContextPhase::OPEN;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -113,5 +166,15 @@ namespace kiotty::net::implementation
         const KiottyNetCode streams = _stream_clients.initialize({ MemoryLimits::STREAM_CLIENTS });
         if (streams != KIOTTY_NET_CODE_SUCCESS) { return streams; }
         return _event_clients.initialize({ MemoryLimits::EVENT_CLIENTS });
+    }
+
+    void Context::finishRelease()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _servers.clear();
+        _stream_clients.clear();
+        _event_clients.clear();
+        stopSockets();
+        _phase = ContextPhase::CLOSED;
     }
 }

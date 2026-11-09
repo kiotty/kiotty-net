@@ -394,7 +394,7 @@ TEST_F(OwnerTest, ServerAndEventClientLoopbackRoundTrip)
     ASSERT_TRUE(created);
     net::EventClient& client = created.value();
     EXPECT_EQ(0, client.connection().id);
-    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, client.notify(spanOf("note")));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, client.notify(client.connection().id, spanOf("note")));
 
     Probe client_probe(Role::PING);
     std::atomic<KiottyNetCode> client_code(KIOTTY_NET_CODE_SUCCESS);
@@ -405,7 +405,7 @@ TEST_F(OwnerTest, ServerAndEventClientLoopbackRoundTrip)
     KiottyNetConnectionHandle handle = client.connection();
     EXPECT_EQ(static_cast<KiottyNetConnectionOwner*>(&client), handle.owner);
     EXPECT_NE(0, handle.id);
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client.notify(spanOf("note")));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client.notify(client.connection().id, spanOf("note")));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return server_probe.read.load() > 1; }, WAIT_MS));
     EXPECT_EQ("pingnote", server_probe.received);
 
@@ -535,6 +535,198 @@ TEST_F(OwnerTest, OnDisconnectedIsCalledExactlyOncePerAcceptedConnectionOverATho
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     EXPECT_EQ(total, probe.disconnected.load());
     context->destroy(server);
+}
+
+namespace
+{
+    struct Reentry
+    {
+        Reentry(net::Context& owner_context, uint16_t port, bool destroy_on_connect)
+            : context(owner_context)
+            , server(nullptr)
+            , client(clientConfiguration(port))
+            , is_self_destroying(destroy_on_connect)
+            , connected(0)
+            , disconnected(0)
+            , created(0)
+        {
+        }
+
+        net::Context&                context;
+        net::Server*                 server;
+        KiottyNetClientConfiguration client;
+        bool                         is_self_destroying;
+        std::atomic<int>             connected;
+        std::atomic<int>             disconnected;
+        std::atomic<int>             created;
+    };
+
+    Reentry& reentryOf(void* context)
+    {
+        return *static_cast<Reentry*>(context);
+    }
+
+    KiottyNetConnectionDecision onReentryConnected(KiottyNetAppContext app_context, KiottyNetConnectionInfo info)
+    {
+        (void)info;
+        Reentry& reentry = reentryOf(app_context);
+        reentry.connected.fetch_add(1);
+        if (reentry.is_self_destroying)
+        {
+            reentry.context.destroy(*reentry.server);
+        }
+        return net::acceptConnection(app_context);
+    }
+
+    KiottyNetConnectionAction onReentryReady(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection)
+    {
+        (void)context;
+        (void)connection;
+        return net::thenRead(1, 0);
+    }
+
+    KiottyNetConnectionAction onReentryRead(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetSpan data)
+    {
+        (void)context;
+        (void)connection;
+        (void)data;
+        return net::thenHold(0);
+    }
+
+    void onReentryWorkStarted(KiottyNetConnectionContext context, KiottyNetConnectionStream stream)
+    {
+        (void)context;
+        (void)stream;
+    }
+
+    void onReentryDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    {
+        (void)context;
+        (void)connection;
+        (void)reason;
+        Reentry& reentry = reentryOf(app_context);
+        reentry.disconnected.fetch_add(1);
+        net::EventClientResult created = reentry.context.createEventClient(reentry.client, nullptr);
+        if (created)
+        {
+            reentry.created.fetch_add(1);
+            reentry.context.destroy(created.value());
+        }
+    }
+
+    const KiottyNetConnectionHandler REENTRY_CALLBACKS = { &onReentryConnected, &onReentryReady, &onReentryRead, &onWritten, &onTimeout, &onReentryWorkStarted, &onReentryDisconnected, &onError };
+}
+
+TEST_F(OwnerTest, RetiredServerStartsFreshOnTheNextCreate)
+{
+    // generations of a reused slot are checked in kiotty_test_lazy_reusable_pool
+    const uint16_t first_port = kiotty_test::unusedPort();
+    net::Server& first = createServer(first_port);
+    {
+        Probe probe(Role::ECHO);
+        RunningServer running(first, probe);
+        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, first.await(WAIT_MS));
+        LoopbackPeer peer;
+        ASSERT_TRUE(peer.connectTcp(first_port));
+        EXPECT_TRUE(kiotty_test::waitUntil([&]() { return probe.ready.load() == 1; }, WAIT_MS));
+        EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
+    }
+    context->destroy(first);
+
+    const uint16_t second_port = kiotty_test::unusedPort();
+    net::Server& second = createServer(second_port);
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, second.await(QUIET_MS));
+    Probe probe(Role::ECHO);
+    RunningServer running(second, probe);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, second.await(WAIT_MS));
+    LoopbackPeer stale;
+    EXPECT_FALSE(stale.connectTcp(first_port));
+    LoopbackPeer peer;
+    ASSERT_TRUE(peer.connectTcp(second_port));
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() { return probe.ready.load() == 1; }, WAIT_MS));
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
+    EXPECT_EQ(1, probe.connected.load());
+    EXPECT_EQ(1, probe.disconnected.load());
+    context->destroy(second);
+}
+
+TEST_F(OwnerTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
+{
+    const uint16_t port = kiotty_test::unusedPort();
+    net::Server& server = createServer(port);
+    Probe probe(Role::WORK);
+    RunningServer running(server, probe);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
+    LoopbackPeer peer;
+    ASSERT_TRUE(peer.connectTcp(port));
+    ASSERT_TRUE(waitForStream(probe));
+    net::Owner& owner = *probe.stream_owner.load();
+    const int64_t id = probe.stream_id.load();
+
+    std::atomic<bool> destroyed(false);
+    std::thread destroyer([&]() {
+        context->destroy(server);
+        destroyed.store(true);
+    });
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() { return probe.disconnected.load() == 1; }, WAIT_MS));
+    std::this_thread::sleep_for(std::chrono::milliseconds(QUIET_MS));
+    EXPECT_FALSE(destroyed.load());
+
+    KiottyNetClientConfiguration configuration = clientConfiguration(port);
+    net::EventClientResult created = context->createEventClient(configuration, nullptr);
+    EXPECT_TRUE(created);
+    if (created)
+    {
+        context->destroy(created.value());
+    }
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, owner.closeStream(id, net::thenClose(KIOTTY_NET_CODE_SUCCESS)));
+    destroyer.join();
+    EXPECT_TRUE(destroyed.load());
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() { return running.returned(); }, WAIT_MS));
+}
+
+TEST_F(OwnerTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
+{
+    const uint16_t port = kiotty_test::unusedPort();
+    net::Server& server = createServer(port);
+    Reentry reentry(*context, port, false);
+    reentry.server = &server;
+    std::thread io([&]() { (void)server.run(REENTRY_CALLBACKS, &reentry); });
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
+    LoopbackPeer peer;
+    EXPECT_TRUE(peer.connectTcp(port));
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() { return reentry.connected.load() == 1; }, WAIT_MS));
+    context->destroy(server);
+    io.join();
+    EXPECT_EQ(1, reentry.disconnected.load());
+    EXPECT_EQ(1, reentry.created.load());
+}
+
+TEST_F(OwnerTest, ServerDestroyedFromItsOwnCallbackIsReclaimedByTheNextCreate)
+{
+    const uint16_t port = kiotty_test::unusedPort();
+    net::Server& server = createServer(port);
+    Reentry reentry(*context, port, true);
+    reentry.server = &server;
+    std::thread io([&]() { (void)server.run(REENTRY_CALLBACKS, &reentry); });
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
+    LoopbackPeer peer;
+    const bool is_connected = peer.connectTcp(port);
+    EXPECT_TRUE(is_connected);
+    const bool is_destroyed = kiotty_test::waitUntil([&]() { return reentry.connected.load() == 1; }, WAIT_MS);
+    EXPECT_TRUE(is_destroyed);
+    if (!is_connected || !is_destroyed)
+    {
+        server.close();
+    }
+    io.join();
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, server.await(WAIT_MS));
+
+    net::ServerResult next = context->createServer(serverConfiguration(kiotty_test::unusedPort()), nullptr);
+    ASSERT_TRUE(next);
+    EXPECT_EQ(&server, &next.value());
+    context->destroy(next.value());
 }
 
 #endif
