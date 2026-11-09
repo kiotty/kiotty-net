@@ -8,7 +8,7 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr size_t   DEFAULT_MAX_CLIENTS = 128;
+        constexpr size_t   DEFAULT_MAX_CLIENTS = 1024;
         constexpr size_t   DEFAULT_CAPACITY_BYTES = 4096;
         constexpr uint32_t DEFAULT_CONNECT_TIMEOUT_MILLISECONDS = 5000;
         constexpr uint32_t DEFAULT_MAX_TRIAL = 1;
@@ -63,7 +63,7 @@ namespace kiotty::net::implementation
                                             size_t max_clients)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const bool is_valid = isWithin(max_clients, MemoryLimits::CONNECTIONS_PER_SERVER);
+        const bool is_valid = isWithin(max_clients, CONNECTIONS_PER_SERVER_LIMIT);
         if (!is_valid) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         configuration.max_clients = max_clients;
         return KIOTTY_NET_CODE_SUCCESS;
@@ -208,8 +208,7 @@ namespace kiotty::net::implementation
             KiottyNetServerConfiguration configuration{};
             configuration.initialization_mark = INITIALIZATION_MARK;
             configuration.endpoint = endpoint;
-            configuration.max_clients =
-                smallerOf(DEFAULT_MAX_CLIENTS, MemoryLimits::CONNECTIONS_PER_SERVER);
+            configuration.max_clients = DEFAULT_MAX_CLIENTS;
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;

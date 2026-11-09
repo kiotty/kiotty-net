@@ -5,9 +5,12 @@
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
 
+#include <sys/epoll.h>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace kiotty::net::implementation
 {
@@ -47,6 +50,32 @@ namespace kiotty::net::implementation
         , payload()
         , done(0)
         , next(nullptr)
+    {
+    }
+
+    struct EventListenerState
+    {
+        EventListenerState();
+
+        int                       epoll;
+        int                       wake;
+        std::vector<epoll_event>  entries;
+        std::vector<IoCompletion> completions;
+        size_t                    capacity;
+        uint32_t                  generation;
+        IoEvent*                  ready_head;
+        IoEvent*                  ready_tail;
+    };
+
+    inline EventListenerState::EventListenerState()
+        : epoll(-1)
+        , wake(-1)
+        , entries()
+        , completions()
+        , capacity(0)
+        , generation(0)
+        , ready_head(nullptr)
+        , ready_tail(nullptr)
     {
     }
 }

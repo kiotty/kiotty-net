@@ -15,8 +15,12 @@
 #include <winsock2.h>
 #include <mswsock.h>
 
+#include <windows.h>
+
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace kiotty::net::implementation
 {
@@ -56,6 +60,26 @@ namespace kiotty::net::implementation
         , failure(SocketCode::SUCCESS)
         , request()
         , accept_ex(nullptr)
+    {
+    }
+
+    struct EventListenerState
+    {
+        EventListenerState();
+
+        HANDLE                        port;
+        std::vector<OVERLAPPED_ENTRY> entries;
+        std::vector<IoCompletion>     completions;
+        size_t                        capacity;
+        uint32_t                      generation;
+    };
+
+    inline EventListenerState::EventListenerState()
+        : port(nullptr)
+        , entries()
+        , completions()
+        , capacity(0)
+        , generation(0)
     {
     }
 }

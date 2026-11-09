@@ -7,13 +7,11 @@
 #include <windows.h>
 
 #include <climits>
-#include <new>
 
 namespace kiotty::net::implementation
 {
     using backend::attached;
     using backend::belongsTo;
-    using backend::stateOf;
 
     namespace
     {
@@ -26,8 +24,8 @@ namespace kiotty::net::implementation
     }
 
     EventListener::EventListener()
+        : _state()
     {
-        ::new (static_cast<void*>(_storage)) EventListenerState();
     }
 
     EventListener::~EventListener()
@@ -37,7 +35,7 @@ namespace kiotty::net::implementation
 
     SocketCode EventListener::open(size_t completion_capacity)
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         if (state.port != nullptr) { return SocketCode::INVALID_ARGUMENT; }
         if (!isUsableCapacity(completion_capacity)) { return SocketCode::INVALID_ARGUMENT; }
         const SocketCode allocated = allocate(state, completion_capacity);
@@ -60,22 +58,20 @@ namespace kiotty::net::implementation
 
     void EventListener::close()
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         if (state.port != nullptr)
         {
             ::CloseHandle(state.port);
         }
-        delete[] state.entries;
-        delete[] state.completions;
+        state.entries.clear();
+        state.completions.clear();
         state.port = nullptr;
-        state.entries = nullptr;
-        state.completions = nullptr;
         state.capacity = 0;
     }
 
     SocketCode EventListener::attach(IoEvent& event, SocketHandle socket, int32_t slot)
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         const SocketCode checked = checkAttach(state, event, socket);
         if (checked != SocketCode::SUCCESS) { return checked; }
         const SOCKET native = static_cast<SOCKET>(socket);
@@ -92,7 +88,7 @@ namespace kiotty::net::implementation
 
     void EventListener::detach(IoEvent& event)
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         if (!attached(event) || event.listener != &state)
         {
             return;
@@ -106,7 +102,7 @@ namespace kiotty::net::implementation
 
     SocketCode EventListener::wake()
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         if (state.port == nullptr)
         {
             return SocketCode::CLOSED;
@@ -128,10 +124,8 @@ namespace kiotty::net::implementation
 
         SocketCode allocate(EventListenerState& state, size_t completion_capacity)
         {
-            state.entries = new (std::nothrow) OVERLAPPED_ENTRY[completion_capacity];
-            state.completions = new (std::nothrow) IoCompletion[completion_capacity];
-            const bool is_allocated = state.entries != nullptr && state.completions != nullptr;
-            if (!is_allocated) { return SocketCode::OUT_OF_RESOURCE; }
+            state.entries.resize(completion_capacity);
+            state.completions.resize(completion_capacity);
             return SocketCode::SUCCESS;
         }
 

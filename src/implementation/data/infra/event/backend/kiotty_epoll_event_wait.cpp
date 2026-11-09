@@ -15,7 +15,6 @@ namespace kiotty::net::implementation
 {
     using backend::disarm;
     using backend::sendRest;
-    using backend::stateOf;
     using backend::watch;
 
     namespace
@@ -38,8 +37,8 @@ namespace kiotty::net::implementation
 
     Span<const IoCompletion> EventListener::wait(uint32_t timeout_milliseconds)
     {
-        EventListenerState& state = stateOf(_storage);
-        Span<const IoCompletion> completions = { state.completions, 0 };
+        EventListenerState& state = _state;
+        Span<const IoCompletion> completions = { state.completions.data(), 0 };
         if (state.epoll < 0)
         {
             return completions;
@@ -84,7 +83,7 @@ namespace kiotty::net::implementation
             int limit = forever ? -1 : remainingMilliseconds(deadline);
             for (;;)
             {
-                const int ready = ::epoll_wait(state.epoll, state.entries, capacity, limit);
+                const int ready = ::epoll_wait(state.epoll, state.entries.data(), capacity, limit);
                 if (ready < 0 && errno != EINTR) { return 0; }
                 const size_t count = collect(state, ready);
                 if (count > 0) { return count; }
@@ -99,7 +98,7 @@ namespace kiotty::net::implementation
             size_t count = 0;
             for (int i = 0; i < ready; ++i)
             {
-                void* const tag = state.entries[i].data.ptr;
+                void* const tag = state.entries[static_cast<size_t>(i)].data.ptr;
                 if (tag == nullptr)
                 {
                     clearWake(state);

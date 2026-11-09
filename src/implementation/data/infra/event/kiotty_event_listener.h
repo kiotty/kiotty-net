@@ -39,8 +39,6 @@ namespace kiotty::net::implementation
     class EventListener
     {
     public:
-        static const size_t   STORAGE_SIZE = 256;
-        static const size_t   STORAGE_ALIGN = 16;
         static const uint32_t WAIT_FOREVER = 0xFFFFFFFFu;
 
         EventListener();
@@ -58,6 +56,6 @@ namespace kiotty::net::implementation
         SocketCode               wake();
 
     private:
-        alignas(STORAGE_ALIGN) unsigned char _storage[STORAGE_SIZE];
+        EventListenerState _state;
     };
 }

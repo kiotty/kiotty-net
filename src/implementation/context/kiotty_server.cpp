@@ -13,6 +13,7 @@ namespace kiotty::net::implementation
     {
         ConnectionLimits limitsOf(const KiottyNetServerConfiguration& configuration);
         NoDelay          noDelayOf(const KiottyNetServerConfiguration& configuration);
+        size_t           listenerCapacityOf(size_t max_clients);
     }
 
     Server::Server()
@@ -38,7 +39,9 @@ namespace kiotty::net::implementation
         if (!isInitialized(server)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const KiottyNetCode secured = openProfile(configuration.tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
-        const SocketCode opened = _listener.open(LISTENER_CAPACITY);
+        const bool is_sized = _connections.resize(server.max_clients);
+        if (!is_sized) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const SocketCode opened = _listener.open(listenerCapacityOf(server.max_clients));
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         _host.initialize(limitsOf(server), server.max_clients);
         _configuration = server;
@@ -179,6 +182,11 @@ namespace kiotty::net::implementation
         NoDelay noDelayOf(const KiottyNetServerConfiguration& configuration)
         {
             return configuration.no_delay ? NoDelay::ENABLED : NoDelay::DISABLED;
+        }
+
+        size_t listenerCapacityOf(size_t max_clients)
+        {
+            return 2 * max_clients + 2;
         }
     }
 }

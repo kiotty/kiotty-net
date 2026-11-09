@@ -19,6 +19,10 @@ namespace kiotty::net::implementation
         IoAction action;
     };
 
+    struct EventListenerState
+    {
+    };
+
     inline IoEvent::IoEvent()
         : pending(false)
         , action(IoAction::none())

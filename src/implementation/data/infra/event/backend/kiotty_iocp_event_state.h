@@ -12,33 +12,14 @@
 
 namespace kiotty::net::implementation
 {
-    struct EventListenerState
-    {
-        HANDLE            port;
-        OVERLAPPED_ENTRY* entries;
-        IoCompletion*     completions;
-        size_t            capacity;
-        uint32_t          generation;
-    };
-
-    static_assert(sizeof(EventListenerState) <= EventListener::STORAGE_SIZE,
-        "EventListenerState outgrew EventListener::STORAGE_SIZE");
-    static_assert(alignof(EventListenerState) <= EventListener::STORAGE_ALIGN,
-        "EventListenerState needs stricter alignment than EventListener::STORAGE_ALIGN");
     static_assert(sizeof(sockaddr_storage) == AcceptBuffer::SOCKET_ADDRESS_BYTES,
         "AcceptEx needs sizeof(sockaddr_storage) plus padding per address");
 
     namespace backend
     {
-        EventListenerState& stateOf(unsigned char* storage);
-        bool                attached(const IoEvent& event);
-        bool                belongsTo(const IoEvent& event, const EventListenerState& state);
-        void                disarm(IoEvent& event);
-    }
-
-    inline EventListenerState& backend::stateOf(unsigned char* storage)
-    {
-        return *static_cast<EventListenerState*>(static_cast<void*>(storage));
+        bool       attached(const IoEvent& event);
+        bool       belongsTo(const IoEvent& event, const EventListenerState& state);
+        void       disarm(IoEvent& event);
     }
 
     inline bool backend::attached(const IoEvent& event)

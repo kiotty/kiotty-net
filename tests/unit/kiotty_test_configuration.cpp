@@ -12,7 +12,7 @@ namespace net = kiotty::net::implementation;
 namespace
 {
     const uint16_t PORT = 8080;
-    const size_t   DEFAULT_MAX_CLIENTS = 128;
+    const size_t   DEFAULT_MAX_CLIENTS = 1024;
 
     KiottyNetServerConfiguration tcpServer()
     {
@@ -41,7 +41,7 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
     EXPECT_EQ(KIOTTY_NET_TRANSPORT_TCP, configuration.endpoint.transport);
     EXPECT_STREQ("127.0.0.1", configuration.endpoint.host);
     EXPECT_EQ(PORT, configuration.endpoint.port);
-    size_t expected_max = DEFAULT_MAX_CLIENTS < net::MemoryLimits::CONNECTIONS_PER_SERVER ? DEFAULT_MAX_CLIENTS : net::MemoryLimits::CONNECTIONS_PER_SERVER;
+    size_t expected_max = DEFAULT_MAX_CLIENTS;
     EXPECT_EQ(expected_max, configuration.max_clients);
     EXPECT_EQ(4096u, configuration.receive_capacity);
     EXPECT_EQ(4096u, configuration.send_capacity);
@@ -60,20 +60,20 @@ TEST(Configuration, ClientDefaultsAreTheRequirementValues)
     EXPECT_STREQ("127.0.0.1", net::hostnameOf(configuration));
 }
 
-TEST(Configuration, MaxClientsRejectsZeroAndAboveTheCompiledLimit)
+TEST(Configuration, MaxClientsRejectsZeroAndAboveTheLimit)
 {
     KiottyNetServerConfiguration configuration = tcpServer();
     KiottyNetServerConfiguration before = configuration;
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerMaxClients(configuration, 0));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerMaxClients(configuration, net::MemoryLimits::CONNECTIONS_PER_SERVER + 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerMaxClients(configuration, net::CONNECTIONS_PER_SERVER_LIMIT + 1));
     EXPECT_TRUE(sameBytes(&before, &configuration, sizeof(configuration)));
 }
 
-TEST(Configuration, MaxClientsAcceptsTheCompiledLimit)
+TEST(Configuration, MaxClientsAcceptsTheLimit)
 {
     KiottyNetServerConfiguration configuration = tcpServer();
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(configuration, net::MemoryLimits::CONNECTIONS_PER_SERVER));
-    EXPECT_EQ(net::MemoryLimits::CONNECTIONS_PER_SERVER, configuration.max_clients);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(configuration, net::CONNECTIONS_PER_SERVER_LIMIT));
+    EXPECT_EQ(net::CONNECTIONS_PER_SERVER_LIMIT, configuration.max_clients);
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(configuration, 1));
     EXPECT_EQ(1u, configuration.max_clients);
 }

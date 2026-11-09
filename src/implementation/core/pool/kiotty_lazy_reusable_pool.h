@@ -8,17 +8,12 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace kiotty::net::implementation
 {
-    struct LazyReusablePoolConfiguration
-    {
-        size_t capacity;
-    };
-
     template <class T>
     class LazyReusablePool
     {
@@ -37,7 +32,6 @@ namespace kiotty::net::implementation
         LazyReusablePool(const LazyReusablePool&) = delete;
         LazyReusablePool& operator=(const LazyReusablePool&) = delete;
 
-        code_type     initialize(LazyReusablePoolConfiguration configuration);
         AcquireResult acquire(configuration_type configuration);
         void          release(T& object);
         void          clear();
@@ -50,11 +44,12 @@ namespace kiotty::net::implementation
     private:
         size_t findSlot(SlotState state) const;
         size_t indexOf(const T& object) const;
+        size_t grow();
 
-        std::vector<T>         _objects;
-        std::vector<SlotState> _states;
-        std::vector<int32_t>   _generations;
-        size_t                 _count;
+        std::vector<std::unique_ptr<T>> _objects;
+        std::vector<SlotState>          _states;
+        std::vector<int32_t>            _generations;
+        size_t                          _count;
     };
 
     template <class T>
@@ -73,30 +68,18 @@ namespace kiotty::net::implementation
     }
 
     template <class T>
-    typename LazyReusablePool<T>::code_type
-    LazyReusablePool<T>::initialize(LazyReusablePoolConfiguration configuration)
-    {
-        const code_type invalid = static_cast<code_type>(T::INVALID_ARGUMENT);
-        if (!_objects.empty()) { return invalid; }
-        const size_t slots = configuration.capacity;
-        if (slots == 0 || slots > REUSABLE_POOL_MAX_SLOTS) { return invalid; }
-        _objects = std::vector<T>(slots);
-        _states.assign(slots, SlotState::EMPTY);
-        _generations.assign(slots, 0);
-        return code_type{};
-    }
-
-    template <class T>
     typename LazyReusablePool<T>::AcquireResult
     LazyReusablePool<T>::acquire(configuration_type configuration)
     {
         const size_t none = _objects.size();
         size_t index = findSlot(SlotState::RETIRED);
         if (index == none) { index = findSlot(SlotState::EMPTY); }
-        if (index == none) { return AcquireResult::failure(static_cast<code_type>(T::TABLE_FULL)); }
+        if (index == none) { index = grow(); }
+        const code_type full = static_cast<code_type>(T::TABLE_FULL);
+        if (index >= _objects.size()) { return AcquireResult::failure(full); }
         _generations[index] = detail::nextGeneration(_generations[index]);
         const PoolHandle id{ _generations[index], static_cast<int32_t>(index) };
-        T& object = _objects[index];
+        T& object = *_objects[index];
         const code_type code = object.initialize(id, std::move(configuration));
         if (code != code_type{})
         {
@@ -126,7 +109,7 @@ namespace kiotty::net::implementation
     {
         for (size_t i = 0; i < _objects.size(); ++i)
         {
-            if (_states[i] == SlotState::ACTIVE) { _objects[i].reset(); }
+            if (_states[i] == SlotState::ACTIVE) { _objects[i]->reset(); }
             _states[i] = SlotState::EMPTY;
         }
         _count = 0;
@@ -150,7 +133,7 @@ namespace kiotty::net::implementation
     {
         for (size_t i = 0; i < _objects.size(); ++i)
         {
-            if (_states[i] == SlotState::ACTIVE) { visit(_objects[i]); }
+            if (_states[i] == SlotState::ACTIVE) { visit(*_objects[i]); }
         }
     }
 
@@ -167,12 +150,21 @@ namespace kiotty::net::implementation
     template <class T>
     size_t LazyReusablePool<T>::indexOf(const T& object) const
     {
-        const T* address = &object;
-        const T* begin = _objects.data();
-        const T* end = begin + _objects.size();
-        const std::less<const T*> before;
-        const bool is_inside = !before(address, begin) && before(address, end);
-        if (!is_inside) { return _objects.size(); }
-        return static_cast<size_t>(address - begin);
+        for (size_t i = 0; i < _objects.size(); ++i)
+        {
+            if (_objects[i].get() == &object) { return i; }
+        }
+        return _objects.size();
+    }
+
+    template <class T>
+    size_t LazyReusablePool<T>::grow()
+    {
+        const size_t index = _objects.size();
+        if (index >= REUSABLE_POOL_MAX_SLOTS) { return index; }
+        _objects.push_back(std::make_unique<T>());
+        _states.push_back(SlotState::EMPTY);
+        _generations.push_back(0);
+        return index;
     }
 }

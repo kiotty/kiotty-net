@@ -30,9 +30,10 @@
 
 ### 1.1 힙 할당은 초기화 함수 안에서만 한다.
 
-- 최대 개수(서버, 클라이언트, 연결, 세션)는 `Configuration` 으로 받아 초기화 때 전부 확보한다.
-- 초기화 이후 `new`, `malloc`, `std::vector` 크기 변경, `std::string` 생성은 없다.
-- `std::bad_alloc` 은 초기화 함수에서 잡아 `OUT_OF_MEMORY` 로 반환한다. 그 밖의 코드는 `-fno-exceptions` 로 빌드한다.
+- 초기화 함수는 `create*` (Owner 와 그 Owner 의 연결 풀, 완료 배열) 다. Owner 개수에는 상한이 없고, 연결 수 (`max_clients`) 는 Owner 의 `Configuration` 으로 받아 create 때 전부 확보한다. 버퍼 용량의 최대는 compile time 상수다.
+- 할당은 표준 라이브러리 (`std::vector`, `std::make_unique`) 로만 한다. raw `new` / `delete` / `malloc` 은 쓰지 않는다 (MISRA C++:2023 21.6.2).
+- 초기화 이후 (run 중) `new`, `malloc`, `std::vector` 크기 변경, `std::string` 생성은 없다.
+- 라이브러리는 `-fno-exceptions` 로 빌드하므로 할당 실패는 process 종료다 (`OUT_OF_MEMORY` 를 돌려주지 않는다. 사용자 결정 2026-11-09).
 - 초기화는 단일 스레드에서 한 번 호출한다. 재호출은 `ALREADY_INITIALIZED`.
 - 사용자 정의 `operator new/delete`, placement new, 사용자 정의 할당자는 쓰지 않는다.
 - 위 항목은 MISRA C++:2023 21.6.1 편차로 문서화한다.

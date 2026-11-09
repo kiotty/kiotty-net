@@ -1,6 +1,5 @@
 #include "context/kiotty_context.h"
 
-#include "data/datasource/kiotty_memory_limits.h"
 #include "data/infra/socket/kiotty_socket_startup.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "domain/entity/kiotty_socket_code.h"
@@ -146,26 +145,13 @@ namespace kiotty::net::implementation
         const SocketCode started = startSockets();
         if (started != SocketCode::SUCCESS) { return toNetCode(started); }
         const KiottyNetCode secured = initializeTlsLibrary();
-        const KiottyNetCode reserved = reservePools();
-        const KiottyNetCode failed = secured != KIOTTY_NET_CODE_SUCCESS ? secured : reserved;
-        if (failed != KIOTTY_NET_CODE_SUCCESS)
+        if (secured != KIOTTY_NET_CODE_SUCCESS)
         {
             stopSockets();
-            return failed;
+            return secured;
         }
         _phase = ContextPhase::OPEN;
         return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode Context::reservePools()
-    {
-        const bool is_reserved = _servers.capacity() > 0;
-        if (is_reserved) { return KIOTTY_NET_CODE_SUCCESS; }
-        const KiottyNetCode servers = _servers.initialize({ MemoryLimits::SERVERS });
-        if (servers != KIOTTY_NET_CODE_SUCCESS) { return servers; }
-        const KiottyNetCode streams = _stream_clients.initialize({ MemoryLimits::STREAM_CLIENTS });
-        if (streams != KIOTTY_NET_CODE_SUCCESS) { return streams; }
-        return _event_clients.initialize({ MemoryLimits::EVENT_CLIENTS });
     }
 
     void Context::finishRelease()

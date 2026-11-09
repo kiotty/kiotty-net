@@ -52,7 +52,6 @@ namespace kiotty::net::implementation
         ~Context();
 
         KiottyNetCode initialize();
-        KiottyNetCode reservePools();
         void          finishRelease();
 
         template <class Owner>

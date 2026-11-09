@@ -46,6 +46,8 @@ namespace kiotty::net::implementation
         ReusablePoolBase(Span<T> objects, Span<SlotState> states, Span<int32_t> generations);
         ~ReusablePoolBase();
 
+        void bind(Span<T> objects, Span<SlotState> states, Span<int32_t> generations);
+
     private:
         size_t indexOf(const T& object) const;
         size_t slotOf(PoolHandle id) const;
@@ -97,6 +99,17 @@ namespace kiotty::net::implementation
                 _objects[i].reset();
             }
         }
+    }
+
+    template <class T>
+    void ReusablePoolBase<T>::bind(Span<T> objects,
+                                   Span<SlotState> states,
+                                   Span<int32_t> generations)
+    {
+        assert(_count == 0);
+        _objects = objects;
+        _states = states;
+        _generations = generations;
     }
 
     template <class T>

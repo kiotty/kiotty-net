@@ -5,13 +5,13 @@
 namespace kiotty::net::implementation
 {
     EventListener::EventListener()
-        : _storage()
+        : _state()
     {
     }
 
     EventListener::~EventListener()
     {
-        (void)_storage;
+        (void)_state;
     }
 
     SocketCode EventListener::open(size_t completion_capacity)

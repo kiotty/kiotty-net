@@ -2,7 +2,6 @@
 
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_tls_configuration.h"
-#include "data/datasource/kiotty_memory_limits.h"
 #include "support/kiotty_test_peer.h"
 
 #include <gtest/gtest.h>
@@ -132,22 +131,38 @@ TEST_F(ContextTest, RetiredOwnerIsReusedByTheNextCreateOfTheSameType)
     EXPECT_EQ(first_stream_address, &second_stream.value());
 }
 
-TEST_F(ContextTest, CreateServerIsTableFullAfterMaxServers)
+TEST_F(ContextTest, CreateServerHasNoCountLimitAndReusesARetiredServer)
 {
+    const size_t servers_beyond_the_old_limit = 20;
     KiottyNetServerConfiguration server = serverConfiguration();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(server, 1));
     std::vector<net::Server*> servers;
-    for (size_t i = 0; i < net::MemoryLimits::SERVERS; ++i)
+    for (size_t i = 0; i < servers_beyond_the_old_limit; ++i)
     {
         net::ServerResult created = context->createServer(server, nullptr);
         ASSERT_TRUE(created);
         servers.push_back(&created.value());
     }
-    net::ServerResult refused = context->createServer(server, nullptr);
-    EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, refused.code);
-    context->destroy(*servers.back());
+    context->destroy(*servers[3]);
     net::ServerResult reused = context->createServer(server, nullptr);
     ASSERT_TRUE(reused);
-    EXPECT_EQ(servers.back(), &reused.value());
+    EXPECT_EQ(servers[3], &reused.value());
+}
+
+TEST_F(ContextTest, AServerReusedWithMoreClientsThanBeforeAcceptsTheNewCount)
+{
+    KiottyNetServerConfiguration small = serverConfiguration();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(small, 2));
+    net::ServerResult first = context->createServer(small, nullptr);
+    ASSERT_TRUE(first);
+    net::Server* address = &first.value();
+    context->destroy(first.value());
+
+    KiottyNetServerConfiguration large = serverConfiguration();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(large, 64));
+    net::ServerResult second = context->createServer(large, nullptr);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(address, &second.value());
 }
 
 TEST_F(ContextTest, CreateRejectsConfigurationsThatWereNotInitialized)

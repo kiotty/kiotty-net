@@ -5,8 +5,7 @@
 #include "context/kiotty_run_gate.h"
 #include "context/kiotty_run_lifetime.h"
 #include "core/pool/kiotty_pool_handle.h"
-#include "core/pool/kiotty_reusable_pool.h"
-#include "data/datasource/kiotty_memory_limits.h"
+#include "core/pool/kiotty_sized_reusable_pool.h"
 #include "data/infra/event/kiotty_event_listener.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "data/repository/connection/kiotty_acceptor.h"
@@ -72,23 +71,22 @@ namespace kiotty::net::implementation
                                             const KiottyNetConnectionAction& then) override;
 
     private:
-        static constexpr size_t LISTENER_CAPACITY = 2 * MemoryLimits::CONNECTIONS_PER_SERVER + 2;
-        static constexpr int    LISTEN_BACKLOG = 128;
+        static constexpr int LISTEN_BACKLOG = 128;
 
         KiottyNetCode    openProfile(const KiottyNetTlsServerConfiguration* tls);
         KiottyNetCode    listen();
         KiottyNetCode    leave(KiottyNetCode code);
         ConnectionAccess access();
 
-        ReusablePool<Connection, MemoryLimits::CONNECTIONS_PER_SERVER> _connections;
-        ConnectionHost                                                  _host;
-        NotificationDesk                                                _desk;
-        EventListener                                                   _listener;
-        Acceptor                                                        _acceptor;
-        TlsProfile                                                      _profile;
-        IoLoop                                                          _loop;
-        RunGate                                                         _gate;
-        std::atomic<bool>                                               _is_abandoned;
-        KiottyNetServerConfiguration                                    _configuration;
+        SizedReusablePool<Connection> _connections;
+        ConnectionHost                _host;
+        NotificationDesk              _desk;
+        EventListener                 _listener;
+        Acceptor                      _acceptor;
+        TlsProfile                    _profile;
+        IoLoop                        _loop;
+        RunGate                       _gate;
+        std::atomic<bool>             _is_abandoned;
+        KiottyNetServerConfiguration  _configuration;
     };
 }

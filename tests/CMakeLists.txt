@@ -32,10 +32,6 @@ function(kiotty_net_add_test_target target label)
     target_compile_features(${target} PRIVATE cxx_std_17)
     target_compile_definitions(${target} PRIVATE
         KIOTTY_NET_TESTING=1
-        KIOTTY_TEST_EXPECTED_SERVERS=${KIOTTY_NET_MAX_SERVERS}
-        KIOTTY_TEST_EXPECTED_STREAM_CLIENTS=${KIOTTY_NET_MAX_STREAM_CLIENTS}
-        KIOTTY_TEST_EXPECTED_EVENT_CLIENTS=${KIOTTY_NET_MAX_EVENT_CLIENTS}
-        KIOTTY_TEST_EXPECTED_CONNECTIONS_PER_SERVER=${KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER}
     )
     target_link_libraries(${target} PRIVATE kiotty_net kiotty_net_test_warnings GTest::gtest_main)
     gtest_discover_tests(${target}

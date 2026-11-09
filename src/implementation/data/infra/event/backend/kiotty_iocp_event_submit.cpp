@@ -14,7 +14,6 @@ namespace kiotty::net::implementation
     using backend::attached;
     using backend::belongsTo;
     using backend::disarm;
-    using backend::stateOf;
 
     namespace
     {
@@ -35,7 +34,7 @@ namespace kiotty::net::implementation
 
     SocketCode EventListener::submit(IoEvent& event, const IoAction& action, IoPayload payload)
     {
-        EventListenerState& state = stateOf(_storage);
+        EventListenerState& state = _state;
         const SocketCode admitted = admit(state, event, action, payload);
         if (admitted != SocketCode::SUCCESS) { return admitted; }
         arm(event, action);

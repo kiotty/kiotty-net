@@ -12,7 +12,6 @@
 namespace kiotty::net::implementation
 {
     using backend::disarm;
-    using backend::stateOf;
 
     namespace
     {
@@ -29,8 +28,8 @@ namespace kiotty::net::implementation
 
     Span<const IoCompletion> EventListener::wait(uint32_t timeout_milliseconds)
     {
-        EventListenerState& state = stateOf(_storage);
-        Span<const IoCompletion> completions = { state.completions, 0 };
+        EventListenerState& state = _state;
+        Span<const IoCompletion> completions = { state.completions.data(), 0 };
         if (state.port == nullptr)
         {
             return completions;
@@ -55,7 +54,8 @@ namespace kiotty::net::implementation
             for (;;)
             {
                 ULONG removed = 0;
-                const BOOL dequeued = ::GetQueuedCompletionStatusEx(state.port, state.entries,
+                OVERLAPPED_ENTRY* const entries = state.entries.data();
+                const BOOL dequeued = ::GetQueuedCompletionStatusEx(state.port, entries,
                     capacity, &removed, limit, FALSE);
                 if (dequeued != FALSE) { return removed; }
                 if (::GetLastError() != WAIT_TIMEOUT) { return 0; }
