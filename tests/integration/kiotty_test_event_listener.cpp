@@ -45,14 +45,14 @@ namespace
     const size_t   CAPACITY = 16;
     const int32_t  SLOT = 7;
 
-    KiottyNetEndpoint loopback(uint16_t port)
+    KiottyNetAddress loopback(uint16_t port)
     {
-        KiottyNetEndpoint endpoint;
-        std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
-        kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), "127.0.0.1");
-        endpoint.port = port;
-        return endpoint;
+        KiottyNetAddress address;
+        std::memset(&address, 0, sizeof(address));
+        address.transport = KIOTTY_NET_TRANSPORT_TCP;
+        kiotty_test::copyHost(address.host, sizeof(address.host), "127.0.0.1");
+        address.port = port;
+        return address;
     }
 
     IoPayload payloadOf(void* buffer, size_t length)

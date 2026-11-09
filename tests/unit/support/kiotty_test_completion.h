@@ -140,7 +140,7 @@ namespace kiotty_test
         kiotty::net::implementation::ConnectionHost         host;
         kiotty::net::implementation::NotificationDesk       desk;
         kiotty::net::implementation::TlsProfile             profile;
-        FakeOwner                                           owner;
+        FakeEndpoint                                           owner;
         Recorder                                            recorder;
         const KiottyNetConnectionHandler                    callbacks;
         kiotty::net::implementation::Handler                handler;

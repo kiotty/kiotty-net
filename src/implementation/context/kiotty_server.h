@@ -1,7 +1,7 @@
 #pragma once
 
 #include "context/kiotty_connection_access.h"
-#include "context/kiotty_owner.h"
+#include "context/kiotty_endpoint.h"
 #include "context/kiotty_run_gate.h"
 #include "context/kiotty_run_lifetime.h"
 #include "core/pool/kiotty_pool_handle.h"
@@ -27,7 +27,7 @@ namespace kiotty::net::implementation
         const KiottyNetTlsServerConfiguration* tls;
     };
 
-    class Server : public Owner
+    class Server : public Endpoint
     {
     public:
         using code_type = KiottyNetCode;

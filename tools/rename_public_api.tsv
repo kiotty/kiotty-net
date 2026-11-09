@@ -123,3 +123,6 @@ recv_capacity	receive_capacity
 client_auth	client_authentication
 clientAuth	clientAuthentication
 _config	_configuration
+# 7b. names (user decision 2026-11-09): the address type and the connection owner
+KiottyNetEndpoint	KiottyNetAddress
+KiottyNetConnectionOwner	KiottyNetEndpoint

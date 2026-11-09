@@ -54,8 +54,8 @@ namespace kiotty::net::implementation
         KiottyNetCode initialize();
         void          finishRelease();
 
-        template <class Owner>
-        void retire(LazyReusablePool<Owner>& pool, Owner& owner);
+        template <class T>
+        void retire(LazyReusablePool<T>& pool, T& owner);
 
         LazyReusablePool<Server>       _servers;
         LazyReusablePool<StreamClient> _stream_clients;

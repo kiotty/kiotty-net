@@ -41,14 +41,14 @@ namespace
     const char     TLS_APPLICATION_DATA = 0x17;
     const size_t   TLS_HEADER_BYTES = 5;
 
-    KiottyNetEndpoint loopback(uint16_t port)
+    KiottyNetAddress loopback(uint16_t port)
     {
-        KiottyNetEndpoint endpoint;
-        std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
-        kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), "127.0.0.1");
-        endpoint.port = port;
-        return endpoint;
+        KiottyNetAddress address;
+        std::memset(&address, 0, sizeof(address));
+        address.transport = KIOTTY_NET_TRANSPORT_TCP;
+        kiotty_test::copyHost(address.host, sizeof(address.host), "127.0.0.1");
+        address.port = port;
+        return address;
     }
 
     std::string pattern(size_t length)

@@ -151,7 +151,7 @@ namespace kiotty::net::implementation
     KiottyNetCode Server::listen()
     {
         const NoDelay no_delay = noDelayOf(_configuration);
-        const SocketCode opened = _acceptor.open(_configuration.endpoint, LISTEN_BACKLOG, no_delay);
+        const SocketCode opened = _acceptor.open(_configuration.address, LISTEN_BACKLOG, no_delay);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const SocketCode attached = _acceptor.attach(_listener);
         if (attached == SocketCode::SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }

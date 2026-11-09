@@ -100,7 +100,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/io_loop/kiotty_io_loop.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_step.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
-    src/implementation/context/kiotty_owner.cpp
+    src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
     src/implementation/context/kiotty_tls_configuration.cpp
     src/implementation/context/kiotty_action.cpp

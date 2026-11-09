@@ -69,11 +69,11 @@ namespace kiotty::net::implementation
         return ActiveSocketResult::success(std::move(socket));
     }
 
-    SocketCode ActiveSocket::connect(const KiottyNetEndpoint& endpoint,
+    SocketCode ActiveSocket::connect(const KiottyNetAddress& address,
         uint32_t timeout_milliseconds)
     {
         if (!valid()) { return SocketCode::INVALID_ARGUMENT; }
-        const AddressResult resolved = resolveAddress(_transport, endpoint, AddressRole::ACTIVE);
+        const AddressResult resolved = resolveAddress(_transport, address, AddressRole::ACTIVE);
         if (!resolved) { return resolved.code; }
         const int descriptor = descriptorOf(_handle);
         const SocketCode connected = startConnect(descriptor, resolved.value, timeout_milliseconds);

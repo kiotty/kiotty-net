@@ -67,7 +67,7 @@ namespace
         std::atomic<int>                        disconnected;
         std::atomic<int>                        errors;
         std::atomic<int>                        work_started;
-        std::atomic<KiottyNetConnectionOwner*>  stream_owner;
+        std::atomic<KiottyNetEndpoint*>  stream_owner;
         std::atomic<int64_t>                    stream_id;
     };
 
@@ -242,10 +242,10 @@ namespace
         std::thread                _thread;
     };
 
-    class OwnerTest : public ::testing::Test
+    class EndpointTest : public ::testing::Test
     {
     protected:
-        OwnerTest()
+        EndpointTest()
             : context(nullptr)
         {
         }
@@ -281,7 +281,7 @@ namespace
         return kiotty_test::waitUntil([&probe]() { return probe.work_started.load() > 0; }, WAIT_MS);
     }
 
-    std::string readFromStream(net::Owner& owner, int64_t id, size_t length)
+    std::string readFromStream(net::Endpoint& owner, int64_t id, size_t length)
     {
         std::string text;
         char buffer[64];
@@ -325,9 +325,9 @@ namespace
         net::StreamClient& client = created.value();
         ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.connect());
         ASSERT_TRUE(waitForStream(probe));
-        net::Owner& owner = *probe.stream_owner.load();
+        net::Endpoint& owner = *probe.stream_owner.load();
         const int64_t id = probe.stream_id.load();
-        EXPECT_EQ(static_cast<net::Owner*>(&server), &owner);
+        EXPECT_EQ(static_cast<net::Endpoint*>(&server), &owner);
 
         EXPECT_EQ(4, client.write(spanOf("ping"), WAIT_MS).bytes);
         EXPECT_EQ("ping", readFromStream(owner, id, 4));
@@ -345,7 +345,7 @@ namespace
     }
 }
 
-TEST_F(OwnerTest, ServerAwaitTimesOutBeforeRunThenReportsRunningAndClosed)
+TEST_F(EndpointTest, ServerAwaitTimesOutBeforeRunThenReportsRunningAndClosed)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -367,7 +367,7 @@ TEST_F(OwnerTest, ServerAwaitTimesOutBeforeRunThenReportsRunningAndClosed)
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, ServerRunReturnsTheBindFailure)
+TEST_F(EndpointTest, ServerRunReturnsTheBindFailure)
 {
     const uint16_t port = kiotty_test::unusedPort();
     LoopbackPeer holder;
@@ -381,7 +381,7 @@ TEST_F(OwnerTest, ServerRunReturnsTheBindFailure)
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, ServerAndEventClientLoopbackRoundTrip)
+TEST_F(EndpointTest, ServerAndEventClientLoopbackRoundTrip)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -403,7 +403,7 @@ TEST_F(OwnerTest, ServerAndEventClientLoopbackRoundTrip)
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return client_probe.read.load() > 0; }, WAIT_MS));
     EXPECT_EQ("ping", client_probe.received);
     KiottyNetConnectionHandle handle = client.connection();
-    EXPECT_EQ(static_cast<KiottyNetConnectionOwner*>(&client), handle.owner);
+    EXPECT_EQ(static_cast<KiottyNetEndpoint*>(&client), handle.owner);
     EXPECT_NE(0, handle.id);
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client.notify(client.connection().id, spanOf("note")));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return server_probe.read.load() > 1; }, WAIT_MS));
@@ -420,7 +420,7 @@ TEST_F(OwnerTest, ServerAndEventClientLoopbackRoundTrip)
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, EventClientRunReturnsTheConnectFailure)
+TEST_F(EndpointTest, EventClientRunReturnsTheConnectFailure)
 {
     const uint16_t port = kiotty_test::unusedPort();
     KiottyNetClientConfiguration configuration = clientConfiguration(port);
@@ -434,7 +434,7 @@ TEST_F(OwnerTest, EventClientRunReturnsTheConnectFailure)
     context->destroy(created.value());
 }
 
-TEST_F(OwnerTest, ServerCloseWaitsForWorkerCloseStream)
+TEST_F(EndpointTest, ServerCloseWaitsForWorkerCloseStream)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -450,14 +450,14 @@ TEST_F(OwnerTest, ServerCloseWaitsForWorkerCloseStream)
     std::this_thread::sleep_for(std::chrono::milliseconds(QUIET_MS));
     EXPECT_FALSE(running.returned());
 
-    net::Owner& owner = *probe.stream_owner.load();
+    net::Endpoint& owner = *probe.stream_owner.load();
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, owner.closeStream(probe.stream_id.load(), net::thenClose(KIOTTY_NET_CODE_SUCCESS)));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return running.returned(); }, WAIT_MS));
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, StreamClientSharesConnectionStreamCode)
+TEST_F(EndpointTest, StreamClientSharesConnectionStreamCode)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -465,7 +465,7 @@ TEST_F(OwnerTest, StreamClientSharesConnectionStreamCode)
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, StreamClientSharesConnectionStreamCodeOverTls)
+TEST_F(EndpointTest, StreamClientSharesConnectionStreamCodeOverTls)
 {
     if (!net::tlsSupported())
     {
@@ -479,7 +479,7 @@ TEST_F(OwnerTest, StreamClientSharesConnectionStreamCodeOverTls)
     context->destroy(server);
 }
 
-TEST_F(OwnerTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConnect)
+TEST_F(EndpointTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConnect)
 {
     KiottyNetClientConfiguration configuration = clientConfiguration(kiotty_test::unusedPort());
     net::StreamClientResult created = context->createStreamClient(configuration, nullptr);
@@ -488,7 +488,7 @@ TEST_F(OwnerTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConnect)
     char byte = 0;
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, client.read(net::Span<char>{ &byte, 1 }, 10).code);
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, client.write(spanOf("x"), 10).code);
-    net::Owner& owner = client;
+    net::Endpoint& owner = client;
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, owner.notify(1, spanOf("x")));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, owner.readStream(1, net::Span<char>{ &byte, 1 }, 10).code);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, owner.writeStream(1, spanOf("x"), 10).code);
@@ -497,7 +497,7 @@ TEST_F(OwnerTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConnect)
     context->destroy(client);
 }
 
-TEST_F(OwnerTest, OnDisconnectedIsCalledExactlyOncePerAcceptedConnectionOverAThousandConnections)
+TEST_F(EndpointTest, OnDisconnectedIsCalledExactlyOncePerAcceptedConnectionOverAThousandConnections)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -617,7 +617,7 @@ namespace
     const KiottyNetConnectionHandler REENTRY_CALLBACKS = { &onReentryConnected, &onReentryReady, &onReentryRead, &onWritten, &onTimeout, &onReentryWorkStarted, &onReentryDisconnected, &onError };
 }
 
-TEST_F(OwnerTest, RetiredServerStartsFreshOnTheNextCreate)
+TEST_F(EndpointTest, RetiredServerStartsFreshOnTheNextCreate)
 {
     // generations of a reused slot are checked in kiotty_test_lazy_reusable_pool
     const uint16_t first_port = kiotty_test::unusedPort();
@@ -651,7 +651,7 @@ TEST_F(OwnerTest, RetiredServerStartsFreshOnTheNextCreate)
     context->destroy(second);
 }
 
-TEST_F(OwnerTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
+TEST_F(EndpointTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -661,7 +661,7 @@ TEST_F(OwnerTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
     LoopbackPeer peer;
     ASSERT_TRUE(peer.connectTcp(port));
     ASSERT_TRUE(waitForStream(probe));
-    net::Owner& owner = *probe.stream_owner.load();
+    net::Endpoint& owner = *probe.stream_owner.load();
     const int64_t id = probe.stream_id.load();
 
     std::atomic<bool> destroyed(false);
@@ -686,7 +686,7 @@ TEST_F(OwnerTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return running.returned(); }, WAIT_MS));
 }
 
-TEST_F(OwnerTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
+TEST_F(EndpointTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);
@@ -703,7 +703,7 @@ TEST_F(OwnerTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
     EXPECT_EQ(1, reentry.created.load());
 }
 
-TEST_F(OwnerTest, ServerDestroyedFromItsOwnCallbackIsReclaimedByTheNextCreate)
+TEST_F(EndpointTest, ServerDestroyedFromItsOwnCallbackIsReclaimedByTheNextCreate)
 {
     const uint16_t port = kiotty_test::unusedPort();
     net::Server& server = createServer(port);

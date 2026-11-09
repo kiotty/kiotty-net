@@ -7,12 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 
-struct KiottyNetConnectionOwner
+struct KiottyNetEndpoint
 {
-    KiottyNetConnectionOwner() = default;
-    KiottyNetConnectionOwner(const KiottyNetConnectionOwner&) = delete;
-    KiottyNetConnectionOwner& operator=(const KiottyNetConnectionOwner&) = delete;
-    virtual ~KiottyNetConnectionOwner();
+    KiottyNetEndpoint() = default;
+    KiottyNetEndpoint(const KiottyNetEndpoint&) = delete;
+    KiottyNetEndpoint& operator=(const KiottyNetEndpoint&) = delete;
+    virtual ~KiottyNetEndpoint();
 
     using FileRange = kiotty::net::implementation::FileRange;
 
@@ -35,5 +35,5 @@ struct KiottyNetConnectionOwner
 
 namespace kiotty::net::implementation
 {
-    using Owner = ::KiottyNetConnectionOwner;
+    using Endpoint = ::KiottyNetEndpoint;
 }

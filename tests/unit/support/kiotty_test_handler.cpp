@@ -256,39 +256,39 @@ namespace kiotty_test
         of(app_context).record(entry);
     }
 
-    KiottyNetCode FakeOwner::notify(int64_t, KiottyNetSpan)
+    KiottyNetCode FakeEndpoint::notify(int64_t, KiottyNetSpan)
     {
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
-    KiottyNetConnectionInfo FakeOwner::info(int64_t) const
+    KiottyNetConnectionInfo FakeEndpoint::info(int64_t) const
     {
         return KiottyNetConnectionInfo();
     }
 
-    KiottyNetResult FakeOwner::readStream(int64_t, kiotty::net::implementation::Span<char>, uint32_t)
+    KiottyNetResult FakeEndpoint::readStream(int64_t, kiotty::net::implementation::Span<char>, uint32_t)
     {
         KiottyNetResult result = { 0, KIOTTY_NET_CODE_INVALID_ARGUMENT };
         return result;
     }
 
-    KiottyNetResult FakeOwner::writeStream(int64_t, KiottyNetSpan, uint32_t)
+    KiottyNetResult FakeEndpoint::writeStream(int64_t, KiottyNetSpan, uint32_t)
     {
         KiottyNetResult result = { 0, KIOTTY_NET_CODE_INVALID_ARGUMENT };
         return result;
     }
 
-    KiottyNetCode FakeOwner::writeStreamFile(int64_t, const char*, FileRange, uint32_t)
+    KiottyNetCode FakeEndpoint::writeStreamFile(int64_t, const char*, FileRange, uint32_t)
     {
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
-    bool FakeOwner::isStreamOpen(int64_t)
+    bool FakeEndpoint::isStreamOpen(int64_t)
     {
         return false;
     }
 
-    KiottyNetCode FakeOwner::closeStream(int64_t, const KiottyNetConnectionAction&)
+    KiottyNetCode FakeEndpoint::closeStream(int64_t, const KiottyNetConnectionAction&)
     {
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }

@@ -8,16 +8,16 @@ namespace kiotty::net::implementation
     {
         Handler(const KiottyNetConnectionHandler& user_callbacks,
                 KiottyNetAppContext application,
-                KiottyNetConnectionOwner& connection_owner);
+                KiottyNetEndpoint& connection_owner);
 
         const KiottyNetConnectionHandler& callbacks;
         KiottyNetAppContext               app_context;
-        KiottyNetConnectionOwner&         owner;
+        KiottyNetEndpoint&         owner;
     };
 
     inline Handler::Handler(const KiottyNetConnectionHandler& user_callbacks,
                             KiottyNetAppContext application,
-                            KiottyNetConnectionOwner& connection_owner)
+                            KiottyNetEndpoint& connection_owner)
         : callbacks(user_callbacks)
         , app_context(application)
         , owner(connection_owner)

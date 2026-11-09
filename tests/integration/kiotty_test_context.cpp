@@ -101,7 +101,7 @@ TEST_F(ContextTest, ReleaseOnceEndsBoth)
     reopened.value().destroy(created.value());
 }
 
-TEST_F(ContextTest, RetiredOwnerIsReusedByTheNextCreateOfTheSameType)
+TEST_F(ContextTest, RetiredEndpointIsReusedByTheNextCreateOfTheSameType)
 {
     KiottyNetServerConfiguration server = serverConfiguration();
     KiottyNetClientConfiguration client = clientConfiguration();

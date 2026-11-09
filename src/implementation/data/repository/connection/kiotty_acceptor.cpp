@@ -23,11 +23,11 @@ namespace kiotty::net::implementation
         close();
     }
 
-    SocketCode Acceptor::open(const KiottyNetEndpoint& endpoint, int backlog, NoDelay no_delay)
+    SocketCode Acceptor::open(const KiottyNetAddress& address, int backlog, NoDelay no_delay)
     {
         close();
         _no_delay = no_delay;
-        return _socket.open(endpoint, backlog);
+        return _socket.open(address, backlog);
     }
 
     void Acceptor::close()

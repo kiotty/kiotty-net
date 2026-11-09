@@ -18,7 +18,7 @@ namespace kiotty::net::implementation
         PassiveSocket(const PassiveSocket&) = delete;
         PassiveSocket& operator=(const PassiveSocket&) = delete;
 
-        SocketCode         open(const KiottyNetEndpoint& endpoint, int backlog);
+        SocketCode         open(const KiottyNetAddress& address, int backlog);
         ActiveSocketResult prepare();
         ActiveSocketResult accept();
         ActiveSocketResult accept(ActiveSocket&& prepared);

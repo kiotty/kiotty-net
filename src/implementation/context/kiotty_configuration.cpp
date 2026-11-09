@@ -23,12 +23,12 @@ namespace kiotty::net::implementation
 
         static_assert(sizeof(Capacities) == 3 * sizeof(size_t), "Capacities: unexpected padding");
 
-        KiottyNetEndpoint            endpointOf(KiottyNetTransport transport,
+        KiottyNetAddress            addressOf(KiottyNetTransport transport,
                                                 const char* name,
                                                 size_t length,
                                                 uint16_t port);
-        KiottyNetServerConfiguration defaultServer(const KiottyNetEndpoint& endpoint);
-        KiottyNetClientConfiguration defaultClient(const KiottyNetEndpoint& endpoint);
+        KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address);
+        KiottyNetClientConfiguration defaultClient(const KiottyNetAddress& address);
         Capacities                   defaultCapacities();
         bool                         areCapacitiesValid(Capacities capacities);
         bool                         isWithin(size_t value, size_t maximum);
@@ -42,9 +42,9 @@ namespace kiotty::net::implementation
         const TextLength measured = measureText(host, KIOTTY_NET_MAX_HOST_LENGTH);
         if (!measured) { return measured.code; }
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetEndpoint endpoint =
-            endpointOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
-        configuration = defaultServer(endpoint);
+        const KiottyNetAddress address =
+            addressOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
+        configuration = defaultServer(address);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -53,9 +53,9 @@ namespace kiotty::net::implementation
     {
         const TextLength measured = measureText(pipe_name, KIOTTY_NET_MAX_HOST_LENGTH);
         if (!measured) { return measured.code; }
-        const KiottyNetEndpoint endpoint =
-            endpointOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
-        configuration = defaultServer(endpoint);
+        const KiottyNetAddress address =
+            addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
+        configuration = defaultServer(address);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -98,9 +98,9 @@ namespace kiotty::net::implementation
         const TextLength measured = measureText(host, KIOTTY_NET_MAX_HOST_LENGTH);
         if (!measured) { return measured.code; }
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetEndpoint endpoint =
-            endpointOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
-        configuration = defaultClient(endpoint);
+        const KiottyNetAddress address =
+            addressOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
+        configuration = defaultClient(address);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -109,9 +109,9 @@ namespace kiotty::net::implementation
     {
         const TextLength measured = measureText(pipe_name, KIOTTY_NET_MAX_HOST_LENGTH);
         if (!measured) { return measured.code; }
-        const KiottyNetEndpoint endpoint =
-            endpointOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
-        configuration = defaultClient(endpoint);
+        const KiottyNetAddress address =
+            addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
+        configuration = defaultClient(address);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -168,8 +168,8 @@ namespace kiotty::net::implementation
 
     const char* hostnameOf(const KiottyNetClientConfiguration& configuration)
     {
-        const bool is_tcp = configuration.endpoint.transport == KIOTTY_NET_TRANSPORT_TCP;
-        return is_tcp ? configuration.endpoint.host : "";
+        const bool is_tcp = configuration.address.transport == KIOTTY_NET_TRANSPORT_TCP;
+        return is_tcp ? configuration.address.host : "";
     }
 
     TextLength measureText(const char* text, size_t capacity)
@@ -190,24 +190,24 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        KiottyNetEndpoint endpointOf(KiottyNetTransport transport,
+        KiottyNetAddress addressOf(KiottyNetTransport transport,
                                      const char* name,
                                      size_t length,
                                      uint16_t port)
         {
-            KiottyNetEndpoint endpoint{};
-            endpoint.transport = transport;
-            writeText(Span<char>{ endpoint.host, sizeof(endpoint.host) }, name, length);
-            endpoint.port = port;
-            return endpoint;
+            KiottyNetAddress address{};
+            address.transport = transport;
+            writeText(Span<char>{ address.host, sizeof(address.host) }, name, length);
+            address.port = port;
+            return address;
         }
 
-        KiottyNetServerConfiguration defaultServer(const KiottyNetEndpoint& endpoint)
+        KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address)
         {
             const Capacities capacities = defaultCapacities();
             KiottyNetServerConfiguration configuration{};
             configuration.initialization_mark = INITIALIZATION_MARK;
-            configuration.endpoint = endpoint;
+            configuration.address = address;
             configuration.max_clients = DEFAULT_MAX_CLIENTS;
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
@@ -216,12 +216,12 @@ namespace kiotty::net::implementation
             return configuration;
         }
 
-        KiottyNetClientConfiguration defaultClient(const KiottyNetEndpoint& endpoint)
+        KiottyNetClientConfiguration defaultClient(const KiottyNetAddress& address)
         {
             const Capacities capacities = defaultCapacities();
             KiottyNetClientConfiguration configuration{};
             configuration.initialization_mark = INITIALIZATION_MARK;
-            configuration.endpoint = endpoint;
+            configuration.address = address;
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;

@@ -24,9 +24,9 @@ namespace
     {
         KiottyNetClientConfiguration config;
         std::memset(&config, 0, sizeof(config));
-        config.endpoint.transport = transport;
-        kiotty_test::copyHost(config.endpoint.host, sizeof(config.endpoint.host), host);
-        config.endpoint.port = port;
+        config.address.transport = transport;
+        kiotty_test::copyHost(config.address.host, sizeof(config.address.host), host);
+        config.address.port = port;
         config.connect_timeout_milliseconds = 5000;
         config.max_trial = max_trial;
         config.trial_interval_milliseconds = interval_milliseconds;

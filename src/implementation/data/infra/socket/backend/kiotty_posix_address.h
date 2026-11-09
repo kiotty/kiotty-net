@@ -32,7 +32,7 @@ namespace kiotty::net::implementation
     int                     sendFlags();
     SocketCode              prepareDescriptor(int descriptor);
     AddressResult           resolveAddress(KiottyNetTransport transport,
-                                const KiottyNetEndpoint& endpoint, AddressRole role);
+                                const KiottyNetAddress& address, AddressRole role);
     KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage);
     SocketCode              waitFor(int descriptor, short events, uint32_t timeout_milliseconds);
 }

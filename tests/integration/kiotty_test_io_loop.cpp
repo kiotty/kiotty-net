@@ -248,14 +248,14 @@ namespace
         return table;
     }
 
-    KiottyNetEndpoint loopbackEndpoint(uint16_t port)
+    KiottyNetAddress loopbackAddress(uint16_t port)
     {
-        KiottyNetEndpoint endpoint;
-        std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
-        kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), LOOPBACK_HOST);
-        endpoint.port = port;
-        return endpoint;
+        KiottyNetAddress address;
+        std::memset(&address, 0, sizeof(address));
+        address.transport = KIOTTY_NET_TRANSPORT_TCP;
+        kiotty_test::copyHost(address.host, sizeof(address.host), LOOPBACK_HOST);
+        address.port = port;
+        return address;
     }
 
     class Watchdog
@@ -341,7 +341,7 @@ namespace
         net::EventListener                  listener;
         net::Acceptor                       acceptor;
         net::TlsProfile                     profile;
-        kiotty_test::FakeOwner              owner;
+        kiotty_test::FakeEndpoint              owner;
         Probe                               probe;
         const KiottyNetConnectionHandler    callbacks;
         net::Handler                        handler;
@@ -372,7 +372,7 @@ namespace
         bool ready = listener.open(CAPACITY) == net::SocketCode::SUCCESS;
         if (listen)
         {
-            ready = ready && acceptor.open(loopbackEndpoint(0), BACKLOG, net::NoDelay::ENABLED) == net::SocketCode::SUCCESS;
+            ready = ready && acceptor.open(loopbackAddress(0), BACKLOG, net::NoDelay::ENABLED) == net::SocketCode::SUCCESS;
             ready = ready && acceptor.attach(listener) == net::SocketCode::SUCCESS;
         }
         _opened = ready;
@@ -638,7 +638,7 @@ TEST(IoLoop, NotifyDuringUserWriteArrivesAsTwoWholeMessagesInOrder)
     EXPECT_TRUE(rig.host.empty());
 }
 
-TEST(IoLoop, OwnerCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream)
+TEST(IoLoop, EndpointCloseDuringWorkShutsDownSocketAndReleasesAfterCloseStream)
 {
     Rig rig(true);
     ASSERT_TRUE(rig.opened());
@@ -717,7 +717,7 @@ TEST(IoLoop, AdmittedConnectionStartsWorkBeforeTheFirstWait)
     ASSERT_TRUE(server.listenTcp(0));
     net::ActiveSocketResult opened = net::ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
     ASSERT_TRUE(opened);
-    ASSERT_EQ(opened.value.connect(loopbackEndpoint(server.port()), WAIT_MS), net::SocketCode::SUCCESS);
+    ASSERT_EQ(opened.value.connect(loopbackAddress(server.port()), WAIT_MS), net::SocketCode::SUCCESS);
     rig.loop.admit(rig.parts(), std::move(opened.value), LOOPBACK_HOST);
 
     std::thread worker([&]() {

@@ -29,7 +29,7 @@ namespace kiotty::net::implementation
 
         static ActiveSocketResult open(KiottyNetTransport transport);
 
-        SocketCode connect(const KiottyNetEndpoint& endpoint, uint32_t timeout_milliseconds);
+        SocketCode connect(const KiottyNetAddress& address, uint32_t timeout_milliseconds);
         void       close();
 
         bool                    valid() const;

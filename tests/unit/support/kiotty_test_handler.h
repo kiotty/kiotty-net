@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_TEST_HANDLER_H)
 #define KIOTTY_TEST_HANDLER_H
 
-#include "context/kiotty_owner.h"
+#include "context/kiotty_endpoint.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>
@@ -73,7 +73,7 @@ namespace kiotty_test
         std::deque<std::string>               _buffers;
     };
 
-    class FakeOwner : public kiotty::net::implementation::Owner
+    class FakeEndpoint : public kiotty::net::implementation::Endpoint
     {
     public:
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;

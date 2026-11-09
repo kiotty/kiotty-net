@@ -16,7 +16,7 @@ namespace kiotty::net::implementation
     namespace
     {
         void       releasePath(KiottyNetTransport transport, int descriptor,
-                       const KiottyNetEndpoint& endpoint);
+                       const KiottyNetAddress& address);
         SocketCode bindAndListen(int descriptor, const Address& address, int backlog);
         uint16_t   boundPort(int descriptor);
         int        acceptOnce(int listening, sockaddr_storage& peer);
@@ -34,23 +34,23 @@ namespace kiotty::net::implementation
         close();
     }
 
-    SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
+    SocketCode PassiveSocket::open(const KiottyNetAddress& address, int backlog)
     {
         close();
         const AddressResult resolved =
-            resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
+            resolveAddress(address.transport, address, AddressRole::PASSIVE);
         if (!resolved) { return resolved.code; }
-        const int descriptor = ::socket(familyOf(endpoint.transport), SOCK_STREAM, 0);
+        const int descriptor = ::socket(familyOf(address.transport), SOCK_STREAM, 0);
         if (descriptor < 0) { return lastSocketCode(); }
         _handle = descriptor;
-        _transport = endpoint.transport;
+        _transport = address.transport;
         const SocketCode prepared = prepareDescriptor(descriptor);
         if (prepared != SocketCode::SUCCESS)
         {
             close();
             return prepared;
         }
-        releasePath(_transport, descriptor, endpoint);
+        releasePath(_transport, descriptor, address);
         const SocketCode listening = bindAndListen(descriptor, resolved.value, backlog);
         if (listening != SocketCode::SUCCESS)
         {
@@ -115,11 +115,11 @@ namespace kiotty::net::implementation
     namespace
     {
         void releasePath(KiottyNetTransport transport, int descriptor,
-            const KiottyNetEndpoint& endpoint)
+            const KiottyNetAddress& address)
         {
             if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
-                ::unlink(endpoint.host);
+                ::unlink(address.host);
                 return;
             }
             const int reuse = 1;

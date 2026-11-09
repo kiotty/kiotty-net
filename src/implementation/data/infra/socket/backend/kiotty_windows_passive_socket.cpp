@@ -15,7 +15,7 @@ namespace kiotty::net::implementation
     namespace
     {
         void       releasePath(KiottyNetTransport transport, SOCKET socket,
-                       const KiottyNetEndpoint& endpoint);
+                       const KiottyNetAddress& address);
         SocketCode bindAndListen(SOCKET socket, const Address& address, int backlog);
         uint16_t   boundPort(SOCKET socket);
         using PeerResult = Result<KiottyNetConnectionInfo, SocketCode>;
@@ -36,23 +36,23 @@ namespace kiotty::net::implementation
         close();
     }
 
-    SocketCode PassiveSocket::open(const KiottyNetEndpoint& endpoint, int backlog)
+    SocketCode PassiveSocket::open(const KiottyNetAddress& address, int backlog)
     {
         close();
         const AddressResult resolved =
-            resolveAddress(endpoint.transport, endpoint, AddressRole::PASSIVE);
+            resolveAddress(address.transport, address, AddressRole::PASSIVE);
         if (!resolved) { return resolved.code; }
-        const SOCKET created = createSocket(endpoint.transport);
+        const SOCKET created = createSocket(address.transport);
         if (created == INVALID_SOCKET) { return lastSocketCode(); }
         _handle = static_cast<SocketHandle>(created);
-        _transport = endpoint.transport;
+        _transport = address.transport;
         const SocketCode prepared = prepareSocket(created);
         if (prepared != SocketCode::SUCCESS)
         {
             close();
             return prepared;
         }
-        releasePath(_transport, created, endpoint);
+        releasePath(_transport, created, address);
         const SocketCode listening = bindAndListen(created, resolved.value, backlog);
         if (listening != SocketCode::SUCCESS)
         {
@@ -127,11 +127,11 @@ namespace kiotty::net::implementation
     namespace
     {
         void releasePath(KiottyNetTransport transport, SOCKET socket,
-            const KiottyNetEndpoint& endpoint)
+            const KiottyNetAddress& address)
         {
             if (transport == KIOTTY_NET_TRANSPORT_PIPE)
             {
-                ::DeleteFileA(endpoint.host);
+                ::DeleteFileA(address.host);
                 return;
             }
             const BOOL exclusive = TRUE;

@@ -2,7 +2,7 @@
 
 #include "context/kiotty_client_configuration.h"
 #include "context/kiotty_connection_access.h"
-#include "context/kiotty_owner.h"
+#include "context/kiotty_endpoint.h"
 #include "context/kiotty_run_gate.h"
 #include "context/kiotty_run_lifetime.h"
 #include "core/pool/kiotty_pool_handle.h"
@@ -22,7 +22,7 @@
 
 namespace kiotty::net::implementation
 {
-    class EventClient : public Owner
+    class EventClient : public Endpoint
     {
     public:
         using code_type = KiottyNetCode;

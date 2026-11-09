@@ -177,17 +177,17 @@ typedef enum KiottyNetTransport
     KIOTTY_NET_TRANSPORT_PIPE
 } KiottyNetTransport;
 
-typedef struct KiottyNetEndpoint
+typedef struct KiottyNetAddress
 {
     KiottyNetTransport transport;
     char               host[KIOTTY_NET_MAX_HOST_LENGTH];
     uint16_t           port;
-} KiottyNetEndpoint;
+} KiottyNetAddress;
 
 typedef struct KiottyNetServerConfiguration
 {
     uint32_t          initialization_mark;
-    KiottyNetEndpoint endpoint;
+    KiottyNetAddress address;
     size_t            max_clients;
     size_t            receive_capacity;
     size_t            send_capacity;
@@ -198,7 +198,7 @@ typedef struct KiottyNetServerConfiguration
 typedef struct KiottyNetClientConfiguration
 {
     uint32_t          initialization_mark;
-    KiottyNetEndpoint endpoint;
+    KiottyNetAddress address;
     size_t            receive_capacity;
     size_t            send_capacity;
     size_t            push_capacity;
@@ -250,17 +250,17 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientNoDelay(
     KiottyNetClientConfiguration* config,
     bool no_delay);
 
-typedef struct KiottyNetConnectionOwner KiottyNetConnectionOwner;
+typedef struct KiottyNetEndpoint KiottyNetEndpoint;
 
 typedef struct KiottyNetConnectionHandle
 {
-    KiottyNetConnectionOwner* owner;
+    KiottyNetEndpoint* owner;
     int64_t                   id;
 } KiottyNetConnectionHandle;
 
 typedef struct KiottyNetConnectionStream
 {
-    KiottyNetConnectionOwner* owner;
+    KiottyNetEndpoint* owner;
     int64_t                   id;
 } KiottyNetConnectionStream;
 
@@ -1147,7 +1147,7 @@ inline bool KiottyNet_Connection::operator!=(const KiottyNet_Connection& other) 
 
 inline bool KiottyNet_Connection::operator<(const KiottyNet_Connection& other) const
 {
-    std::less<const KiottyNetConnectionOwner*> before;
+    std::less<const KiottyNetEndpoint*> before;
     if (before(_handle.owner, other._handle.owner))
     {
         return true;

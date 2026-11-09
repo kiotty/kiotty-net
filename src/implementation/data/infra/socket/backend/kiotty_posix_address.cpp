@@ -21,7 +21,7 @@ namespace kiotty::net::implementation
     namespace
     {
         AddressResult unixAddressOf(const char* path);
-        AddressResult inetAddressOf(const KiottyNetEndpoint& endpoint, AddressRole role);
+        AddressResult inetAddressOf(const KiottyNetAddress& address, AddressRole role);
         int           waitMillisecondsOf(uint64_t deadline, uint32_t timeout_milliseconds);
         SocketCode    disableSigpipe(int descriptor);
     }
@@ -57,11 +57,11 @@ namespace kiotty::net::implementation
         return disableSigpipe(descriptor);
     }
 
-    AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetEndpoint& endpoint,
+    AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetAddress& address,
         AddressRole role)
     {
-        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(endpoint.host); }
-        return inetAddressOf(endpoint, role);
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(address.host); }
+        return inetAddressOf(address, role);
     }
 
     KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage)
@@ -104,8 +104,8 @@ namespace kiotty::net::implementation
     {
         AddressResult unixAddressOf(const char* path)
         {
-            Address address{};
-            sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&address.storage);
+            Address native{};
+            sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&native.storage);
             const size_t length = strnlen(path, sizeof(unix_address->sun_path));
             const bool is_fitting = length > 0 && length < sizeof(unix_address->sun_path);
             if (!is_fitting) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
@@ -113,33 +113,33 @@ namespace kiotty::net::implementation
             const Span<char> target{ unix_address->sun_path, sizeof(unix_address->sun_path) };
             const Span<const char> source{ path, length };
             static_cast<void>(target.copyFrom(source));
-            address.length = static_cast<socklen_t>(sizeof(sockaddr_un));
-            return AddressResult::success(address);
+            native.length = static_cast<socklen_t>(sizeof(sockaddr_un));
+            return AddressResult::success(native);
         }
 
-        AddressResult inetAddressOf(const KiottyNetEndpoint& endpoint, AddressRole role)
+        AddressResult inetAddressOf(const KiottyNetAddress& address, AddressRole role)
         {
             addrinfo hints{};
             hints.ai_family = AF_INET;
             hints.ai_socktype = SOCK_STREAM;
             hints.ai_flags = role == AddressRole::PASSIVE ? AI_PASSIVE : 0;
-            const char* host = endpoint.host[0] == '\0' ? nullptr : endpoint.host;
+            const char* host = address.host[0] == '\0' ? nullptr : address.host;
             addrinfo* found = nullptr;
             const int resolved = ::getaddrinfo(host, nullptr, &hints, &found);
             const bool is_found = resolved == 0 && found != nullptr;
             if (!is_found) { return AddressResult::failure(SocketCode::UNREACHABLE); }
-            Address address{};
-            char* const storage = reinterpret_cast<char*>(&address.storage);
+            Address native{};
+            char* const storage = reinterpret_cast<char*>(&native.storage);
             const char* const found_address = reinterpret_cast<const char*>(found->ai_addr);
-            const Span<char> target{ storage, sizeof(address.storage) };
+            const Span<char> target{ storage, sizeof(native.storage) };
             const Span<const char> source{ found_address, found->ai_addrlen };
             const bool copied = target.copyFrom(source);
-            address.length = static_cast<socklen_t>(found->ai_addrlen);
+            native.length = static_cast<socklen_t>(found->ai_addrlen);
             ::freeaddrinfo(found);
             if (!copied) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
-            sockaddr_in* inet_address = reinterpret_cast<sockaddr_in*>(&address.storage);
-            inet_address->sin_port = htons(endpoint.port);
-            return AddressResult::success(address);
+            sockaddr_in* inet_address = reinterpret_cast<sockaddr_in*>(&native.storage);
+            inet_address->sin_port = htons(address.port);
+            return AddressResult::success(native);
         }
 
         int waitMillisecondsOf(uint64_t deadline, uint32_t timeout_milliseconds)

@@ -21,14 +21,14 @@ using kiotty_test::LoopbackPeer;
 
 namespace
 {
-    KiottyNetEndpoint tcpEndpoint(const std::string& host, uint16_t port)
+    KiottyNetAddress tcpAddress(const std::string& host, uint16_t port)
     {
-        KiottyNetEndpoint endpoint;
-        std::memset(&endpoint, 0, sizeof(endpoint));
-        endpoint.transport = KIOTTY_NET_TRANSPORT_TCP;
-        kiotty_test::copyHost(endpoint.host, sizeof(endpoint.host), host);
-        endpoint.port = port;
-        return endpoint;
+        KiottyNetAddress address;
+        std::memset(&address, 0, sizeof(address));
+        address.transport = KIOTTY_NET_TRANSPORT_TCP;
+        kiotty_test::copyHost(address.host, sizeof(address.host), host);
+        address.port = port;
+        return address;
     }
 
     ActiveSocket openTcp()
@@ -42,8 +42,8 @@ namespace
     {
         EXPECT_TRUE(peer.listenTcp(0));
         ActiveSocket socket = openTcp();
-        KiottyNetEndpoint endpoint = tcpEndpoint("127.0.0.1", peer.port());
-        EXPECT_EQ(socket.connect(endpoint, 2000), SocketCode::SUCCESS);
+        KiottyNetAddress address = tcpAddress("127.0.0.1", peer.port());
+        EXPECT_EQ(socket.connect(address, 2000), SocketCode::SUCCESS);
         EXPECT_TRUE(peer.accept(2000));
         return socket;
     }
@@ -80,8 +80,8 @@ TEST(ActiveSocket, ConnectToListeningLoopbackSucceeds)
     LoopbackPeer peer;
     ASSERT_TRUE(peer.listenTcp(0));
     ActiveSocket socket = openTcp();
-    KiottyNetEndpoint endpoint = tcpEndpoint("127.0.0.1", peer.port());
-    EXPECT_EQ(socket.connect(endpoint, 2000), SocketCode::SUCCESS);
+    KiottyNetAddress address = tcpAddress("127.0.0.1", peer.port());
+    EXPECT_EQ(socket.connect(address, 2000), SocketCode::SUCCESS);
     KiottyNetConnectionInfo info = socket.peer();
     EXPECT_STREQ(info.hostname, "127.0.0.1");
     EXPECT_EQ(info.port, static_cast<int32_t>(peer.port()));
@@ -91,18 +91,18 @@ TEST(ActiveSocket, ConnectToClosedPortReturnsRefusedBeforeTimeout)
 {
     uint16_t port = kiotty_test::unusedPort();
     ActiveSocket socket = openTcp();
-    KiottyNetEndpoint endpoint = tcpEndpoint("127.0.0.1", port);
+    KiottyNetAddress address = tcpAddress("127.0.0.1", port);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    EXPECT_EQ(socket.connect(endpoint, 5000), SocketCode::REFUSED);
+    EXPECT_EQ(socket.connect(address, 5000), SocketCode::REFUSED);
     EXPECT_LT(kiotty_test::elapsedMilliseconds(started), 5000u);
 }
 
 TEST(ActiveSocket, ConnectTimeoutExpiresOnUnroutableAddress)
 {
     ActiveSocket socket = openTcp();
-    KiottyNetEndpoint endpoint = tcpEndpoint("10.255.255.1", 9);
+    KiottyNetAddress address = tcpAddress("10.255.255.1", 9);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    SocketCode code = socket.connect(endpoint, 200);
+    SocketCode code = socket.connect(address, 200);
     uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
     if (code != SocketCode::TIMEOUT)
     {

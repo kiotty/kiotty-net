@@ -38,9 +38,9 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
 {
     KiottyNetServerConfiguration configuration = tcpServer();
     EXPECT_TRUE(net::isInitialized(configuration));
-    EXPECT_EQ(KIOTTY_NET_TRANSPORT_TCP, configuration.endpoint.transport);
-    EXPECT_STREQ("127.0.0.1", configuration.endpoint.host);
-    EXPECT_EQ(PORT, configuration.endpoint.port);
+    EXPECT_EQ(KIOTTY_NET_TRANSPORT_TCP, configuration.address.transport);
+    EXPECT_STREQ("127.0.0.1", configuration.address.host);
+    EXPECT_EQ(PORT, configuration.address.port);
     size_t expected_max = DEFAULT_MAX_CLIENTS;
     EXPECT_EQ(expected_max, configuration.max_clients);
     EXPECT_EQ(4096u, configuration.receive_capacity);
@@ -128,14 +128,14 @@ TEST(Configuration, InitializeRejectsMissingHostZeroPortAndTooLongHost)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::initializeTcpServerConfiguration(configuration, too_long.c_str(), PORT));
     EXPECT_FALSE(net::isInitialized(configuration));
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpServerConfiguration(configuration, longest.c_str(), PORT));
-    EXPECT_EQ(longest, std::string(configuration.endpoint.host));
+    EXPECT_EQ(longest, std::string(configuration.address.host));
 }
 
 TEST(Configuration, PipeClientHasNoHostnameForVerification)
 {
     KiottyNetClientConfiguration configuration{};
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializePipeClientConfiguration(configuration, "/tmp/kiotty.sock"));
-    EXPECT_EQ(KIOTTY_NET_TRANSPORT_PIPE, configuration.endpoint.transport);
+    EXPECT_EQ(KIOTTY_NET_TRANSPORT_PIPE, configuration.address.transport);
     EXPECT_STREQ("", net::hostnameOf(configuration));
 }
 

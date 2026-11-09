@@ -59,11 +59,11 @@ namespace kiotty::net::implementation
 
         ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& config)
         {
-            ActiveSocketResult opened = ActiveSocket::open(config.endpoint.transport);
+            ActiveSocketResult opened = ActiveSocket::open(config.address.transport);
             if (!opened) { return opened; }
             ActiveSocket& socket = opened.value;
             const uint32_t timeout_milliseconds = config.connect_timeout_milliseconds;
-            const SocketCode connected = socket.connect(config.endpoint, timeout_milliseconds);
+            const SocketCode connected = socket.connect(config.address, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }
             const SocketCode tuned = configureNoDelay(socket, noDelayOf(config));
             if (tuned != SocketCode::SUCCESS) { return ActiveSocketResult::failure(tuned); }

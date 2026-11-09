@@ -60,8 +60,8 @@ TEST(Headers, ConnectionHandleAndStreamAreDistinctTypesWithTheSameFields)
 TEST(Headers, ConnectionWrappersCompareByOwnerThenId)
 {
     int                       anchor = 0;
-    KiottyNetConnectionOwner* first  = reinterpret_cast<KiottyNetConnectionOwner*>(&anchor);
-    KiottyNetConnectionOwner* second = nullptr;
+    KiottyNetEndpoint* first  = reinterpret_cast<KiottyNetEndpoint*>(&anchor);
+    KiottyNetEndpoint* second = nullptr;
     KiottyNetConnectionHandle a = { first, 7 };
     KiottyNetConnectionHandle b = { first, 7 };
     KiottyNetConnectionHandle c = { first, 8 };

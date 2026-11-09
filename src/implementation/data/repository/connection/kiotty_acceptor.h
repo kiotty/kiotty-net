@@ -22,7 +22,7 @@ namespace kiotty::net::implementation
         Acceptor(Acceptor&&) = delete;
         Acceptor& operator=(Acceptor&&) = delete;
 
-        SocketCode         open(const KiottyNetEndpoint& endpoint, int backlog, NoDelay no_delay);
+        SocketCode         open(const KiottyNetAddress& address, int backlog, NoDelay no_delay);
         void               close();
         ActiveSocketResult accept();
         bool               listening() const;

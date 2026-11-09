@@ -10,24 +10,24 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        template <class Owner>
-        void sweep(LazyReusablePool<Owner>& pool)
+        template <class T>
+        void sweep(LazyReusablePool<T>& pool)
         {
-            pool.forEachActive([&pool](Owner& owner) {
+            pool.forEachActive([&pool](T& owner) {
                 if (owner.lifetime().isReleasable()) { pool.release(owner); }
             });
         }
 
-        template <class Owner>
-        void closeAll(LazyReusablePool<Owner>& pool)
+        template <class T>
+        void closeAll(LazyReusablePool<T>& pool)
         {
-            pool.forEachActive([](Owner& owner) { owner.close(); });
+            pool.forEachActive([](T& owner) { owner.close(); });
         }
 
-        template <class Owner>
-        void joinAll(LazyReusablePool<Owner>& pool)
+        template <class T>
+        void joinAll(LazyReusablePool<T>& pool)
         {
-            pool.forEachActive([](Owner& owner) {
+            pool.forEachActive([](T& owner) {
                 RunLifetime life = owner.lifetime();
                 assert(!life.isRunner());
                 if (!life.isRunner()) { life.join(); }
@@ -122,8 +122,8 @@ namespace kiotty::net::implementation
 
     Context::~Context() = default;
 
-    template <class Owner>
-    void Context::retire(LazyReusablePool<Owner>& pool, Owner& owner)
+    template <class T>
+    void Context::retire(LazyReusablePool<T>& pool, T& owner)
     {
         RunLifetime life = owner.lifetime();
         owner.close();

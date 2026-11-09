@@ -1,7 +1,7 @@
 #pragma once
 
 #include "context/kiotty_client_configuration.h"
-#include "context/kiotty_owner.h"
+#include "context/kiotty_endpoint.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
 #include "core/pool/kiotty_pool_handle.h"
@@ -17,7 +17,7 @@
 
 namespace kiotty::net::implementation
 {
-    class StreamClient : public Owner
+    class StreamClient : public Endpoint
     {
     public:
         using code_type = KiottyNetCode;
