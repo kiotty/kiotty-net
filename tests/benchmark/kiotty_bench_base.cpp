@@ -1,4 +1,5 @@
 #include "kiotty_net_base.h"
+#include "kiotty_net_statemachine.h"
 
 #include "support/kiotty_test_peer.h"
 
@@ -30,6 +31,7 @@ namespace
     enum class Role : uint8_t
     {
         ECHO,
+        STATEFUL_ECHO,
         DRAIN,
         WORK
     };
@@ -84,6 +86,7 @@ namespace
         switch (app.role)
         {
         case Role::ECHO:
+        case Role::STATEFUL_ECHO:
             return KiottyNet_thenRead(MESSAGE_BYTES, 0);
         case Role::DRAIN:
             return KiottyNet_thenRead(app.chunk, 0);
@@ -149,6 +152,60 @@ namespace
 
     const KiottyNetConnectionHandler HANDLER = { &onConnected, &onReady, &onRead, &onWritten, &onTimeout, &onWorkStarted, &onDisconnected, &onError };
 
+    enum class EchoState
+    {
+        Reading,
+        Writing
+    };
+
+    typedef KiottyNet_Transition<EchoState> EchoNext;
+
+    KiottyNetTransition statefulConnected(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent)
+    {
+        return EchoNext::moveToNextState(EchoState::Reading, onReady(context, connection));
+    }
+
+    KiottyNetTransition statefulRead(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
+    {
+        return EchoNext::moveToNextState(EchoState::Writing, onRead(context, connection, event.as.read.data));
+    }
+
+    KiottyNetTransition statefulWritten(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+    {
+        return EchoNext::moveToNextState(EchoState::Reading, KiottyNet_thenRead(MESSAGE_BYTES, 0));
+    }
+
+    KiottyNetTransition statefulIgnored(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)
+    {
+        return EchoNext::moveToNextState(EchoState::Reading, KiottyNet_thenHold(0));
+    }
+
+    KiottyNetConnectionContext statefulCreate(KiottyNetAppContext app_context, KiottyNetConnectionInfo)
+    {
+        return new Slot{ static_cast<App*>(app_context), {} };
+    }
+
+    void statefulRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle)
+    {
+        delete static_cast<Slot*>(context);
+        appOf(app_context).disconnected.fetch_add(1);
+    }
+
+    constexpr auto ECHO_RULES = KiottyNet_rules(
+        KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED).then(statefulConnected).to(EchoState::Reading),
+        KiottyNet_from(EchoState::Reading).when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ).then(statefulRead).to(EchoState::Writing),
+        KiottyNet_from(EchoState::Writing).when(KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN).then(statefulWritten).to(EchoState::Reading),
+        KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT).then(statefulIgnored),
+        KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED).then(statefulIgnored));
+    constexpr KiottyNetStateMachine ECHO_MACHINE = KiottyNet_makeStateMachine(ECHO_RULES, EchoState::Reading);
+
+    KiottyNetCode runBenchServer(KiottyNetServerHandle server, App& app, KiottyNetStatefulAppContext& stateful)
+    {
+        if (app.role != Role::STATEFUL_ECHO) { return KiottyNet_runServer(server, &HANDLER, &app); }
+        stateful = KiottyNetStatefulAppContext{ &app, &ECHO_MACHINE, statefulCreate, statefulRelease, nullptr };
+        return KiottyNet_runStatefulServer(server, &stateful);
+    }
+
     std::string certPath(const char* name)
     {
         return std::string(KIOTTY_BENCH_CERT_DIR) + "/" + name;
@@ -162,6 +219,7 @@ namespace
             , port(kiotty_test::unusedPort())
             , _context(KiottyNet_initializeContext().handle)
             , _server(nullptr)
+            , _stateful()
             , _thread()
         {
             KiottyNetServerConfiguration configuration;
@@ -176,7 +234,7 @@ namespace
             (void)KiottyNet_initializeTlsServerConfiguration(&secure, cert.c_str(), key.c_str(), nullptr);
             _server = KiottyNet_createServer(_context, &configuration, tls ? &secure : nullptr).handle;
             if (_server == nullptr) { return; }
-            _thread = std::thread([this]() { (void)KiottyNet_runServer(_server, &HANDLER, &app); });
+            _thread = std::thread([this]() { (void)runBenchServer(_server, app, _stateful); });
             (void)KiottyNet_awaitServer(_server, WAIT_MS);
         }
 
@@ -218,9 +276,10 @@ namespace
         uint16_t port;
 
     private:
-        KiottyNetContext      _context;
-        KiottyNetServerHandle _server;
-        std::thread           _thread;
+        KiottyNetContext            _context;
+        KiottyNetServerHandle       _server;
+        KiottyNetStatefulAppContext _stateful;
+        std::thread                 _thread;
     };
 
     template <typename Predicate>
@@ -271,9 +330,9 @@ namespace
     }
 }
 
-static void EchoRoundtrip(benchmark::State& state)
+static void runEchoRoundtrip(benchmark::State& state, Role role)
 {
-    BenchServer bench(Role::ECHO, false, CHUNK_BYTES, static_cast<size_t>(state.range(1)));
+    BenchServer bench(role, false, CHUNK_BYTES, static_cast<size_t>(state.range(1)));
     const int clients = static_cast<int>(state.range(0));
     std::vector<std::unique_ptr<kiotty_test::LoopbackPeer>> peers;
     for (int i = 0; i < clients; ++i)
@@ -295,7 +354,17 @@ static void EchoRoundtrip(benchmark::State& state)
     state.SetItemsProcessed(state.iterations() * clients);
     state.SetBytesProcessed(state.iterations() * clients * static_cast<int64_t>(MESSAGE_BYTES));
 }
+static void EchoRoundtrip(benchmark::State& state)
+{
+    runEchoRoundtrip(state, Role::ECHO);
+}
 BENCHMARK(EchoRoundtrip)->ArgNames({ "clients", "max_clients" })->Args({ 1, 16 })->Args({ 1, 1024 })->Args({ 128, 1024 })->UseRealTime();
+
+static void EchoRoundtripStateful(benchmark::State& state)
+{
+    runEchoRoundtrip(state, Role::STATEFUL_ECHO);
+}
+BENCHMARK(EchoRoundtripStateful)->ArgNames({ "clients", "max_clients" })->Args({ 1, 16 })->Args({ 1, 1024 })->Args({ 128, 1024 })->UseRealTime();
 
 static void ReadHeavy(benchmark::State& state)
 {

@@ -28,6 +28,8 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_connection_tls.cpp
     kiotty_test_configuration.cpp
     kiotty_test_action.cpp
+    kiotty_test_rule_table.cpp
+    kiotty_test_stateful_handler.cpp
     support/kiotty_test_handler.cpp
     support/kiotty_test_openssl_memory.cpp
 )

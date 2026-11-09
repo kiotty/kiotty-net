@@ -104,6 +104,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/connection/kiotty_notification_desk.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_step.cpp
+    src/implementation/domain/usecases/statemachine/kiotty_rule_table.cpp
+    src/implementation/domain/usecases/statemachine/kiotty_stateful_handler.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
