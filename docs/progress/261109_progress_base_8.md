@@ -26,12 +26,12 @@
 
 ## 벤치마크
 
-`tests/benchmark/kiotty_bench_base.cpp` 12 개 (공개 C API 만). 수치는 `docs/test/test_base_v0.html` 12.1 (CI 의 ubuntu 와 WSL2). CI 기준으로 echo 78 µs, TLS handshake 1.09 k/s 는 목표 안. WSL2 는 맨 TCP loopback echo 도 197 µs 라 그 환경의 지연이 대부분이다. 처음 판의 대기 helper 가 1 ms sleep 이라 ConnectionChurn, WorkHandoff 가 낮게 나왔다 (yield 로 바꿨다). 목표 밖으로 남은 것은 ReadHeavy (16 KiB 마다 콜백, 약 40 µs) 와 ConnectionChurn. CI `benchmark` job 은 main push 와 `workflow_dispatch` 에서 JSON 을 artifact 로 남긴다. 회귀 판정은 아직 없다.
+`tests/benchmark/kiotty_bench_base.cpp` 12 개 (공개 C API 만). 수치는 `docs/test/test_base_v0.html` 12.1 (CI 의 ubuntu 와 WSL2). CI 기준으로 echo 56 µs, TLS handshake 1.43 k/s, ConnectionChurn 7.66 k/s 는 목표 안. WSL2 는 맨 TCP loopback echo 도 197 µs 라 그 환경의 지연이 대부분이다. 처음 판의 대기 helper 가 1 ms sleep 이라 ConnectionChurn, WorkHandoff 가 낮게 나왔다 (yield 로 바꿨다). 목표 밖으로 남은 것은 ReadHeavy (CI 596 MB/s. 16 KiB 마다 콜백) 하나. CI `benchmark` job 은 main push 와 `workflow_dispatch` 에서 JSON 을 artifact 로 남긴다. 회귀 판정은 아직 없다.
 
 ## 정할 것
 
 1. timeout 0 의 뜻. 라이브러리 전체 (`await`, stream read / write, connect, action 의 timeout) 가 0 = 제한 없음이다 (`SO_RCVTIMEO` 와 같은 관례). `await` 만 0 = 바로 확인으로 바꾸면 어긋난다.
-2. ReadHeavy 와 ConnectionChurn 의 원인 조사.
+2. ReadHeavy 의 원인 조사.
 
 ## 다음 할 일
 
