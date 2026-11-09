@@ -36,7 +36,7 @@
 
 ## 정할 것
 
-1. 병렬 `ctest -j 8` 의 포트 충돌. `unusedPort()` 가 port 0 으로 bind 해 번호를 얻고 닫는데, 두 테스트가 같은 번호를 받으면 한 쪽의 listen 이 `SOCKET_ERROR` 로 끝나거나 (`DestroyDoesNotBlockALoopCallbackThatCallsContext` 의 `await`) 다른 테스트의 connect 가 이 쪽 서버로 들어온다 (`OnDisconnectedIsCalledExactlyOnce...` 의 1000 이 1001). kqueue 와 무관하고 전부터 있던 것이며 sanitizer 로 느려지면 더 자주 난다. CI 는 `-j` 없이 돌아 안 보인다. 고치려면 서버 테스트가 port 0 으로 listen 하고 실제 포트를 읽어 오거나 (`PassiveSocket::port()` 가 있다), `ADDRESS_IN_USE` 면 다른 포트로 한 번 더 하거나, integration 을 직렬로 돌린다.
+1. (고쳤다, 2026-11-09) 병렬 `ctest -j 8` 의 포트 충돌. `unusedPort()` 가 port 0 으로 bind 해 번호를 얻고 닫았는데, 두 테스트 process 가 같은 번호를 받으면 한 쪽의 listen 이 `SOCKET_ERROR` 로 끝나거나 (`DestroyDoesNotBlockALoopCallbackThatCallsContext` 의 `await`) 다른 테스트의 connect 가 이 쪽 서버로 들어왔다 (`OnDisconnectedIsCalledExactlyOnce...` 의 1000 이 1001). 커널이 막 닫힌 번호를 다음 bind(0) 에 다시 줄 수 있고, 다른 process 의 connect 가 같은 ephemeral 번호를 집을 수도 있어서다. kqueue 와 무관하고 전부터 있던 것이며 sanitizer 로 느려지면 더 자주 났다. 고친 방법은 process 사이 잠금이다: `tests/integration/support/kiotty_test_port_lease.*` 의 `PortLease` 가 temp 디렉토리의 파일 하나 (`kiotty_test_ports.lock`) 를 `flock` / `LockFileEx` 로 잠그고 그 안의 counter 를 읽어 하나 올린다. `unusedPort()` 는 counter 로 20000 ~ 32767 (Linux 의 ephemeral 32768, macOS / Windows 의 49152 아래) 의 번호를 차례로 받고, bind 가 되는지 확인한 뒤 돌려준다. 같은 번호는 12768 번 뒤에나 다시 나오고 ephemeral 범위 밖이라 connect 와도 겹치지 않는다. 잠금 파일을 열 수 없으면 전처럼 port 0 으로 돌아간다.
 2. UBSan 의 gtest 소음. 테스트 target 이 `-fno-rtti` 라 UBSan 의 vptr 검사가 gtest 안에서 "does not point to an object of type" 을 찍는다 (실패는 아니다). sanitizer 빌드에 `-fno-sanitize=vptr` 을 더하면 사라진다.
 3. iOS 는 build only 그대로다. kqueue 는 같은 코드이고 시뮬레이터에서 ctest 를 돌리는 job 은 두지 않았다.
 

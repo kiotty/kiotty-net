@@ -702,6 +702,8 @@ namespace
 {
     bool kernelAllowsIoUring()
     {
+        const uint32_t required_features =
+            IORING_FEAT_SINGLE_MMAP | IORING_FEAT_NODROP | IORING_FEAT_EXT_ARG;
         io_uring_params params{};
         const long ring = ::syscall(__NR_io_uring_setup, 1, &params);
         if (ring < 0)
@@ -709,7 +711,7 @@ namespace
             return false;
         }
         ::close(static_cast<int>(ring));
-        return true;
+        return (params.features & required_features) == required_features;
     }
 
     size_t ringDescriptors()

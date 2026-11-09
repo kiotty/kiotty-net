@@ -1,5 +1,7 @@
 #include "support/kiotty_test_peer.h"
 
+#include "support/kiotty_test_port_lease.h"
+
 #include <atomic>
 #include <cstring>
 #include <string>
@@ -38,6 +40,41 @@ namespace kiotty_test
 #else
             return static_cast<int>(::getpid());
 #endif
+        }
+
+        const uint16_t FIRST_LEASED_PORT = 20000;
+        const uint32_t LEASED_PORT_COUNT = 12768;
+
+        uint16_t kernelChosenPort()
+        {
+            RawSocket probe = ::socket(AF_INET, SOCK_STREAM, 0);
+            sockaddr_in address = loopbackAddress(0);
+            ::bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+            sockaddr_in bound;
+            std::memset(&bound, 0, sizeof(bound));
+            socklen_t length = sizeof(bound);
+            ::getsockname(probe, reinterpret_cast<sockaddr*>(&bound), &length);
+            closeRaw(probe);
+            return ntohs(bound.sin_port);
+        }
+
+        bool isBindable(uint16_t port)
+        {
+            RawSocket probe = ::socket(AF_INET, SOCK_STREAM, 0);
+            if (probe == INVALID_RAW_SOCKET)
+            {
+                return false;
+            }
+            sockaddr_in address = loopbackAddress(port);
+            int bound = ::bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+            closeRaw(probe);
+            return bound == 0;
+        }
+
+        uint16_t leasedPort(PortLease& lease)
+        {
+            uint32_t counter = lease.take();
+            return static_cast<uint16_t>(FIRST_LEASED_PORT + counter % LEASED_PORT_COUNT);
         }
     }
 
@@ -202,15 +239,17 @@ namespace kiotty_test
 
     uint16_t unusedPort()
     {
-        RawSocket probe = ::socket(AF_INET, SOCK_STREAM, 0);
-        sockaddr_in address = loopbackAddress(0);
-        ::bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-        sockaddr_in bound;
-        std::memset(&bound, 0, sizeof(bound));
-        socklen_t length = sizeof(bound);
-        ::getsockname(probe, reinterpret_cast<sockaddr*>(&bound), &length);
-        closeRaw(probe);
-        return ntohs(bound.sin_port);
+        PortLease lease;
+        if (!lease.locked())
+        {
+            return kernelChosenPort();
+        }
+        uint16_t port = leasedPort(lease);
+        while (!isBindable(port))
+        {
+            port = leasedPort(lease);
+        }
+        return port;
     }
 
     std::string uniqueSocketPath()

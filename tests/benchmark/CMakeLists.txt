@@ -17,6 +17,7 @@ add_executable(kiotty_net_benchmarks
     kiotty_bench_base.cpp
     ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_os.cpp
     ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_peer.cpp
+    ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_port_lease.cpp
 )
 target_include_directories(kiotty_net_benchmarks PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

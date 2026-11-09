@@ -22,7 +22,7 @@
 
 ## 테스트
 
-- 새 테스트 하나: `EventListener_Ring.OpenTakesAnIoUringInstanceWhenTheKernelAllowsIt`. `/proc/self/fd` 에서 `anon_inode:[io_uring]` 를 세어 fallback 이 조용히 epoll 로 가서 나머지 테스트가 ring 을 안 보는 일을 막는다. 커널이 막으면 skip. 전체 423 개.
+- 새 테스트 하나: `EventListener_Ring.OpenTakesAnIoUringInstanceWhenTheKernelAllowsIt`. `/proc/self/fd` 에서 `anon_inode:[io_uring]` 를 세어 fallback 이 조용히 epoll 로 가서 나머지 테스트가 ring 을 안 보는 일을 막는다. 커널이 막으면 skip. 전체 423 개. skip 의 조건은 backend 의 `open` 과 같은 `IORING_FEAT_SINGLE_MMAP | NODROP | EXT_ARG` 다 (2026-11-09 수정. setup 만 되는 커널 5.10 의 WSL2 에서 backend 는 epoll 로 가는데 테스트는 ring 을 기대해 실패했다).
 - CI 에 `gcc epoll only (io_uring OFF)` job 을 더했다. 다른 Linux job 은 이제 io_uring 을 돈다.
 
 | 환경 (WSL2, 커널 6.6) | 결과 |
