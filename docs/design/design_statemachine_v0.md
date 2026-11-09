@@ -4,7 +4,7 @@
 
 1. StateMachine 층의 코드 모양. 공개 헤더 `include/kiotty_net_statemachine.h` 는 이미 있고, 구현은 `KiottyNet_moveToNextState` 하나뿐이다.
 2. HTTP 와 WebSocket 이 이 층 위에 얹히는 자리. 둘의 설계는 다음 문서지만, 둘이 필요로 하는 것을 이 층이 지금 갖추어야 한다.
-3. DV12 (`const char*` 가 내부 경계를 지난다) 와 DV13 (공개 API 의 bool 인자, 약어, 400 줄 헤더, wrapper 의 인자와 메서드 수) 을 닫는다. 둘 다 "다음 공개 API 판에서" 로 미뤄 둔 것이고 이 층이 그 판이다.
+3. DV12 (`const char*` 가 내부 경계를 지난다) 를 닫고, DV13 (공개 API 의 bool 인자, 약어, wrapper 의 인자와 메서드 수) 에 공개 API 판 v1 을 제안한다. 공개 헤더는 수칙이 아니라 사용자가 지정한 모양을 따르므로 (수칙 0.2) DV13 은 사용자가 정하는 만큼만 바뀐다. 헤더 넷과 그 줄 수는 그대로 둔다.
 
 두 문서가 다르면 requirement 가 우선한다. requirement 8절과 구현 가이드 2절이 다른 자리는 14절에 모았다.
 
@@ -40,20 +40,14 @@ KiottyNet_runServer(server, callbacks, app)            KiottyNet_runStatefulServ
 | `domain/usecases/statemachine/` | 없음 | `StatefulHandler`, 표 찾기 / 검사 |
 | `core/` | `Span`, `Result`, `checked` | + `FixedString<N>`, `parseText`, `parseUnsigned`, `parseHexadecimal` (DV12) |
 | 내부 `const char*` (hostname, path) | 다섯 자리 (DV12) | 전부 `Span<const char>`. OS 에 C 문자열이 필요한 backend 안에서만 `FixedString<N>` 으로 복사 |
-| 공개 API | v0 이름 + DV13 | 판 v1 (12절). bool 인자 → enum, 약어 → 단어, 헤더는 `include/kiotty_net/` 조각, wrapper 는 7 개 이하 |
+| 공개 API | v0 이름 + DV13 | 판 v1 (12절). bool 인자 → enum, 약어 → 단어, wrapper 는 7 개 이하 (제안). 헤더 넷은 그대로 |
 
 ## 1. 폴더
 
 ```
 include/
     kiotty_net_base.h, kiotty_net_statemachine.h, kiotty_net_http.h, kiotty_net_websocket.h
-                                    사용자가 include 하는 넷. include guard 와 #include 만 (12.3)
-    kiotty_net/                     조각. 하나가 400 줄 이하
-        base_types.h  base_tls_configuration.h  base_configuration.h  base_connection.h  base_endpoint.h
-        base_builder.hpp  base_wrapper.hpp          C++ (묶는 헤더가 __cplusplus 안에서 include)
-        owned_handle.hpp                             kiotty::net::OwnedHandle. http 와 websocket 이 같이 include
-        statemachine_types.h  statemachine_rules.hpp
-        http_*.h / .hpp, websocket_*.h / .hpp        다음 설계
+                                    넷 그대로. 나누지 않는다 (수칙 0.2, 12.3)
 src/
     kiotty_net_base.cpp             번역 (설계 v5 15절). run 은 CallbackHandler 를 stack 에 만들어 넘긴다 (6절)
     kiotty_net_statemachine.cpp     번역. moveToNextState, runStateful* (StatefulHandler 를 stack 에)
@@ -80,9 +74,6 @@ src/
         context/
             kiotty_server.*, kiotty_event_client.*   run(const Handler&) 하나 (6절)
             kiotty_configuration.*                   const char* 를 parseText 로 (8.3)
-tools/
-    check_rules.py                  include/ 도 본다 (12.3). 묶는 헤더는 include 만이라 통과한다
-    make_single_header.py           include/kiotty_net/ 조각을 하나로 (12.3. single_header/kiotty_net.hpp)
 ```
 
 StatefulHandler 가 `domain/usecases/` 에 있는 이유: 표 (사용자 값) 와 Connection 의 state (repository) 를 합쳐 다음 action 을 만드는 흐름이고, repository 와 entity 를 쓴다 (수칙 7.3). CallbackHandler 는 `data/repository/connection/` 이다. Caller 와 같은 층에서 사용자 콜백 표를 읽기만 한다. Handler 인터페이스 자체는 값 (`KiottyNetConnectionEvent`, `KiottyNetConnectionAction`) 만 알아 `domain/entity/` 다.
@@ -525,7 +516,7 @@ enum class ProtocolState : int32_t
 
 ## 12. 공개 API 판 v1 (DV13)
 
-DV13 이 미룬 것을 전부 여기서 정한다. 이름 표는 `tools/rename_public_api.tsv` 에 이어 적는다 (단계 2 의 120 쌍 뒤). enum 값의 번호는 바뀌지 않는다.
+DV13 이 미룬 것의 제안이다. 공개 헤더는 사용자가 지정한 모양을 따르므로 (수칙 0.2) 아래의 수칙 번호는 차이를 가리킬 뿐이고, 무엇을 바꿀지는 사용자가 정한다. 이름 표는 `tools/rename_public_api.tsv` 에 이어 적는다 (단계 2 의 120 쌍 뒤). enum 값의 번호는 바뀌지 않는다.
 
 ### 12.1 bool 인자 → enum (수칙 4.6)
 
@@ -548,14 +539,12 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 | `KiottyNetAppContext`, `app_context` | `KiottyNetApplicationContext`, `application_context` | base.h, statemachine.h, http.h, websocket.h 전부. 14절 4 에서 확인받는다 |
 | `tls` (인자), `Tls` (타입), `Http`, `Tcp`, `Url`, `Id` | 그대로 | 약어가 아니라 이름이다 (설계 v5 3절의 cipher suite 와 같은 이유). `del` (C++ wrapper 의 DELETE) 도 예약어 때문의 예외로 둔다 |
 
-### 12.3 400 줄 헤더 (수칙 4.1)
+### 12.3 헤더 넷은 그대로
 
-공개 헤더 넷은 지금 1500 / 457 / 756 / 580 줄이다. 사용자가 include 하는 파일은 하나여야 하고 (user_guide_http "이 헤더 하나만 include 하면 된다"), 위에 C, 아래에 C++ 이라는 모양도 유지한다. 그래서 묶는 헤더와 조각으로 나눈다.
+공개 헤더는 `kiotty_net_base.h`, `kiotty_net_statemachine.h`, `kiotty_net_http.h`, `kiotty_net_websocket.h` 넷이고 나누지 않는다 (사용자 결정 2026-11-09). 공개 헤더는 수칙이 아니라 사용자가 지정한 모양을 따르고 (수칙 0.2), 400 줄 한계와의 차이는 DV13 에 남긴다. `tools/check_rules.py` 는 지금처럼 `include/` 를 보지 않는다.
 
-- `include/kiotty_net_base.h` 는 include guard 와 `#include "kiotty_net/base_types.h"` ... 뿐이다. C++ 조각은 `#if defined(__cplusplus)` 안에서 include 한다. 조각은 `include/kiotty_net/` 에 두고 하나가 400 줄 이하다. 조각 이름은 1절의 표다.
-- `kiotty::net::OwnedHandle` 은 `include/kiotty_net/owned_handle.hpp` 하나가 된다. http.h 와 websocket.h 가 같은 파일을 include 하므로 "두 정의가 글자까지 같아야 한다" 는 규칙 (user_guide_http 헤더 구성) 이 없어진다. 두 프로토콜 헤더가 서로를 include 하지 않는 것은 그대로다.
-- `single_header/kiotty_net.hpp` 는 `tools/make_single_header.py` 가 조각을 의존 순서로 이어 붙여 만든다 (수칙 7.1 "스크립트로만 생성"). 지금은 0 바이트다.
-- `tools/check_rules.py` 가 `include/` 도 본다. 묶는 헤더는 include 뿐이라 통과하고 조각은 400 줄 검사를 받는다. `#define` 은 include guard (`#pragma once` 를 쓰지 않는 공개 헤더. 수칙 4.14 의 예외) 와 `KIOTTY_NET_MAX_*`, `KIOTTY_NET_API`, `KIOTTY_NET_RULE*` 이다. 공개 헤더의 상수 매크로는 C 가 enum 으로 배열 크기를 적을 수 없어 두는 것이고 설계 v5 3절에 이미 있다. MACRO 수를 deviations 의 DV10 에 적는다.
+- 위에 C, 아래에 C++ 이라는 모양과 "이 헤더 하나만 include 하면 된다" (user_guide_http) 는 그대로다.
+- `kiotty::net::OwnedHandle` 을 http.h 와 websocket.h 가 글자까지 같게 되풀이하는 규칙 (user_guide_http 헤더 구성) 도 그대로다.
 - `KiottyNet_rules` 의 중복 행이 compile 되지 않는 것은 `tests/unit/compile_fail/` 의 작은 소스와 CMake `try_compile` 로 본다 (10절).
 
 ### 12.4 인자 5 개 이상 (수칙 4.1)
@@ -593,7 +582,7 @@ base 의 사이클 정의 (`plan_base_v0.md` 0절: 로컬 두 환경 초록, com
 
 | 사이클 | 하는 것 | 완료 |
 |---|---|---|
-| M1 공개 API 판 v1 | 12.1 ~ 12.5. 헤더 조각, `make_single_header.py`, `check_rules.py` 의 include/, 이름 표, 테스트와 user_guide 의 이름 | 매트릭스 초록. `check_rules.py include/ src/implementation` 의 FILE 0. single header 가 C++17 과 C99 로 syntax check 통과 |
+| M1 공개 API 판 v1 | 12.1, 12.2, 12.4 ~ 12.6 중 사용자가 정한 것. 이름 표, 테스트와 user_guide 의 이름 | 매트릭스 초록. 네 헤더가 C++17 과 C99 로 syntax check 통과 |
 | M2 core (DV12) | 8절. FixedString, parse 셋, 8.3 의 표 | 수칙 2.10 의 다섯 × 3 통과. `grep "const char\*" src/implementation` 이 리터럴 message 와 parseText 뿐 |
 | M3 Handler | 3절, 5절, 6절의 `run(const Handler&)`, CallbackHandler, Connection 의 `_machine_state`, onWorkReady | 기존 테스트 전부 그대로 통과 (동작 변화 없음). `EchoRoundtrip` 전후 비교 |
 | M4 StatefulHandler | 4절, statemachine.cpp, 10절의 unit + integration, 구현 가이드 3절의 echo 예제가 테스트로 | 매트릭스 초록 |
@@ -612,4 +601,4 @@ M1 의 이름 변경은 `tools/rename_public_api.tsv` 와 `wrap_parameters.py` �
 7. **WebSocket 의 메시지 버퍼는 HTTP 의 body 버퍼를 같이 쓴다** (11절). Upgrade 경로의 `max_message_bytes` 가 `max_body_bytes` 보다 크면 `addWebSocketUpgrade` 가 INVALID_ARGUMENT. 제안: 그렇게. 대안은 HttpLimits 에 필드 하나.
 8. **HTTP 와 WebSocket 은 한 표, 한 Session** (11절). 구현 가이드 5절과 user_guide_websocket 9절의 미결. 제안: 한 표.
 9. **`KiottyNet_HttpServer` 를 `routes()` / `files()` 로 나눈다** (12.5). 대안은 wrapper 를 DV9 처럼 "C API 의 거울" 로 보고 7 개 한계의 예외로 두는 것. 제안: 나눈다.
-10. **공개 헤더를 `include/kiotty_net/` 조각으로** (12.3). 대안은 공개 헤더를 400 줄 한계의 예외로 적는 것. 제안: 조각.
+10. (정했다, 2026-11-09) **공개 헤더는 넷 그대로** (12.3). 나누지 않고 400 줄과의 차이는 DV13 에 둔다. `include/` 는 수칙이 아니라 사용자가 지정한 모양을 따른다 (수칙 0.2).

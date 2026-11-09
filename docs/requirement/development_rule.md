@@ -24,6 +24,13 @@
 - CMake 는 `CMAKE_CXX_STANDARD 17`, `CMAKE_CXX_STANDARD_REQUIRED ON`, `CMAKE_CXX_EXTENSIONS OFF` 로 설정한다.
 - 네 플랫폼 툴체인 모두에서 빌드가 통과해야 PR 을 병합한다.
 
+### 0.2 `include/` 의 공개 헤더는 이 수칙이 아니라 사용자가 지정한 모양을 따른다.
+
+- 공개 헤더는 라이브러리 사용자와의 계약이다. 파일 구성, 함수 이름, 인자의 모양과 개수, 줄 수는 requirement 와 user guide, 사용자의 결정이 정한다.
+- 수칙 4 (가독성) 의 수치 한계와 이름 규칙, 4.6 의 bool 인자 금지는 공개 헤더에 걸지 않는다. `tools/check_rules.py` 도 `include/` 를 보지 않는다.
+- 사용자가 지정한 모양이 수칙과 다르면 그 차이를 `docs/deviations.md` 에 적는다. 고치는 것은 사용자가 정할 때만이다.
+- `src/` 의 번역 층 (`kiotty_net_*.cpp`) 과 그 안쪽은 이 수칙을 따른다. 공개 헤더의 `const char*`, bool 인자는 번역 층에서 내부 타입 (`Span`, `enum class`) 으로 바뀐다.
+
 ---
 
 ## 1. 메모리 예측 가능성
