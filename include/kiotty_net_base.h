@@ -89,6 +89,19 @@ typedef enum KiottyNetTlsV13CipherSuite
     KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_CCM8_SHA256      = 1 << 4
 } KiottyNetTlsV13CipherSuite;
 
+typedef enum KiottyNetTlsVerification
+{
+    KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME,
+    KIOTTY_NET_TLS_VERIFICATION_SERVER,
+    KIOTTY_NET_TLS_VERIFICATION_NONE
+} KiottyNetTlsVerification;
+
+typedef enum KiottyNetNoDelay
+{
+    KIOTTY_NET_NO_DELAY_OFF,
+    KIOTTY_NET_NO_DELAY_ON
+} KiottyNetNoDelay;
+
 typedef enum KiottyNetClientAuthentication
 {
     KIOTTY_NET_CLIENT_AUTHENTICATION_NONE,
@@ -98,7 +111,7 @@ typedef enum KiottyNetClientAuthentication
 
 typedef struct KiottyNetTlsIdentity
 {
-    char cert_file[KIOTTY_NET_MAX_PATH_LENGTH];
+    char certificate_file[KIOTTY_NET_MAX_PATH_LENGTH];
     char key_file[KIOTTY_NET_MAX_PATH_LENGTH];
     char key_password[KIOTTY_NET_MAX_PASSWORD_LENGTH];
 } KiottyNetTlsIdentity;
@@ -120,54 +133,50 @@ typedef struct KiottyNetTlsClientConfiguration
     uint32_t             versions;
     uint32_t             v12_cipher_suites;
     uint32_t             v13_cipher_suites;
-    int                  skip_server_verification;
-    int                  skip_hostname_verification;
+    KiottyNetTlsVerification verification;
     char                 trust_store_path[KIOTTY_NET_MAX_PATH_LENGTH];
     KiottyNetTlsIdentity identity;
 } KiottyNetTlsClientConfiguration;
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTlsServerConfiguration(
-    KiottyNetTlsServerConfiguration* config,
-    const char* cert_file,
+    KiottyNetTlsServerConfiguration* configuration,
+    const char* certificate_file,
     const char* key_file,
     const char* key_password);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsServerVersions(
-    KiottyNetTlsServerConfiguration* config,
-    bool tls_1_2,
-    bool tls_1_3);
+    KiottyNetTlsServerConfiguration* configuration,
+    uint32_t versions);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsServerV12CipherSuites(
-    KiottyNetTlsServerConfiguration* config,
+    KiottyNetTlsServerConfiguration* configuration,
     uint32_t suites);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsServerV13CipherSuites(
-    KiottyNetTlsServerConfiguration* config,
+    KiottyNetTlsServerConfiguration* configuration,
     uint32_t suites);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsServerClientAuthentication(
-    KiottyNetTlsServerConfiguration* config,
+    KiottyNetTlsServerConfiguration* configuration,
     KiottyNetClientAuthentication mode,
     const char* trust_store_path);
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTlsClientConfiguration(
-    KiottyNetTlsClientConfiguration* config);
+    KiottyNetTlsClientConfiguration* configuration);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientVersions(
-    KiottyNetTlsClientConfiguration* config,
-    bool tls_1_2,
-    bool tls_1_3);
+    KiottyNetTlsClientConfiguration* configuration,
+    uint32_t versions);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientV12CipherSuites(
-    KiottyNetTlsClientConfiguration* config,
+    KiottyNetTlsClientConfiguration* configuration,
     uint32_t suites);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientV13CipherSuites(
-    KiottyNetTlsClientConfiguration* config,
+    KiottyNetTlsClientConfiguration* configuration,
     uint32_t suites);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientTrustStore(
-    KiottyNetTlsClientConfiguration* config,
+    KiottyNetTlsClientConfiguration* configuration,
     const char* trust_store_path);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientVerification(
-    KiottyNetTlsClientConfiguration* config,
-    bool verify_server,
-    bool verify_hostname);
+    KiottyNetTlsClientConfiguration* configuration,
+    KiottyNetTlsVerification verification);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureTlsClientIdentity(
-    KiottyNetTlsClientConfiguration* config,
-    const char* cert_file,
+    KiottyNetTlsClientConfiguration* configuration,
+    const char* certificate_file,
     const char* key_file,
     const char* key_password);
 
@@ -192,7 +201,7 @@ typedef struct KiottyNetServerConfiguration
     size_t            receive_capacity;
     size_t            send_capacity;
     size_t            push_capacity;
-    bool              no_delay;
+    KiottyNetNoDelay  no_delay;
 } KiottyNetServerConfiguration;
 
 typedef struct KiottyNetClientConfiguration
@@ -205,50 +214,50 @@ typedef struct KiottyNetClientConfiguration
     uint32_t          connect_timeout_milliseconds;
     uint32_t          max_trial;
     uint32_t          trial_interval_milliseconds;
-    bool              no_delay;
+    KiottyNetNoDelay  no_delay;
 } KiottyNetClientConfiguration;
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTcpServerConfiguration(
-    KiottyNetServerConfiguration* config,
+    KiottyNetServerConfiguration* configuration,
     const char* host,
     uint16_t port);
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializePipeServerConfiguration(
-    KiottyNetServerConfiguration* config,
+    KiottyNetServerConfiguration* configuration,
     const char* pipe_name);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerMaxClients(
-    KiottyNetServerConfiguration* config,
+    KiottyNetServerConfiguration* configuration,
     size_t max_clients);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerBufferCapacity(
-    KiottyNetServerConfiguration* config,
+    KiottyNetServerConfiguration* configuration,
     size_t receive_capacity,
     size_t send_capacity,
     size_t push_capacity);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerNoDelay(
-    KiottyNetServerConfiguration* config,
-    bool no_delay);
+    KiottyNetServerConfiguration* configuration,
+    KiottyNetNoDelay no_delay);
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTcpClientConfiguration(
-    KiottyNetClientConfiguration* config,
+    KiottyNetClientConfiguration* configuration,
     const char* host,
     uint16_t port);
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializePipeClientConfiguration(
-    KiottyNetClientConfiguration* config,
+    KiottyNetClientConfiguration* configuration,
     const char* pipe_name);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientBufferCapacity(
-    KiottyNetClientConfiguration* config,
+    KiottyNetClientConfiguration* configuration,
     size_t receive_capacity,
     size_t send_capacity,
     size_t push_capacity);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientConnectTimeout(
-    KiottyNetClientConfiguration* config,
+    KiottyNetClientConfiguration* configuration,
     uint32_t timeout_milliseconds);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientRetry(
-    KiottyNetClientConfiguration* config,
+    KiottyNetClientConfiguration* configuration,
     uint32_t max_trial,
     uint32_t trial_interval_milliseconds);
 KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientNoDelay(
-    KiottyNetClientConfiguration* config,
-    bool no_delay);
+    KiottyNetClientConfiguration* configuration,
+    KiottyNetNoDelay no_delay);
 
 typedef struct KiottyNetEndpoint KiottyNetEndpoint;
 
@@ -404,8 +413,8 @@ typedef struct KiottyNetContextResult
 KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
-KIOTTY_NET_API size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config);
-KIOTTY_NET_API size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* config);
+KIOTTY_NET_API size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* configuration);
+KIOTTY_NET_API size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* configuration);
 
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
 
@@ -417,7 +426,7 @@ typedef struct KiottyNetStreamClientResult
 
 KIOTTY_NET_API KiottyNetStreamClientResult KiottyNet_createStreamClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* config,
+    const KiottyNetClientConfiguration* configuration,
     const KiottyNetTlsClientConfiguration* tls);
 KIOTTY_NET_API void                        KiottyNet_destroyStreamClient(
     KiottyNetContext context,
@@ -446,7 +455,7 @@ typedef struct KiottyNetEventClientResult
 
 KIOTTY_NET_API KiottyNetEventClientResult KiottyNet_createEventClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* config,
+    const KiottyNetClientConfiguration* configuration,
     const KiottyNetTlsClientConfiguration* tls);
 KIOTTY_NET_API void                       KiottyNet_destroyEventClient(
     KiottyNetContext context,
@@ -476,7 +485,7 @@ typedef struct KiottyNetServerResult
 
 KIOTTY_NET_API KiottyNetServerResult KiottyNet_createServer(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration* config,
+    const KiottyNetServerConfiguration* configuration,
     const KiottyNetTlsServerConfiguration* tls);
 KIOTTY_NET_API void                  KiottyNet_destroyServer(
     KiottyNetContext context,
@@ -593,11 +602,11 @@ class KiottyNet_ServerConfigurationBuilder
 {
 public:
     static KiottyNet_ServerConfigurationBuilder tcp(
-        KiottyNetServerConfiguration& config,
+        KiottyNetServerConfiguration& configuration,
         const char* host,
         uint16_t port);
     static KiottyNet_ServerConfigurationBuilder pipe(
-        KiottyNetServerConfiguration& config,
+        KiottyNetServerConfiguration& configuration,
         const char* pipe_name);
 
     KiottyNet_ServerConfigurationBuilder& maxClients(size_t max_clients);
@@ -605,13 +614,13 @@ public:
         size_t receive_capacity,
         size_t send_capacity,
         size_t push_capacity);
-    KiottyNet_ServerConfigurationBuilder& noDelay(bool no_delay);
+    KiottyNet_ServerConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
 
     KiottyNetCode build() const;
 
 private:
     KiottyNet_ServerConfigurationBuilder(
-        KiottyNetServerConfiguration& config,
+        KiottyNetServerConfiguration& configuration,
         KiottyNetCode initialized);
 
     void record(KiottyNetCode code);
@@ -624,11 +633,11 @@ class KiottyNet_ClientConfigurationBuilder
 {
 public:
     static KiottyNet_ClientConfigurationBuilder tcp(
-        KiottyNetClientConfiguration& config,
+        KiottyNetClientConfiguration& configuration,
         const char* host,
         uint16_t port);
     static KiottyNet_ClientConfigurationBuilder pipe(
-        KiottyNetClientConfiguration& config,
+        KiottyNetClientConfiguration& configuration,
         const char* pipe_name);
 
     KiottyNet_ClientConfigurationBuilder& bufferCapacity(
@@ -639,13 +648,13 @@ public:
     KiottyNet_ClientConfigurationBuilder& retry(
         uint32_t max_trial,
         uint32_t trial_interval_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& noDelay(bool no_delay);
+    KiottyNet_ClientConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
 
     KiottyNetCode build() const;
 
 private:
     KiottyNet_ClientConfigurationBuilder(
-        KiottyNetClientConfiguration& config,
+        KiottyNetClientConfiguration& configuration,
         KiottyNetCode initialized);
 
     void record(KiottyNetCode code);
@@ -658,12 +667,12 @@ class KiottyNet_TlsServerConfigurationBuilder
 {
 public:
     KiottyNet_TlsServerConfigurationBuilder(
-        KiottyNetTlsServerConfiguration& config,
-        const char* cert_file,
+        KiottyNetTlsServerConfiguration& configuration,
+        const char* certificate_file,
         const char* key_file,
         const char* key_password = nullptr);
 
-    KiottyNet_TlsServerConfigurationBuilder& versions(bool tls_1_2, bool tls_1_3);
+    KiottyNet_TlsServerConfigurationBuilder& versions(uint32_t versions);
     KiottyNet_TlsServerConfigurationBuilder& v12CipherSuites(uint32_t suites);
     KiottyNet_TlsServerConfigurationBuilder& v13CipherSuites(uint32_t suites);
     KiottyNet_TlsServerConfigurationBuilder& clientAuthentication(
@@ -682,15 +691,15 @@ private:
 class KiottyNet_TlsClientConfigurationBuilder
 {
 public:
-    explicit KiottyNet_TlsClientConfigurationBuilder(KiottyNetTlsClientConfiguration& config);
+    explicit KiottyNet_TlsClientConfigurationBuilder(KiottyNetTlsClientConfiguration& configuration);
 
-    KiottyNet_TlsClientConfigurationBuilder& versions(bool tls_1_2, bool tls_1_3);
+    KiottyNet_TlsClientConfigurationBuilder& versions(uint32_t versions);
     KiottyNet_TlsClientConfigurationBuilder& v12CipherSuites(uint32_t suites);
     KiottyNet_TlsClientConfigurationBuilder& v13CipherSuites(uint32_t suites);
     KiottyNet_TlsClientConfigurationBuilder& trustStore(const char* trust_store_path);
-    KiottyNet_TlsClientConfigurationBuilder& verification(bool verify_server, bool verify_hostname);
+    KiottyNet_TlsClientConfigurationBuilder& verification(KiottyNetTlsVerification verification);
     KiottyNet_TlsClientConfigurationBuilder& identity(
-        const char* cert_file,
+        const char* certificate_file,
         const char* key_file,
         const char* key_password = nullptr);
 
@@ -759,7 +768,7 @@ public:
     KiottyNet_Context(const KiottyNet_Context&) = delete;
     KiottyNet_Context& operator=(const KiottyNet_Context&) = delete;
 
-    bool             valid() const;
+    explicit operator bool() const;
     KiottyNetCode    code() const;
     KiottyNetContext handle() const;
 
@@ -776,13 +785,13 @@ private:
 class KiottyNet_StreamClient
 {
 public:
-    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& config);
+    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration);
     KiottyNet_StreamClient(
         KiottyNetContext context,
-        const KiottyNetClientConfiguration& config,
+        const KiottyNetClientConfiguration& configuration,
         const KiottyNetTlsClientConfiguration& tls);
 
-    bool                        valid() const;
+    explicit operator bool() const;
     KiottyNetCode               code() const;
     KiottyNetStreamClientHandle handle() const;
 
@@ -801,13 +810,13 @@ private:
 class KiottyNet_EventClient
 {
 public:
-    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& config);
+    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration);
     KiottyNet_EventClient(
         KiottyNetContext context,
-        const KiottyNetClientConfiguration& config,
+        const KiottyNetClientConfiguration& configuration,
         const KiottyNetTlsClientConfiguration& tls);
 
-    bool                       valid() const;
+    explicit operator bool() const;
     KiottyNetCode              code() const;
     KiottyNetEventClientHandle handle() const;
 
@@ -829,13 +838,13 @@ private:
 class KiottyNet_Server
 {
 public:
-    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& config);
+    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& configuration);
     KiottyNet_Server(
         KiottyNetContext context,
-        const KiottyNetServerConfiguration& config,
+        const KiottyNetServerConfiguration& configuration,
         const KiottyNetTlsServerConfiguration& tls);
 
-    bool                  valid() const;
+    explicit operator bool() const;
     KiottyNetCode         code() const;
     KiottyNetServerHandle handle() const;
 
@@ -852,30 +861,30 @@ private:
 };
 
 inline KiottyNet_ServerConfigurationBuilder::KiottyNet_ServerConfigurationBuilder(
-    KiottyNetServerConfiguration& config,
+    KiottyNetServerConfiguration& configuration,
     KiottyNetCode initialized)
-    : _configuration(config)
+    : _configuration(configuration)
     , _code(initialized)
 {
 }
 
 inline KiottyNet_ServerConfigurationBuilder KiottyNet_ServerConfigurationBuilder::tcp(
-    KiottyNetServerConfiguration& config,
+    KiottyNetServerConfiguration& configuration,
     const char* host,
     uint16_t port)
 {
     return KiottyNet_ServerConfigurationBuilder(
-        config,
-        KiottyNet_initializeTcpServerConfiguration(&config, host, port));
+        configuration,
+        KiottyNet_initializeTcpServerConfiguration(&configuration, host, port));
 }
 
 inline KiottyNet_ServerConfigurationBuilder KiottyNet_ServerConfigurationBuilder::pipe(
-    KiottyNetServerConfiguration& config,
+    KiottyNetServerConfiguration& configuration,
     const char* pipe_name)
 {
     return KiottyNet_ServerConfigurationBuilder(
-        config,
-        KiottyNet_initializePipeServerConfiguration(&config, pipe_name));
+        configuration,
+        KiottyNet_initializePipeServerConfiguration(&configuration, pipe_name));
 }
 
 inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilder::maxClients(
@@ -899,7 +908,7 @@ inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilde
 }
 
 inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilder::noDelay(
-    bool no_delay)
+    KiottyNetNoDelay no_delay)
 {
     record(KiottyNet_configureServerNoDelay(&_configuration, no_delay));
     return *this;
@@ -919,30 +928,30 @@ inline void KiottyNet_ServerConfigurationBuilder::record(KiottyNetCode code)
 }
 
 inline KiottyNet_ClientConfigurationBuilder::KiottyNet_ClientConfigurationBuilder(
-    KiottyNetClientConfiguration& config,
+    KiottyNetClientConfiguration& configuration,
     KiottyNetCode initialized)
-    : _configuration(config)
+    : _configuration(configuration)
     , _code(initialized)
 {
 }
 
 inline KiottyNet_ClientConfigurationBuilder KiottyNet_ClientConfigurationBuilder::tcp(
-    KiottyNetClientConfiguration& config,
+    KiottyNetClientConfiguration& configuration,
     const char* host,
     uint16_t port)
 {
     return KiottyNet_ClientConfigurationBuilder(
-        config,
-        KiottyNet_initializeTcpClientConfiguration(&config, host, port));
+        configuration,
+        KiottyNet_initializeTcpClientConfiguration(&configuration, host, port));
 }
 
 inline KiottyNet_ClientConfigurationBuilder KiottyNet_ClientConfigurationBuilder::pipe(
-    KiottyNetClientConfiguration& config,
+    KiottyNetClientConfiguration& configuration,
     const char* pipe_name)
 {
     return KiottyNet_ClientConfigurationBuilder(
-        config,
-        KiottyNet_initializePipeClientConfiguration(&config, pipe_name));
+        configuration,
+        KiottyNet_initializePipeClientConfiguration(&configuration, pipe_name));
 }
 
 inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::bufferCapacity(
@@ -974,7 +983,7 @@ inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilde
 }
 
 inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::noDelay(
-    bool no_delay)
+    KiottyNetNoDelay no_delay)
 {
     record(KiottyNet_configureClientNoDelay(&_configuration, no_delay));
     return *this;
@@ -994,20 +1003,19 @@ inline void KiottyNet_ClientConfigurationBuilder::record(KiottyNetCode code)
 }
 
 inline KiottyNet_TlsServerConfigurationBuilder::KiottyNet_TlsServerConfigurationBuilder(
-    KiottyNetTlsServerConfiguration& config,
-    const char* cert_file,
+    KiottyNetTlsServerConfiguration& configuration,
+    const char* certificate_file,
     const char* key_file,
     const char* key_password)
-    : _configuration(config)
-    , _code(KiottyNet_initializeTlsServerConfiguration(&config, cert_file, key_file, key_password))
+    : _configuration(configuration)
+    , _code(KiottyNet_initializeTlsServerConfiguration(&configuration, certificate_file, key_file, key_password))
 {
 }
 
 inline KiottyNet_TlsServerConfigurationBuilder& KiottyNet_TlsServerConfigurationBuilder::versions(
-    bool tls_1_2,
-    bool tls_1_3)
+    uint32_t versions)
 {
-    record(KiottyNet_configureTlsServerVersions(&_configuration, tls_1_2, tls_1_3));
+    record(KiottyNet_configureTlsServerVersions(&_configuration, versions));
     return *this;
 }
 
@@ -1049,17 +1057,16 @@ inline void KiottyNet_TlsServerConfigurationBuilder::record(KiottyNetCode code)
 }
 
 inline KiottyNet_TlsClientConfigurationBuilder::KiottyNet_TlsClientConfigurationBuilder(
-    KiottyNetTlsClientConfiguration& config)
-    : _configuration(config)
-    , _code(KiottyNet_initializeTlsClientConfiguration(&config))
+    KiottyNetTlsClientConfiguration& configuration)
+    : _configuration(configuration)
+    , _code(KiottyNet_initializeTlsClientConfiguration(&configuration))
 {
 }
 
 inline KiottyNet_TlsClientConfigurationBuilder& KiottyNet_TlsClientConfigurationBuilder::versions(
-    bool tls_1_2,
-    bool tls_1_3)
+    uint32_t versions)
 {
-    record(KiottyNet_configureTlsClientVersions(&_configuration, tls_1_2, tls_1_3));
+    record(KiottyNet_configureTlsClientVersions(&_configuration, versions));
     return *this;
 }
 
@@ -1085,20 +1092,19 @@ inline KiottyNet_TlsClientConfigurationBuilder& KiottyNet_TlsClientConfiguration
 }
 
 inline KiottyNet_TlsClientConfigurationBuilder&
-KiottyNet_TlsClientConfigurationBuilder::verification(bool verify_server, bool verify_hostname)
+KiottyNet_TlsClientConfigurationBuilder::verification(KiottyNetTlsVerification verification)
 {
-    record(
-        KiottyNet_configureTlsClientVerification(&_configuration, verify_server, verify_hostname));
+    record(KiottyNet_configureTlsClientVerification(&_configuration, verification));
     return *this;
 }
 
 inline KiottyNet_TlsClientConfigurationBuilder& KiottyNet_TlsClientConfigurationBuilder::identity(
-    const char* cert_file,
+    const char* certificate_file,
     const char* key_file,
     const char* key_password)
 {
     record(
-        KiottyNet_configureTlsClientIdentity(&_configuration, cert_file, key_file, key_password));
+        KiottyNet_configureTlsClientIdentity(&_configuration, certificate_file, key_file, key_password));
     return *this;
 }
 
@@ -1277,7 +1283,7 @@ inline KiottyNet_Context::~KiottyNet_Context()
     reset();
 }
 
-inline bool KiottyNet_Context::valid() const
+inline KiottyNet_Context::operator bool() const
 {
     return _context != nullptr;
 }
@@ -1311,16 +1317,16 @@ inline void KiottyNet_Context::reset()
 
 inline KiottyNet_StreamClient::KiottyNet_StreamClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration& config)
-    : KiottyNet_StreamClient(context, KiottyNet_createStreamClient(context, &config, nullptr))
+    const KiottyNetClientConfiguration& configuration)
+    : KiottyNet_StreamClient(context, KiottyNet_createStreamClient(context, &configuration, nullptr))
 {
 }
 
 inline KiottyNet_StreamClient::KiottyNet_StreamClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration& config,
+    const KiottyNetClientConfiguration& configuration,
     const KiottyNetTlsClientConfiguration& tls)
-    : KiottyNet_StreamClient(context, KiottyNet_createStreamClient(context, &config, &tls))
+    : KiottyNet_StreamClient(context, KiottyNet_createStreamClient(context, &configuration, &tls))
 {
 }
 
@@ -1332,7 +1338,7 @@ inline KiottyNet_StreamClient::KiottyNet_StreamClient(
 {
 }
 
-inline bool KiottyNet_StreamClient::valid() const
+inline KiottyNet_StreamClient::operator bool() const
 {
     return _handle.get() != nullptr;
 }
@@ -1374,16 +1380,16 @@ inline KiottyNetResult KiottyNet_StreamClient::write(
 
 inline KiottyNet_EventClient::KiottyNet_EventClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration& config)
-    : KiottyNet_EventClient(context, KiottyNet_createEventClient(context, &config, nullptr))
+    const KiottyNetClientConfiguration& configuration)
+    : KiottyNet_EventClient(context, KiottyNet_createEventClient(context, &configuration, nullptr))
 {
 }
 
 inline KiottyNet_EventClient::KiottyNet_EventClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration& config,
+    const KiottyNetClientConfiguration& configuration,
     const KiottyNetTlsClientConfiguration& tls)
-    : KiottyNet_EventClient(context, KiottyNet_createEventClient(context, &config, &tls))
+    : KiottyNet_EventClient(context, KiottyNet_createEventClient(context, &configuration, &tls))
 {
 }
 
@@ -1395,7 +1401,7 @@ inline KiottyNet_EventClient::KiottyNet_EventClient(
 {
 }
 
-inline bool KiottyNet_EventClient::valid() const
+inline KiottyNet_EventClient::operator bool() const
 {
     return _handle.get() != nullptr;
 }
@@ -1439,16 +1445,16 @@ inline KiottyNetCode KiottyNet_EventClient::notify(KiottyNetSpan data)
 
 inline KiottyNet_Server::KiottyNet_Server(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration& config)
-    : KiottyNet_Server(context, KiottyNet_createServer(context, &config, nullptr))
+    const KiottyNetServerConfiguration& configuration)
+    : KiottyNet_Server(context, KiottyNet_createServer(context, &configuration, nullptr))
 {
 }
 
 inline KiottyNet_Server::KiottyNet_Server(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration& config,
+    const KiottyNetServerConfiguration& configuration,
     const KiottyNetTlsServerConfiguration& tls)
-    : KiottyNet_Server(context, KiottyNet_createServer(context, &config, &tls))
+    : KiottyNet_Server(context, KiottyNet_createServer(context, &configuration, &tls))
 {
 }
 
@@ -1458,7 +1464,7 @@ inline KiottyNet_Server::KiottyNet_Server(KiottyNetContext context, KiottyNetSer
 {
 }
 
-inline bool KiottyNet_Server::valid() const
+inline KiottyNet_Server::operator bool() const
 {
     return _handle.get() != nullptr;
 }

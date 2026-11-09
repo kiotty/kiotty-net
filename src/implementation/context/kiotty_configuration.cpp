@@ -32,6 +32,7 @@ namespace kiotty::net::implementation
         Capacities                   defaultCapacities();
         bool                         areCapacitiesValid(Capacities capacities);
         bool                         isWithin(size_t value, size_t maximum);
+        bool                         isNoDelayKnown(KiottyNetNoDelay no_delay);
         size_t                       smallerOf(size_t left, size_t right);
     }
 
@@ -84,10 +85,11 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
-                                         NoDelay no_delay)
+                                         KiottyNetNoDelay no_delay)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay == NoDelay::ENABLED;
+        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.no_delay = no_delay;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -149,10 +151,11 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
-                                         NoDelay no_delay)
+                                         KiottyNetNoDelay no_delay)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay == NoDelay::ENABLED;
+        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.no_delay = no_delay;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -188,8 +191,25 @@ namespace kiotty::net::implementation
         (void)copied;
     }
 
+    NoDelay noDelayOf(KiottyNetNoDelay no_delay)
+    {
+        if (no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
+        return NoDelay::DISABLED;
+    }
+
     namespace
     {
+        bool isNoDelayKnown(KiottyNetNoDelay no_delay)
+        {
+            switch (no_delay)
+            {
+            case KIOTTY_NET_NO_DELAY_OFF:
+            case KIOTTY_NET_NO_DELAY_ON:
+                return true;
+            }
+            return false;
+        }
+
         KiottyNetAddress addressOf(KiottyNetTransport transport,
                                      const char* name,
                                      size_t length,
@@ -212,7 +232,7 @@ namespace kiotty::net::implementation
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
-            configuration.no_delay = true;
+            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
             return configuration;
         }
 
@@ -228,7 +248,7 @@ namespace kiotty::net::implementation
             configuration.connect_timeout_milliseconds = DEFAULT_CONNECT_TIMEOUT_MILLISECONDS;
             configuration.max_trial = DEFAULT_MAX_TRIAL;
             configuration.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
-            configuration.no_delay = true;
+            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
             return configuration;
         }
 

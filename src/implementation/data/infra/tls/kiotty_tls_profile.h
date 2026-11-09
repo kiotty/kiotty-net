@@ -32,8 +32,8 @@ namespace kiotty::net::implementation
         TlsProfile(const TlsProfile&) = delete;
         TlsProfile& operator=(const TlsProfile&) = delete;
 
-        KiottyNetCode openServer(const KiottyNetTlsServerConfiguration& config);
-        KiottyNetCode openClient(const KiottyNetTlsClientConfiguration& config);
+        KiottyNetCode openServer(const KiottyNetTlsServerConfiguration& configuration);
+        KiottyNetCode openClient(const KiottyNetTlsClientConfiguration& configuration);
         void          close();
 
         bool        valid() const;

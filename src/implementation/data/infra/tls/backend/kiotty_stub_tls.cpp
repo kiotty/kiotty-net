@@ -25,15 +25,15 @@ namespace kiotty::net::implementation
     {
     }
 
-    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& config)
+    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& configuration)
     {
-        (void)config;
+        (void)configuration;
         return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 
-    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& config)
+    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& configuration)
     {
-        (void)config;
+        (void)configuration;
         return KIOTTY_NET_CODE_TLS_NOT_SUPPORTED;
     }
 

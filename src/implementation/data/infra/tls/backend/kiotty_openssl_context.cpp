@@ -82,32 +82,34 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode prepareServerContext(SSL_CTX* context,
-                                       const KiottyNetTlsServerConfiguration& config)
+                                       const KiottyNetTlsServerConfiguration& configuration)
     {
-        const ProtocolSelection protocol{
-            config.versions, config.v12_cipher_suites, config.v13_cipher_suites };
+        const ProtocolSelection protocol{ configuration.versions,
+                                          configuration.v12_cipher_suites,
+                                          configuration.v13_cipher_suites };
         const KiottyNetCode configured = configureProtocol(context, protocol);
         if (configured != KIOTTY_NET_CODE_SUCCESS) { return configured; }
-        const KiottyNetCode loaded = loadIdentity(context, config.identity);
+        const KiottyNetCode loaded = loadIdentity(context, configuration.identity);
         if (loaded != KIOTTY_NET_CODE_SUCCESS) { return loaded; }
-        const KiottyNetClientAuthentication authentication = config.client_authentication;
+        const KiottyNetClientAuthentication authentication = configuration.client_authentication;
         const bool authenticates = authentication != KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
         if (!authenticates) { return KIOTTY_NET_CODE_SUCCESS; }
-        return loadTrustStore(context, config.trust_store_path);
+        return loadTrustStore(context, configuration.trust_store_path);
     }
 
     KiottyNetCode prepareClientContext(SSL_CTX* context,
-                                       const KiottyNetTlsClientConfiguration& config)
+                                       const KiottyNetTlsClientConfiguration& configuration)
     {
-        const ProtocolSelection protocol{
-            config.versions, config.v12_cipher_suites, config.v13_cipher_suites };
+        const ProtocolSelection protocol{ configuration.versions,
+                                          configuration.v12_cipher_suites,
+                                          configuration.v13_cipher_suites };
         const KiottyNetCode configured = configureProtocol(context, protocol);
         if (configured != KIOTTY_NET_CODE_SUCCESS) { return configured; }
-        const KiottyNetCode trusted = loadClientTrust(context, config.trust_store_path);
+        const KiottyNetCode trusted = loadClientTrust(context, configuration.trust_store_path);
         if (trusted != KIOTTY_NET_CODE_SUCCESS) { return trusted; }
-        const bool has_identity = config.identity.cert_file[0] != '\0';
+        const bool has_identity = configuration.identity.certificate_file[0] != '\0';
         if (!has_identity) { return KIOTTY_NET_CODE_SUCCESS; }
-        return loadIdentity(context, config.identity);
+        return loadIdentity(context, configuration.identity);
     }
 
     int clientVerifyMode(KiottyNetClientAuthentication authentication)
@@ -215,7 +217,8 @@ namespace kiotty::net::implementation
 
         bool identityTerminated(const KiottyNetTlsIdentity& identity)
         {
-            const Span<const char> certificate{ identity.cert_file, sizeof(identity.cert_file) };
+            const Span<const char> certificate{ identity.certificate_file,
+                                                sizeof(identity.certificate_file) };
             const Span<const char> key{ identity.key_file, sizeof(identity.key_file) };
             const Span<const char> password{
                 identity.key_password, sizeof(identity.key_password) };
@@ -227,7 +230,7 @@ namespace kiotty::net::implementation
 
         bool identityFilesExist(const KiottyNetTlsIdentity& identity)
         {
-            const bool certificate = fileExists(identity.cert_file);
+            const bool certificate = fileExists(identity.certificate_file);
             if (!certificate) { return false; }
             return fileExists(identity.key_file);
         }
@@ -237,7 +240,8 @@ namespace kiotty::net::implementation
             void* password = const_cast<char*>(identity.key_password);
             SSL_CTX_set_default_passwd_cb(context, passwordCallback);
             SSL_CTX_set_default_passwd_cb_userdata(context, password);
-            const int certified = SSL_CTX_use_certificate_chain_file(context, identity.cert_file);
+            const char* certificate_file = identity.certificate_file;
+            const int certified = SSL_CTX_use_certificate_chain_file(context, certificate_file);
             int keyed = 0;
             if (certified == 1)
             {

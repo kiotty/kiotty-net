@@ -40,6 +40,22 @@ TEST(Headers, CAndCppSeeTheSameEnumeratorValues)
     KiottyTestHeaderLayout c = kiottyTestHeaderLayoutFromC();
     EXPECT_EQ(c.last_code, static_cast<int>(KIOTTY_NET_CODE_OUT_OF_MEMORY));
     EXPECT_EQ(c.last_action_type, static_cast<int>(KIOTTY_NET_ACTION_TYPE_CLOSE));
+    EXPECT_EQ(c.last_tls_verification, static_cast<int>(KIOTTY_NET_TLS_VERIFICATION_NONE));
+}
+
+TEST(Headers, CRuleMacroAndCppRuleFillTheSameNextStates)
+{
+    KiottyTestHeaderLayout c = kiottyTestHeaderLayoutFromC();
+    constexpr kiotty::net::Rule rule =
+        kiotty::net::From(0).when(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ).then(nullptr).to(1, 2);
+    EXPECT_EQ(c.rule_next_count, static_cast<size_t>(rule.raw.next.count));
+    EXPECT_EQ(c.rule_second_next, rule.raw.next.at[1]);
+}
+
+TEST(Headers, ZeroedTlsClientConfigurationVerifiesServerAndHostname)
+{
+    KiottyNetTlsClientConfiguration configuration = {};
+    EXPECT_EQ(configuration.verification, KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME);
 }
 
 TEST(Headers, TransitionCarriesAConnectionAction)
@@ -81,4 +97,16 @@ TEST(Headers, ConnectionWrappersCompareByOwnerThenId)
     sessions[KiottyNet_Connection(b)] = 4;
     EXPECT_EQ(sessions.size(), 3u);
     EXPECT_EQ(sessions[KiottyNet_Connection(a)], 4);
+}
+
+TEST(Headers, OwningWrappersTestAsBoolOnlyExplicitly)
+{
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_Server&>::value));
+    EXPECT_FALSE((std::is_convertible<const KiottyNet_Server&, bool>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_EventClient&>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_StreamClient&>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_Context&>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_HttpServer&>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_WebSocketServer&>::value));
+    EXPECT_FALSE((std::is_convertible<const KiottyNet_WebSocketClient&, bool>::value));
 }

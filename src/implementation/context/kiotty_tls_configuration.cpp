@@ -28,10 +28,10 @@ namespace kiotty::net::implementation
 
         struct IdentityText
         {
-            const char* cert_file;
+            const char* certificate_file;
             const char* key_file;
             const char* key_password;
-            size_t      cert_length;
+            size_t      certificate_length;
             size_t      key_length;
             size_t      password_length;
         };
@@ -41,22 +41,22 @@ namespace kiotty::net::implementation
 
         using IdentityResult = Result<IdentityText, KiottyNetCode>;
 
-        IdentityResult measureIdentity(const char* cert_file,
+        IdentityResult measureIdentity(const char* certificate_file,
                                        const char* key_file,
                                        const char* key_password);
         TextLength     measurePassword(const char* key_password);
         TextLength     measureTrust(KiottyNetClientAuthentication mode, const char* path);
         void           writeIdentity(KiottyNetTlsIdentity& identity, const IdentityText& text);
-        uint32_t       versionsOf(TlsVersions versions);
         bool           isSuiteSetValid(uint32_t suites, uint32_t known);
+        bool           isVerificationKnown(KiottyNetTlsVerification verification);
     }
 
     KiottyNetCode initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration& configuration,
-                                                   const char* cert_file,
+                                                   const char* certificate_file,
                                                    const char* key_file,
                                                    const char* key_password)
     {
-        const IdentityResult identity = measureIdentity(cert_file, key_file, key_password);
+        const IdentityResult identity = measureIdentity(certificate_file, key_file, key_password);
         if (!identity) { return identity.code; }
         configuration = KiottyNetTlsServerConfiguration{};
         configuration.initialization_mark = INITIALIZATION_MARK;
@@ -69,12 +69,11 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureTlsServerVersions(KiottyNetTlsServerConfiguration& configuration,
-                                             TlsVersions versions)
+                                             uint32_t versions)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const uint32_t chosen = versionsOf(versions);
-        if (chosen == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.versions = chosen;
+        if (!isSuiteSetValid(versions, ALL_VERSIONS)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.versions = versions;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -118,16 +117,16 @@ namespace kiotty::net::implementation
         configuration.versions = ALL_VERSIONS;
         configuration.v12_cipher_suites = ALL_V12_SUITES;
         configuration.v13_cipher_suites = ALL_V13_SUITES;
+        configuration.verification = KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode configureTlsClientVersions(KiottyNetTlsClientConfiguration& configuration,
-                                             TlsVersions versions)
+                                             uint32_t versions)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const uint32_t chosen = versionsOf(versions);
-        if (chosen == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.versions = chosen;
+        if (!isSuiteSetValid(versions, ALL_VERSIONS)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.versions = versions;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -162,23 +161,21 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureTlsClientVerification(KiottyNetTlsClientConfiguration& configuration,
-                                                 TlsVerification verification)
+                                                 KiottyNetTlsVerification verification)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const bool is_hostname_alone = !verification.verify_server && verification.verify_hostname;
-        if (is_hostname_alone) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.skip_server_verification = verification.verify_server ? 0 : 1;
-        configuration.skip_hostname_verification = verification.verify_hostname ? 0 : 1;
+        if (!isVerificationKnown(verification)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.verification = verification;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode configureTlsClientIdentity(KiottyNetTlsClientConfiguration& configuration,
-                                             const char* cert_file,
+                                             const char* certificate_file,
                                              const char* key_file,
                                              const char* key_password)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const IdentityResult identity = measureIdentity(cert_file, key_file, key_password);
+        const IdentityResult identity = measureIdentity(certificate_file, key_file, key_password);
         if (!identity) { return identity.code; }
         writeIdentity(configuration.identity, identity.value);
         return KIOTTY_NET_CODE_SUCCESS;
@@ -196,18 +193,23 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        IdentityResult measureIdentity(const char* cert_file,
+        IdentityResult measureIdentity(const char* certificate_file,
                                        const char* key_file,
                                        const char* key_password)
         {
-            const TextLength cert_length = measureText(cert_file, KIOTTY_NET_MAX_PATH_LENGTH);
+            const TextLength certificate_length =
+                measureText(certificate_file, KIOTTY_NET_MAX_PATH_LENGTH);
             const TextLength key_length = measureText(key_file, KIOTTY_NET_MAX_PATH_LENGTH);
             const TextLength password_length = measurePassword(key_password);
-            const bool is_valid = cert_length && key_length && password_length;
+            const bool is_valid = certificate_length && key_length && password_length;
             if (!is_valid) { return IdentityResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             const char* password = key_password == nullptr ? "" : key_password;
-            const IdentityText text{ cert_file,         key_file,          password,
-                                     cert_length.value, key_length.value, password_length.value };
+            const IdentityText text{ certificate_file,
+                                     key_file,
+                                     password,
+                                     certificate_length.value,
+                                     key_length.value,
+                                     password_length.value };
             return IdentityResult::success(text);
         }
 
@@ -238,25 +240,30 @@ namespace kiotty::net::implementation
 
         void writeIdentity(KiottyNetTlsIdentity& identity, const IdentityText& text)
         {
-            const Span<char> cert{ identity.cert_file, sizeof(identity.cert_file) };
+            const Span<char> cert{ identity.certificate_file, sizeof(identity.certificate_file) };
             const Span<char> key{ identity.key_file, sizeof(identity.key_file) };
             const Span<char> password{ identity.key_password, sizeof(identity.key_password) };
-            writeText(cert, text.cert_file, text.cert_length);
+            writeText(cert, text.certificate_file, text.certificate_length);
             writeText(key, text.key_file, text.key_length);
             writeText(password, text.key_password, text.password_length);
-        }
-
-        uint32_t versionsOf(TlsVersions versions)
-        {
-            const uint32_t v12 = versions.tls_1_2 ? VERSION_V12_BIT : 0u;
-            const uint32_t v13 = versions.tls_1_3 ? VERSION_V13_BIT : 0u;
-            return v12 | v13;
         }
 
         bool isSuiteSetValid(uint32_t suites, uint32_t known)
         {
             const bool has_unknown = (suites & ~known) != 0;
             return suites != 0 && !has_unknown;
+        }
+
+        bool isVerificationKnown(KiottyNetTlsVerification verification)
+        {
+            switch (verification)
+            {
+            case KIOTTY_NET_TLS_VERIFICATION_NONE:
+            case KIOTTY_NET_TLS_VERIFICATION_SERVER:
+            case KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME:
+                return true;
+            }
+            return false;
         }
     }
 }

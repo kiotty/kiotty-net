@@ -126,3 +126,10 @@ _config	_configuration
 # 7b. names (user decision 2026-11-09): the address type and the connection owner
 KiottyNetEndpoint	KiottyNetAddress
 KiottyNetConnectionOwner	KiottyNetEndpoint
+# 8. public API v1 (design_statemachine_v0 12, user decision 2026-11-09)
+config	configuration
+cert_file	certificate_file
+ws	websocket
+ws_context	websocket_context
+skip_server_verification	verification
+skip_hostname_verification	verification

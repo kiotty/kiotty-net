@@ -55,13 +55,18 @@ typedef KiottyNetTransition (*KiottyNetTransitionAction)(
     KiottyNetConnectionHandle connection,
     KiottyNetConnectionEvent event);
 
+typedef struct KiottyNetNextStates
+{
+    int32_t  at[KIOTTY_NET_MAX_NEXT];
+    uint32_t count;
+} KiottyNetNextStates;
+
 typedef struct KiottyNetRule
 {
     int32_t                      state;
     KiottyNetConnectionEventType event;
     KiottyNetTransitionAction    transition_action;
-    int32_t                      next[KIOTTY_NET_MAX_NEXT];
-    uint32_t                     next_count;
+    KiottyNetNextStates          next;
 } KiottyNetRule;
 
 typedef struct KiottyNetStateMachine
@@ -71,11 +76,13 @@ typedef struct KiottyNetStateMachine
     int32_t              initial;
 } KiottyNetStateMachine;
 
+#if !defined(__cplusplus)
 #define KIOTTY_NET_RULE(state, event, transition_action, ...) \
-    { (state), (event), (transition_action), { __VA_ARGS__ }, \
-      (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
+    { (state), (event), (transition_action), { { __VA_ARGS__ }, \
+      (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) } }
+#endif
 #define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) \
-    { (state), (event), (transition_action), { 0 }, 0 }
+    { (state), (event), (transition_action), { { 0 }, 0 } }
 #define KIOTTY_NET_RULE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
 
 KIOTTY_NET_API KiottyNetTransition KiottyNet_moveToNextState(
@@ -93,6 +100,11 @@ typedef struct KiottyNetStatefulAppContext
         KiottyNetAppContext app_context,
         KiottyNetConnectionContext connection_context,
         KiottyNetConnectionHandle connection);
+    void (*onError)(
+        KiottyNetAppContext app_context,
+        KiottyNetConnectionInfo info,
+        KiottyNetCode code,
+        const char* message);
 } KiottyNetStatefulAppContext;
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulServer(
@@ -119,11 +131,7 @@ namespace kiotty
                 int32_t state,
                 KiottyNetConnectionEventType event,
                 KiottyNetTransitionAction transition_action,
-                uint32_t next_count,
-                int32_t n0,
-                int32_t n1,
-                int32_t n2,
-                int32_t n3);
+                KiottyNetNextStates next);
 
             template <typename State>
             constexpr Rule to(State a) const;
@@ -250,7 +258,7 @@ namespace kiotty
             int32_t state,
             KiottyNetConnectionEventType event,
             KiottyNetTransitionAction transition_action)
-            : raw{ state, event, transition_action, { 0, 0, 0, 0 }, 0 }
+            : raw{ state, event, transition_action, { { 0, 0, 0, 0 }, 0 } }
         {
         }
 
@@ -258,69 +266,37 @@ namespace kiotty
             int32_t state,
             KiottyNetConnectionEventType event,
             KiottyNetTransitionAction transition_action,
-            uint32_t next_count,
-            int32_t n0,
-            int32_t n1,
-            int32_t n2,
-            int32_t n3)
-            : raw{ state, event, transition_action, { n0, n1, n2, n3 }, next_count }
+            KiottyNetNextStates next)
+            : raw{ state, event, transition_action, next }
         {
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a) const
         {
-            return Rule(
-                raw.state,
-                raw.event,
-                raw.transition_action,
-                1,
-                static_cast<int32_t>(a),
-                0,
-                0,
-                0);
+            const KiottyNetNextStates next = { { static_cast<int32_t>(a), 0, 0, 0 }, 1 };
+            return Rule(raw.state, raw.event, raw.transition_action, next);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b) const
         {
-            return Rule(
-                raw.state,
-                raw.event,
-                raw.transition_action,
-                2,
-                static_cast<int32_t>(a),
-                static_cast<int32_t>(b),
-                0,
-                0);
+            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), 0, 0 }, 2 };
+            return Rule(raw.state, raw.event, raw.transition_action, next);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b, State c) const
         {
-            return Rule(
-                raw.state,
-                raw.event,
-                raw.transition_action,
-                3,
-                static_cast<int32_t>(a),
-                static_cast<int32_t>(b),
-                static_cast<int32_t>(c),
-                0);
+            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), 0 }, 3 };
+            return Rule(raw.state, raw.event, raw.transition_action, next);
         }
 
         template <typename State>
         constexpr Rule Rule::to(State a, State b, State c, State d) const
         {
-            return Rule(
-                raw.state,
-                raw.event,
-                raw.transition_action,
-                4,
-                static_cast<int32_t>(a),
-                static_cast<int32_t>(b),
-                static_cast<int32_t>(c),
-                static_cast<int32_t>(d));
+            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), static_cast<int32_t>(d) }, 4 };
+            return Rule(raw.state, raw.event, raw.transition_action, next);
         }
 
         constexpr FromWhen::FromWhen(int32_t state_, KiottyNetConnectionEventType event_)

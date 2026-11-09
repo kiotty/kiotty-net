@@ -134,10 +134,10 @@ TEST(TlsProfile, OpenServerWithGarbageFileReturnsCertificateInvalid)
 TEST(TlsProfile, OpenClientWithDefaultsSucceedsAndHandshakeTimeoutIsTheDefault)
 {
     REQUIRE_TLS();
-    KiottyNetTlsClientConfiguration config = clientConfig();
-    config.trust_store_path[0] = '\0';
+    KiottyNetTlsClientConfiguration configuration = clientConfig();
+    configuration.trust_store_path[0] = '\0';
     TlsProfile profile;
-    EXPECT_EQ(profile.openClient(config), KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(profile.openClient(configuration), KIOTTY_NET_CODE_SUCCESS);
     EXPECT_FALSE(profile.settings().is_server);
     EXPECT_TRUE(profile.settings().has_hostname_verification);
     EXPECT_EQ(profile.settings().handshake_timeout_milliseconds, kiotty::net::implementation::TLS_HANDSHAKE_TIMEOUT_MILLISECONDS);
@@ -327,12 +327,11 @@ TEST(TlsEngine, ClientRejectsServerSignedByUntrustedCaWithVerifyFailed)
 TEST(TlsEngine, ClientWithVerifyServerOffAcceptsUntrustedCa)
 {
     REQUIRE_TLS();
-    KiottyNetTlsClientConfiguration config = clientConfig("other_ca.pem");
-    config.skip_server_verification = 1;
-    config.skip_hostname_verification = 1;
+    KiottyNetTlsClientConfiguration configuration = clientConfig("other_ca.pem");
+    configuration.verification = KIOTTY_NET_TLS_VERIFICATION_NONE;
     Profiles profiles;
     ASSERT_EQ(profiles.server.openServer(serverConfig()), KIOTTY_NET_CODE_SUCCESS);
-    ASSERT_EQ(profiles.client.openClient(config), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(profiles.client.openClient(configuration), KIOTTY_NET_CODE_SUCCESS);
     TlsPump pump;
     ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
     pump.handshake();
@@ -383,7 +382,7 @@ TEST(TlsEngine, ServerRequiringClientAuthFailsWithoutClientCertAndSucceedsWithIt
     EXPECT_EQ(rejected.server.status().failure.code, KIOTTY_NET_CODE_TLS_VERIFY_FAILED);
 
     KiottyNetTlsClientConfiguration client_config = clientConfig();
-    copyText(client_config.identity.cert_file, certPath("client.pem"));
+    copyText(client_config.identity.certificate_file, certPath("client.pem"));
     copyText(client_config.identity.key_file, certPath("client.key"));
     TlsProfile identified;
     ASSERT_EQ(identified.openClient(client_config), KIOTTY_NET_CODE_SUCCESS);

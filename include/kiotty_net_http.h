@@ -73,8 +73,19 @@ typedef struct KiottyNetHttpRequest
     int                        keep_alive;
 } KiottyNetHttpRequest;
 
-typedef int64_t KiottyNetHttpResponseHandle;
-typedef int64_t KiottyNetHttpWorkHandle;
+typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
+
+typedef struct KiottyNetHttpResponseHandle
+{
+    KiottyNetHttpServerHandle server;
+    int64_t                   id;
+} KiottyNetHttpResponseHandle;
+
+typedef struct KiottyNetHttpWorkHandle
+{
+    KiottyNetHttpServerHandle server;
+    int64_t                   id;
+} KiottyNetHttpWorkHandle;
 
 KIOTTY_NET_API KiottyNetSpan KiottyNet_findHttpHeader(
     const KiottyNetHttpRequest* request,
@@ -129,11 +140,9 @@ KIOTTY_NET_API KiottyNetHttpRoute KiottyNet_makeHttpRoute(
     KiottyNetHttpRequestAction onRequest,
     KiottyNetHttpWorkAction onWorkStarted);
 
-typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
-
 KIOTTY_NET_API KiottyNetHttpServerHandle KiottyNet_createHttpServer(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration* config,
+    const KiottyNetServerConfiguration* configuration,
     const KiottyNetTlsServerConfiguration* tls,
     const KiottyNetHttpLimits* limits);
 KIOTTY_NET_API void                      KiottyNet_destroyHttpServer(
@@ -326,71 +335,53 @@ class KiottyNet_HttpServer
 public:
     KiottyNet_HttpServer(
         KiottyNetContext context,
-        const KiottyNetServerConfiguration& config,
+        const KiottyNetServerConfiguration& configuration,
         const KiottyNetHttpLimits& limits);
     KiottyNet_HttpServer(
         KiottyNetContext context,
-        const KiottyNetServerConfiguration& config,
+        const KiottyNetServerConfiguration& configuration,
         const KiottyNetTlsServerConfiguration& tls,
         const KiottyNetHttpLimits& limits);
 
-    bool                      valid() const;
+    explicit operator bool() const;
     KiottyNetHttpServerHandle handle() const;
 
     KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
     KiottyNetCode route(
         KiottyNetHttpMethod method,
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode get(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode get(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode head(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode head(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode post(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode post(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode put(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode put(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode patch(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode patch(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode del(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode del(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode options(const char* path, KiottyNetHttpRoute route);
     KiottyNetCode options(
         const char* path,
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
     KiottyNetCode notFound(KiottyNetHttpRoute route);
     KiottyNetCode notFound(
-        KiottyNetHttpRequestAction on_request,
-        KiottyNetHttpWorkAction on_work_started = nullptr,
-        KiottyNetAppContext app_context = nullptr);
+        KiottyNetHttpRequestAction on_request);
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
@@ -515,7 +506,7 @@ inline KiottyNet_HttpWork& KiottyNet_HttpWork::operator=(KiottyNet_HttpWork&& ot
 {
     if (this != &other)
     {
-        if (_work != 0)
+        if (_work.server != nullptr)
         {
             finishWithClose();
         }
@@ -526,7 +517,7 @@ inline KiottyNet_HttpWork& KiottyNet_HttpWork::operator=(KiottyNet_HttpWork&& ot
 
 inline KiottyNet_HttpWork::~KiottyNet_HttpWork()
 {
-    if (_work != 0)
+    if (_work.server != nullptr)
     {
         finishWithClose();
     }
@@ -550,28 +541,28 @@ inline KiottyNetCode KiottyNet_HttpWork::finishWithClose(KiottyNetCode reason)
 inline KiottyNetHttpWorkHandle KiottyNet_HttpWork::release()
 {
     KiottyNetHttpWorkHandle work = _work;
-    _work = 0;
+    _work = KiottyNetHttpWorkHandle{ nullptr, 0 };
     return work;
 }
 
 inline KiottyNet_HttpServer::KiottyNet_HttpServer(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration& config,
+    const KiottyNetServerConfiguration& configuration,
     const KiottyNetHttpLimits& limits)
-    : _handle(context, KiottyNet_createHttpServer(context, &config, nullptr, &limits))
+    : _handle(context, KiottyNet_createHttpServer(context, &configuration, nullptr, &limits))
 {
 }
 
 inline KiottyNet_HttpServer::KiottyNet_HttpServer(
     KiottyNetContext context,
-    const KiottyNetServerConfiguration& config,
+    const KiottyNetServerConfiguration& configuration,
     const KiottyNetTlsServerConfiguration& tls,
     const KiottyNetHttpLimits& limits)
-    : _handle(context, KiottyNet_createHttpServer(context, &config, &tls, &limits))
+    : _handle(context, KiottyNet_createHttpServer(context, &configuration, &tls, &limits))
 {
 }
 
-inline bool KiottyNet_HttpServer::valid() const
+inline KiottyNet_HttpServer::operator bool() const
 {
     return _handle.get() != nullptr;
 }
@@ -592,15 +583,10 @@ inline KiottyNetCode KiottyNet_HttpServer::route(
 inline KiottyNetCode KiottyNet_HttpServer::route(
     KiottyNetHttpMethod method,
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return KiottyNet_addHttpRoute(
-        _handle.get(),
-        method,
-        path,
-        KiottyNet_makeHttpRoute(app_context, on_request, on_work_started));
+    const KiottyNetHttpRoute route = KiottyNet_makeHttpRoute(nullptr, on_request, nullptr);
+    return KiottyNet_addHttpRoute(_handle.get(), method, path, route);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::get(const char* path, KiottyNetHttpRoute route)
@@ -610,11 +596,9 @@ inline KiottyNetCode KiottyNet_HttpServer::get(const char* path, KiottyNetHttpRo
 
 inline KiottyNetCode KiottyNet_HttpServer::get(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_GET, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_GET, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::head(const char* path, KiottyNetHttpRoute route)
@@ -624,11 +608,9 @@ inline KiottyNetCode KiottyNet_HttpServer::head(const char* path, KiottyNetHttpR
 
 inline KiottyNetCode KiottyNet_HttpServer::head(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_HEAD, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_HEAD, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::post(const char* path, KiottyNetHttpRoute route)
@@ -638,11 +620,9 @@ inline KiottyNetCode KiottyNet_HttpServer::post(const char* path, KiottyNetHttpR
 
 inline KiottyNetCode KiottyNet_HttpServer::post(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_POST, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_POST, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::put(const char* path, KiottyNetHttpRoute route)
@@ -652,11 +632,9 @@ inline KiottyNetCode KiottyNet_HttpServer::put(const char* path, KiottyNetHttpRo
 
 inline KiottyNetCode KiottyNet_HttpServer::put(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_PUT, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_PUT, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::patch(const char* path, KiottyNetHttpRoute route)
@@ -666,11 +644,9 @@ inline KiottyNetCode KiottyNet_HttpServer::patch(const char* path, KiottyNetHttp
 
 inline KiottyNetCode KiottyNet_HttpServer::patch(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_PATCH, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_PATCH, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::del(const char* path, KiottyNetHttpRoute route)
@@ -680,11 +656,9 @@ inline KiottyNetCode KiottyNet_HttpServer::del(const char* path, KiottyNetHttpRo
 
 inline KiottyNetCode KiottyNet_HttpServer::del(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_DELETE, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_DELETE, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::options(const char* path, KiottyNetHttpRoute route)
@@ -694,11 +668,9 @@ inline KiottyNetCode KiottyNet_HttpServer::options(const char* path, KiottyNetHt
 
 inline KiottyNetCode KiottyNet_HttpServer::options(
     const char* path,
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return route(KIOTTY_NET_HTTP_METHOD_OPTIONS, path, on_request, on_work_started, app_context);
+    return route(KIOTTY_NET_HTTP_METHOD_OPTIONS, path, on_request);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::notFound(KiottyNetHttpRoute route)
@@ -707,13 +679,10 @@ inline KiottyNetCode KiottyNet_HttpServer::notFound(KiottyNetHttpRoute route)
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::notFound(
-    KiottyNetHttpRequestAction on_request,
-    KiottyNetHttpWorkAction on_work_started,
-    KiottyNetAppContext app_context)
+    KiottyNetHttpRequestAction on_request)
 {
-    return KiottyNet_setHttpNotFound(
-        _handle.get(),
-        KiottyNet_makeHttpRoute(app_context, on_request, on_work_started));
+    const KiottyNetHttpRoute route = KiottyNet_makeHttpRoute(nullptr, on_request, nullptr);
+    return KiottyNet_setHttpNotFound(_handle.get(), route);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::serveDirectory(

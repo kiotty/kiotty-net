@@ -12,7 +12,7 @@ namespace kiotty::net::implementation
     namespace
     {
         KiottyNetCode abandonContext(SSL_CTX* context, KiottyNetCode code);
-        TlsSettings   clientSettings(const KiottyNetTlsClientConfiguration& config);
+        TlsSettings   clientSettings(const KiottyNetTlsClientConfiguration& configuration);
     }
 
     bool tlsSupported()
@@ -33,7 +33,7 @@ namespace kiotty::net::implementation
         close();
     }
 
-    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& config)
+    KiottyNetCode TlsProfile::openServer(const KiottyNetTlsServerConfiguration& configuration)
     {
         close();
         SSL_CTX* context = SSL_CTX_new(TLS_server_method());
@@ -41,30 +41,31 @@ namespace kiotty::net::implementation
         {
             return abandonContext(context, KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
         }
-        const KiottyNetCode prepared = prepareServerContext(context, config);
+        const KiottyNetCode prepared = prepareServerContext(context, configuration);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return abandonContext(context, prepared); }
-        const int mode = clientVerifyMode(config.client_authentication);
+        const int mode = clientVerifyMode(configuration.client_authentication);
         SSL_CTX_set_verify(context, mode, nullptr);
         _context = context;
         _settings = TlsSettings{ TLS_HANDSHAKE_TIMEOUT_MILLISECONDS, true, false };
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& config)
+    KiottyNetCode TlsProfile::openClient(const KiottyNetTlsClientConfiguration& configuration)
     {
         close();
-        const bool is_server_verified = config.skip_server_verification == 0;
+        const bool is_server_verified =
+            configuration.verification != KIOTTY_NET_TLS_VERIFICATION_NONE;
         SSL_CTX* context = SSL_CTX_new(TLS_client_method());
         if (context == nullptr)
         {
             return abandonContext(context, KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
         }
-        const KiottyNetCode prepared = prepareClientContext(context, config);
+        const KiottyNetCode prepared = prepareClientContext(context, configuration);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return abandonContext(context, prepared); }
         const int mode = is_server_verified ? SSL_VERIFY_PEER : SSL_VERIFY_NONE;
         SSL_CTX_set_verify(context, mode, nullptr);
         _context = context;
-        _settings = clientSettings(config);
+        _settings = clientSettings(configuration);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -83,11 +84,10 @@ namespace kiotty::net::implementation
             return code;
         }
 
-        TlsSettings clientSettings(const KiottyNetTlsClientConfiguration& config)
+        TlsSettings clientSettings(const KiottyNetTlsClientConfiguration& configuration)
         {
-            const bool is_server_verified = config.skip_server_verification == 0;
-            const bool is_hostname_verified = config.skip_hostname_verification == 0;
-            const bool has_hostname_verification = is_server_verified && is_hostname_verified;
+            const bool has_hostname_verification =
+                configuration.verification == KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME;
             const uint32_t timeout_milliseconds = TLS_HANDSHAKE_TIMEOUT_MILLISECONDS;
             return TlsSettings{ timeout_milliseconds, false, has_hostname_verification };
         }

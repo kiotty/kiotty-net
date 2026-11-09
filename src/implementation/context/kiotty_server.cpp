@@ -12,7 +12,6 @@ namespace kiotty::net::implementation
     namespace
     {
         ConnectionLimits limitsOf(const KiottyNetServerConfiguration& configuration);
-        NoDelay          noDelayOf(const KiottyNetServerConfiguration& configuration);
         size_t           listenerCapacityOf(size_t max_clients);
         TlsCapacity      cipherOf(ConnectionLimits limits,
                                   const KiottyNetTlsServerConfiguration* tls);
@@ -153,7 +152,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode Server::listen()
     {
-        const NoDelay no_delay = noDelayOf(_configuration);
+        const NoDelay no_delay = noDelayOf(_configuration.no_delay);
         const SocketCode opened = _acceptor.open(_configuration.address, LISTEN_BACKLOG, no_delay);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const SocketCode attached = _acceptor.attach(_listener);
@@ -180,11 +179,6 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity };
-        }
-
-        NoDelay noDelayOf(const KiottyNetServerConfiguration& configuration)
-        {
-            return configuration.no_delay ? NoDelay::ENABLED : NoDelay::DISABLED;
         }
 
         size_t listenerCapacityOf(size_t max_clients)

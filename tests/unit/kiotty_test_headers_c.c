@@ -7,6 +7,11 @@
 
 #include <stddef.h>
 
+static const KiottyNetRule RULES[] = {
+    KIOTTY_NET_RULE(0, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ, NULL, 1, 2),
+    KIOTTY_NET_RULE_UNCHECKED(1, KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED, NULL)
+};
+
 KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
 {
     KiottyTestHeaderLayout layout;
@@ -29,6 +34,9 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.stream_client_result = sizeof(KiottyNetStreamClientResult);
     layout.transition           = sizeof(KiottyNetTransition);
     layout.rule                 = sizeof(KiottyNetRule);
+    layout.rule_next_count      = RULES[0].next.count;
+    layout.rule_second_next     = RULES[0].next.at[1];
+    layout.last_tls_verification = KIOTTY_NET_TLS_VERIFICATION_NONE;
     layout.last_code            = KIOTTY_NET_CODE_OUT_OF_MEMORY;
     layout.last_action_type     = KIOTTY_NET_ACTION_TYPE_CLOSE;
     return layout;

@@ -35,26 +35,26 @@ namespace kiotty_test
 
     inline KiottyNetTlsServerConfiguration serverConfig(const char* cert = "server.pem", const char* key = "server.key")
     {
-        KiottyNetTlsServerConfiguration config;
-        std::memset(&config, 0, sizeof(config));
-        config.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
-        config.v12_cipher_suites = 0xF;
-        config.v13_cipher_suites = 0x1F;
-        copyText(config.identity.cert_file, certPath(cert));
-        copyText(config.identity.key_file, certPath(key));
-        config.client_authentication = KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
-        return config;
+        KiottyNetTlsServerConfiguration configuration;
+        std::memset(&configuration, 0, sizeof(configuration));
+        configuration.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
+        configuration.v12_cipher_suites = 0xF;
+        configuration.v13_cipher_suites = 0x1F;
+        copyText(configuration.identity.certificate_file, certPath(cert));
+        copyText(configuration.identity.key_file, certPath(key));
+        configuration.client_authentication = KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
+        return configuration;
     }
 
     inline KiottyNetTlsClientConfiguration clientConfig(const char* trust = "ca.pem")
     {
-        KiottyNetTlsClientConfiguration config;
-        std::memset(&config, 0, sizeof(config));
-        config.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
-        config.v12_cipher_suites = 0xF;
-        config.v13_cipher_suites = 0x1F;
-        copyText(config.trust_store_path, certPath(trust));
-        return config;
+        KiottyNetTlsClientConfiguration configuration;
+        std::memset(&configuration, 0, sizeof(configuration));
+        configuration.versions = KIOTTY_NET_TLS_VERSION_V12 | KIOTTY_NET_TLS_VERSION_V13;
+        configuration.v12_cipher_suites = 0xF;
+        configuration.v13_cipher_suites = 0x1F;
+        copyText(configuration.trust_store_path, certPath(trust));
+        return configuration;
     }
 
     inline void put(StageBase& stage, const std::string& bytes)

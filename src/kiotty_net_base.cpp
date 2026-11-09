@@ -18,9 +18,13 @@ namespace
         return result;
     }
 
-    net::NoDelay noDelayOf(bool no_delay)
+    template <typename Configuration>
+    size_t stagesOf(const Configuration& configuration)
     {
-        return no_delay ? net::NoDelay::ENABLED : net::NoDelay::DISABLED;
+        const size_t receive = configuration.receive_capacity;
+        const size_t send = configuration.send_capacity;
+        const size_t push = configuration.push_capacity;
+        return receive + send + push;
     }
 
     bool isUsable(const void* buffer, size_t length)
@@ -29,183 +33,198 @@ namespace
     }
 }
 
-KiottyNetCode KiottyNet_initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration* config,
-                                                         const char* cert_file,
-                                                         const char* key_file,
-                                                         const char* key_password)
+KiottyNetCode KiottyNet_initializeTlsServerConfiguration(
+    KiottyNetTlsServerConfiguration* configuration,
+    const char* certificate_file,
+    const char* key_file,
+    const char* key_password)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializeTlsServerConfiguration(*config, cert_file, key_file, key_password);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializeTlsServerConfiguration(
+        *configuration,
+        certificate_file,
+        key_file,
+        key_password);
 }
 
-KiottyNetCode KiottyNet_configureTlsServerVersions(KiottyNetTlsServerConfiguration* config,
-                                                   bool tls_1_2,
-                                                   bool tls_1_3)
+KiottyNetCode KiottyNet_configureTlsServerVersions(KiottyNetTlsServerConfiguration* configuration,
+                                                   uint32_t versions)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsServerVersions(*config, net::TlsVersions{ tls_1_2, tls_1_3 });
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsServerVersions(*configuration, versions);
 }
 
-KiottyNetCode KiottyNet_configureTlsServerV12CipherSuites(KiottyNetTlsServerConfiguration* config,
-                                                          uint32_t suites)
+KiottyNetCode KiottyNet_configureTlsServerV12CipherSuites(
+    KiottyNetTlsServerConfiguration* configuration,
+    uint32_t suites)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsServerV12CipherSuites(*config, suites);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsServerV12CipherSuites(*configuration, suites);
 }
 
-KiottyNetCode KiottyNet_configureTlsServerV13CipherSuites(KiottyNetTlsServerConfiguration* config,
-                                                          uint32_t suites)
+KiottyNetCode KiottyNet_configureTlsServerV13CipherSuites(
+    KiottyNetTlsServerConfiguration* configuration,
+    uint32_t suites)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsServerV13CipherSuites(*config, suites);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsServerV13CipherSuites(*configuration, suites);
 }
 
 KiottyNetCode KiottyNet_configureTlsServerClientAuthentication(
-    KiottyNetTlsServerConfiguration* config,
+    KiottyNetTlsServerConfiguration* configuration,
     KiottyNetClientAuthentication mode,
     const char* trust_store_path)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsServerClientAuthentication(*config, mode, trust_store_path);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsServerClientAuthentication(*configuration, mode, trust_store_path);
 }
 
-KiottyNetCode KiottyNet_initializeTlsClientConfiguration(KiottyNetTlsClientConfiguration* config)
+KiottyNetCode KiottyNet_initializeTlsClientConfiguration(
+    KiottyNetTlsClientConfiguration* configuration)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializeTlsClientConfiguration(*config);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializeTlsClientConfiguration(*configuration);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientVersions(KiottyNetTlsClientConfiguration* config,
-                                                   bool tls_1_2,
-                                                   bool tls_1_3)
+KiottyNetCode KiottyNet_configureTlsClientVersions(KiottyNetTlsClientConfiguration* configuration,
+                                                   uint32_t versions)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsClientVersions(*config, net::TlsVersions{ tls_1_2, tls_1_3 });
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientVersions(*configuration, versions);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientV12CipherSuites(KiottyNetTlsClientConfiguration* config,
-                                                          uint32_t suites)
+KiottyNetCode KiottyNet_configureTlsClientV12CipherSuites(
+    KiottyNetTlsClientConfiguration* configuration,
+    uint32_t suites)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsClientV12CipherSuites(*config, suites);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientV12CipherSuites(*configuration, suites);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientV13CipherSuites(KiottyNetTlsClientConfiguration* config,
-                                                          uint32_t suites)
+KiottyNetCode KiottyNet_configureTlsClientV13CipherSuites(
+    KiottyNetTlsClientConfiguration* configuration,
+    uint32_t suites)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsClientV13CipherSuites(*config, suites);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientV13CipherSuites(*configuration, suites);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientTrustStore(KiottyNetTlsClientConfiguration* config,
+KiottyNetCode KiottyNet_configureTlsClientTrustStore(KiottyNetTlsClientConfiguration* configuration,
                                                      const char* trust_store_path)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsClientTrustStore(*config, trust_store_path);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientTrustStore(*configuration, trust_store_path);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientVerification(KiottyNetTlsClientConfiguration* config,
-                                                       bool verify_server,
-                                                       bool verify_hostname)
+KiottyNetCode KiottyNet_configureTlsClientVerification(
+    KiottyNetTlsClientConfiguration* configuration,
+    KiottyNetTlsVerification verification)
 {
-    if (config == nullptr) { return INVALID; }
-    const net::TlsVerification verification{ verify_server, verify_hostname };
-    return net::configureTlsClientVerification(*config, verification);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientVerification(*configuration, verification);
 }
 
-KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfiguration* config,
-                                                   const char* cert_file,
+KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfiguration* configuration,
+                                                   const char* certificate_file,
                                                    const char* key_file,
                                                    const char* key_password)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureTlsClientIdentity(*config, cert_file, key_file, key_password);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureTlsClientIdentity(
+        *configuration,
+        certificate_file,
+        key_file,
+        key_password);
 }
 
-KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* config,
-                                                         const char* host,
-                                                         uint16_t port)
+KiottyNetCode KiottyNet_initializeTcpServerConfiguration(
+    KiottyNetServerConfiguration* configuration,
+    const char* host,
+    uint16_t port)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializeTcpServerConfiguration(*config, host, port);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializeTcpServerConfiguration(*configuration, host, port);
 }
 
-KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfiguration* config,
-                                                          const char* pipe_name)
+KiottyNetCode KiottyNet_initializePipeServerConfiguration(
+    KiottyNetServerConfiguration* configuration,
+    const char* pipe_name)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializePipeServerConfiguration(*config, pipe_name);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializePipeServerConfiguration(*configuration, pipe_name);
 }
 
-KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* config,
+KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration,
                                                   size_t max_clients)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureServerMaxClients(*config, max_clients);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureServerMaxClients(*configuration, max_clients);
 }
 
-KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* config,
+KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* configuration,
                                                       size_t receive_capacity,
                                                       size_t send_capacity,
                                                       size_t push_capacity)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureServerBufferCapacity(*config, receive_capacity, send_capacity,
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureServerBufferCapacity(*configuration, receive_capacity, send_capacity,
                                               push_capacity);
 }
 
-KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* config,
-                                               bool no_delay)
+KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration,
+                                               KiottyNetNoDelay no_delay)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureServerNoDelay(*config, noDelayOf(no_delay));
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureServerNoDelay(*configuration, no_delay);
 }
 
-KiottyNetCode KiottyNet_initializeTcpClientConfiguration(KiottyNetClientConfiguration* config,
-                                                         const char* host,
-                                                         uint16_t port)
+KiottyNetCode KiottyNet_initializeTcpClientConfiguration(
+    KiottyNetClientConfiguration* configuration,
+    const char* host,
+    uint16_t port)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializeTcpClientConfiguration(*config, host, port);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializeTcpClientConfiguration(*configuration, host, port);
 }
 
-KiottyNetCode KiottyNet_initializePipeClientConfiguration(KiottyNetClientConfiguration* config,
-                                                          const char* pipe_name)
+KiottyNetCode KiottyNet_initializePipeClientConfiguration(
+    KiottyNetClientConfiguration* configuration,
+    const char* pipe_name)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::initializePipeClientConfiguration(*config, pipe_name);
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializePipeClientConfiguration(*configuration, pipe_name);
 }
 
-KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* config,
+KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* configuration,
                                                       size_t receive_capacity,
                                                       size_t send_capacity,
                                                       size_t push_capacity)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureClientBufferCapacity(*config, receive_capacity, send_capacity,
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureClientBufferCapacity(*configuration, receive_capacity, send_capacity,
                                               push_capacity);
 }
 
-KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* config,
+KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration,
                                                       uint32_t timeout_milliseconds)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureClientConnectTimeout(*config, timeout_milliseconds);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureClientConnectTimeout(*configuration, timeout_milliseconds);
 }
 
-KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* config,
+KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration,
                                              uint32_t max_trial,
                                              uint32_t trial_interval_milliseconds)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureClientRetry(*config, max_trial, trial_interval_milliseconds);
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureClientRetry(*configuration, max_trial, trial_interval_milliseconds);
 }
 
-KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* config,
-                                               bool no_delay)
+KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration,
+                                               KiottyNetNoDelay no_delay)
 {
-    if (config == nullptr) { return INVALID; }
-    return net::configureClientNoDelay(*config, noDelayOf(no_delay));
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureClientNoDelay(*configuration, no_delay);
 }
 
 KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds)
@@ -319,30 +338,31 @@ void KiottyNet_releaseContext(KiottyNetContext context)
     context->release();
 }
 
-size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config)
+size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* configuration)
 {
-    if (config == nullptr || !net::isInitialized(*config)) { return 0; }
-    const size_t stages = config->receive_capacity + config->send_capacity + config->push_capacity;
-    return sizeof(KiottyNetServer) + config->max_clients * (sizeof(net::Connection) + stages);
+    if (configuration == nullptr || !net::isInitialized(*configuration)) { return 0; }
+    const size_t stages = stagesOf(*configuration);
+    const size_t connection = sizeof(net::Connection) + stages;
+    return sizeof(KiottyNetServer) + configuration->max_clients * connection;
 }
 
-size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* config)
+size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* configuration)
 {
-    if (config == nullptr || !net::isInitialized(*config)) { return 0; }
+    if (configuration == nullptr || !net::isInitialized(*configuration)) { return 0; }
     const size_t event = sizeof(KiottyNetEventClient);
     const size_t stream = sizeof(KiottyNetStreamClient);
     const size_t largest = event > stream ? event : stream;
-    return largest + config->receive_capacity + config->send_capacity + config->push_capacity;
+    return largest + stagesOf(*configuration);
 }
 
 KiottyNetStreamClientResult KiottyNet_createStreamClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* config,
+    const KiottyNetClientConfiguration* configuration,
     const KiottyNetTlsClientConfiguration* tls)
 {
     KiottyNetStreamClientResult result = { INVALID, nullptr };
-    if (context == nullptr || config == nullptr) { return result; }
-    const net::StreamClientResult created = context->createStreamClient(*config, tls);
+    if (context == nullptr || configuration == nullptr) { return result; }
+    const net::StreamClientResult created = context->createStreamClient(*configuration, tls);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;
@@ -386,12 +406,12 @@ KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
 
 KiottyNetEventClientResult KiottyNet_createEventClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* config,
+    const KiottyNetClientConfiguration* configuration,
     const KiottyNetTlsClientConfiguration* tls)
 {
     KiottyNetEventClientResult result = { INVALID, nullptr };
-    if (context == nullptr || config == nullptr) { return result; }
-    const net::EventClientResult created = context->createEventClient(*config, tls);
+    if (context == nullptr || configuration == nullptr) { return result; }
+    const net::EventClientResult created = context->createEventClient(*configuration, tls);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;
@@ -437,12 +457,12 @@ KiottyNetCode KiottyNet_notifyEventClient(KiottyNetEventClientHandle client, Kio
 }
 
 KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context,
-                                             const KiottyNetServerConfiguration* config,
+                                             const KiottyNetServerConfiguration* configuration,
                                              const KiottyNetTlsServerConfiguration* tls)
 {
     KiottyNetServerResult result = { INVALID, nullptr };
-    if (context == nullptr || config == nullptr) { return result; }
-    const net::ServerResult created = context->createServer(*config, tls);
+    if (context == nullptr || configuration == nullptr) { return result; }
+    const net::ServerResult created = context->createServer(*configuration, tls);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;

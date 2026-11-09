@@ -28,6 +28,9 @@ typedef struct KiottyTestHeaderLayout
     size_t stream_client_result;
     size_t transition;
     size_t rule;
+    size_t rule_next_count;
+    int    rule_second_next;
+    int    last_tls_verification;
     int    last_code;
     int    last_action_type;
 } KiottyTestHeaderLayout;

@@ -46,7 +46,7 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
     EXPECT_EQ(4096u, configuration.receive_capacity);
     EXPECT_EQ(4096u, configuration.send_capacity);
     EXPECT_EQ(4096u, configuration.push_capacity);
-    EXPECT_TRUE(configuration.no_delay);
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
 }
 
 TEST(Configuration, ClientDefaultsAreTheRequirementValues)
@@ -56,7 +56,7 @@ TEST(Configuration, ClientDefaultsAreTheRequirementValues)
     EXPECT_EQ(5000u, configuration.connect_timeout_milliseconds);
     EXPECT_EQ(1u, configuration.max_trial);
     EXPECT_EQ(1000u, configuration.trial_interval_milliseconds);
-    EXPECT_TRUE(configuration.no_delay);
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
     EXPECT_STREQ("127.0.0.1", net::hostnameOf(configuration));
 }
 
@@ -112,9 +112,20 @@ TEST(Configuration, ConfigureWithoutInitializeIsInvalidArgument)
     KiottyNetClientConfiguration client{};
     EXPECT_FALSE(net::isInitialized(server));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerMaxClients(server, 1));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, net::NoDelay::DISABLED));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, KIOTTY_NET_NO_DELAY_OFF));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientRetry(client, 1, 0));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientConnectTimeout(client, 1));
+}
+
+TEST(Configuration, UnknownNoDelayIsInvalidArgument)
+{
+    KiottyNetServerConfiguration server{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpServerConfiguration(server, "127.0.0.1", 8080));
+    const KiottyNetNoDelay unknown = static_cast<KiottyNetNoDelay>(2);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, unknown));
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, server.no_delay);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerNoDelay(server, KIOTTY_NET_NO_DELAY_OFF));
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_OFF, server.no_delay);
 }
 
 TEST(Configuration, InitializeRejectsMissingHostZeroPortAndTooLongHost)
@@ -158,30 +169,30 @@ TEST(TlsConfiguration, ServerDefaultsAndRejectedValues)
     EXPECT_EQ(0xFu, configuration.v12_cipher_suites);
     EXPECT_EQ(0x1Fu, configuration.v13_cipher_suites);
     EXPECT_EQ(KIOTTY_NET_CLIENT_AUTHENTICATION_NONE, configuration.client_authentication);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerVersions(configuration, net::TlsVersions{ false, false }));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerVersions(configuration, 0u));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerVersions(configuration, 0x4u));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerV12CipherSuites(configuration, 0));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerV13CipherSuites(configuration, 0x20));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerClientAuthentication(configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_NONE, "ca.pem"));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsServerClientAuthentication(configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED, nullptr));
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsServerClientAuthentication(configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED, "ca.pem"));
     EXPECT_STREQ("ca.pem", configuration.trust_store_path);
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsServerVersions(configuration, net::TlsVersions{ false, true }));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsServerVersions(configuration, static_cast<uint32_t>(KIOTTY_NET_TLS_VERSION_V13)));
     EXPECT_EQ(static_cast<uint32_t>(KIOTTY_NET_TLS_VERSION_V13), configuration.versions);
 }
 
-TEST(TlsConfiguration, ClientDefaultsVerifyAndHostnameAloneIsRejected)
+TEST(TlsConfiguration, ClientDefaultsVerifyServerAndHostnameAndUnknownVerificationIsRejected)
 {
     KiottyNetTlsClientConfiguration configuration{};
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTlsClientConfiguration(configuration));
-    EXPECT_EQ(0, configuration.skip_server_verification);
-    EXPECT_EQ(0, configuration.skip_hostname_verification);
+    EXPECT_EQ(KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME, configuration.verification);
     EXPECT_STREQ("", configuration.trust_store_path);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsClientVerification(configuration, net::TlsVerification{ false, true }));
-    EXPECT_EQ(0, configuration.skip_server_verification);
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsClientVerification(configuration, net::TlsVerification{ true, false }));
-    EXPECT_EQ(0, configuration.skip_server_verification);
-    EXPECT_EQ(1, configuration.skip_hostname_verification);
+    const KiottyNetTlsVerification unknown = static_cast<KiottyNetTlsVerification>(3);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsClientVerification(configuration, unknown));
+    EXPECT_EQ(KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME, configuration.verification);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsClientVerification(configuration, KIOTTY_NET_TLS_VERIFICATION_SERVER));
+    EXPECT_EQ(KIOTTY_NET_TLS_VERIFICATION_SERVER, configuration.verification);
     std::string too_long_password(KIOTTY_NET_MAX_PASSWORD_LENGTH, 'p');
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureTlsClientIdentity(configuration, "cert.pem", "key.pem", too_long_password.c_str()));
-    EXPECT_STREQ("", configuration.identity.cert_file);
+    EXPECT_STREQ("", configuration.identity.certificate_file);
 }

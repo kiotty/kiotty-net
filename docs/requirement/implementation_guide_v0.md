@@ -460,15 +460,15 @@ int runEchoServer(uint16_t port)
     static SessionPool<ServerSession, 32> sessions = {};
     KiottyNetStatefulAppContext           stateful = { &sessions, &SERVER_MACHINE, &SessionPool<ServerSession, 32>::acquire, &SessionPool<ServerSession, 32>::release };
 
-    KiottyNetServerConfiguration config;
-    if (KiottyNet_ServerConfigurationBuilder::tcp(config, "0.0.0.0", port).maxClients(32).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetServerConfiguration configuration;
+    if (KiottyNet_ServerConfigurationBuilder::tcp(configuration, "0.0.0.0", port).maxClients(32).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     KiottyNet_Context context;
-    KiottyNet_Server  server(context.handle(), config);
-    if (!context.valid() || !server.valid())
+    KiottyNet_Server  server(context.handle(), configuration);
+    if (!context || !server)
     {
         return 1;
     }
@@ -579,15 +579,15 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
 
     KiottyNetStatefulAppContext stateful = { &session, &CLIENT_MACHINE, &singleSession, nullptr };   // release 는 할 일이 없어서 NULL
 
-    KiottyNetClientConfiguration config;
-    if (KiottyNet_ClientConfigurationBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetClientConfiguration configuration;
+    if (KiottyNet_ClientConfigurationBuilder::tcp(configuration, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     KiottyNet_Context     context;
-    KiottyNet_EventClient client(context.handle(), config);
-    if (!context.valid() || !client.valid())
+    KiottyNet_EventClient client(context.handle(), configuration);
+    if (!context || !client)
     {
         return 1;
     }
@@ -628,15 +628,15 @@ int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
     std::memcpy(frame + HEADER_LENGTH, message.data, message.length);
     KiottyNetSpan request = { frame, HEADER_LENGTH + message.length };
 
-    KiottyNetClientConfiguration config;
-    if (KiottyNet_ClientConfigurationBuilder::tcp(config, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetClientConfiguration configuration;
+    if (KiottyNet_ClientConfigurationBuilder::tcp(configuration, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     KiottyNet_Context      context;
-    KiottyNet_StreamClient client(context.handle(), config);
-    if (!context.valid() || !client.valid() || client.connect() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNet_StreamClient client(context.handle(), configuration);
+    if (!context || !client || client.connect() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -777,21 +777,21 @@ static const KiottyNetStatefulAppContext SERVER_APP = { NULL, &SERVER_MACHINE, a
 int run_echo_server(uint16_t port)
 {
     KiottyNetContext      context;
-    KiottyNetServerConfiguration config;
+    KiottyNetServerConfiguration configuration;
     KiottyNetServerHandle server;
     KiottyNetCode         code;
 
-    if (KiottyNet_initializeTcpServerConfiguration(&config, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
+    if (KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
-    KiottyNet_configureServerMaxClients(&config, 32);
+    KiottyNet_configureServerMaxClients(&configuration, 32);
     context = KiottyNet_initializeContext();
     if (context == NULL)
     {
         return 1;
     }
-    server = KiottyNet_createServer(context, &config, NULL);
+    server = KiottyNet_createServer(context, &configuration, NULL);
     if (server == NULL)
     {
         KiottyNet_releaseContext(context);
@@ -838,14 +838,14 @@ struct HttpServer {
     RouteEntry*           _routes;                     // limits.max_routes 개
     size_t                _route_count;
     KiottyNetHttpRoute    _not_found;                  // onRequest == NULL 이면 미등록
-    HttpSession*          _sessions;                   // config.max_clients 개 (4.2)
+    HttpSession*          _sessions;                   // configuration.max_clients 개 (4.2)
     int32_t*              _free;                       // 비어 있는 session index 의 stack
     size_t                _free_count;
     bool                  _running;                    // run 뒤의 등록은 KIOTTY_NET_CODE_BUSY
 };
 ```
 
-- `createHttpServer` 는 `_server = KiottyNet_createServer(context, config, tls)` 를 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
+- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration, tls)` 를 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
 - `sessionBytes(limits) = sizeof(HttpSession) + max_header_bytes + max_headers × sizeof(KiottyNetHttpHeader) + max_body_bytes + response_bytes`. 곱셈과 덧셈은 오버플로를 먼저 검사한다.
 - `KiottyNet_destroyHttpServer` 는 base Server 를 destroy 하고 블록을 돌려준다. run 이 return 한 뒤에만 불린다는 것은 사용자 규칙이다 (base 와 같다).
 

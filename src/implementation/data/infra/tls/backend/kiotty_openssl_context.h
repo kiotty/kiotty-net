@@ -7,8 +7,8 @@
 namespace kiotty::net::implementation
 {
     KiottyNetCode prepareServerContext(SSL_CTX* context,
-                                       const KiottyNetTlsServerConfiguration& config);
+                                       const KiottyNetTlsServerConfiguration& configuration);
     KiottyNetCode prepareClientContext(SSL_CTX* context,
-                                       const KiottyNetTlsClientConfiguration& config);
+                                       const KiottyNetTlsClientConfiguration& configuration);
     int           clientVerifyMode(KiottyNetClientAuthentication authentication);
 }

@@ -526,7 +526,7 @@ DV13 이 미룬 것의 제안이다. 공개 헤더는 사용자가 지정한 모
 | 지금 | v1 |
 |---|---|
 | `KiottyNet_configureTlsServerVersions(config, bool tls_1_2, bool tls_1_3)`, `...TlsClientVersions` | `(configuration, uint32_t versions)`. `KIOTTY_NET_TLS_VERSION_V12 \| V13` 의 비트 합. 이미 그런 enum 이고 struct 의 `versions` 도 그 값이다. 0 이면 INVALID_ARGUMENT |
-| `KiottyNet_configureTlsClientVerification(config, bool verify_server, bool verify_hostname)` | `(configuration, KiottyNetTlsVerification verification)`. `enum { KIOTTY_NET_TLS_VERIFICATION_NONE, _SERVER, _SERVER_AND_HOSTNAME }`. hostname 만 검증하는 조합은 뜻이 없어 셋이다. struct 의 `int skip_server_verification, skip_hostname_verification` → `KiottyNetTlsVerification verification` 하나 |
+| `KiottyNet_configureTlsClientVerification(config, bool verify_server, bool verify_hostname)` | `(configuration, KiottyNetTlsVerification verification)`. `enum { KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME, _SERVER, _NONE }`. 0 이 가장 엄격한 값이라 0 으로 채운 struct 도 검증한다 (전의 `skip_*` 필드와 같은 성질). hostname 만 검증하는 조합은 뜻이 없어 셋이다. struct 의 `int skip_server_verification, skip_hostname_verification` → `KiottyNetTlsVerification verification` 하나 |
 | `KiottyNet_configureServerNoDelay(config, bool)`, `...ClientNoDelay` | `(configuration, KiottyNetNoDelay no_delay)`. `enum { KIOTTY_NET_NO_DELAY_OFF, _ON }`. struct 의 `bool no_delay` → `KiottyNetNoDelay no_delay`. 내부의 `enum class NoDelay` 와 맞는다 |
 | C++ builder 의 `versions(bool, bool)`, `verification(bool, bool)`, `noDelay(bool)` | 같은 enum / 비트 합 |
 
@@ -554,7 +554,7 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 
 | 지금 | v1 |
 |---|---|
-| `KiottyNet_writeConnectionStreamFile(stream, path, offset, length, timeout)` | `(stream, path, KiottyNetFileRange range, timeout)`. `KiottyNetFileRange { uint64_t offset; uint64_t length; }`. 내부의 `FileRange` 와 같은 모양. C++ `KiottyNet_ConnectionStream::writeFile(path, range, timeout)` |
+| `KiottyNet_writeConnectionStreamFile(stream, path, offset, length, timeout)` | 그대로 (사용자 결정 2026-11-09). offset 과 length 를 따로 받고 7 개 한계와의 차이는 DV13 에 둔다 |
 | `kiotty::net::Rule` 의 8 인자 생성자 | 2절. `KiottyNetNextStates` |
 | `KiottyNet_HttpServer::route(method, path, on_request, on_work_started, app_context)` 와 메서드별 별칭의 5 인자 overload | 없앤다. 남는 overload 는 `(method, path, KiottyNetHttpRoute)` 와 `(method, path, KiottyNetHttpRequestAction)` (context 없고 Work 없는 라우트) 둘. 셋 다 필요하면 `KiottyNet_makeHttpRoute(context, onRequest, onWorkStarted)` 로 값을 만들어 넘긴다 (C 와 같은 모양) |
 
@@ -585,7 +585,7 @@ base 의 사이클 정의 (`plan_base_v0.md` 0절: 로컬 두 환경 초록, com
 
 | 사이클 | 하는 것 | 완료 |
 |---|---|---|
-| M1 공개 API 판 v1 | 12.1, 12.2, 12.4 ~ 12.6 중 사용자가 정한 것. 이름 표, 테스트와 user_guide 의 이름 | 매트릭스 초록. 네 헤더가 C++17 과 C99 로 syntax check 통과 |
+| M1 공개 API 판 v1 (끝, 2026-11-09) | 2절의 statemachine.h 넷, 12.1, 12.2, 12.4 (파일 쓰기 제외), 12.5, 12.6. 이름 표, 테스트와 user_guide 의 이름 | 매트릭스 초록. 네 헤더가 C++17 과 C99 로 syntax check 통과 |
 | M2 core (DV12) | 8절. FixedString, parse 셋, 8.3 의 표 | 수칙 2.10 의 다섯 × 3 통과. `grep "const char\*" src/implementation` 이 리터럴 message 와 parseText 뿐 |
 | M3 Handler | 3절, 5절, 6절의 `run(const Handler&)`, CallbackHandler, Connection 의 `_machine_state`, onWorkReady | 기존 테스트 전부 그대로 통과 (동작 변화 없음). `EchoRoundtrip` 전후 비교 |
 | M4 StatefulHandler | 4절, statemachine.cpp, 10절의 unit + integration, 구현 가이드 3절의 echo 예제가 테스트로 | 매트릭스 초록 |

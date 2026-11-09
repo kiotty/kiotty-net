@@ -22,7 +22,7 @@
 HttpServer 는 소유 handle 이다. `KiottyNet_createHttpServer` 가 만들고 `KiottyNet_destroyHttpServer` 가 없앤다. 만들 때 세 가지를 넘긴다.
 
 1. `KiottyNetContext` : `KiottyNet_initializeContext()` 로 만든 라이브러리 전역 컨텍스트. 소유 handle 은 모두 같은 context 를 받고, destroy 때도 같은 context 를 넘긴다.
-2. `KiottyNetServerConfiguration` : 주소와 `max_clients`, 버퍼 크기. `KiottyNet_initializeTcpServerConfiguration(&config, host, port)` 또는 `KiottyNet_initializePipeServerConfiguration(&config, name)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 따로 만들어 넘기고, 평문이면 `NULL`.
+2. `KiottyNetServerConfiguration` : 주소와 `max_clients`, 버퍼 크기. `KiottyNet_initializeTcpServerConfiguration(&configuration, host, port)` 또는 `KiottyNet_initializePipeServerConfiguration(&configuration, name)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 따로 만들어 넘기고, 평문이면 `NULL`.
 3. `KiottyNetHttpLimits` : HTTP 층의 고정 크기 버퍼와 timeout. 아래 표.
 
 `KiottyNet_initializeHttpLimits(&limits)` 가 모든 필드를 기본값으로 채우고, `KiottyNet_configureHttp*` 가 하나씩 바꾼다. 다른 설정 struct 와 같은 규칙이다. 함수가 값을 검사하고 `KiottyNetCode` 를 돌려주며, 잘못된 값이면 struct 를 바꾸지 않는다.
@@ -98,7 +98,7 @@ KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, Kiotty
 
 ### 1.4 응답 채우기
 
-응답은 pool handle `KiottyNetHttpResponseHandle` 로 채운다. Connection 마다 `response_bytes` 크기의 버퍼가 있고 setter 는 거기에 쓴다.
+응답은 handle `KiottyNetHttpResponseHandle { server, id }` 로 채운다 (base 의 `KiottyNetConnectionHandle` 과 같은 모양). Connection 마다 `response_bytes` 크기의 버퍼가 있고 setter 는 거기에 쓴다.
 
 | 함수 | 하는 일 | 실패 |
 |---|---|---|
@@ -217,16 +217,16 @@ int main(void)
 {
     KiottyNetContext context = KiottyNet_initializeContext();
 
-    KiottyNetServerConfiguration config;
-    KiottyNet_initializeTcpServerConfiguration(&config, "0.0.0.0", 8080);
-    KiottyNet_configureServerMaxClients(&config, 16);
+    KiottyNetServerConfiguration configuration;
+    KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", 8080);
+    KiottyNet_configureServerMaxClients(&configuration, 16);
 
     KiottyNetHttpLimits limits;
     KiottyNet_initializeHttpLimits(&limits);
     KiottyNet_configureHttpBodyCapacity(&limits, 16 * 1024);
 
     App app = { create_pool(4) };
-    KiottyNetHttpServerHandle server = KiottyNet_createHttpServer(context, &config, NULL, &limits);
+    KiottyNetHttpServerHandle server = KiottyNet_createHttpServer(context, &configuration, NULL, &limits);
 
     KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health",         KiottyNet_makeHttpRoute(&app, onHealth, NULL));
     KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/devices/*", KiottyNet_makeHttpRoute(&app, onDevice, NULL));
@@ -258,26 +258,28 @@ int main()
 {
     KiottyNet_Context context;
 
-    KiottyNetServerConfiguration config;
-    KiottyNet_ServerConfigurationBuilder::tcp(config, "0.0.0.0", 8080).maxClients(16).build();
+    KiottyNetServerConfiguration configuration;
+    KiottyNet_ServerConfigurationBuilder::tcp(configuration, "0.0.0.0", 8080).maxClients(16).build();
 
     KiottyNetHttpLimits limits;
     KiottyNet_HttpLimitsBuilder(limits).bodyCapacity(16 * 1024).build();
 
     App                  app;
-    KiottyNet_HttpServer server(context.handle(), config, limits);
+    KiottyNet_HttpServer server(context.handle(), configuration, limits);
 
     server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r)
     {
         KiottyNet_HttpResponse(r).status(200);
     });
 
-    server.get("/api/devices/*", [](KiottyNetAppContext ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r)
-    {
-        KiottyNet_HttpResponse(r).body(static_cast<App*>(ctx)->render(q->path), "application/json");
-    }, nullptr, &app);
+    server.get("/api/devices/*", KiottyNet_makeHttpRoute(&app,
+        [](KiottyNetAppContext ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r)
+        {
+            KiottyNet_HttpResponse(r).body(static_cast<App*>(ctx)->render(q->path), "application/json");
+        },
+        nullptr));
 
-    server.get("/api/report",
+    server.get("/api/report", KiottyNet_makeHttpRoute(&app,
         [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r)
         {
             KiottyNet_HttpResponse(r).startWork();
@@ -296,8 +298,7 @@ int main()
                 KiottyNet_HttpResponse(r).body({ json.data(), json.size() }, "application/json");
                 work.finishWithResponse();
             });
-        },
-        &app);
+        }));
 
     server.serveMemory("/app.wasm", wasmSpan(), "application/wasm");
     server.serveDirectory("/", "./www/");
