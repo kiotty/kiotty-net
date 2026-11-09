@@ -31,7 +31,8 @@
 ## 정할 것
 
 1. timeout 0 의 뜻. 라이브러리 전체 (`await`, stream read / write, connect, action 의 timeout) 가 0 = 제한 없음이다 (`SO_RCVTIMEO` 와 같은 관례). `await` 만 0 = 바로 확인으로 바꾸면 어긋난다.
-2. ReadHeavy 의 원인 조사.
+2. IoLoop 의 바퀴가 연결 수가 아니라 `max_clients` 에 비례한다. `drain` (slot 마다 notification mutex), `releaseSettled`, `waitTimeout`, `stepLocalEvents` (최소 한 번) 가 매 바퀴 `host.capacity()` 전체를 돈다. 연결 하나에서 echo 왕복이 max_clients 16 이면 203 µs, 1024 면 257 µs (WSL2, 5 회 중앙값), 4096 이면 ReadHeavy 가 96 MiB/s 까지 떨어졌다. 고칠 길: ConnectionHost 가 활성 slot 목록을 들고 바퀴가 그것만 돈다, drain 의 mutex 를 한 번만 잡는다.
+3. 수신 Stage 상한을 256 KiB 로 올려도 (`KIOTTY_NET_MAX_RECEIVE_CAPACITY`) WSL2 에서는 서버, EventClient, StreamClient 읽기가 모두 약 1 GiB/s 에서 멈춘다. 바퀴 비용을 고친 뒤 CI 에서 다시 잰다.
 
 ## 다음 할 일
 

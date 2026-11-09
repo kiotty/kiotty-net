@@ -25,6 +25,7 @@ namespace
     const size_t   CHUNK_BYTES = 16384;
     const size_t   HEAVY_BYTES = 1024 * 1024;
     const uint64_t FILE_BYTES = 64ULL * 1024 * 1024;
+    const size_t   DEFAULT_MAX_CLIENTS = 1024;
 
     enum class Role : uint8_t
     {
@@ -43,7 +44,7 @@ namespace
             , drained(0)
             , stream_owner(nullptr)
             , stream_id(0)
-            , echo()
+            , chunk(CHUNK_BYTES)
         {
         }
 
@@ -54,7 +55,7 @@ namespace
         std::atomic<uint64_t>           drained;
         std::atomic<KiottyNetEndpoint*> stream_owner;
         std::atomic<int64_t>            stream_id;
-        std::vector<char>               echo;
+        size_t                          chunk;
     };
 
     struct Slot
@@ -85,7 +86,7 @@ namespace
         case Role::ECHO:
             return KiottyNet_thenRead(MESSAGE_BYTES, 0);
         case Role::DRAIN:
-            return KiottyNet_thenRead(CHUNK_BYTES, 0);
+            return KiottyNet_thenRead(app.chunk, 0);
         case Role::WORK:
             return KiottyNet_thenWork();
         }
@@ -100,7 +101,7 @@ namespace
         if (app.role == Role::DRAIN)
         {
             app.drained.fetch_add(data.length);
-            return KiottyNet_thenRead(CHUNK_BYTES, 0);
+            return KiottyNet_thenRead(app.chunk, 0);
         }
         std::memcpy(slot.message, data.data, data.length);
         KiottyNetSpan echo = { slot.message, data.length };
@@ -156,7 +157,7 @@ namespace
     class BenchServer
     {
     public:
-        BenchServer(Role role, bool tls)
+        BenchServer(Role role, bool tls, size_t receive_capacity = CHUNK_BYTES, size_t max_clients = DEFAULT_MAX_CLIENTS)
             : app(role)
             , port(kiotty_test::unusedPort())
             , _context(KiottyNet_initializeContext().handle)
@@ -165,7 +166,10 @@ namespace
         {
             KiottyNetServerConfiguration configuration;
             (void)KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port);
-            (void)KiottyNet_configureServerBufferCapacity(&configuration, CHUNK_BYTES, CHUNK_BYTES, CHUNK_BYTES);
+            (void)KiottyNet_configureServerMaxClients(&configuration, max_clients);
+            app.chunk = receive_capacity;
+            const KiottyNetCode sized = KiottyNet_configureServerBufferCapacity(&configuration, receive_capacity, CHUNK_BYTES, CHUNK_BYTES);
+            if (sized != KIOTTY_NET_CODE_SUCCESS) { return; }
             KiottyNetTlsServerConfiguration secure;
             const std::string cert = certPath("server.pem");
             const std::string key = certPath("server.key");
@@ -269,7 +273,7 @@ namespace
 
 static void EchoRoundtrip(benchmark::State& state)
 {
-    BenchServer bench(Role::ECHO, false);
+    BenchServer bench(Role::ECHO, false, CHUNK_BYTES, static_cast<size_t>(state.range(1)));
     const int clients = static_cast<int>(state.range(0));
     std::vector<std::unique_ptr<kiotty_test::LoopbackPeer>> peers;
     for (int i = 0; i < clients; ++i)
@@ -291,11 +295,12 @@ static void EchoRoundtrip(benchmark::State& state)
     state.SetItemsProcessed(state.iterations() * clients);
     state.SetBytesProcessed(state.iterations() * clients * static_cast<int64_t>(MESSAGE_BYTES));
 }
-BENCHMARK(EchoRoundtrip)->Arg(1)->Arg(128)->UseRealTime();
+BENCHMARK(EchoRoundtrip)->ArgNames({ "clients", "max_clients" })->Args({ 1, 16 })->Args({ 1, 1024 })->Args({ 128, 1024 })->UseRealTime();
 
 static void ReadHeavy(benchmark::State& state)
 {
-    BenchServer bench(Role::DRAIN, false);
+    BenchServer bench(Role::DRAIN, false, static_cast<size_t>(state.range(0)), static_cast<size_t>(state.range(1)));
+    if (!bench.valid()) { state.SkipWithError("receive capacity above the compile time maximum"); return; }
     kiotty_test::LoopbackPeer peer;
     if (!peer.connectTcp(bench.port) || !waitFor(bench.app.ready, 1)) { state.SkipWithError("connect failed"); return; }
     std::vector<char> payload(HEAVY_BYTES, 'r');
@@ -309,7 +314,7 @@ static void ReadHeavy(benchmark::State& state)
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
 }
-BENCHMARK(ReadHeavy)->UseRealTime();
+BENCHMARK(ReadHeavy)->ArgNames({ "receive", "max_clients" })->ArgsProduct({ { 16384, 65536, 262144 }, { 16, 1024 } })->UseRealTime();
 
 static void WriteHeavy(benchmark::State& state)
 {
@@ -462,5 +467,216 @@ static void StreamWriteFile64MiB(benchmark::State& state)
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(FILE_BYTES));
 }
 BENCHMARK(StreamWriteFile64MiB)->Iterations(4)->UseRealTime();
+
+namespace
+{
+    class BenchContext
+    {
+    public:
+        BenchContext()
+            : handle(KiottyNet_initializeContext().handle)
+        {
+        }
+
+        ~BenchContext()
+        {
+            KiottyNet_releaseContext(handle);
+        }
+
+        BenchContext(const BenchContext&) = delete;
+        BenchContext& operator=(const BenchContext&) = delete;
+
+        KiottyNetContext handle;
+    };
+
+    KiottyNetClientConfiguration clientConfiguration(uint16_t port, size_t receive_capacity, bool& sized)
+    {
+        KiottyNetClientConfiguration configuration;
+        (void)KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, port);
+        const KiottyNetCode code = KiottyNet_configureClientBufferCapacity(&configuration, receive_capacity, CHUNK_BYTES, CHUNK_BYTES);
+        sized = code == KIOTTY_NET_CODE_SUCCESS;
+        return configuration;
+    }
+
+    class BenchEventClient
+    {
+    public:
+        BenchEventClient(KiottyNetContext context, uint16_t port, Role role, size_t receive_capacity)
+            : app(role)
+            , _context(context)
+            , _client(nullptr)
+            , _thread()
+        {
+            bool sized = false;
+            const KiottyNetClientConfiguration configuration = clientConfiguration(port, receive_capacity, sized);
+            if (!sized) { return; }
+            app.chunk = receive_capacity;
+            _client = KiottyNet_createEventClient(_context, &configuration, nullptr).handle;
+            if (_client == nullptr) { return; }
+            _thread = std::thread([this]() { (void)KiottyNet_runEventClient(_client, &HANDLER, &app); });
+        }
+
+        ~BenchEventClient()
+        {
+            if (_client == nullptr) { return; }
+            KiottyNet_closeEventClient(_client);
+            _thread.join();
+            KiottyNet_destroyEventClient(_context, _client);
+        }
+
+        BenchEventClient(const BenchEventClient&) = delete;
+        BenchEventClient& operator=(const BenchEventClient&) = delete;
+
+        bool valid() const
+        {
+            return _client != nullptr;
+        }
+
+        KiottyNetConnectionStream stream() const
+        {
+            return KiottyNetConnectionStream{ app.stream_owner.load(), app.stream_id.load() };
+        }
+
+        App app;
+
+    private:
+        KiottyNetContext           _context;
+        KiottyNetEventClientHandle _client;
+        std::thread                _thread;
+    };
+
+    class BenchStreamClient
+    {
+    public:
+        BenchStreamClient(KiottyNetContext context, uint16_t port, size_t receive_capacity)
+            : _context(context)
+            , _client(nullptr)
+        {
+            bool sized = false;
+            const KiottyNetClientConfiguration configuration = clientConfiguration(port, receive_capacity, sized);
+            if (!sized) { return; }
+            _client = KiottyNet_createStreamClient(_context, &configuration, nullptr).handle;
+        }
+
+        ~BenchStreamClient()
+        {
+            if (_client == nullptr) { return; }
+            KiottyNet_disconnectStreamClient(_client);
+            KiottyNet_destroyStreamClient(_context, _client);
+        }
+
+        BenchStreamClient(const BenchStreamClient&) = delete;
+        BenchStreamClient& operator=(const BenchStreamClient&) = delete;
+
+        KiottyNetStreamClientHandle get() const
+        {
+            return _client;
+        }
+
+    private:
+        KiottyNetContext            _context;
+        KiottyNetStreamClientHandle _client;
+    };
+
+    bool writeAll(kiotty_test::LoopbackPeer& peer, const std::vector<char>& payload)
+    {
+        return peer.sendAll(payload.data(), payload.size());
+    }
+}
+
+static void EventClientReadHeavy(benchmark::State& state)
+{
+    BenchContext context;
+    kiotty_test::LoopbackPeer peer;
+    const uint16_t port = kiotty_test::unusedPort();
+    if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
+    BenchEventClient client(context.handle, port, Role::DRAIN, static_cast<size_t>(state.range(0)));
+    if (!client.valid()) { state.SkipWithError("receive capacity above the compile time maximum"); return; }
+    if (!peer.accept(WAIT_MS) || !waitFor(client.app.ready, 1)) { state.SkipWithError("connect failed"); return; }
+    std::vector<char> payload(HEAVY_BYTES, 'r');
+    uint64_t expected = 0;
+    for (auto _ : state)
+    {
+        (void)writeAll(peer, payload);
+        expected += payload.size();
+        const bool drained = spinUntil([&]() { return client.app.drained.load() >= expected; });
+        if (!drained) { state.SkipWithError("drain stalled"); return; }
+    }
+    state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
+}
+BENCHMARK(EventClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->Arg(262144)->UseRealTime();
+
+static void EventClientWriteHeavy(benchmark::State& state)
+{
+    BenchContext context;
+    kiotty_test::LoopbackPeer peer;
+    const uint16_t port = kiotty_test::unusedPort();
+    if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
+    BenchEventClient client(context.handle, port, Role::WORK, CHUNK_BYTES);
+    if (!client.valid() || !peer.accept(WAIT_MS) || !waitFor(client.app.work_started, 1)) { state.SkipWithError("connect failed"); return; }
+    const KiottyNetConnectionStream stream = client.stream();
+    std::vector<char> payload(HEAVY_BYTES, 'w');
+    const KiottyNetSpan data = { payload.data(), payload.size() };
+    for (auto _ : state)
+    {
+        std::thread reader([&]() { (void)readAll(peer, HEAVY_BYTES); });
+        const KiottyNetResult written = KiottyNet_writeConnectionStream(stream, data, WAIT_MS);
+        reader.join();
+        if (written.code != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("write failed"); break; }
+    }
+    (void)KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS));
+    state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
+}
+BENCHMARK(EventClientWriteHeavy)->UseRealTime();
+
+static void StreamClientReadHeavy(benchmark::State& state)
+{
+    BenchContext context;
+    kiotty_test::LoopbackPeer peer;
+    const uint16_t port = kiotty_test::unusedPort();
+    if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
+    const size_t capacity = static_cast<size_t>(state.range(0));
+    BenchStreamClient client(context.handle, port, capacity);
+    if (client.get() == nullptr) { state.SkipWithError("receive capacity above the compile time maximum"); return; }
+    if (KiottyNet_connectStreamClient(client.get()) != KIOTTY_NET_CODE_SUCCESS || !peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
+    std::vector<char> payload(HEAVY_BYTES, 'r');
+    std::vector<char> buffer(capacity);
+    for (auto _ : state)
+    {
+        std::thread writer([&]() { (void)writeAll(peer, payload); });
+        size_t got = 0;
+        while (got < HEAVY_BYTES)
+        {
+            const KiottyNetResult read = KiottyNet_readStreamClient(client.get(), buffer.data(), buffer.size(), WAIT_MS);
+            if (read.code != KIOTTY_NET_CODE_SUCCESS) { break; }
+            got += static_cast<size_t>(read.bytes);
+        }
+        writer.join();
+        if (got < HEAVY_BYTES) { state.SkipWithError("read failed"); break; }
+    }
+    state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
+}
+BENCHMARK(StreamClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->Arg(262144)->UseRealTime();
+
+static void StreamClientWriteHeavy(benchmark::State& state)
+{
+    BenchContext context;
+    kiotty_test::LoopbackPeer peer;
+    const uint16_t port = kiotty_test::unusedPort();
+    if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
+    BenchStreamClient client(context.handle, port, CHUNK_BYTES);
+    if (client.get() == nullptr || KiottyNet_connectStreamClient(client.get()) != KIOTTY_NET_CODE_SUCCESS || !peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
+    std::vector<char> payload(HEAVY_BYTES, 'w');
+    const KiottyNetSpan data = { payload.data(), payload.size() };
+    for (auto _ : state)
+    {
+        std::thread reader([&]() { (void)readAll(peer, HEAVY_BYTES); });
+        const KiottyNetResult written = KiottyNet_writeStreamClient(client.get(), data, WAIT_MS);
+        reader.join();
+        if (written.code != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("write failed"); break; }
+    }
+    state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
+}
+BENCHMARK(StreamClientWriteHeavy)->UseRealTime();
 
 #endif
