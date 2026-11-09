@@ -257,7 +257,7 @@ TEST(ConnectionHost, AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck)
 {
     ConnectionBench<4> bench(smallLimits());
     bench.open();
-    for (int32_t slot = 1; slot < bench.host.capacity(); ++slot)
+    for (int32_t slot = 1; slot < 4; ++slot)
     {
         net::Connection& idle = bench.host.at(slot);
         EXPECT_FALSE(idle.state().isExpired(UINT64_MAX));
@@ -279,4 +279,24 @@ TEST(ConnectionHost, MaxConnectionsBelowCapacityMakesTheHostFullEarly)
     EXPECT_TRUE(bench.full());
     net::ConnectionResult refused = bench.acquire();
     EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, refused.code);
+}
+
+TEST(ConnectionHost, ActiveListsOnlyAcquiredSlotsAndReleaseRemovesThem)
+{
+    ConnectionBench<4> bench(smallLimits());
+    EXPECT_EQ(0u, bench.host.active().length);
+    net::Connection& first = bench.open();
+    net::Connection& second = bench.open();
+    net::Connection& third = bench.open();
+    ASSERT_EQ(3u, bench.host.active().length);
+    bench.host.release(second);
+    const net::Span<const int32_t> active = bench.host.active();
+    ASSERT_EQ(2u, active.length);
+    const bool has_first = active[0] == first.slot() || active[1] == first.slot();
+    const bool has_third = active[0] == third.slot() || active[1] == third.slot();
+    EXPECT_TRUE(has_first);
+    EXPECT_TRUE(has_third);
+    bench.host.release(first);
+    bench.host.release(third);
+    EXPECT_EQ(0u, bench.host.active().length);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/kiotty_span.h"
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/repository/connection/kiotty_connection.h"
 #include "data/repository/connection/kiotty_connection_configuration.h"
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <vector>
 
 namespace kiotty::net::implementation
 {
@@ -22,7 +24,7 @@ namespace kiotty::net::implementation
         ConnectionResult acquire(ConnectionConfiguration&& configuration);
         void             release(Connection& connection);
         Connection&      at(int32_t slot);
-        int32_t          capacity() const;
+        Span<const int32_t> active() const;
         bool             full() const;
         bool             empty() const;
         std::mutex&      notificationMutex();
@@ -31,6 +33,7 @@ namespace kiotty::net::implementation
         ReusablePoolBase<Connection>& _connections;
         ConnectionLimits              _limits;
         size_t                        _max_connections;
+        std::vector<int32_t>          _active;
         std::mutex                    _notification;
     };
 }

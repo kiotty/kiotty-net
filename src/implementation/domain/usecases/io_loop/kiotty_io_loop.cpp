@@ -5,12 +5,17 @@
 #include "data/repository/connection/kiotty_connection_status.h"
 #include "domain/entity/kiotty_phase.h"
 
+#include <array>
+#include <cstddef>
+#include <mutex>
 #include <utility>
 
 namespace kiotty::net::implementation
 {
     namespace
     {
+        constexpr size_t DRAIN_BATCH = 64;
+
         uint32_t nearer(uint32_t timeout, uint64_t deadline, uint64_t now);
     }
 
@@ -74,11 +79,23 @@ namespace kiotty::net::implementation
 
     void IoLoop::drain(const LoopParts& parts)
     {
-        for (int32_t i = 0; i < parts.host.capacity(); ++i)
+        const Span<const int32_t> active = parts.host.active();
+        std::array<IoAction, DRAIN_BATCH> writes{};
+        for (size_t first = 0; first < active.length; first += DRAIN_BATCH)
         {
-            Connection& connection = parts.host.at(i);
-            const IoAction write = connection.flows().send.pick(parts.host.notificationMutex());
-            submitTo(connection, write, parts);
+            const size_t left = active.length - first;
+            const size_t count = left < DRAIN_BATCH ? left : DRAIN_BATCH;
+            {
+                const std::lock_guard<std::mutex> lock(parts.host.notificationMutex());
+                for (size_t i = 0; i < count; ++i)
+                {
+                    writes[i] = parts.host.at(active[first + i]).flows().send.pick(lock);
+                }
+            }
+            for (size_t i = 0; i < count; ++i)
+            {
+                submitTo(parts.host.at(active[first + i]), writes[i], parts);
+            }
         }
     }
 
@@ -95,9 +112,10 @@ namespace kiotty::net::implementation
 
     void IoLoop::releaseSettled(const LoopParts& parts)
     {
-        for (int32_t i = 0; i < parts.host.capacity(); ++i)
+        const Span<const int32_t> active = parts.host.active();
+        for (size_t i = active.length; i > 0; --i)
         {
-            Connection& connection = parts.host.at(i);
+            Connection& connection = parts.host.at(active[i - 1]);
             const ConnectionStatus status = connection.status();
             const bool is_closing = status.phase == Phase::CLOSING;
             if (is_closing && status.isSettled())
@@ -139,9 +157,10 @@ namespace kiotty::net::implementation
             return 0;
         }
         uint32_t timeout = EventListener::WAIT_FOREVER;
-        for (int32_t i = 0; i < parts.host.capacity(); ++i)
+        const Span<const int32_t> active = parts.host.active();
+        for (size_t i = 0; i < active.length; ++i)
         {
-            timeout = nearer(timeout, parts.host.at(i).status().deadline, now);
+            timeout = nearer(timeout, parts.host.at(active[i]).status().deadline, now);
         }
         if (_accept_retry_at > now)
         {
@@ -152,9 +171,10 @@ namespace kiotty::net::implementation
 
     void IoLoop::shutdown(const LoopParts& parts)
     {
-        for (int32_t i = 0; i < parts.host.capacity(); ++i)
+        const Span<const int32_t> active = parts.host.active();
+        for (size_t i = 0; i < active.length; ++i)
         {
-            Connection& connection = parts.host.at(i);
+            Connection& connection = parts.host.at(active[i]);
             submitTo(connection, connection.close(KIOTTY_NET_CODE_CLOSED, parts.handler), parts);
         }
         if (parts.acceptor.listening())

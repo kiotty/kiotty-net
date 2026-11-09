@@ -25,15 +25,14 @@ namespace kiotty::net::implementation
         SendFlow(const SendFlow&) = delete;
         SendFlow& operator=(const SendFlow&) = delete;
 
-        IoAction      pick(std::mutex& notification);
+        IoAction      pick(const std::lock_guard<std::mutex>& notification);
         IoPayload     payload(const IoAction& write);
         void          release(const IoCompletion& sent, std::mutex& notification);
         size_t        notificationWritable();
         KiottyNetCode stageNotification(KiottyNetSpan data);
 
     private:
-        IoAction select(std::mutex& notification);
-        IoAction selectNotification(std::mutex& notification);
+        IoAction select();
         IoAction selectStage(StageBase& stage, IoPurpose purpose);
         IoAction encoded(IoAction write, Span<char> plain);
         bool     isBlocked() const;

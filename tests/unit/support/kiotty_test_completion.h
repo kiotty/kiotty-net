@@ -118,7 +118,8 @@ namespace kiotty_test
 
         kiotty::net::implementation::IoAction pick(kiotty::net::implementation::Connection& connection)
         {
-            return connection.flows().send.pick(host.notificationMutex());
+            const std::lock_guard<std::mutex> lock(host.notificationMutex());
+            return connection.flows().send.pick(lock);
         }
 
         KiottyNetCode notify(kiotty::net::implementation::Connection& connection, const std::string& bytes)

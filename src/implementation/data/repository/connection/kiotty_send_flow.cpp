@@ -19,14 +19,15 @@ namespace kiotty::net::implementation
     {
     }
 
-    IoAction SendFlow::pick(std::mutex& notification)
+    IoAction SendFlow::pick(const std::lock_guard<std::mutex>& notification)
     {
+        (void)notification;
         const bool blocked = isBlocked();
         if (blocked)
         {
             return IoAction::none();
         }
-        return select(notification);
+        return select();
     }
 
     IoPayload SendFlow::payload(const IoAction& write)
@@ -76,7 +77,7 @@ namespace kiotty::net::implementation
         return Sender::stage(_notify, data);
     }
 
-    IoAction SendFlow::select(std::mutex& notification)
+    IoAction SendFlow::select()
     {
         const Phase phase = _phase.load();
         const bool cipher_waiting = hasCipherWaiting(_tls);
@@ -90,18 +91,12 @@ namespace kiotty::net::implementation
         {
             return IoAction::none();
         }
-        const IoAction pushed = selectNotification(notification);
+        const IoAction pushed = selectStage(_notify, IoPurpose::NOTIFY);
         if (pushed.kind == IoActionKind::WRITE)
         {
             return pushed;
         }
         return selectStage(_send, IoPurpose::USER);
-    }
-
-    IoAction SendFlow::selectNotification(std::mutex& notification)
-    {
-        const std::lock_guard<std::mutex> lock(notification);
-        return selectStage(_notify, IoPurpose::NOTIFY);
     }
 
     IoAction SendFlow::selectStage(StageBase& stage, IoPurpose purpose)

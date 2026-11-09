@@ -314,7 +314,7 @@ static void ReadHeavy(benchmark::State& state)
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
 }
-BENCHMARK(ReadHeavy)->ArgNames({ "receive", "max_clients" })->ArgsProduct({ { 16384, 65536, 262144 }, { 16, 1024 } })->UseRealTime();
+BENCHMARK(ReadHeavy)->ArgNames({ "receive", "max_clients" })->ArgsProduct({ { 16384, 65536 }, { 16, 1024 } })->UseRealTime();
 
 static void WriteHeavy(benchmark::State& state)
 {
@@ -604,7 +604,7 @@ static void EventClientReadHeavy(benchmark::State& state)
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
 }
-BENCHMARK(EventClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->Arg(262144)->UseRealTime();
+BENCHMARK(EventClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->UseRealTime();
 
 static void EventClientWriteHeavy(benchmark::State& state)
 {
@@ -656,7 +656,7 @@ static void StreamClientReadHeavy(benchmark::State& state)
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));
 }
-BENCHMARK(StreamClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->Arg(262144)->UseRealTime();
+BENCHMARK(StreamClientReadHeavy)->ArgName("receive")->Arg(16384)->Arg(65536)->UseRealTime();
 
 static void StreamClientWriteHeavy(benchmark::State& state)
 {

@@ -28,9 +28,10 @@ namespace kiotty::net::implementation
     {
         bool stepped = false;
         const uint64_t now = monotonicMilliseconds();
-        for (int32_t i = 0; i < parts.host.capacity(); ++i)
+        const Span<const int32_t> active = parts.host.active();
+        for (size_t i = 0; i < active.length; ++i)
         {
-            const bool slot_stepped = stepSlot(parts, i, now);
+            const bool slot_stepped = stepSlot(parts, active[i], now);
             stepped = stepped || slot_stepped;
         }
         return stepped;

@@ -248,7 +248,7 @@ typedef struct KiottyNetServerConfiguration {
     uint32_t          initialization_mark;
     KiottyNetAddress address;
     size_t            max_clients;      /* 기본 1024, 1 ~ 65536. 동시 연결 수. create 때 이만큼의 연결을 잡는다 */
-    size_t            receive_capacity;    /* 기본 4 KiB, 상한 KIOTTY_NET_MAX_RECV_CAPACITY (기본 16 KiB). Connection 당 수신 Stage 크기 */
+    size_t            receive_capacity;    /* 기본 4 KiB, 상한 KIOTTY_NET_MAX_RECEIVE_CAPACITY (compile time, 기본 64 KiB). Connection 당 수신 Stage 크기 */
     size_t            send_capacity;    /* 기본 4 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
     bool              no_delay;         /* 기본 true. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */

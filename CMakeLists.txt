@@ -4,7 +4,7 @@ project(kiotty_net LANGUAGES C CXX)
 
 option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF builds the stub backend without OpenSSL" ON)
 option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
-set(KIOTTY_NET_MAX_RECEIVE_CAPACITY "16384" CACHE STRING "Upper bound of receive_capacity in bytes")
+set(KIOTTY_NET_MAX_RECEIVE_CAPACITY "65536" CACHE STRING "Upper bound of receive_capacity in bytes")
 set(KIOTTY_NET_MAX_SEND_CAPACITY "16384" CACHE STRING "Upper bound of send_capacity in bytes")
 set(KIOTTY_NET_MAX_PUSH_CAPACITY "16384" CACHE STRING "Upper bound of push_capacity in bytes")
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)

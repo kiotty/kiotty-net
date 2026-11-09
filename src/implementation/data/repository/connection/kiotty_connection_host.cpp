@@ -9,6 +9,7 @@ namespace kiotty::net::implementation
         : _connections(connections)
         , _limits()
         , _max_connections(0)
+        , _active()
         , _notification()
     {
     }
@@ -17,6 +18,8 @@ namespace kiotty::net::implementation
     {
         _limits = limits;
         _max_connections = max_connections;
+        _active.clear();
+        _active.reserve(max_connections);
     }
 
     ConnectionResult ConnectionHost::acquire(ConnectionConfiguration&& configuration)
@@ -24,12 +27,22 @@ namespace kiotty::net::implementation
         configuration.limits = _limits;
         const std::lock_guard<std::mutex> lock(_notification);
         if (full()) { return ConnectionResult::failure(KIOTTY_NET_CODE_TABLE_FULL); }
-        return _connections.acquire(std::move(configuration));
+        ConnectionResult acquired = _connections.acquire(std::move(configuration));
+        if (acquired) { _active.push_back(acquired.value().slot()); }
+        return acquired;
     }
 
     void ConnectionHost::release(Connection& connection)
     {
         const std::lock_guard<std::mutex> lock(_notification);
+        const int32_t slot = connection.slot();
+        for (size_t i = 0; i < _active.size(); ++i)
+        {
+            if (_active[i] != slot) { continue; }
+            _active[i] = _active.back();
+            _active.pop_back();
+            break;
+        }
         _connections.release(connection);
     }
 
@@ -38,9 +51,9 @@ namespace kiotty::net::implementation
         return _connections.at(static_cast<size_t>(slot));
     }
 
-    int32_t ConnectionHost::capacity() const
+    Span<const int32_t> ConnectionHost::active() const
     {
-        return static_cast<int32_t>(_connections.capacity());
+        return Span<const int32_t>{ _active.data(), _active.size() };
     }
 
     bool ConnectionHost::full() const
