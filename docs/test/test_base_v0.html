@@ -683,20 +683,21 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h3>12.1 첫 측정 (2026-11-09, 8단계)</h3>
-<p><code>tests/benchmark/kiotty_bench_base.cpp</code>, 공개 C API 만 쓴다. WSL2 Ubuntu, gcc Release, TLS ON, loopback, 12 코어. 값은 real time 평균이다 (p50 / p99 는 아직 내지 않는다). CI 의 <code>benchmark</code> job 이 같은 실행 파일의 JSON 을 artifact 로 남긴다. 회귀 판정 (20 %) 은 아직 없다.</p>
+<p><code>tests/benchmark/kiotty_bench_base.cpp</code>, 공개 C API 만 쓴다. 값은 real time 평균이다 (p50 / p99 는 아직 내지 않는다). 두 환경: <b>CI</b> 는 GitHub <code>ubuntu-latest</code> (4 코어, gcc Release, TLS ON, <code>benchmark</code> job 의 JSON), <b>WSL2</b> 는 개발 PC (12 코어). CI 값을 기준치로 쓴다. 회귀 판정 (20 %) 은 아직 없다.</p>
+<p>WSL2 는 맨 TCP loopback echo (커널 socket 둘, 라이브러리 없음) 도 197 µs 다. WSL2 의 echo 253 µs 는 대부분 그 환경의 몫이고, 라이브러리가 더하는 것은 약 40 ~ 55 µs 다. 아래 CI 열의 ConnectionChurn, WorkHandoff, ReadHeavy 는 벤치의 대기 helper 가 1 ms sleep 이던 판으로 쟀다 (지금은 yield). 다음 CI 실행으로 바꾼다.</p>
 <table>
-  <tr><th>벤치마크</th><th>부하</th><th>첫 측정</th><th>추정 대비</th></tr>
-  <tr><td>StageProvideConsume</td><td>위와 같음</td><td>7.2 ns / op</td><td>목표 안</td></tr>
-  <tr><td>EchoRoundtrip/1</td><td>peer 1, 64 B echo 직렬</td><td>253 µs / 왕복</td><td><b>목표 (p50 &lt; 80 µs) 밖</b>. CPU 시간은 19 µs 라 대부분 기다림이다. 원인 조사 필요 (WSL2 의 wake 지연인지, 바퀴의 wait 인지)</td></tr>
-  <tr><td>EchoRoundtrip/128</td><td>peer 128, 한 바퀴에 128 개 echo</td><td>57 k msg/s</td><td>목표 (32 클라이언트 150 k msg/s) 밖, 조건이 다르다</td></tr>
-  <tr><td>ReadHeavy</td><td>peer 1 이 1 MiB 를 밀고 서버는 READ(16 KiB)</td><td>303 MiB/s</td><td>목표 (1.5 GB/s, 32 클라이언트) 밖, 조건이 다르다</td></tr>
-  <tr><td>WriteHeavy</td><td>worker 가 stream 으로 1 MiB 쓰기</td><td>990 MiB/s</td><td>—</td></tr>
-  <tr><td>BroadcastFanOut/16, /128</td><td>64 B broadcast, 모든 peer 수신까지</td><td>403 µs, 1.75 ms</td><td>목표 (p99 &lt; 2 ms, 32) 근처</td></tr>
-  <tr><td>ConnectionChurn</td><td>connect → 64 B echo → close → onDisconnected</td><td>645 conn/s</td><td><b>목표 (5 k conn/s) 밖</b></td></tr>
-  <tr><td>WorkHandoff</td><td>connect → onWorkStarted → closeStream → onDisconnected</td><td>418 /s (2.4 ms)</td><td>표의 정의 (onRead → onWritten) 와 다르다</td></tr>
-  <tr><td>StreamEcho tls:0 / tls:1</td><td>StreamClient 64 B echo 직렬</td><td>222 µs / 275 µs (×1.24)</td><td>TlsEchoOverhead 목표 (× 3 안) 안</td></tr>
-  <tr><td>TlsHandshakeRate</td><td>StreamClient TLS connect / disconnect</td><td>666 /s</td><td><b>목표 (1 k/s) 밖</b></td></tr>
-  <tr><td>StreamWriteFile64MiB</td><td>worker 가 64 MiB 파일 전송</td><td>1.18 GiB/s</td><td>—</td></tr>
+  <tr><th>벤치마크</th><th>부하</th><th>CI</th><th>WSL2</th><th>추정 대비</th></tr>
+  <tr><td>StageProvideConsume</td><td>위와 같음</td><td>9.9 ns</td><td>7.2 ns</td><td>목표 안</td></tr>
+  <tr><td>EchoRoundtrip/1</td><td>peer 1, 64 B echo 직렬</td><td>78 µs</td><td>260 µs</td><td>CI 는 목표 (p50 &lt; 80 µs) 안</td></tr>
+  <tr><td>EchoRoundtrip/128</td><td>peer 128, 한 바퀴에 128 개 echo</td><td>108 k msg/s</td><td>57 k msg/s</td><td>목표 (32 클라이언트 150 k msg/s) 와 조건이 다르다</td></tr>
+  <tr><td>ReadHeavy</td><td>peer 1 이 1 MiB 를 밀고 서버는 READ(16 KiB)</td><td>(316 MB/s, sleep 판)</td><td>380 MiB/s</td><td><b>목표 (1.5 GB/s) 밖</b>. 16 KiB 마다 콜백 하나 (약 40 µs). 수신 Stage 상한이 16 KiB 라 recv 한 번이 16 KiB 다. 조사 대상</td></tr>
+  <tr><td>WriteHeavy</td><td>worker 가 stream 으로 1 MiB 쓰기</td><td>5.6 GB/s</td><td>1.04 GiB/s</td><td>목표 안</td></tr>
+  <tr><td>BroadcastFanOut/16, /128</td><td>64 B broadcast, 모든 peer 수신까지</td><td>116 µs, 726 µs</td><td>420 µs, 1.98 ms</td><td>목표 (p99 &lt; 2 ms) 안</td></tr>
+  <tr><td>ConnectionChurn</td><td>connect → 64 B echo → close → onDisconnected</td><td>(850 /s, sleep 판)</td><td>1.58 k/s</td><td><b>목표 (5 k conn/s) 밖</b></td></tr>
+  <tr><td>WorkHandoff</td><td>connect → onWorkStarted → closeStream → onDisconnected</td><td>(463 /s, sleep 판)</td><td>2.75 k/s (364 µs)</td><td>표의 정의 (onRead → onWritten) 와 다르다</td></tr>
+  <tr><td>StreamEcho tls:0 / tls:1</td><td>StreamClient 64 B echo 직렬</td><td>79 µs / 87 µs (×1.10)</td><td>258 µs / 283 µs</td><td>TlsEchoOverhead 목표 (× 3 안) 안</td></tr>
+  <tr><td>TlsHandshakeRate</td><td>StreamClient TLS connect / disconnect</td><td>1.09 k/s</td><td>660 /s</td><td>CI 는 목표 (1 k/s) 안</td></tr>
+  <tr><td>StreamWriteFile64MiB</td><td>worker 가 64 MiB 파일 전송</td><td>8.3 GB/s</td><td>1.29 GiB/s</td><td>—</td></tr>
 </table>
 
 <h2 id="s13">13. 설계에 요구하는 관찰 지점</h2>

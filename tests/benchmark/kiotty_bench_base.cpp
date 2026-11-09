@@ -1,11 +1,11 @@
 #include "kiotty_net_base.h"
 
 #include "support/kiotty_test_peer.h"
-#include "support/kiotty_test_wait.h"
 
 #include <benchmark/benchmark.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -219,9 +219,21 @@ namespace
         std::thread           _thread;
     };
 
+    template <typename Predicate>
+    bool spinUntil(Predicate predicate)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(WAIT_MS);
+        while (!predicate())
+        {
+            if (std::chrono::steady_clock::now() >= deadline) { return false; }
+            std::this_thread::yield();
+        }
+        return true;
+    }
+
     bool waitFor(const std::atomic<int>& counter, int target)
     {
-        return kiotty_test::waitUntil([&]() { return counter.load() >= target; }, WAIT_MS);
+        return spinUntil([&]() { return counter.load() >= target; });
     }
 
     KiottyNetStreamClientHandle createStreamClient(BenchServer& bench, bool tls)
@@ -292,7 +304,7 @@ static void ReadHeavy(benchmark::State& state)
     {
         (void)peer.sendAll(payload.data(), payload.size());
         expected += payload.size();
-        const bool drained = kiotty_test::waitUntil([&]() { return bench.app.drained.load() >= expected; }, WAIT_MS);
+        const bool drained = spinUntil([&]() { return bench.app.drained.load() >= expected; });
         if (!drained) { state.SkipWithError("drain stalled"); return; }
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(HEAVY_BYTES));

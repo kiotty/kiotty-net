@@ -271,10 +271,6 @@ TEST_F(BaseApiTest, NullArgumentsAreRejectedWithoutTouchingAnything)
     EXPECT_EQ(invalid, KiottyNet_readStreamClient(nullptr, nullptr, 0, 0).code);
     EXPECT_EQ(invalid, KiottyNet_writeStreamClient(nullptr, spanOf("x"), 0).code);
 
-    KiottyNetServerResult created = KiottyNet_createServer(context, &server_configuration, nullptr);
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
-    EXPECT_EQ(invalid, KiottyNet_runServer(created.handle, nullptr, nullptr));
-
     KiottyNetConnectionHandle no_owner = { nullptr, 0 };
     KiottyNetConnectionStream no_stream = { nullptr, 0 };
     char byte = 0;
@@ -289,12 +285,10 @@ TEST_F(BaseApiTest, NullArgumentsAreRejectedWithoutTouchingAnything)
     KiottyNet_closeServer(nullptr);
     KiottyNet_closeEventClient(nullptr);
     KiottyNet_disconnectStreamClient(nullptr);
-    KiottyNet_destroyServer(nullptr, created.handle);
     KiottyNet_destroyServer(context, nullptr);
     KiottyNet_destroyEventClient(context, nullptr);
     KiottyNet_destroyStreamClient(context, nullptr);
     KiottyNet_releaseContext(nullptr);
-    KiottyNet_destroyServer(context, created.handle);
 }
 
 #if defined(_WIN32) || defined(__linux__)
@@ -313,6 +307,16 @@ namespace
         }
         return text == expected;
     }
+}
+
+TEST_F(BaseApiTest, RunWithoutAHandlerAndDestroyWithoutAContextAreRejected)
+{
+    KiottyNetServerHandle server = createServer(kiotty_test::unusedPort());
+    ASSERT_NE(nullptr, server);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runServer(server, nullptr, nullptr));
+    KiottyNet_destroyServer(nullptr, server);
+    EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitServer(server, 1));
+    KiottyNet_destroyServer(context, server);
 }
 
 TEST_F(BaseApiTest, NotifyAnswersEveryKindOfHandle)
@@ -436,6 +440,18 @@ TEST_F(BaseApiTest, StreamClientTalksToAWorkerAndTheIoThreadGetsBusy)
 
 TEST_F(BaseApiTest, MemorySizesCoverTheObjects)
 {
-    EXPECT_GT(KiottyNet_serverMemorySize(), KiottyNet_clientMemorySize());
+    KiottyNetServerConfiguration small;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&small, LOOPBACK_HOST, 1));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&small, 1));
+    KiottyNetServerConfiguration large = small;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&large, 1024));
+    const size_t one = KiottyNet_serverMemorySize(&small);
+    const size_t many = KiottyNet_serverMemorySize(&large);
+    EXPECT_GT(one, 0u);
+    EXPECT_EQ(0u, (many - one) % 1023);
+    EXPECT_GT((many - one) / 1023, KiottyNet_clientMemorySize() / 2);
+    EXPECT_EQ(0u, KiottyNet_serverMemorySize(nullptr));
+    KiottyNetServerConfiguration uninitialized = {};
+    EXPECT_EQ(0u, KiottyNet_serverMemorySize(&uninitialized));
     EXPECT_GT(KiottyNet_clientMemorySize(), 0u);
 }

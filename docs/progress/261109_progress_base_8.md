@@ -17,23 +17,21 @@
 
 - `context/kiotty_handles.h`: `struct KiottyNetServer final : Server {}` 와 StreamClient, EventClient 둘. `KiottyNetContextImpl final : Context` 는 `kiotty_context.h` 끝 (DV16). Context 의 풀과 `create*` / `destroy` 가 이 이름을 쓰므로 base.cpp 에 cast 가 없다.
 - `src/kiotty_net_base.cpp`: 함수마다 NULL 검사 (context, config, handle, handler, `owner`) 뒤 내부 함수 하나. 로직 없음. `KiottyNet_notifyEventClient` 는 `notify(connection().id, data)`.
-- `KiottyNet_serverMemorySize` 는 기본 설정 (`max_clients` 1024) 의 Server 객체 + 연결 수 × `sizeof(Connection)`, `KiottyNet_clientMemorySize` 는 두 client 중 큰 쪽. 인자가 없는 함수라 설정마다의 값은 내지 못한다 (아래 정할 것).
+- `KiottyNet_serverMemorySize(config)` 는 그 설정의 Server 객체 + `max_clients` × `sizeof(Connection)` (NULL 이나 초기화 안 된 설정은 0), `KiottyNet_clientMemorySize` 는 두 client 중 큰 쪽.
 
 ## 테스트
 
 - `tests/integration/kiotty_test_base_api.cpp` (공개 헤더만): 6 개. Context 두 번, NULL 인자 전부, notify 의 handle 종류 ({NULL, 0}, {owner, 0}, 랜덤 id, 유효, 지난 generation, destroy 된 Owner), Server + EventClient 왕복, StreamClient ↔ worker 와 IO thread 의 `BUSY`, 메모리 크기.
-- 전체 420 개.
+- 전체 421 개.
 
 ## 벤치마크
 
-`tests/benchmark/kiotty_bench_base.cpp` 12 개 (공개 C API 만). 첫 수치는 `docs/test/test_base_v0.html` 12.1. 추정 대비 밖인 것: EchoRoundtrip/1 (253 µs, CPU 19 µs), ConnectionChurn (645 /s), TlsHandshakeRate (666 /s). CI `benchmark` job 은 main push 와 `workflow_dispatch` 에서 JSON 을 artifact 로 남긴다. 회귀 판정은 아직 없다.
+`tests/benchmark/kiotty_bench_base.cpp` 12 개 (공개 C API 만). 수치는 `docs/test/test_base_v0.html` 12.1 (CI 의 ubuntu 와 WSL2). CI 기준으로 echo 78 µs, TLS handshake 1.09 k/s 는 목표 안. WSL2 는 맨 TCP loopback echo 도 197 µs 라 그 환경의 지연이 대부분이다. 처음 판의 대기 helper 가 1 ms sleep 이라 ConnectionChurn, WorkHandoff 가 낮게 나왔다 (yield 로 바꿨다). 목표 밖으로 남은 것은 ReadHeavy (16 KiB 마다 콜백, 약 40 µs) 와 ConnectionChurn. CI `benchmark` job 은 main push 와 `workflow_dispatch` 에서 JSON 을 artifact 로 남긴다. 회귀 판정은 아직 없다.
 
 ## 정할 것
 
-1. `await(0)` 은 "영원히 기다림" 이다 (`RunGate` 의 `WAIT_FOREVER = 0`). 테스트를 쓰다가 `KiottyNet_awaitEventClient(client, 0)` 이 멈췄다. "0 = 바로 확인" 이 C API 사용자에게 자연스럽다.
-2. `KiottyNet_serverMemorySize(void)` 를 설정을 받는 모양 (`const KiottyNetServerConfiguration*`) 으로 바꿀지.
-3. echo 왕복 253 µs 의 원인 (WSL2 의 wake 지연인지, 바퀴의 wait 인지) 조사.
-4. `docs/requirement/requirement_v0.md` 의 compile time 상한 (128, 최대 1024) 문장.
+1. timeout 0 의 뜻. 라이브러리 전체 (`await`, stream read / write, connect, action 의 timeout) 가 0 = 제한 없음이다 (`SO_RCVTIMEO` 와 같은 관례). `await` 만 0 = 바로 확인으로 바꾸면 어긋난다.
+2. ReadHeavy 와 ConnectionChurn 의 원인 조사.
 
 ## 다음 할 일
 

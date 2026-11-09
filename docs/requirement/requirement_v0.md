@@ -26,7 +26,7 @@
     - 추후, DICOM 라이브러리 개발에 소스 코드를 그대로 활용할 예정
 8. AI 또는 사람이 읽기 좋은 단순한 문서화
 9.  HTTP는 Rest API 뿐만 아니라 정적 파일 서빙 기능도 제공함. 정적파일 서빙은 파일 redirecting 뿐만 아니라 메모리에 올라와있는 바이너리 파일도 적절한 redirecting을 통해 제공해줄 수 있음
-10. 서버의 성능은 고성능이 아니라 일반 PC 또는 모바일 디바이스에서 최대 128 Client (설정으로 1024 까지. compile time 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 함께 올린다) 를 지원하는 것으로 가정하고 있음.
+10. 서버의 성능은 고성능이 아니라 일반 PC 또는 모바일 디바이스에서 서버 하나에 기본 1024 Client (`max_clients` 로 1 ~ 65536 을 실행 시간에 정한다) 를 지원하는 것으로 가정하고 있음. 서버와 클라이언트의 개수에는 상한이 없다.
 11. 서버가 완전 고성능을 지원하는 게 아닌데신 의료기기 소프트웨어에서 사용할 확률이 높기 때문에 매우 높은 수준의 메모리 안정성을 지원해야 함.
 
 - Runtime 동적 할당을 최대한 제약하기
@@ -101,11 +101,11 @@ naming 규약 (C, C++ 공통)
        }
    }
    ```
-7. handle 이 아닌 단순 struct (`KiottyNetSpan`, `KiottyNetEndpoint`, 설정, 콜백 구조체 등) 와 공개 enum 은 C, C++ 이 같은 정의를 공용으로 쓴다. 한 벌만 정의하고 양쪽에서 같은 이름으로 쓴다. 이름은 `KiottyNet` 바로 뒤에 언더스코어 없이 잇는다 (`KiottyNetServerConfiguration`, `KiottyNetCode`). 그래서 외부로 공개되는 enum 은 `enum class` 를 쓰지 않으며 (C 에서 쓸 수 없다), enumerator 는 `KIOTTY_` 접두어로 전역 이름 충돌을 막는다.
+7. handle 이 아닌 단순 struct (`KiottyNetSpan`, `KiottyNetAddress`, 설정, 콜백 구조체 등) 와 공개 enum 은 C, C++ 이 같은 정의를 공용으로 쓴다. 한 벌만 정의하고 양쪽에서 같은 이름으로 쓴다. 이름은 `KiottyNet` 바로 뒤에 언더스코어 없이 잇는다 (`KiottyNetServerConfiguration`, `KiottyNetCode`). 그래서 외부로 공개되는 enum 은 `enum class` 를 쓰지 않으며 (C 에서 쓸 수 없다), enumerator 는 `KIOTTY_` 접두어로 전역 이름 충돌을 막는다.
    정리하면 **`KiottyNet_` 는 함수 또는 C++ 래퍼 클래스, `KiottyNet` 바로 뒤에 이름이 붙으면 C / C++ 공용 데이터 타입**이다.
 8. handle 은 두 종류이며 둘 다 공용 타입이다.
    - **소유 handle.** 사용자가 `KiottyNet_createX` 로 만들고 `KiottyNet_destroyX` 로 없애는 객체. StreamClient, EventClient, Server, HttpServer, WebSocketServer, HttpClient, WebSocketClient 가 여기에 속한다. `typedef struct KiottyNetServer* KiottyNetServerHandle;` 처럼 불투명 포인터다. C++ 래퍼는 생성자에서 create, 소멸자에서 destroy 를 부르고, 복사는 없고 이동만 있다.
-   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse 가 여기에 속한다. 외부에서는 소유자 포인터와 정수 id 를 나란히 둔 struct 다 (`KiottyNetConnectionHandle { KiottyNetConnectionOwner* owner; int64_t id; }`). `owner` 는 그 연결을 가진 Server / EventClient 의 불투명 포인터이고 `id` 는 내부에서 `{ int32_t generation; int32_t index; }` 로 해석한다. `owner == NULL` 또는 `id == 0` 은 무효 (`KIOTTY_NET_CODE_INVALID_ARGUMENT`). 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 id 가 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_NET_CODE_PEER_CLOSED`). 소유자를 destroy 해도 `owner` 포인터는 `releaseContext` 전까지 유효하다 (은퇴할 뿐 해제되지 않는다). 그래서 handle 은 복사해 두어도 되고 다른 thread 에 넘겨도 된다. C 에서 두 handle 이 같은지는 `owner` 와 `id` 둘을 비교한다. C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만들고 `operator==` / `operator<` 가 있어 map 의 key 가 된다. HttpResponse 와 WebSocket 의 handle 은 그 절의 모양 (`int64_t`) 그대로이고, base 가 끝난 뒤 같은 struct 모양으로 맞춘다. 예외는 `KiottyNet_ConnectionStream` 하나다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS))` 로 닫는다 (5절).
+   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse 가 여기에 속한다. 외부에서는 소유자 포인터와 정수 id 를 나란히 둔 struct 다 (`KiottyNetConnectionHandle { KiottyNetEndpoint* owner; int64_t id; }`). `owner` 는 그 연결을 가진 Server / EventClient 의 불투명 포인터이고 `id` 는 내부에서 `{ int32_t generation; int32_t index; }` 로 해석한다. `owner == NULL` 또는 `id == 0` 은 무효 (`KIOTTY_NET_CODE_INVALID_ARGUMENT`). 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 id 가 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_NET_CODE_PEER_CLOSED`). 소유자를 destroy 해도 `owner` 포인터는 `releaseContext` 전까지 유효하다 (은퇴할 뿐 해제되지 않는다). 그래서 handle 은 복사해 두어도 되고 다른 thread 에 넘겨도 된다. C 에서 두 handle 이 같은지는 `owner` 와 `id` 둘을 비교한다. C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만들고 `operator==` / `operator<` 가 있어 map 의 key 가 된다. HttpResponse 와 WebSocket 의 handle 은 그 절의 모양 (`int64_t`) 그대로이고, base 가 끝난 뒤 같은 struct 모양으로 맞춘다. 예외는 `KiottyNet_ConnectionStream` 하나다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS))` 로 닫는다 (5절).
 
 공통 타입
 
@@ -115,9 +115,9 @@ typedef struct KiottyNetSpan {        /* 읽기 전용 바이트 범위. 텍스�
     size_t      length;
 } KiottyNetSpan;
 
-typedef struct KiottyNetConnectionOwner KiottyNetConnectionOwner;   /* 불투명. 연결을 가진 Server / EventClient */
+typedef struct KiottyNetEndpoint KiottyNetEndpoint;   /* 불투명. 연결을 가진 Server / EventClient */
 typedef struct KiottyNetConnectionHandle {   /* pool handle (규약 8). 다른 thread 에 넘겨도 되는 유일한 Connection 표현 */
-    KiottyNetConnectionOwner* owner;         /* NULL 이면 무효 */
+    KiottyNetEndpoint* owner;         /* NULL 이면 무효 */
     int64_t                   id;            /* 상위 32 generation, 하위 16 slot. 0 이면 무효 */
 } KiottyNetConnectionHandle;
 
@@ -176,7 +176,7 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (연결 상한 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 만큼의 연결, 버퍼, TLS 메모리) 을 한 번에 잡는다. 못 잡으면 `KIOTTY_NET_CODE_OUT_OF_MEMORY` 이고, 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용하며, `KiottyNet_releaseContext` 가 한 번에 해제한다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER` 를 낮춰 빌드한다).
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼 상한 (`KIOTTY_NET_MAX_*_CAPACITY`) 은 compile time 이고, 연결 하나는 설정한 capacity 와 상관없이 그 상한만큼을 차지한다. `KiottyNet_serverMemorySize(config)` 가 그 설정의 Server 하나가 잡는 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_NET_CODE_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
@@ -238,16 +238,16 @@ typedef enum KiottyNetTlsV13CipherSuite {
 ```c
 typedef enum KiottyNetTransport { KIOTTY_NET_TRANSPORT_TCP, KIOTTY_NET_TRANSPORT_PIPE } KiottyNetTransport;
 
-typedef struct KiottyNetEndpoint {
+typedef struct KiottyNetAddress {
     KiottyNetTransport transport;
     char               host[KIOTTY_NET_MAX_HOST_LENGTH];   /* Tcp: ip 또는 hostname. Pipe: pipe 이름 (Windows: \\.\pipe\name, Unix: 경로) */
     uint16_t           port;                           /* Pipe 면 0 */
-} KiottyNetEndpoint;
+} KiottyNetAddress;
 
 typedef struct KiottyNetServerConfiguration {
     uint32_t          initialization_mark;
-    KiottyNetEndpoint endpoint;
-    size_t            max_clients;      /* 기본 128, 1 ~ KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER (compile time, 기본 128, 최대 1024). 동시 연결 수. Context 의 Pool 에서 생성 시점에 잡힌다 */
+    KiottyNetAddress address;
+    size_t            max_clients;      /* 기본 1024, 1 ~ 65536. 동시 연결 수. create 때 이만큼의 연결을 잡는다 */
     size_t            receive_capacity;    /* 기본 4 KiB, 상한 KIOTTY_NET_MAX_RECV_CAPACITY (기본 16 KiB). Connection 당 수신 Stage 크기 */
     size_t            send_capacity;    /* 기본 4 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
@@ -256,7 +256,7 @@ typedef struct KiottyNetServerConfiguration {
 
 typedef struct KiottyNetClientConfiguration {
     uint32_t          initialization_mark;
-    KiottyNetEndpoint endpoint;
+    KiottyNetAddress address;
     size_t            receive_capacity;     /* 기본 4 KiB */
     size_t            send_capacity;     /* 기본 4 KiB */
     size_t            push_capacity;     /* 기본 4 KiB. notifyEventClient 가 쌓이는 곳. StreamClient 는 쓰지 않는다 */
@@ -268,7 +268,7 @@ typedef struct KiottyNetClientConfiguration {
 
 KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* config, const char* host, uint16_t port);   /* port != 0 */
 KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfiguration* config, const char* pipe_name);
-KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* config, size_t max_clients);                /* 0 또는 KIOTTY_NET_MAX_CONNECTIONS_PER_SERVER 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* config, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* config, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 KIOTTY_NET_MAX_*_CAPACITY 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
 KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* config, bool no_delay);
 
@@ -566,7 +566,7 @@ typedef struct KiottyNetConnectionInfo {
 } KiottyNetConnectionInfo;
 
 typedef struct KiottyNetConnectionStream {   /* pool handle. onWorkStarted 가 준다. closeConnectionStream 까지 유효. 그 연결의 handle 과 같은 owner / id 의 다른 타입이다 */
-    KiottyNetConnectionOwner* owner;
+    KiottyNetEndpoint* owner;
     int64_t                   id;
 } KiottyNetConnectionStream;
 
@@ -621,7 +621,7 @@ typedef struct KiottyNetConnectionHandler {
     KiottyNetConnectionAction   (*onTimeout)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c);                                          /* action 의 timeout_milliseconds 만료 */
     void                        (*onWorkStarted) (KiottyNetConnectionContext connection_context, KiottyNetConnectionStream stream);                                       /* 이 순간부터 closeConnectionStream 까지 연결은 worker 의 것 */
     void                        (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c, KiottyNetCode reason);   /* 마지막 콜백 */
-    void                        (*onError)       (KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);         /* info 는 상대. 연결 없는 오류는 소유자의 endpoint. message 는 static */
+    void                        (*onError)       (KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);         /* info 는 상대. 연결 없는 오류는 소유자의 address. message 는 static */
 } KiottyNetConnectionHandler;
 
 KiottyNetConnectionInfo KiottyNet_getConnectionInfo(KiottyNetConnectionHandle c);   /* 아무 thread. 값으로 돌려준다. 닫힌 handle 이면 0 으로 채운 값 */
@@ -1324,7 +1324,7 @@ typedef struct KiottyNetHttpReply {         /* 값 + code (2절). C++ 도 이 st
 } KiottyNetHttpReply;
 
 typedef struct KiottyNetHttpClient* KiottyNetHttpClientHandle;
-KiottyNetHttpClientHandle KiottyNet_createHttpClient(const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls, const KiottyNetHttpClientLimits* limits);   /* endpoint.host 가 Host 헤더가 된다 */
+KiottyNetHttpClientHandle KiottyNet_createHttpClient(const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls, const KiottyNetHttpClientLimits* limits);   /* address.host 가 Host 헤더가 된다 */
 void          KiottyNet_destroyHttpClient(KiottyNetHttpClientHandle c);
 
 /* 요청 하나. headers 는 사용자 배열 (NULL, 0 가능). body.length == 0 이면 body 없음. timeout_milliseconds 는 연결 + 송신 + 응답 수신 전체 */

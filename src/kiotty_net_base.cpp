@@ -27,13 +27,6 @@ namespace
     {
         return buffer != nullptr || length == 0;
     }
-
-    size_t defaultMaxClients()
-    {
-        KiottyNetServerConfiguration configuration{};
-        (void)net::initializeTcpServerConfiguration(configuration, "127.0.0.1", 1);
-        return configuration.max_clients;
-    }
 }
 
 KiottyNetCode KiottyNet_initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration* config,
@@ -326,9 +319,10 @@ void KiottyNet_releaseContext(KiottyNetContext context)
     context->release();
 }
 
-size_t KiottyNet_serverMemorySize(void)
+size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config)
 {
-    return sizeof(KiottyNetServer) + defaultMaxClients() * sizeof(net::Connection);
+    if (config == nullptr || !net::isInitialized(*config)) { return 0; }
+    return sizeof(KiottyNetServer) + config->max_clients * sizeof(net::Connection);
 }
 
 size_t KiottyNet_clientMemorySize(void)

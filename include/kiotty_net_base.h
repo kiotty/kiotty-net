@@ -404,7 +404,7 @@ typedef struct KiottyNetContextResult
 KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
-KIOTTY_NET_API size_t KiottyNet_serverMemorySize(void);
+KIOTTY_NET_API size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config);
 KIOTTY_NET_API size_t KiottyNet_clientMemorySize(void);
 
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
