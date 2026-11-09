@@ -16,7 +16,6 @@ namespace
     const uint32_t WAIT_MS = 5000;
     const char*    LOOPBACK_HOST = "127.0.0.1";
     const size_t   MESSAGE_BYTES = 4;
-    const int64_t  RANDOM_ID = 0x1234567890LL;
 
     enum class Role : uint8_t
     {
@@ -234,16 +233,6 @@ namespace
 
         KiottyNetContext context;
     };
-
-    bool receive(kiotty_test::LoopbackPeer& peer, const std::string& expected)
-    {
-        std::string text(expected.size(), '\0');
-        if (!peer.recvExactly(&text[0], text.size(), WAIT_MS))
-        {
-            return false;
-        }
-        return text == expected;
-    }
 }
 
 TEST_F(BaseApiTest, InitializeContextTwiceReturnsTheSameHandle)
@@ -310,6 +299,21 @@ TEST_F(BaseApiTest, NullArgumentsAreRejectedWithoutTouchingAnything)
 }
 
 #if defined(_WIN32) || defined(__linux__)
+
+namespace
+{
+    const int64_t RANDOM_ID = 0x1234567890LL;
+
+    bool receive(kiotty_test::LoopbackPeer& peer, const std::string& expected)
+    {
+        std::string text(expected.size(), '\0');
+        if (!peer.recvExactly(&text[0], text.size(), WAIT_MS))
+        {
+            return false;
+        }
+        return text == expected;
+    }
+}
 
 TEST_F(BaseApiTest, NotifyAnswersEveryKindOfHandle)
 {
