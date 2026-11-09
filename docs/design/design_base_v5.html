@@ -507,16 +507,17 @@ struct AcceptBuffer { SocketHandle socket; char addresses[2 * ADDRESS_LENGTH]; }
 struct IoEvent      // backend/kiotty_iocp_event.h. 멤버 public (MISRA 14.1.1), 복사 없음
 { std::atomic&lt;bool&gt; pending; IoAction action; const EventListenerState* listener; uint32_t generation; SOCKET socket;
   int32_t slot; SocketCode failure; IocpRequest request /* { OVERLAPPED overlapped; IoEvent* owner; } */; LPFN_ACCEPTEX accept_ex; };
-struct IoEvent      // backend/kiotty_epoll_event.h. 소멸자가 ready 목록에서 빼고 DEL + close
+struct IoEvent      // backend/kiotty_readiness_event.h (epoll 과 kqueue 공용). 소멸자가 ready 목록에서 빼고 unwatch + close
 { std::atomic&lt;bool&gt; pending; IoAction action; EventListenerState* listener; uint32_t generation; int fd; int32_t slot;
   bool registered; bool queued; SocketCode result; IoPayload payload; size_t done; IoEvent* next; };
+// backend/kiotty_event_backend.h 가 고른다: _WIN32 는 IOCP, __APPLE__ (또는 libkqueue) 는 kqueue, __linux__ 는 epoll
 // 그 밖의 OS: backend/kiotty_no_event.h (pending 과 action 만). KIOTTY_NET_HAS_EVENT_BACKEND 가 0 (DV10)</code></pre>
 <ul>
   <li>계약은 v4 7절 그대로: WRITE 완료의 length 는 payload 전체다 (epoll 은 남으면 <code>EPOLLOUT | EPOLLONESHOT</code> 으로 이어 보낸다). detach 의 CANCELLED, 즉시 실패, submit 에서 바로 끝난 WRITE 는 ready 목록으로 다음 wait 가 먼저 돌려준다. 할당은 open 의 배열 둘뿐이다.</li>
   <li>v4 의 <code>pending()</code> 메서드는 public 필드 <code>pending</code> 이다 (값 struct, 수칙 4.16). 쓰는 것은 IO thread 의 listener 뿐이고, <code>std::atomic&lt;bool&gt;</code> 인 것은 다른 thread 가 <code>Connection::state()</code> 로 읽기 때문이다 (9.2 의 <code>pending</code>).</li>
   <li>IOCP 의 ACCEPT 에서 <code>AcceptBuffer::socket</code> 이 무효면 (Acceptor 의 <code>prepare</code> 실패) submit 은 반환값이 아니라 <code>INVALID_ARGUMENT</code> 가 담긴 ACCEPT 완료로 돌려준다 (다른 즉시 실패와 같은 길). 반환값의 <code>INVALID_ARGUMENT</code> 는 payload 길이처럼 부른 쪽의 잘못에만 남는다.</li>
-  <li>listener 는 epoll 596 줄, iocp 475 줄의 한 파일이었다. v5 는 backend 마다 <code>*_event_state.h</code> (상태 struct), <code>*_event_submit.cpp</code>, <code>*_event_wait.cpp</code>, <code>*_event_listener.cpp</code> (open / close / attach / detach / wake) 넷이다 (수칙 4.1 의 400 줄). iocp <code>dequeue</code> 와 epoll <code>handle</code> 의 출력 인자는 없어졌다.</li>
-  <li>OS 가 주소를 들고 있는 raw pointer (<code>IocpRequest::owner</code>, <code>data.ptr</code>, <code>next</code>, <code>listener</code>) 는 DV3 다.</li>
+  <li>listener 는 epoll 596 줄, iocp 475 줄의 한 파일이었다. v5 는 backend 마다 <code>*_event_state.h</code> (상태 struct), <code>*_event_submit.cpp</code>, <code>*_event_wait.cpp</code>, <code>*_event_listener.cpp</code> (open / close / attach / detach / wake) 넷이다 (수칙 4.1 의 400 줄). iocp <code>dequeue</code> 와 epoll <code>handle</code> 의 출력 인자는 없어졌다. kqueue 가 들어오면서 (2026-11-09) epoll 과 kqueue 는 readiness 공용 넷 (<code>kiotty_readiness_event_listener / _submit / _wait / _ready.cpp</code>: open / close / attach / detach / submit / wait 와 ready 목록, send / recv 진행) 위에 OS 파일 둘만 둔다: <code>*_event_listener.cpp</code> 가 <code>wake / isOpen / createHandles / releaseHandles / watch / unwatch</code>, <code>*_event_wait.cpp</code> 가 <code>poll</code>. kqueue 는 <code>EV_ONESHOT</code> 으로 걸고 (한 번 오면 knote 가 사라지므로 <code>registered</code> 를 내린다) wake 는 <code>EVFILT_USER</code> 다. Linux 에서도 <code>KIOTTY_NET_WITH_LIBKQUEUE</code> 로 kqueue backend 를 돌려 볼 수 있다 (libkqueue).</li>
+  <li>OS 가 주소를 들고 있는 raw pointer (<code>IocpRequest::owner</code>, epoll <code>data.ptr</code>, kqueue <code>udata</code>, <code>next</code>, <code>listener</code>) 는 DV3 다.</li>
 </ul>
 
 <h3>7.4 file</h3>

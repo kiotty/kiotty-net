@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
 
 namespace
 {

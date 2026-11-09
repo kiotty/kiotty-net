@@ -1,4 +1,6 @@
-#if !defined(_WIN32) && !defined(__linux__)
+#include "data/infra/event/backend/kiotty_event_backend.h"
+
+#if !KIOTTY_NET_HAS_EVENT_BACKEND
 
 #include "data/infra/event/kiotty_event_listener.h"
 

@@ -53,6 +53,20 @@ jobs:
       - name: unit and integration tests
         run: ctest --test-dir build --output-on-failure -L "unit|integration"
 
+  libkqueue:
+    name: gcc kqueue backend through libkqueue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install libkqueue
+        run: sudo apt-get update && sudo apt-get install -y libkqueue-dev
+      - name: configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=ON -DKIOTTY_NET_WITH_LIBKQUEUE=ON
+      - name: build
+        run: cmake --build build --parallel
+      - name: unit and integration tests
+        run: ctest --test-dir build --output-on-failure -L "unit|integration"
+
   cross-build:
     name: ${{ matrix.name }} (build only)
     runs-on: ${{ matrix.os }}

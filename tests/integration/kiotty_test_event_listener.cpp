@@ -680,12 +680,12 @@ TEST_F(EventListener_Iocp, AcceptWithoutAPreparedSocketIsDeliveredAsAnErrorCompl
 }
 #endif
 
-#if defined(__linux__)
-class EventListener_Epoll : public EventListener
+#if KIOTTY_NET_EVENT_READINESS
+class EventListener_Readiness : public EventListener
 {
 };
 
-TEST_F(EventListener_Epoll, NoCompletionArrivesWithoutASubmitEvenIfPeerSends)
+TEST_F(EventListener_Readiness, NoCompletionArrivesWithoutASubmitEvenIfPeerSends)
 {
     ASSERT_TRUE(link.peer.sendAll("unasked", 7));
     EXPECT_TRUE(listener.wait(50).empty());

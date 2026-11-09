@@ -287,7 +287,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EventListener</td><td>SubmitWithNoneOrHoldKindIsRejectedWithInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>"그 밖의 kind 는 오지 않는다" 를 debug assert 가 아니라 코드로도 막는지 확정</td></tr>
   <tr><td>EventListener</td><td>WaitReturnsAtMostCompletionCapacityAndKeepsTheRestForNextWait</td><td><span class="tag edge">엣지</span></td><td>capacity 4 에 완료 6 → 4, 2. 유실 없음</td></tr>
   <tr><td>EventListener</td><td>CloseWithPendingRequestsDoesNotCrashAndLaterWaitIsRefused</td><td><span class="tag misuse">오용</span></td><td>shutdown 경로의 안전</td></tr>
-  <tr><td>EventListener_Epoll</td><td>NoCompletionArrivesWithoutASubmitEvenIfPeerSends</td><td><span class="tag ok">정상</span></td><td>EPOLLONESHOT. 걸지 않으면 readable 이 와도 완료가 없다 (Work / HOLD 중의 상태)</td></tr>
+  <tr><td>EventListener_Readiness</td><td>NoCompletionArrivesWithoutASubmitEvenIfPeerSends</td><td><span class="tag ok">정상</span></td><td>EPOLLONESHOT / EV_ONESHOT (epoll 과 kqueue). 걸지 않으면 readable 이 와도 완료가 없다 (Work / HOLD 중의 상태)</td></tr>
   <tr><td>EventListener_Iocp</td><td>AcceptExBufferReceivesBothAddressesAndUpdateContextSucceeds</td><td><span class="tag ok">정상</span></td><td>Acceptor::resolve 의 버퍼 크기와 SO_UPDATE_ACCEPT_CONTEXT</td></tr>
 </table>
 
@@ -755,7 +755,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>⑦ (7)</td><td>server, client, context, config</td><td>11절의 Config / Action unit, Context / Server / Client integration (19.9 의 여섯 포함)</td><td>unit, integration</td></tr>
   <tr><td>⑧ (8)</td><td>base.cpp 번역</td><td>11절 전부를 C API 로 다시. 12절 나머지 벤치마크</td><td>integration, benchmark</td></tr>
 </table>
-<p>CI 매트릭스는 Windows MSVC (IOCP) 와 Linux gcc + clang (epoll) 이고, Linux 는 ASan + TSan 으로 한 번 더 돈다. kqueue 와 io_uring 은 backend 가 생길 때 같은 integration 테스트를 그대로 돌린다. 새 backend 에 새 테스트는 없다.</p>
+<p>CI 매트릭스는 Windows MSVC (IOCP), Linux gcc + clang (epoll), macOS apple-clang (kqueue, 2026-11-09 부터) 이고, Linux 는 ASan + TSan 으로 한 번 더 돌고 libkqueue 로 kqueue backend 도 한 번 더 돈다. io_uring 은 backend 가 생길 때 같은 integration 테스트를 그대로 돌린다. 새 backend 에 새 테스트는 없다.</p>
 
 </body>
 </html>

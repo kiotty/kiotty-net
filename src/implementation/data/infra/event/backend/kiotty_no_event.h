@@ -1,6 +1,8 @@
 #pragma once
 
-#if !defined(_WIN32) && !defined(__linux__)
+#include "data/infra/event/backend/kiotty_event_backend.h"
+
+#if !KIOTTY_NET_HAS_EVENT_BACKEND
 
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
