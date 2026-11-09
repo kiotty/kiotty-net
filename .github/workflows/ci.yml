@@ -77,3 +77,23 @@ jobs:
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug ${{ matrix.configure }}
       - name: build
         run: cmake --build build --parallel
+
+  benchmark:
+    name: benchmark
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DKIOTTY_NET_BUILD_BENCHMARKS=ON -DKIOTTY_NET_USE_TLS=ON
+      - name: build
+        run: cmake --build build --parallel --target kiotty_net_benchmarks
+      - name: run
+        run: build/tests/benchmark/kiotty_net_benchmarks --benchmark_min_time=0.5s --benchmark_out=benchmark.json --benchmark_out_format=json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.sha }}
+          path: benchmark.json

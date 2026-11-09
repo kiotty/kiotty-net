@@ -14,11 +14,16 @@ FetchContent_MakeAvailable(benchmark)
 
 add_executable(kiotty_net_benchmarks
     kiotty_bench_core.cpp
+    kiotty_bench_base.cpp
+    ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_os.cpp
+    ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_peer.cpp
 )
 target_include_directories(kiotty_net_benchmarks PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/tests/integration
     ${PROJECT_SOURCE_DIR}/src/implementation
     ${KIOTTY_NET_GENERATED_DIR}
 )
 target_compile_features(kiotty_net_benchmarks PRIVATE cxx_std_17)
 target_link_libraries(kiotty_net_benchmarks PRIVATE kiotty_net benchmark::benchmark_main)
+target_compile_definitions(kiotty_net_benchmarks PRIVATE KIOTTY_BENCH_CERT_DIR="${PROJECT_SOURCE_DIR}/tests/certs")

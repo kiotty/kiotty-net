@@ -1,8 +1,6 @@
 #pragma once
 
-#include "context/kiotty_event_client.h"
-#include "context/kiotty_server.h"
-#include "context/kiotty_stream_client.h"
+#include "context/kiotty_handles.h"
 #include "core/kiotty_result.h"
 #include "core/pool/kiotty_lazy_reusable_pool.h"
 #include "kiotty_net_base.h"
@@ -10,9 +8,10 @@
 #include <cstdint>
 #include <mutex>
 
+struct KiottyNetContextImpl;
+
 namespace kiotty::net::implementation
 {
-    class Context;
 
     enum class ContextPhase : uint8_t
     {
@@ -21,10 +20,10 @@ namespace kiotty::net::implementation
         RELEASING
     };
 
-    using ContextResult = Result<Context&, KiottyNetCode>;
-    using ServerResult = Result<Server&, KiottyNetCode>;
-    using StreamClientResult = Result<StreamClient&, KiottyNetCode>;
-    using EventClientResult = Result<EventClient&, KiottyNetCode>;
+    using ContextResult = Result<KiottyNetContextImpl&, KiottyNetCode>;
+    using ServerResult = Result<KiottyNetServer&, KiottyNetCode>;
+    using StreamClientResult = Result<KiottyNetStreamClient&, KiottyNetCode>;
+    using EventClientResult = Result<KiottyNetEventClient&, KiottyNetCode>;
 
     class Context
     {
@@ -43,24 +42,29 @@ namespace kiotty::net::implementation
                                               const KiottyNetTlsClientConfiguration* tls);
         EventClientResult  createEventClient(const KiottyNetClientConfiguration& configuration,
                                              const KiottyNetTlsClientConfiguration* tls);
-        void               destroy(Server& server);
-        void               destroy(StreamClient& client);
-        void               destroy(EventClient& client);
+        void               destroy(KiottyNetServer& server);
+        void               destroy(KiottyNetStreamClient& client);
+        void               destroy(KiottyNetEventClient& client);
 
-    private:
+    protected:
         Context();
         ~Context();
 
+    private:
         KiottyNetCode initialize();
         void          finishRelease();
 
         template <class T>
         void retire(LazyReusablePool<T>& pool, T& owner);
 
-        LazyReusablePool<Server>       _servers;
-        LazyReusablePool<StreamClient> _stream_clients;
-        LazyReusablePool<EventClient>  _event_clients;
-        std::mutex                     _mutex;
-        ContextPhase                   _phase;
+        LazyReusablePool<KiottyNetServer>       _servers;
+        LazyReusablePool<KiottyNetStreamClient> _stream_clients;
+        LazyReusablePool<KiottyNetEventClient>  _event_clients;
+        std::mutex                              _mutex;
+        ContextPhase                            _phase;
     };
 }
+
+struct KiottyNetContextImpl final : kiotty::net::implementation::Context
+{
+};

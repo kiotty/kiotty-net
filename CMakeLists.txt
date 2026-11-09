@@ -51,6 +51,7 @@ configure_file(cmake/kiotty_memory_limits_configuration.h.in
     ${KIOTTY_NET_GENERATED_DIR}/kiotty_memory_limits_configuration.h @ONLY)
 
 set(KIOTTY_NET_SOURCES
+    src/kiotty_net_base.cpp
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_deadline.cpp

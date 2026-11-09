@@ -108,7 +108,7 @@ TEST_F(ContextTest, RetiredEndpointIsReusedByTheNextCreateOfTheSameType)
 
     net::ServerResult first_server = context->createServer(server, nullptr);
     ASSERT_TRUE(first_server);
-    net::Server* first_server_address = &first_server.value();
+    KiottyNetServer* first_server_address = &first_server.value();
     context->destroy(first_server.value());
     net::ServerResult second_server = context->createServer(server, nullptr);
     ASSERT_TRUE(second_server);
@@ -116,7 +116,7 @@ TEST_F(ContextTest, RetiredEndpointIsReusedByTheNextCreateOfTheSameType)
 
     net::EventClientResult first_event = context->createEventClient(client, nullptr);
     ASSERT_TRUE(first_event);
-    net::EventClient* first_event_address = &first_event.value();
+    KiottyNetEventClient* first_event_address = &first_event.value();
     context->destroy(first_event.value());
     net::EventClientResult second_event = context->createEventClient(client, nullptr);
     ASSERT_TRUE(second_event);
@@ -124,7 +124,7 @@ TEST_F(ContextTest, RetiredEndpointIsReusedByTheNextCreateOfTheSameType)
 
     net::StreamClientResult first_stream = context->createStreamClient(client, nullptr);
     ASSERT_TRUE(first_stream);
-    net::StreamClient* first_stream_address = &first_stream.value();
+    KiottyNetStreamClient* first_stream_address = &first_stream.value();
     context->destroy(first_stream.value());
     net::StreamClientResult second_stream = context->createStreamClient(client, nullptr);
     ASSERT_TRUE(second_stream);
@@ -136,7 +136,7 @@ TEST_F(ContextTest, CreateServerHasNoCountLimitAndReusesARetiredServer)
     const size_t servers_beyond_the_old_limit = 20;
     KiottyNetServerConfiguration server = serverConfiguration();
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(server, 1));
-    std::vector<net::Server*> servers;
+    std::vector<KiottyNetServer*> servers;
     for (size_t i = 0; i < servers_beyond_the_old_limit; ++i)
     {
         net::ServerResult created = context->createServer(server, nullptr);
@@ -155,7 +155,7 @@ TEST_F(ContextTest, AServerReusedWithMoreClientsThanBeforeAcceptsTheNewCount)
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(small, 2));
     net::ServerResult first = context->createServer(small, nullptr);
     ASSERT_TRUE(first);
-    net::Server* address = &first.value();
+    KiottyNetServer* address = &first.value();
     context->destroy(first.value());
 
     KiottyNetServerConfiguration large = serverConfiguration();

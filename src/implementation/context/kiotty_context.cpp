@@ -37,11 +37,12 @@ namespace kiotty::net::implementation
 
     ContextResult Context::open()
     {
-        static Context context;
+        static KiottyNetContextImpl instance;
+        Context& context = instance;
         const std::lock_guard<std::mutex> lock(context._mutex);
         const KiottyNetCode initialized = context.initialize();
         if (initialized != KIOTTY_NET_CODE_SUCCESS) { return ContextResult::failure(initialized); }
-        return ContextResult::success(context);
+        return ContextResult::success(instance);
     }
 
     void Context::release()
@@ -94,19 +95,19 @@ namespace kiotty::net::implementation
         return _event_clients.acquire(ClientConfiguration{ configuration, tls });
     }
 
-    void Context::destroy(Server& server)
+    void Context::destroy(KiottyNetServer& server)
     {
         retire(_servers, server);
     }
 
-    void Context::destroy(StreamClient& client)
+    void Context::destroy(KiottyNetStreamClient& client)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         if (_phase != ContextPhase::OPEN) { return; }
         _stream_clients.release(client);
     }
 
-    void Context::destroy(EventClient& client)
+    void Context::destroy(KiottyNetEventClient& client)
     {
         retire(_event_clients, client);
     }
