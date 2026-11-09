@@ -413,7 +413,7 @@ private:
 ```cpp
 // core/kiotty_text.h
 using TextResult = Result<Span<const char>, KiottyNetCode>;
-TextResult parseText(const char* text, size_t max_length);        // C 경계의 유일한 입구. NULL 이면 INVALID_ARGUMENT. strnlen(text, max_length + 1) 가 max_length 를 넘으면 INVALID_ARGUMENT. UTF-8 이 아니면 INVALID_ARGUMENT
+TextResult parseText(const char* text, size_t max_length);        // C 경계의 유일한 입구. NULL 이면 INVALID_ARGUMENT. strnlen(text, max_length + 1) 가 max_length 를 넘으면 INVALID_ARGUMENT. UTF-8 이 아니면 INVALID_ENCODING (사용자 결정 2026-11-09)
 bool       equalsIgnoreCase(Span<const char> a, Span<const char> b);  // ASCII. HTTP 헤더 이름, "chunked"
 // core/kiotty_parse_integer.h
 using UnsignedResult = Result<uint64_t, KiottyNetCode>;
@@ -577,7 +577,7 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 
 ### 12.7 이 판이 바꾸지 않는 것
 
-핸들 struct 둘, `KiottyNetConnectionHandler` 의 콜백 여덟과 그 인자, action 함수 여섯, `KiottyNetCode` 의 값, 설정 struct 의 필드 배치 (12.1 의 둘 제외), `initialization_mark`.
+핸들 struct 둘, `KiottyNetConnectionHandler` 의 콜백 여덟과 그 인자, action 함수 여섯, `KiottyNetCode` 의 값 (M2 에서 enum 끝에 `INVALID_ENCODING` 하나를 더했다. 있던 값은 그대로다), 설정 struct 의 필드 배치 (12.1 의 둘 제외), `initialization_mark`.
 
 ## 13. 사이클
 

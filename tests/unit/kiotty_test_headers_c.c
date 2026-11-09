@@ -37,7 +37,7 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.rule_next_count      = RULES[0].next.count;
     layout.rule_second_next     = RULES[0].next.at[1];
     layout.last_tls_verification = KIOTTY_NET_TLS_VERIFICATION_NONE;
-    layout.last_code            = KIOTTY_NET_CODE_OUT_OF_MEMORY;
+    layout.last_code            = KIOTTY_NET_CODE_INVALID_ENCODING;
     layout.last_action_type     = KIOTTY_NET_ACTION_TYPE_CLOSE;
     return layout;
 }

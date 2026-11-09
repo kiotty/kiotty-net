@@ -38,7 +38,9 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
 TEST(Headers, CAndCppSeeTheSameEnumeratorValues)
 {
     KiottyTestHeaderLayout c = kiottyTestHeaderLayoutFromC();
-    EXPECT_EQ(c.last_code, static_cast<int>(KIOTTY_NET_CODE_OUT_OF_MEMORY));
+    EXPECT_EQ(c.last_code, static_cast<int>(KIOTTY_NET_CODE_INVALID_ENCODING));
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_CODE_OUT_OF_MEMORY), 24);
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_CODE_INVALID_ENCODING), 25);
     EXPECT_EQ(c.last_action_type, static_cast<int>(KIOTTY_NET_ACTION_TYPE_CLOSE));
     EXPECT_EQ(c.last_tls_verification, static_cast<int>(KIOTTY_NET_TLS_VERIFICATION_NONE));
 }

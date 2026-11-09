@@ -31,8 +31,9 @@ namespace
         const net::TextResult certificate = net::parseText(certificate_file, MAX_PATH_TEXT);
         const net::TextResult key = net::parseText(key_file, MAX_PATH_TEXT);
         const net::TextResult password = parseOptionalText(key_password, MAX_PASSWORD_TEXT);
-        const bool is_parsed = certificate && key && password;
-        if (!is_parsed) { return IdentityResult::failure(INVALID); }
+        if (!certificate) { return IdentityResult::failure(certificate.code); }
+        if (!key) { return IdentityResult::failure(key.code); }
+        if (!password) { return IdentityResult::failure(password.code); }
         const net::TlsIdentityText identity{ certificate.value, key.value, password.value };
         return IdentityResult::success(identity);
     }

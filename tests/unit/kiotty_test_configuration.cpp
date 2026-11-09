@@ -147,6 +147,18 @@ TEST(Configuration, InitializeRejectsMissingHostZeroPortAndTooLongHost)
     EXPECT_EQ(longest, std::string(configuration.address.host));
 }
 
+TEST(Configuration, InitializeRejectsHostAndPipeNameThatAreNotUtf8WithInvalidEncoding)
+{
+    KiottyNetServerConfiguration server{};
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_initializeTcpServerConfiguration(&server, "host\xFF", PORT));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_initializePipeServerConfiguration(&server, "/tmp/\xC0\xAF"));
+    EXPECT_FALSE(net::isInitialized(server));
+    KiottyNetClientConfiguration client{};
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_initializeTcpClientConfiguration(&client, "\xED\xA0\x80", PORT));
+    EXPECT_FALSE(net::isInitialized(client));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializePipeClientConfiguration(&client, "/tmp/\xED\x95\x9C.sock"));
+}
+
 TEST(Configuration, PipeClientHasNoHostnameForVerification)
 {
     KiottyNetClientConfiguration configuration{};
@@ -184,6 +196,33 @@ TEST(TlsConfiguration, ServerDefaultsAndRejectedValues)
     EXPECT_STREQ("ca.pem", configuration.trust_store_path);
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsServerVersions(configuration, static_cast<uint32_t>(KIOTTY_NET_TLS_VERSION_V13)));
     EXPECT_EQ(static_cast<uint32_t>(KIOTTY_NET_TLS_VERSION_V13), configuration.versions);
+}
+
+TEST(TlsConfiguration, PathsAndPasswordThatAreNotUtf8AreInvalidEncoding)
+{
+    KiottyNetTlsServerConfiguration server{};
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_initializeTlsServerConfiguration(&server, "cert\xFF.pem", "key.pem", nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_initializeTlsServerConfiguration(&server, "cert.pem", "key.pem", "pass\xE9"));
+    EXPECT_FALSE(net::isInitialized(server));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsServerConfiguration(&server, "cert.pem", "key.pem", nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_configureTlsServerClientAuthentication(&server, KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED, "ca\xFF.pem"));
+    KiottyNetTlsClientConfiguration client{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsClientConfiguration(&client));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_configureTlsClientTrustStore(&client, "\xC3\x28"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, KiottyNet_configureTlsClientIdentity(&client, "cert.pem", "key\x80.pem", nullptr));
+    EXPECT_STREQ("", client.trust_store_path);
+    EXPECT_STREQ("", client.identity.certificate_file);
+}
+
+TEST(TlsConfiguration, NoClientAuthenticationAcceptsNullOrEmptyTrustStorePath)
+{
+    KiottyNetTlsServerConfiguration configuration{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsServerConfiguration(&configuration, "cert.pem", "key.pem", nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureTlsServerClientAuthentication(&configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_NONE, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureTlsServerClientAuthentication(&configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_NONE, ""));
+    EXPECT_EQ(KIOTTY_NET_CLIENT_AUTHENTICATION_NONE, configuration.client_authentication);
+    EXPECT_STREQ("", configuration.trust_store_path);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureTlsServerClientAuthentication(&configuration, KIOTTY_NET_CLIENT_AUTHENTICATION_OPTIONAL, ""));
 }
 
 TEST(TlsConfiguration, ClientDefaultsVerifyServerAndHostnameAndUnknownVerificationIsRejected)

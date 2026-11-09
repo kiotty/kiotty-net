@@ -26,6 +26,12 @@ namespace
         const TextResult parsed = parseText(text, MAX_LENGTH);
         return parsed.code == KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
+
+    bool isMisencoded(const char* text)
+    {
+        const TextResult parsed = parseText(text, MAX_LENGTH);
+        return parsed.code == KIOTTY_NET_CODE_INVALID_ENCODING;
+    }
 }
 
 TEST(ParseText, EmptyInputIsAnEmptySpan)
@@ -57,15 +63,20 @@ TEST(ParseText, MiddleNullByteEndsTheTextThereAndIsNotAFailure)
     EXPECT_EQ(parsed.value.length, 2u);
 }
 
-TEST(ParseText, InvalidUtf8IsInvalidArgument)
+TEST(ParseText, InvalidUtf8IsInvalidEncoding)
 {
-    EXPECT_TRUE(isRejected("\xC3\x28"));
-    EXPECT_TRUE(isRejected("\xC0\xAF"));
-    EXPECT_TRUE(isRejected("\xE2\x82"));
-    EXPECT_TRUE(isRejected("\xED\xA0\x80"));
-    EXPECT_TRUE(isRejected("\xF4\x90\x80\x80"));
-    EXPECT_TRUE(isRejected("\xFF"));
-    EXPECT_TRUE(isRejected("a\x80"));
+    EXPECT_TRUE(isMisencoded("\xC3\x28"));
+    EXPECT_TRUE(isMisencoded("\xC0\xAF"));
+    EXPECT_TRUE(isMisencoded("\xE2\x82"));
+    EXPECT_TRUE(isMisencoded("\xED\xA0\x80"));
+    EXPECT_TRUE(isMisencoded("\xF4\x90\x80\x80"));
+    EXPECT_TRUE(isMisencoded("\xFF"));
+    EXPECT_TRUE(isMisencoded("a\x80"));
+}
+
+TEST(ParseText, TooLongWinsOverInvalidUtf8)
+{
+    EXPECT_TRUE(isRejected("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"));
 }
 
 TEST(ParseText, ValidMultibyteUtf8IsAccepted)

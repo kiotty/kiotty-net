@@ -7,7 +7,7 @@
 | 파일 | 내용 |
 |---|---|
 | `kiotty_fixed_string.h` | `FixedString<N>`. 늘 null 종료. public 일곱 (`assign / append / span / c_str / length / empty / clear`). `assign` 이 실패하면 비우고, `append` 가 실패하면 그대로 둔다. 복사는 `Span::copyFrom` |
-| `kiotty_text.h / .cpp` | `parseText(const char*, max_length)`: NULL, `max_length` 초과, 잘못된 UTF-8 (overlong, surrogate, U+10FFFF 초과, 잘린 sequence) 은 INVALID_ARGUMENT. `equalsIgnoreCase` (ASCII 만). `textOf(const char (&)[N])`: 설정 struct 의 `char[]` 를 `strnlen(field, N)` 으로 읽는다. 종료 문자가 없으면 길이 N 이라 `FixedString<N>::assign` 이 실패한다 |
+| `kiotty_text.h / .cpp` | `parseText(const char*, max_length)`: NULL, `max_length` 초과는 INVALID_ARGUMENT, 잘못된 UTF-8 (overlong, surrogate, U+10FFFF 초과, 잘린 sequence) 은 INVALID_ENCODING. 길이 검사가 먼저다. `equalsIgnoreCase` (ASCII 만). `textOf(const char (&)[N])`: 설정 struct 의 `char[]` 를 `strnlen(field, N)` 으로 읽는다. 종료 문자가 없으면 길이 N 이라 `FixedString<N>::assign` 이 실패한다 |
 | `kiotty_parse_integer.h / .cpp` | `parseUnsigned` (10 진, 20 자리), `parseHexadecimal` (16 진, 16 자리). 빈 입력, 자리 초과, 숫자 아닌 글자, 오버플로는 INVALID_ARGUMENT. `checkedMultiply / checkedAdd` |
 
 ## 바꾼 자리 (8.3 의 표)
@@ -29,8 +29,8 @@
 
 ## 동작이 바뀐 것
 
-- 공개 C 함수의 host, pipe_name, 경로, password 가 UTF-8 이 아니면 INVALID_ARGUMENT 다 (설계 8.2). 전에는 바이트 그대로 받았다. UTF-8 이 아닌 key password 도 거절된다.
-- `KiottyNet_configureTlsServerClientAuthentication(NONE, "")` 이 SUCCESS 다. 전에는 NONE 에 NULL 이 아니면 INVALID_ARGUMENT 였다. 안쪽이 NULL 과 빈 문자열을 같은 빈 Span 으로 받는다. NONE 에 비지 않은 경로는 그대로 INVALID_ARGUMENT.
+- 공개 C 함수의 host, pipe_name, 경로, password 가 UTF-8 이 아니면 새 코드 `KIOTTY_NET_CODE_INVALID_ENCODING` 이다 (사용자 결정 2026-11-09). enum 끝에 더해 있던 값 (`OUT_OF_MEMORY` 24 까지) 은 그대로다. 전에는 바이트 그대로 받았다. UTF-8 이 아닌 key password 도 거절된다. 정수 parse 둘은 UTF-8 이 아닌 바이트도 "숫자 아닌 글자" 라 INVALID_ARGUMENT 다.
+- `KiottyNet_configureTlsServerClientAuthentication(NONE, "")` 이 SUCCESS 다 (사용자 결정 2026-11-09). 전에는 NONE 에 NULL 이 아니면 INVALID_ARGUMENT 였다. 안쪽이 NULL 과 빈 문자열을 같은 빈 Span 으로 받는다. NONE 에 비지 않은 경로는 그대로 INVALID_ARGUMENT.
 
 ## 설계와 다른 것
 
@@ -38,15 +38,15 @@
 
 ## 테스트
 
-- 새 파일 셋: `kiotty_test_fixed_string.cpp` (7), `kiotty_test_text.cpp` (10), `kiotty_test_parse_integer.cpp` (13). 수칙 2.10 의 다섯 입력을 parse 셋 모두에. `parseText` 의 중간 null 바이트는 "그 자리에서 끝난다, 실패가 아니다" 로 테스트 이름 (`MiddleNullByteEndsTheTextThereAndIsNotAFailure`) 에 적었다. 두 정수 parse 는 중간 null 바이트가 숫자 아닌 글자라 INVALID_ARGUMENT.
+- 새 파일 셋: `kiotty_test_fixed_string.cpp` (7), `kiotty_test_text.cpp` (11), `kiotty_test_parse_integer.cpp` (13). 공개 API 쪽은 `Configuration.InitializeRejectsHostAndPipeNameThatAreNotUtf8WithInvalidEncoding`, `TlsConfiguration.PathsAndPasswordThatAreNotUtf8AreInvalidEncoding`, `TlsConfiguration.NoClientAuthenticationAcceptsNullOrEmptyTrustStorePath`. `Headers.CAndCppSeeTheSameEnumeratorValues` 는 마지막 코드를 `INVALID_ENCODING` (25) 으로 본다. 수칙 2.10 의 다섯 입력을 parse 셋 모두에. `parseText` 의 중간 null 바이트는 "그 자리에서 끝난다, 실패가 아니다" 로 테스트 이름 (`MiddleNullByteEndsTheTextThereAndIsNotAFailure`) 에 적었다. 두 정수 parse 는 중간 null 바이트가 숫자 아닌 글자라 INVALID_ARGUMENT.
 - 고친 것: 안쪽 설정 함수를 부르던 테스트는 공개 `KiottyNet_*` 를 부른다 (NULL, 빈 문자열, 너무 긴 값의 거절이 번역 층으로 옮겨 갔다). `TlsEngine::open`, `ConnectionConfiguration`, `ConnectionStream::writeFile`, `IoLoop::admit` 를 부르는 자리는 `support/kiotty_test_text.h` 의 `kiotty_test::textOf(const char*)` 로 Span 을 만든다.
 
 | 환경 | 결과 |
 |---|---|
-| MSVC TLS ON | 456 / 456 |
-| MSVC TLS OFF | 456 / 456 |
-| WSL gcc TLS ON | 457 / 457 (ring 테스트 skip) |
-| WSL clang ASan + UBSan TLS ON | 457 / 457. UBSan 의 `runtime error` 는 googletest 안의 vptr 검사뿐이다 (테스트가 `-fno-rtti`). 라이브러리 소스를 가리키는 줄은 없다 |
+| MSVC TLS ON | 460 / 460 |
+| MSVC TLS OFF | 460 / 460 |
+| WSL gcc TLS ON | 461 / 461 (ring 테스트 skip) |
+| WSL clang ASan + UBSan TLS ON | 461 / 461. UBSan 의 `runtime error` 는 googletest 안의 vptr 검사뿐이다 (테스트가 `-fno-rtti`). 라이브러리 소스를 가리키는 줄은 없다 |
 | WSL benchmark target | 빌드 |
 | `check_rules.py src/implementation` | LINE 0, MACRO 18, PUBLIC 2 (전과 같다) |
 

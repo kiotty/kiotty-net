@@ -166,7 +166,8 @@ typedef enum KiottyNetCode {
     KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED,       /* handshake : 버전 / cipher 불일치, alert, 평문 상대 */
     KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT,
     KIOTTY_NET_CODE_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
-    KIOTTY_NET_CODE_OUT_OF_MEMORY               /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
+    KIOTTY_NET_CODE_OUT_OF_MEMORY,              /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
+    KIOTTY_NET_CODE_INVALID_ENCODING            /* 문자열 인자 (host, pipe 이름, 경로, password) 가 UTF-8 이 아님 */
 } KiottyNetCode;
 ```
 

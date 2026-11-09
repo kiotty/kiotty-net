@@ -32,7 +32,7 @@ namespace kiotty::net::implementation
         const size_t length = strnlen(text, scan_length.value);
         if (length > max_length) { return TextResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
         const Span<const char> parsed{ text, length };
-        if (!isUtf8(parsed)) { return TextResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+        if (!isUtf8(parsed)) { return TextResult::failure(KIOTTY_NET_CODE_INVALID_ENCODING); }
         return TextResult::success(parsed);
     }
 
