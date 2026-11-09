@@ -58,10 +58,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: install libkqueue
-        run: sudo apt-get update && sudo apt-get install -y libkqueue-dev
+      - name: build libkqueue
+        run: >-
+          git clone --depth 1 --branch v2.7.0 https://github.com/mheily/libkqueue.git $HOME/libkqueue &&
+          cmake -S $HOME/libkqueue -B $HOME/libkqueue/build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=$HOME/.local -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF &&
+          cmake --build $HOME/libkqueue/build --parallel &&
+          cmake --install $HOME/libkqueue/build
       - name: configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=ON -DKIOTTY_NET_WITH_LIBKQUEUE=ON
+        run: >-
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=ON
+          -DKIOTTY_NET_WITH_LIBKQUEUE=ON -DCMAKE_PREFIX_PATH=$HOME/.local
+          -DKIOTTY_NET_LIBKQUEUE_LIBRARY=$HOME/.local/lib/libkqueue.a
       - name: build
         run: cmake --build build --parallel
       - name: unit and integration tests

@@ -44,6 +44,12 @@ namespace kiotty_test
     bool setSendBuffer(intptr_t handle, int bytes)
     {
         RawSocket socket = toRaw(handle);
+#if defined(__APPLE__)
+        if (bytes == 0)
+        {
+            bytes = 1;
+        }
+#endif
         return ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) == 0;
     }
 
