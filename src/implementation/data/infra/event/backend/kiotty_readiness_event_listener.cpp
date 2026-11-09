@@ -33,7 +33,7 @@ namespace kiotty::net::implementation
         close();
     }
 
-    SocketCode EventListener::open(size_t completion_capacity)
+    SocketCode EventListener::openBackend(size_t completion_capacity)
     {
         EventListenerState& state = _state;
         if (backend::isOpen(state)) { return SocketCode::INVALID_ARGUMENT; }
@@ -42,7 +42,7 @@ namespace kiotty::net::implementation
         const SocketCode created = backend::createHandles(state, completion_capacity);
         if (created != SocketCode::SUCCESS)
         {
-            close();
+            closeBackend();
             return created;
         }
         state.capacity = completion_capacity;
@@ -50,7 +50,7 @@ namespace kiotty::net::implementation
         return SocketCode::SUCCESS;
     }
 
-    void EventListener::close()
+    void EventListener::closeBackend()
     {
         EventListenerState& state = _state;
         backend::cancelReady(state);
@@ -88,11 +88,14 @@ namespace kiotty::net::implementation
         {
             backend::unwatch(state, event);
         }
-        if (is_current && event.pending)
+        if (is_current && event.pending && !event.registered)
         {
             queueReady(state, event, SocketCode::CANCELLED);
         }
-        event.registered = false;
+        if (!is_current)
+        {
+            event.registered = false;
+        }
         ::close(event.fd);
         event.fd = -1;
     }

@@ -31,6 +31,7 @@ namespace kiotty::net::implementation
         int32_t             slot;
         bool                registered;
         bool                queued;
+        bool                polling;
         SocketCode          result;
         IoPayload           payload;
         size_t              done;
@@ -46,6 +47,7 @@ namespace kiotty::net::implementation
         , slot(-1)
         , registered(false)
         , queued(false)
+        , polling(false)
         , result(SocketCode::SUCCESS)
         , payload()
         , done(0)

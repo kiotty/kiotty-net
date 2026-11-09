@@ -18,6 +18,7 @@
 #include "data/infra/event/backend/kiotty_no_event.h"
 #endif
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -54,6 +55,12 @@ namespace kiotty::net::implementation
         SocketCode               wake();
 
     private:
-        EventListenerState _state;
+        SocketCode openBackend(size_t completion_capacity);
+        void       closeBackend();
+        SocketCode wakeBackend();
+
+        EventListenerState    _state;
+        std::atomic<uint32_t> _wakers{ 0 };
+        std::atomic<bool>     _is_open{ false };
     };
 }

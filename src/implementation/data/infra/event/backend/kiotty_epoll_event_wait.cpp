@@ -2,7 +2,7 @@
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#include "data/infra/event/backend/kiotty_readiness_event_state.h"
+#include "data/infra/event/backend/kiotty_ring_event_state.h"
 
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -19,6 +19,10 @@ namespace kiotty::net::implementation
 
     size_t backend::poll(EventListenerState& state, uint32_t timeout_milliseconds)
     {
+        if constexpr (RING_BACKEND)
+        {
+            if (isRing(state)) { return ringPoll(state, timeout_milliseconds); }
+        }
         const bool forever = isForever(timeout_milliseconds);
         const Clock::time_point deadline =
             Clock::now() + std::chrono::milliseconds(timeout_milliseconds);

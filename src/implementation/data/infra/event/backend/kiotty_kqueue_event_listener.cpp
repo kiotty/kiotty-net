@@ -21,7 +21,7 @@ namespace kiotty::net::implementation
         SocketCode change(const EventListenerState& state, const struct kevent& request);
     }
 
-    SocketCode EventListener::wake()
+    SocketCode EventListener::wakeBackend()
     {
         EventListenerState& state = _state;
         if (!backend::isOpen(state))
@@ -82,6 +82,11 @@ namespace kiotty::net::implementation
         EV_SET(&request, ident, filterOf(event.action), EV_DELETE, 0, 0, nullptr);
         static_cast<void>(change(state, request));
         event.registered = false;
+    }
+
+    void backend::forget(EventListenerState& state, IoEvent& event)
+    {
+        unwatch(state, event);
     }
 
     namespace

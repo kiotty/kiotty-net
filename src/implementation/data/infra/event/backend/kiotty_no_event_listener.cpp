@@ -16,13 +16,13 @@ namespace kiotty::net::implementation
         (void)_state;
     }
 
-    SocketCode EventListener::open(size_t completion_capacity)
+    SocketCode EventListener::openBackend(size_t completion_capacity)
     {
         (void)completion_capacity;
         return SocketCode::NOT_SUPPORTED;
     }
 
-    void EventListener::close()
+    void EventListener::closeBackend()
     {
     }
 
@@ -54,7 +54,7 @@ namespace kiotty::net::implementation
         return completions;
     }
 
-    SocketCode EventListener::wake()
+    SocketCode EventListener::wakeBackend()
     {
         return SocketCode::NOT_SUPPORTED;
     }

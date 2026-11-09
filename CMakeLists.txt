@@ -6,6 +6,7 @@ option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF b
 option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)
 option(KIOTTY_NET_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
+option(KIOTTY_NET_WITH_IO_URING "Linux (not Android): use io_uring when the kernel allows it, epoll otherwise" ON)
 option(KIOTTY_NET_WITH_LIBKQUEUE "Linux only: use the kqueue backend through libkqueue instead of epoll" OFF)
 set(KIOTTY_NET_SANITIZER "" CACHE STRING "Sanitizer for every target: address, thread, undefined or a comma list")
 
@@ -60,6 +61,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/socket/backend/kiotty_windows_passive_socket.cpp
     src/implementation/data/infra/socket/backend/kiotty_windows_socket_transfer.cpp
     src/implementation/domain/entity/kiotty_io_action.cpp
+    src/implementation/data/infra/event/kiotty_event_listener.cpp
     src/implementation/data/infra/event/backend/kiotty_readiness_event_listener.cpp
     src/implementation/data/infra/event/backend/kiotty_readiness_event_ready.cpp
     src/implementation/data/infra/event/backend/kiotty_readiness_event_submit.cpp
@@ -67,6 +69,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/event/backend/kiotty_epoll_event_listener.cpp
     src/implementation/data/infra/event/backend/kiotty_epoll_event_wait.cpp
     src/implementation/data/infra/event/backend/kiotty_kqueue_event_listener.cpp
+    src/implementation/data/infra/event/backend/kiotty_ring_event_open.cpp
+    src/implementation/data/infra/event/backend/kiotty_ring_event_submit.cpp
+    src/implementation/data/infra/event/backend/kiotty_ring_event_wait.cpp
     src/implementation/data/infra/event/backend/kiotty_kqueue_event_wait.cpp
     src/implementation/data/infra/event/backend/kiotty_iocp_event_listener.cpp
     src/implementation/data/infra/event/backend/kiotty_iocp_event_submit.cpp
@@ -137,6 +142,16 @@ endif()
 
 if(WIN32)
     target_link_libraries(kiotty_net PUBLIC ws2_32 ntdll)
+endif()
+
+if(KIOTTY_NET_WITH_IO_URING AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KIOTTY_NET_WITH_LIBKQUEUE)
+    include(CheckSymbolExists)
+    check_symbol_exists(IORING_ENTER_EXT_ARG "linux/io_uring.h" KIOTTY_NET_HAS_IO_URING_HEADER)
+    if(KIOTTY_NET_HAS_IO_URING_HEADER)
+        target_compile_definitions(kiotty_net PUBLIC KIOTTY_NET_WITH_IO_URING=1)
+    else()
+        message(STATUS "kiotty_net: linux/io_uring.h is older than 5.11, epoll only")
+    endif()
 endif()
 
 if(KIOTTY_NET_WITH_LIBKQUEUE)

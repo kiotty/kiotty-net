@@ -26,6 +26,7 @@ namespace kiotty::net::implementation
         void       releaseHandles(EventListenerState& state);
         SocketCode watch(EventListenerState& state, IoEvent& event);
         void       unwatch(EventListenerState& state, IoEvent& event);
+        void       forget(EventListenerState& state, IoEvent& event);
         size_t     poll(EventListenerState& state, uint32_t timeout_milliseconds);
 
         void         queueReady(EventListenerState& state, IoEvent& event, SocketCode code);

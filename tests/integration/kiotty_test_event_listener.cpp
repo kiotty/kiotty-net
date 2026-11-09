@@ -692,4 +692,62 @@ TEST_F(EventListener_Readiness, NoCompletionArrivesWithoutASubmitEvenIfPeerSends
 }
 #endif
 
+#if KIOTTY_NET_EVENT_URING
+#include <dirent.h>
+#include <linux/io_uring.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+namespace
+{
+    bool kernelAllowsIoUring()
+    {
+        io_uring_params params{};
+        const long ring = ::syscall(__NR_io_uring_setup, 1, &params);
+        if (ring < 0)
+        {
+            return false;
+        }
+        ::close(static_cast<int>(ring));
+        return true;
+    }
+
+    size_t ringDescriptors()
+    {
+        size_t count = 0;
+        DIR* directory = ::opendir("/proc/self/fd");
+        if (directory == nullptr)
+        {
+            return 0;
+        }
+        for (dirent* entry = ::readdir(directory); entry != nullptr; entry = ::readdir(directory))
+        {
+            const std::string path = std::string("/proc/self/fd/") + entry->d_name;
+            char target[64] = {};
+            const ssize_t length = ::readlink(path.c_str(), target, sizeof(target) - 1);
+            if (length > 0 && std::string(target, static_cast<size_t>(length)) == "anon_inode:[io_uring]")
+            {
+                count += 1;
+            }
+        }
+        ::closedir(directory);
+        return count;
+    }
+}
+
+TEST(EventListener_Ring, OpenTakesAnIoUringInstanceWhenTheKernelAllowsIt)
+{
+    if (!kernelAllowsIoUring())
+    {
+        GTEST_SKIP() << "io_uring is not allowed here, the listener uses epoll";
+    }
+    const size_t before = ringDescriptors();
+    net::EventListener ring;
+    ASSERT_EQ(ring.open(4), SocketCode::SUCCESS);
+    EXPECT_EQ(ringDescriptors(), before + 1);
+    ring.close();
+    EXPECT_EQ(ringDescriptors(), before);
+}
+#endif
+
 #endif

@@ -21,15 +21,14 @@ namespace kiotty::net::implementation
         {
             backend::unlinkReady(*listener, *this);
         }
-        if (!backend::attached(*this))
-        {
-            return;
-        }
         if (registered && backend::belongsTo(*this, *listener))
         {
-            backend::unwatch(*listener, *this);
+            backend::forget(*listener, *this);
         }
-        ::close(fd);
+        if (backend::attached(*this))
+        {
+            ::close(fd);
+        }
     }
 
     void backend::queueReady(EventListenerState& state, IoEvent& event, SocketCode code)

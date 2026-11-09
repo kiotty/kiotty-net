@@ -53,6 +53,18 @@ jobs:
       - name: unit and integration tests
         run: ctest --test-dir build --output-on-failure -L "unit|integration"
 
+  epoll:
+    name: gcc epoll only (io_uring OFF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DKIOTTY_NET_BUILD_TESTS=ON -DKIOTTY_NET_USE_TLS=ON -DKIOTTY_NET_WITH_IO_URING=OFF
+      - name: build
+        run: cmake --build build --parallel
+      - name: unit and integration tests
+        run: ctest --test-dir build --output-on-failure -L "unit|integration"
+
   libkqueue:
     name: gcc kqueue backend through libkqueue
     runs-on: ubuntu-latest

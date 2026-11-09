@@ -5,6 +5,7 @@
 #if KIOTTY_NET_EVENT_EPOLL
 
 #include "data/infra/event/backend/kiotty_readiness_event.h"
+#include "data/infra/event/backend/kiotty_ring_event.h"
 
 #include <sys/epoll.h>
 
@@ -19,6 +20,7 @@ namespace kiotty::net::implementation
         int                      epoll;
         int                      wake;
         std::vector<epoll_event> entries;
+        RingState                ring;
     };
 
     inline EventListenerState::EventListenerState()
@@ -26,6 +28,7 @@ namespace kiotty::net::implementation
         , epoll(-1)
         , wake(-1)
         , entries()
+        , ring()
     {
     }
 }

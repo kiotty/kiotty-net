@@ -33,7 +33,7 @@ namespace kiotty::net::implementation
         close();
     }
 
-    SocketCode EventListener::open(size_t completion_capacity)
+    SocketCode EventListener::openBackend(size_t completion_capacity)
     {
         EventListenerState& state = _state;
         if (state.port != nullptr) { return SocketCode::INVALID_ARGUMENT; }
@@ -41,14 +41,14 @@ namespace kiotty::net::implementation
         const SocketCode allocated = allocate(state, completion_capacity);
         if (allocated != SocketCode::SUCCESS)
         {
-            close();
+            closeBackend();
             return allocated;
         }
         state.port = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
         if (state.port == nullptr)
         {
             const SocketCode failed = lastErrorCode();
-            close();
+            closeBackend();
             return failed;
         }
         state.capacity = completion_capacity;
@@ -56,7 +56,7 @@ namespace kiotty::net::implementation
         return SocketCode::SUCCESS;
     }
 
-    void EventListener::close()
+    void EventListener::closeBackend()
     {
         EventListenerState& state = _state;
         if (state.port != nullptr)
@@ -100,7 +100,7 @@ namespace kiotty::net::implementation
         event.socket = INVALID_SOCKET;
     }
 
-    SocketCode EventListener::wake()
+    SocketCode EventListener::wakeBackend()
     {
         EventListenerState& state = _state;
         if (state.port == nullptr)
