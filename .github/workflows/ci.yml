@@ -122,12 +122,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DKIOTTY_NET_BUILD_BENCHMARKS=ON -DKIOTTY_NET_USE_TLS=ON
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DKIOTTY_NET_BUILD_BENCHMARKS=ON -DKIOTTY_NET_USE_TLS=ON
+          cmake -B build-epoll -DCMAKE_BUILD_TYPE=Release -DKIOTTY_NET_BUILD_BENCHMARKS=ON -DKIOTTY_NET_USE_TLS=ON -DKIOTTY_NET_WITH_IO_URING=OFF
       - name: build
-        run: cmake --build build --parallel --target kiotty_net_benchmarks
-      - name: run
-        run: build/tests/benchmark/kiotty_net_benchmarks --benchmark_min_time=0.5s --benchmark_out=benchmark.json --benchmark_out_format=json
+        run: |
+          cmake --build build --parallel --target kiotty_net_benchmarks
+          cmake --build build-epoll --parallel --target kiotty_net_benchmarks
+      - name: run (default io_uring, then epoll only on the same runner)
+        run: |
+          build/tests/benchmark/kiotty_net_benchmarks --benchmark_min_time=0.5s --benchmark_out=benchmark.json --benchmark_out_format=json
+          build-epoll/tests/benchmark/kiotty_net_benchmarks --benchmark_min_time=0.5s --benchmark_out=benchmark-epoll.json --benchmark_out_format=json
       - uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ github.sha }}
-          path: benchmark.json
+          path: |
+            benchmark.json
+            benchmark-epoll.json
