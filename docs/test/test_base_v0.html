@@ -684,19 +684,22 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 
 <h3>12.1 첫 측정 (2026-11-09, 8단계)</h3>
 <p><code>tests/benchmark/kiotty_bench_base.cpp</code>, 공개 C API 만 쓴다. 값은 real time 평균이다 (p50 / p99 는 아직 내지 않는다). 두 환경: <b>CI</b> 는 GitHub <code>ubuntu-latest</code> (4 코어, gcc Release, TLS ON, <code>benchmark</code> job 의 JSON), <b>WSL2</b> 는 개발 PC (12 코어). CI 값을 기준치로 쓴다. 회귀 판정 (20 %) 은 아직 없다.</p>
-<p>WSL2 는 맨 TCP loopback echo (커널 socket 둘, 라이브러리 없음) 도 197 µs 다. WSL2 의 echo 253 µs 는 대부분 그 환경의 몫이고, 라이브러리가 더하는 것은 약 40 ~ 55 µs 다. 처음 판은 벤치의 대기 helper 가 1 ms sleep 이라 churn, handoff, read heavy 가 낮게 나왔다. 지금은 yield 로 기다린다. CI 열은 run 42549221966.</p>
+<p>WSL2 는 맨 TCP loopback echo (커널 socket 둘, 라이브러리 없음) 도 197 µs 다. WSL2 의 echo 253 µs 는 대부분 그 환경의 몫이고, 라이브러리가 더하는 것은 약 40 ~ 55 µs 다. 처음 판은 벤치의 대기 helper 가 1 ms sleep 이라 churn, handoff, read heavy 가 낮게 나왔다. 지금은 yield 로 기다린다. CI 열은 run 42552369944 (IoLoop 이 활성 slot 만 돌게 고친 뒤, 수신 Stage 상한 64 KiB). 고치기 전에는 바퀴마다 max_clients 의 slot 전부를 4 ~ 5 번 돌아 echo 56 µs, ReadHeavy 596 MB/s 였다.</p>
 <table>
   <tr><th>벤치마크</th><th>부하</th><th>CI</th><th>WSL2</th><th>추정 대비</th></tr>
   <tr><td>StageProvideConsume</td><td>위와 같음</td><td>8.0 ns</td><td>7.2 ns</td><td>목표 안</td></tr>
-  <tr><td>EchoRoundtrip/1</td><td>peer 1, 64 B echo 직렬</td><td>56 µs</td><td>260 µs</td><td>CI 는 목표 (p50 &lt; 80 µs) 안</td></tr>
-  <tr><td>EchoRoundtrip/128</td><td>peer 128, 한 바퀴에 128 개 echo</td><td>122 k msg/s</td><td>57 k msg/s</td><td>목표 (32 클라이언트 150 k msg/s) 와 조건이 다르다</td></tr>
-  <tr><td>ReadHeavy</td><td>peer 1 이 1 MiB 를 밀고 서버는 READ(16 KiB)</td><td>596 MB/s</td><td>380 MiB/s</td><td><b>목표 (1.5 GB/s) 밖</b>. 16 KiB 마다 콜백 하나 (약 40 µs). 수신 Stage 상한이 16 KiB 라 recv 한 번이 16 KiB 다. 조사 대상</td></tr>
+  <tr><td>EchoRoundtrip/1</td><td>peer 1, 64 B echo 직렬</td><td>34.5 µs (max_clients 16 / 1024 같음)</td><td>186 µs</td><td>CI 는 목표 (p50 &lt; 80 µs) 안</td></tr>
+  <tr><td>EchoRoundtrip/128</td><td>peer 128, 한 바퀴에 128 개 echo</td><td>117 k msg/s</td><td>66 k msg/s</td><td>목표 (32 클라이언트 150 k msg/s) 와 조건이 다르다</td></tr>
+  <tr><td>ReadHeavy</td><td>peer 1 이 1 MiB 를 밀고 서버는 READ(16 KiB)</td><td>16 KiB 1.56 GB/s, 64 KiB 2.17 GB/s</td><td>약 1 ~ 1.26 GiB/s</td><td>목표 (1.5 GB/s) 안</td></tr>
   <tr><td>WriteHeavy</td><td>worker 가 stream 으로 1 MiB 쓰기</td><td>6.1 GB/s</td><td>1.04 GiB/s</td><td>목표 안</td></tr>
   <tr><td>BroadcastFanOut/16, /128</td><td>64 B broadcast, 모든 peer 수신까지</td><td>105 µs, 688 µs</td><td>420 µs, 1.98 ms</td><td>목표 (p99 &lt; 2 ms) 안</td></tr>
-  <tr><td>ConnectionChurn</td><td>connect → 64 B echo → close → onDisconnected</td><td>7.66 k/s</td><td>1.58 k/s</td><td>CI 는 목표 (5 k conn/s) 안</td></tr>
+  <tr><td>ConnectionChurn</td><td>connect → 64 B echo → close → onDisconnected</td><td>9.47 k/s</td><td>1.58 k/s</td><td>CI 는 목표 (5 k conn/s) 안</td></tr>
   <tr><td>WorkHandoff</td><td>connect → onWorkStarted → closeStream → onDisconnected</td><td>16 k/s (62 µs)</td><td>2.75 k/s (364 µs)</td><td>표의 정의 (onRead → onWritten) 와 다르다</td></tr>
   <tr><td>StreamEcho tls:0 / tls:1</td><td>StreamClient 64 B echo 직렬</td><td>59 µs / 60 µs (×1.01)</td><td>258 µs / 283 µs</td><td>TlsEchoOverhead 목표 (× 3 안) 안</td></tr>
-  <tr><td>TlsHandshakeRate</td><td>StreamClient TLS connect / disconnect</td><td>1.43 k/s</td><td>660 /s</td><td>CI 는 목표 (1 k/s) 안</td></tr>
+  <tr><td>TlsHandshakeRate</td><td>StreamClient TLS connect / disconnect</td><td>0.67 ~ 1.43 k/s (runner 마다 다르다)</td><td>660 /s</td><td>CI 는 목표 (1 k/s) 안</td></tr>
+  <tr><td>EventClientReadHeavy</td><td>raw peer 가 1 MiB, EventClient 가 READ(16 / 64 KiB)</td><td>3.6 / 5.5 GB/s</td><td>1.3 / 1.1 GiB/s</td><td>—</td></tr>
+  <tr><td>StreamClientReadHeavy</td><td>raw peer 가 1 MiB, StreamClient read</td><td>4.0 / 4.5 GB/s</td><td>0.85 / 0.97 GiB/s</td><td>—</td></tr>
+  <tr><td>EventClientWriteHeavy, StreamClientWriteHeavy</td><td>worker stream / StreamClient 가 1 MiB 쓰기</td><td>4.7 GB/s, 4.7 GB/s</td><td>약 1 GiB/s</td><td>—</td></tr>
   <tr><td>StreamWriteFile64MiB</td><td>worker 가 64 MiB 파일 전송</td><td>6.5 GB/s</td><td>1.29 GiB/s</td><td>—</td></tr>
 </table>
 
