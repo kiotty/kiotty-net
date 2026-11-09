@@ -62,6 +62,15 @@ namespace kiotty::net::implementation
     {
     }
 
+    void StageBase::bind(Span<char> storage)
+    {
+        _buffer = storage.data;
+        _maximum = storage.length;
+        _capacity = storage.length;
+        _begin_position = 0;
+        _end_position = 0;
+    }
+
     size_t StageBase::capacity() const
     {
         return _capacity;
@@ -104,5 +113,26 @@ namespace kiotty::net::implementation
         assert(_end_position == _begin_position);
         _capacity = capacity > _maximum ? _maximum : capacity;
         clear();
+    }
+
+    Stage::Stage()
+        : StageStorage()
+        , StageBase(Span<char>{ nullptr, 0 })
+    {
+    }
+
+    Stage::Stage(size_t maximum)
+        : StageStorage()
+        , StageBase(Span<char>{ nullptr, 0 })
+    {
+        reserve(maximum);
+    }
+
+    void Stage::reserve(size_t maximum)
+    {
+        if (maximum <= bytes.size()) { return; }
+        assert(consumer().readable() == 0);
+        bytes.resize(maximum);
+        bind(Span<char>{ bytes.data(), bytes.size() });
     }
 }

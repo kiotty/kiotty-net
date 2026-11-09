@@ -6,29 +6,36 @@
 
 namespace kiotty::net::implementation
 {
-    template <size_t Receive, size_t Send, size_t Notify>
     struct StageSet
     {
+        void reserve(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
         void limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
         void clear();
 
-        Stage<Receive> receive;
-        Stage<Send>    send;
-        Stage<Notify>  notify;
+        Stage receive;
+        Stage send;
+        Stage notify;
     };
 
-    template <size_t Receive, size_t Send, size_t Notify>
-    void StageSet<Receive, Send, Notify>::limit(size_t receive_capacity,
-                                                size_t send_capacity,
-                                                size_t notify_capacity)
+    inline void StageSet::reserve(size_t receive_capacity,
+                                  size_t send_capacity,
+                                  size_t notify_capacity)
+    {
+        receive.reserve(receive_capacity);
+        send.reserve(send_capacity);
+        notify.reserve(notify_capacity);
+    }
+
+    inline void StageSet::limit(size_t receive_capacity,
+                                size_t send_capacity,
+                                size_t notify_capacity)
     {
         receive.limit(receive_capacity);
         send.limit(send_capacity);
         notify.limit(notify_capacity);
     }
 
-    template <size_t Receive, size_t Send, size_t Notify>
-    void StageSet<Receive, Send, Notify>::clear()
+    inline void StageSet::clear()
     {
         receive.clear();
         send.clear();

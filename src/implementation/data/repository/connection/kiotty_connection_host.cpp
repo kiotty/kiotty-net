@@ -14,12 +14,18 @@ namespace kiotty::net::implementation
     {
     }
 
-    void ConnectionHost::initialize(ConnectionLimits limits, size_t max_connections)
+    void ConnectionHost::initialize(ConnectionLimits limits,
+                                    size_t max_connections,
+                                    TlsCapacity cipher)
     {
         _limits = limits;
         _max_connections = max_connections;
         _active.clear();
         _active.reserve(max_connections);
+        for (size_t i = 0; i < _connections.capacity(); ++i)
+        {
+            _connections.at(i).reserve(limits, cipher);
+        }
     }
 
     ConnectionResult ConnectionHost::acquire(ConnectionConfiguration&& configuration)

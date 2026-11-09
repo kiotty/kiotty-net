@@ -2,7 +2,16 @@
 
 #include <gtest/gtest.h>
 
-typedef kiotty::net::implementation::StageSet<64, 128, 256> SmallSet;
+namespace
+{
+    struct SmallSet : kiotty::net::implementation::StageSet
+    {
+        SmallSet()
+        {
+            reserve(64, 128, 256);
+        }
+    };
+}
 
 TEST(StageSet, EachMemberHasItsOwnLimit)
 {

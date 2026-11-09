@@ -33,6 +33,13 @@ namespace kiotty::net::implementation
         if (!isInitialized(client)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const KiottyNetCode secured = openProfile(configuration.tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
+        _receive.reserve(client.receive_capacity);
+        _send.reserve(client.send_capacity);
+        if (configuration.tls != nullptr)
+        {
+            const TlsCapacity cipher{ client.receive_capacity, client.send_capacity };
+            reserveTlsStages(_tls.stages(), cipher);
+        }
         _receive.limit(client.receive_capacity);
         _send.limit(client.send_capacity);
         _configuration = client;

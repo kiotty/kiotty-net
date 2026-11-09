@@ -115,6 +115,8 @@ namespace kiotty_test
         {
             server_steps.clear();
             client_steps.clear();
+            kiotty::net::implementation::reserveTlsStages(server.stages(), _capacity);
+            kiotty::net::implementation::reserveTlsStages(client.stages(), _capacity);
             KiottyNetCode code = server.open(server_profile, nullptr, _capacity);
             if (code != KIOTTY_NET_CODE_SUCCESS)
             {

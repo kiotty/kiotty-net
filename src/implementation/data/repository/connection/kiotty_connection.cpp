@@ -39,9 +39,12 @@ namespace kiotty::net::implementation
     KiottyNetCode Connection::initialize(PoolHandle id, ConnectionConfiguration&& configuration)
     {
         const ConnectionLimits limits = configuration.limits;
-        const bool receive = fits(limits.receive, _plain.receive.maximum());
-        const bool send = fits(limits.send, _plain.send.maximum());
-        const bool notify = fits(limits.notify, _plain.notify.maximum());
+        const bool receive = fits(limits.receive, MemoryLimits::RECEIVE_CAPACITY)
+                             && fits(limits.receive, _plain.receive.maximum());
+        const bool send = fits(limits.send, MemoryLimits::SEND_CAPACITY)
+                          && fits(limits.send, _plain.send.maximum());
+        const bool notify = fits(limits.notify, MemoryLimits::PUSH_CAPACITY)
+                            && fits(limits.notify, _plain.notify.maximum());
         if (!receive || !send || !notify) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _plain.limit(limits.receive, limits.send, limits.notify);
         _id = id;
@@ -368,17 +371,6 @@ namespace kiotty::net::implementation
             return;
         }
         _deadline.store(monotonicMilliseconds() + timeout_milliseconds);
-    }
-
-    Caller Connection::callerFor(const Handler& handler)
-    {
-        return Caller{ handler, _info, _plain.send, _context, _id };
-    }
-
-    ConnectionParts Connection::parts()
-    {
-        return ConnectionParts{ _phase, _work, _read_event, _write_event,
-                                _plain.receive, _plain.send, _plain.notify, _tls, _socket };
     }
 
     namespace

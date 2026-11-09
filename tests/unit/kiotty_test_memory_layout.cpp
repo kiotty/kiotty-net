@@ -1,4 +1,5 @@
 #include "data/datasource/kiotty_memory_layout.h"
+#include "data/infra/tls/kiotty_tls_engine.h"
 
 #include <gtest/gtest.h>
 
@@ -17,5 +18,9 @@ TEST(TlsLayout, CipherSendBytesHoldsTheLargestPlainMessageWithRecordOverhead)
     EXPECT_EQ(kiotty::net::implementation::cipherSendBytes(100), 100u + 64 + 512);
     size_t largest = kiotty::net::implementation::largerOf(MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY);
     size_t expected = MemoryLimits::TLS ? kiotty::net::implementation::alignStage(kiotty::net::implementation::cipherSendBytes(largest)) : 0;
-    EXPECT_EQ(kiotty::net::implementation::CIPHER_SEND_BYTES, expected);
+    kiotty::net::implementation::Stage receive;
+    kiotty::net::implementation::Stage send;
+    kiotty::net::implementation::reserveTlsStages(kiotty::net::implementation::TlsStages{ receive, send }, kiotty::net::implementation::TlsCapacity{ MemoryLimits::RECEIVE_CAPACITY, largest });
+    EXPECT_EQ(send.maximum(), expected);
+    EXPECT_EQ(receive.maximum(), MemoryLimits::TLS ? MemoryLimits::RECEIVE_CAPACITY : 0);
 }

@@ -405,7 +405,7 @@ KIOTTY_NET_API KiottyNetContextResult KiottyNet_initializeContext(void);
 KIOTTY_NET_API void                   KiottyNet_releaseContext(KiottyNetContext context);
 
 KIOTTY_NET_API size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config);
-KIOTTY_NET_API size_t KiottyNet_clientMemorySize(void);
+KIOTTY_NET_API size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* config);
 
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
 

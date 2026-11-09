@@ -176,7 +176,7 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼 상한 (`KIOTTY_NET_MAX_*_CAPACITY`) 은 compile time 이고, 연결 하나는 설정한 capacity 와 상관없이 그 상한만큼을 차지한다. `KiottyNet_serverMemorySize(config)` 가 그 설정의 Server 하나가 잡는 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 16 KiB. 빌드 설정으로 바꾸지 않는다. `KiottyNet_serverMemorySize(config)` 와 `KiottyNet_clientMemorySize(config)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_NET_CODE_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
@@ -248,9 +248,9 @@ typedef struct KiottyNetServerConfiguration {
     uint32_t          initialization_mark;
     KiottyNetAddress address;
     size_t            max_clients;      /* 기본 1024, 1 ~ 65536. 동시 연결 수. create 때 이만큼의 연결을 잡는다 */
-    size_t            receive_capacity;    /* 기본 4 KiB, 상한 KIOTTY_NET_MAX_RECEIVE_CAPACITY (compile time, 기본 64 KiB). Connection 당 수신 Stage 크기 */
-    size_t            send_capacity;    /* 기본 4 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
-    size_t            push_capacity;    /* 기본 4 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
+    size_t            receive_capacity;    /* 기본 4 KiB, 상한 64 KiB. Connection 당 수신 Stage 크기. create 때 이만큼 잡는다 */
+    size_t            send_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
+    size_t            push_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
     bool              no_delay;         /* 기본 true. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
 } KiottyNetServerConfiguration;
 
@@ -269,7 +269,7 @@ typedef struct KiottyNetClientConfiguration {
 KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* config, const char* host, uint16_t port);   /* port != 0 */
 KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfiguration* config, const char* pipe_name);
 KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* config, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* config, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 KIOTTY_NET_MAX_*_CAPACITY 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
+KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* config, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 상한 (수신 64 KiB, 송신 16 KiB, push 16 KiB) 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
 KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* config, bool no_delay);
 
 KiottyNetCode KiottyNet_initializeTcpClientConfiguration(KiottyNetClientConfiguration* config, const char* host, uint16_t port);

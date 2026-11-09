@@ -322,14 +322,17 @@ void KiottyNet_releaseContext(KiottyNetContext context)
 size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* config)
 {
     if (config == nullptr || !net::isInitialized(*config)) { return 0; }
-    return sizeof(KiottyNetServer) + config->max_clients * sizeof(net::Connection);
+    const size_t stages = config->receive_capacity + config->send_capacity + config->push_capacity;
+    return sizeof(KiottyNetServer) + config->max_clients * (sizeof(net::Connection) + stages);
 }
 
-size_t KiottyNet_clientMemorySize(void)
+size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* config)
 {
+    if (config == nullptr || !net::isInitialized(*config)) { return 0; }
     const size_t event = sizeof(KiottyNetEventClient);
     const size_t stream = sizeof(KiottyNetStreamClient);
-    return event > stream ? event : stream;
+    const size_t largest = event > stream ? event : stream;
+    return largest + config->receive_capacity + config->send_capacity + config->push_capacity;
 }
 
 KiottyNetStreamClientResult KiottyNet_createStreamClient(

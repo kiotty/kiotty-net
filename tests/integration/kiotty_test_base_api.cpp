@@ -449,9 +449,12 @@ TEST_F(BaseApiTest, MemorySizesCoverTheObjects)
     const size_t many = KiottyNet_serverMemorySize(&large);
     EXPECT_GT(one, 0u);
     EXPECT_EQ(0u, (many - one) % 1023);
-    EXPECT_GT((many - one) / 1023, KiottyNet_clientMemorySize() / 2);
+    EXPECT_GT((many - one) / 1023, small.receive_capacity + small.send_capacity + small.push_capacity);
     EXPECT_EQ(0u, KiottyNet_serverMemorySize(nullptr));
     KiottyNetServerConfiguration uninitialized = {};
     EXPECT_EQ(0u, KiottyNet_serverMemorySize(&uninitialized));
-    EXPECT_GT(KiottyNet_clientMemorySize(), 0u);
+    KiottyNetClientConfiguration client;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&client, LOOPBACK_HOST, 1));
+    EXPECT_GT(KiottyNet_clientMemorySize(&client), client.receive_capacity + client.send_capacity);
+    EXPECT_EQ(0u, KiottyNet_clientMemorySize(nullptr));
 }

@@ -15,6 +15,8 @@ namespace kiotty::net::implementation
     namespace
     {
         ConnectionLimits limitsOf(const KiottyNetClientConfiguration& configuration);
+        TlsCapacity      cipherOf(ConnectionLimits limits,
+                                  const KiottyNetTlsClientConfiguration* tls);
     }
 
     EventClient::EventClient()
@@ -43,7 +45,8 @@ namespace kiotty::net::implementation
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
         const SocketCode opened = _listener.open(LISTENER_CAPACITY);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
-        _host.initialize(limitsOf(client), CONNECTIONS);
+        const ConnectionLimits limits = limitsOf(client);
+        _host.initialize(limits, CONNECTIONS, cipherOf(limits, configuration.tls));
         _configuration = client;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
@@ -169,6 +172,12 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity };
+        }
+
+        TlsCapacity cipherOf(ConnectionLimits limits, const KiottyNetTlsClientConfiguration* tls)
+        {
+            if (tls == nullptr) { return TlsCapacity{ 0, 0 }; }
+            return TlsCapacity{ limits.receive, largerOf(limits.send, limits.notify) };
         }
     }
 }

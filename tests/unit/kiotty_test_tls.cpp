@@ -72,7 +72,7 @@ namespace
         ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
         pump.handshake();
         ASSERT_TRUE(pump.done());
-        Stage<16> plain;
+        Stage plain{ 16 };
         DecodeResult swallowed = pump.client.decode(plain);
         ASSERT_TRUE(swallowed);
         ASSERT_EQ(swallowed.value, 0u);
@@ -82,7 +82,7 @@ namespace
     {
         from.encode(spanOf(text));
         std::string received;
-        Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY> plain;
+        Stage plain{ kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY };
         plain.limit(plain_capacity);
         while (from.stages().send.consumer().readable() > 0)
         {
@@ -257,7 +257,7 @@ TEST(TlsEngine, DecodeWithHalfARecordYieldsZeroBytesAndNoError)
     std::string text = pattern(1000);
     pump.client.encode(spanOf(text));
     size_t record = pump.client.stages().send.consumer().readable();
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     move(pump.client, pump.server, record / 2);
     DecodeResult first = pump.server.decode(plain);
     ASSERT_TRUE(first);
@@ -278,7 +278,7 @@ TEST(TlsEngine, DecodeWithOneByteAtATimeEventuallyYieldsTheRecord)
     connect(pump, profiles);
     std::string text = pattern(300);
     pump.client.encode(spanOf(text));
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     std::string received;
     while (pump.client.stages().send.consumer().readable() > 0)
     {
@@ -302,7 +302,7 @@ TEST(TlsEngine, DecodeOfCorruptedRecordReturnsRecordErrorWithNonEmptyMessage)
     size_t length = cipher.consumer().readable();
     cipher.consumer().peek()[length - 1] ^= 0x01;
     move(pump.client, pump.server);
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_TLS_RECORD_ERROR);
@@ -416,6 +416,7 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     Profiles profiles;
     openDefaults(profiles);
     TlsEngine server;
+    kiotty::net::implementation::reserveTlsStages(server.stages(), TlsCapacity{ 4096, 4096 });
     ASSERT_EQ(server.open(profiles.server, nullptr, TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_SUCCESS);
     put(server.stages().receive, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
@@ -451,7 +452,7 @@ TEST(TlsEngine, KeyUpdateFromPeerLeavesTheReplyInCipherSendAfterDecode)
     TlsPipe(pump.client).requestKeyUpdate();
     ASSERT_GT(pump.client.stages().send.consumer().readable(), 0u);
     move(pump.client, pump.server);
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result);
     EXPECT_EQ(result.value, 0u);
@@ -472,7 +473,7 @@ TEST(TlsEngine, CloseNotifyFromPeerDecodesAsPeerClosed)
     connect(pump, profiles);
     TlsPipe(pump.client).sendCloseNotify();
     move(pump.client, pump.server);
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     DecodeResult result = pump.server.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_PEER_CLOSED);
@@ -561,7 +562,7 @@ TEST(TlsEngine, DecodeDrainsPlaintextLeftInSslAcrossCalls)
     std::string text = pattern(3 * 4096);
     pump.client.encode(spanOf(text));
     move(pump.client, pump.server);
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     std::string received;
     for (int i = 0; i < 3; ++i)
     {
@@ -585,7 +586,7 @@ TEST(TlsEngine, DecodeCompactsCipherReceive)
     connect(pump, profiles);
     pump.client.encode(spanOf(pattern(2000)));
     move(pump.client, pump.server);
-    Stage<4096> plain;
+    Stage plain{ 4096 };
     DecodeResult result = pump.server.decode(plain);
     ASSERT_TRUE(result);
     StageBase& cipher = pump.server.stages().receive;
@@ -613,7 +614,7 @@ TEST(TlsEngine, EncodeNeverLeavesCipherSendEmptyForNonEmptyPlain)
             ASSERT_EQ(pump.open(profiles.server, profiles.client), KIOTTY_NET_CODE_SUCCESS);
             pump.handshake();
             ASSERT_TRUE(pump.done());
-            Stage<16> plain;
+            Stage plain{ 16 };
             ASSERT_TRUE(pump.client.decode(plain));
             std::string text = pattern(capacity);
             pump.server.encode(spanOf(text));
@@ -641,7 +642,7 @@ TEST(TlsEngine, EncodeOrDecodeOnInactiveEngineIsRejected)
 {
     REQUIRE_TLS();
     TlsEngine engine;
-    Stage<64> plain;
+    Stage plain{ 64 };
     DecodeResult result = engine.decode(plain);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.code, KIOTTY_NET_CODE_INVALID_ARGUMENT);

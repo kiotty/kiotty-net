@@ -19,6 +19,13 @@ namespace kiotty::net::implementation
         return bound + TLS_CONTROL_RESERVE_BYTES;
     }
 
+    void reserveTlsStages(TlsStages stages, TlsCapacity capacity)
+    {
+        if (!MemoryLimits::TLS) { return; }
+        stages.receive.reserve(capacity.receive);
+        stages.send.reserve(alignStage(tlsCipherCapacity(capacity.send)));
+    }
+
     TlsEngine::TlsEngine()
         : _cipher_receive()
         , _cipher_send()

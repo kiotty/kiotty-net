@@ -21,7 +21,7 @@ namespace
 
 TEST(Stage, PrepareThenCommitMakesBytesReadable)
 {
-    Stage<16> stage;
+    Stage stage{ 16 };
     write(stage, "hello");
     EXPECT_EQ(stage.consumer().readable(), 5u);
     EXPECT_EQ(std::memcmp(stage.consumer().peek(), "hello", 5), 0);
@@ -29,7 +29,7 @@ TEST(Stage, PrepareThenCommitMakesBytesReadable)
 
 TEST(Stage, ConsumerPeekStaysUntilCommit)
 {
-    Stage<16> stage;
+    Stage stage{ 16 };
     write(stage, "abcdef");
     char* first = stage.consumer().peek();
     char* second = stage.consumer().peek();
@@ -42,7 +42,7 @@ TEST(Stage, ConsumerPeekStaysUntilCommit)
 
 TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 {
-    Stage<16> stage;
+    Stage stage{ 16 };
     char* target = stage.provider().prepare(10);
     ASSERT_NE(target, nullptr);
     stage.provider().commit(4);
@@ -52,7 +52,7 @@ TEST(Stage, CommitLessThanPreparedKeepsTheRest)
 
 TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "12345678");
     EXPECT_EQ(stage.provider().writable(), 0u);
     stage.consumer().commit(3);
@@ -61,7 +61,7 @@ TEST(Stage, WritableIsZeroWhenEndReachesCapacity)
 
 TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "12345678");
     stage.consumer().commit(5);
     stage.compact();
@@ -72,7 +72,7 @@ TEST(Stage, CompactMovesUnreadBytesToFrontAndRestoresWritable)
 
 TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "1234");
     stage.consumer().commit(4);
     stage.compact();
@@ -82,7 +82,7 @@ TEST(Stage, CompactOnEmptyStageResetsBothPositions)
 
 TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "123");
     EXPECT_EQ(stage.provider().prepare(6), nullptr);
     EXPECT_EQ(stage.provider().writable(), 5u);
@@ -91,7 +91,7 @@ TEST(Stage, PrepareMoreThanWritableReturnsNullAndChangesNothing)
 
 TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "123456");
     EXPECT_DEBUG_DEATH(stage.provider().commit(3), "");
 #if defined(NDEBUG)
@@ -102,7 +102,7 @@ TEST(Stage, ProviderCommitBeyondWritableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 {
-    Stage<8> stage;
+    Stage stage{ 8 };
     write(stage, "123");
     EXPECT_DEBUG_DEATH(stage.consumer().commit(4), "");
 #if defined(NDEBUG)
@@ -112,7 +112,7 @@ TEST(Stage, ConsumerCommitBeyondReadableAssertsInDebugAndClampsInRelease)
 
 TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 {
-    Stage<0> stage;
+    Stage stage{ 0 };
     EXPECT_EQ(stage.capacity(), 0u);
     EXPECT_EQ(stage.provider().writable(), 0u);
     EXPECT_EQ(stage.consumer().readable(), 0u);
@@ -124,7 +124,7 @@ TEST(Stage, ZeroCapacityStageIsValidAndAlwaysFull)
 
 TEST(Stage, SingleByteCapacityRoundTrips)
 {
-    Stage<1> stage;
+    Stage stage{ 1 };
     write(stage, "x");
     EXPECT_EQ(stage.provider().writable(), 0u);
     EXPECT_EQ(*stage.consumer().peek(), 'x');
@@ -137,7 +137,7 @@ TEST(Stage, SingleByteCapacityRoundTrips)
 
 TEST(Stage, LimitBelowCapacityMakesWritableTheLimit)
 {
-    Stage<4096> stage;
+    Stage stage{ 4096 };
     EXPECT_EQ(stage.capacity(), 4096u);
     EXPECT_EQ(stage.maximum(), 4096u);
     stage.limit(100);
@@ -154,21 +154,21 @@ TEST(Stage, LimitBelowCapacityMakesWritableTheLimit)
 
 TEST(Stage, LimitAboveTheMaximumIsClampedToTheMaximum)
 {
-    Stage<64> stage;
+    Stage stage{ 64 };
     stage.limit(65);
     EXPECT_EQ(stage.capacity(), 64u);
 }
 
 TEST(Stage, LimitOnANonEmptyStageAssertsInDebug)
 {
-    Stage<64> stage;
+    Stage stage{ 64 };
     write(stage, "abc");
     EXPECT_DEBUG_DEATH(stage.limit(32), "");
 }
 
 TEST(Stage, ClearResetsBothPositionsWithoutTouchingTheLimit)
 {
-    Stage<64> stage;
+    Stage stage{ 64 };
     stage.limit(32);
     write(stage, "abcdef");
     stage.consumer().commit(2);
@@ -180,7 +180,7 @@ TEST(Stage, ClearResetsBothPositionsWithoutTouchingTheLimit)
 
 TEST(Stage, StageBaseReferenceSeesTheSameBytesAsTheStage)
 {
-    Stage<64> stage;
+    Stage stage{ 64 };
     StageBase& base = stage;
     write(base, "kiotty");
     EXPECT_EQ(stage.consumer().readable(), 6u);

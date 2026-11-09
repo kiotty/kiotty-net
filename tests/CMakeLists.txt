@@ -27,7 +27,6 @@ function(kiotty_net_add_test_target target label)
     target_include_directories(${target} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/src/implementation
-        ${KIOTTY_NET_GENERATED_DIR}
     )
     target_compile_features(${target} PRIVATE cxx_std_17)
     target_compile_definitions(${target} PRIVATE

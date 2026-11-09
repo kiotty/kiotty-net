@@ -3,6 +3,7 @@
 #include "core/kiotty_span.h"
 
 #include <cstddef>
+#include <vector>
 
 namespace kiotty::net::implementation
 {
@@ -50,6 +51,8 @@ namespace kiotty::net::implementation
         explicit StageBase(Span<char> storage);
         ~StageBase() = default;
 
+        void bind(Span<char> storage);
+
     private:
         char*  _buffer;
         size_t _maximum;
@@ -58,21 +61,17 @@ namespace kiotty::net::implementation
         size_t _end_position;
     };
 
-    template <size_t N>
     struct StageStorage
     {
-        char bytes[N > 0 ? N : 1];
+        std::vector<char> bytes;
     };
 
-    template <size_t N>
-    class Stage : private StageStorage<N>, public StageBase
+    class Stage : private StageStorage, public StageBase
     {
     public:
-        static constexpr size_t MAXIMUM = N;
+        Stage();
+        explicit Stage(size_t maximum);
 
-        Stage()
-            : StageBase(Span<char>{ this->bytes, N })
-        {
-        }
+        void reserve(size_t maximum);
     };
 }

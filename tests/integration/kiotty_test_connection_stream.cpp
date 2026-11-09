@@ -72,10 +72,11 @@ namespace
         explicit Side(size_t capacity = CAPACITY)
             : socket()
             , engine()
-            , receive()
-            , send()
+            , receive(capacity)
+            , send(capacity)
             , tls_capacity{ capacity, capacity }
         {
+            kiotty::net::implementation::reserveTlsStages(engine.stages(), tls_capacity);
             receive.limit(capacity);
             send.limit(capacity);
         }
@@ -87,8 +88,8 @@ namespace
 
         ActiveSocket                         socket;
         TlsEngine                            engine;
-        Stage<kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY>  receive;
-        Stage<kiotty::net::implementation::MemoryLimits::SEND_CAPACITY>  send;
+        Stage  receive{ kiotty::net::implementation::MemoryLimits::RECEIVE_CAPACITY };
+        Stage  send{ kiotty::net::implementation::MemoryLimits::SEND_CAPACITY };
         kiotty::net::implementation::TlsCapacity                       tls_capacity;
     };
 

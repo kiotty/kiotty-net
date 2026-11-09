@@ -96,7 +96,7 @@ TEST(ConnectionHost, AcquireFailureResetsTheConnectionAndLeavesTheSlotEmpty)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, failed.code);
     EXPECT_TRUE(bench.empty());
     EXPECT_EQ(net::Phase::IDLE, bench.host.at(0).state().phase);
-    bench.host.initialize(smallLimits(), 1);
+    bench.host.initialize(smallLimits(), 1, kiotty_test::cipherOf(smallLimits()));
     net::ConnectionResult acquired = bench.acquire();
     ASSERT_TRUE(acquired);
     EXPECT_EQ(&bench.host.at(0), &acquired.value());
@@ -273,7 +273,7 @@ TEST(ConnectionHost, AtReturnsIdleSlotsTooSoLoopsNeedNoOccupancyCheck)
 TEST(ConnectionHost, MaxConnectionsBelowCapacityMakesTheHostFullEarly)
 {
     ConnectionBench<4> bench(smallLimits());
-    bench.host.initialize(smallLimits(), 2);
+    bench.host.initialize(smallLimits(), 2, kiotty_test::cipherOf(smallLimits()));
     ASSERT_TRUE(bench.acquire());
     ASSERT_TRUE(bench.acquire());
     EXPECT_TRUE(bench.full());

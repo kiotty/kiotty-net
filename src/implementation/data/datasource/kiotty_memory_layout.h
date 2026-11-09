@@ -26,15 +26,4 @@ namespace kiotty::net::implementation
         const size_t records = plain / TLS_RECORD_PLAIN_BYTES + 1;
         return plain + records * TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
     }
-
-    constexpr size_t whenTls(size_t count)
-    {
-        return MemoryLimits::TLS ? count : 0;
-    }
-
-    static constexpr size_t CIPHER_RECEIVE_BYTES = whenTls(MemoryLimits::RECEIVE_CAPACITY);
-    static constexpr size_t LARGEST_PLAIN_SEND_BYTES =
-        largerOf(MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY);
-    static constexpr size_t CIPHER_SEND_BYTES =
-        whenTls(alignStage(cipherSendBytes(LARGEST_PLAIN_SEND_BYTES)));
 }

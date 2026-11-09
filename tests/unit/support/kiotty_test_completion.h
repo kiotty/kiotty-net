@@ -58,6 +58,12 @@ namespace kiotty_test
         return limits;
     }
 
+    inline kiotty::net::implementation::TlsCapacity cipherOf(kiotty::net::implementation::ConnectionLimits limits)
+    {
+        const size_t largest = limits.send > limits.notify ? limits.send : limits.notify;
+        return kiotty::net::implementation::TlsCapacity{ limits.receive, largest };
+    }
+
     template <size_t N>
     class ConnectionBench
     {
@@ -74,7 +80,7 @@ namespace kiotty_test
             , callbacks(Recorder::callbacks())
             , handler(callbacks, &recorder, owner)
         {
-            host.initialize(limits, N);
+            host.initialize(limits, N, cipherOf(limits));
         }
 
         kiotty::net::implementation::ConnectionResult acquire()

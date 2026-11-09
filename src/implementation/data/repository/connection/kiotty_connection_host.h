@@ -20,7 +20,9 @@ namespace kiotty::net::implementation
         ConnectionHost(const ConnectionHost&) = delete;
         ConnectionHost& operator=(const ConnectionHost&) = delete;
 
-        void             initialize(ConnectionLimits limits, size_t max_connections);
+        void             initialize(ConnectionLimits limits,
+                                    size_t max_connections,
+                                    TlsCapacity cipher);
         ConnectionResult acquire(ConnectionConfiguration&& configuration);
         void             release(Connection& connection);
         Connection&      at(int32_t slot);

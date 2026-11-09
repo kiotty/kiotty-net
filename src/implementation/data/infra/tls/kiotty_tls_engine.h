@@ -48,9 +48,11 @@ namespace kiotty::net::implementation
 
     struct TlsStages
     {
-        StageBase& receive;
-        StageBase& send;
+        Stage& receive;
+        Stage& send;
     };
+
+    void reserveTlsStages(TlsStages stages, TlsCapacity capacity);
 
     static_assert(sizeof(TlsStages) == 2 * sizeof(void*), "TlsStages: unexpected padding");
 
@@ -102,11 +104,11 @@ namespace kiotty::net::implementation
         size_t        flush();
         size_t        pending() const;
 
-        Stage<CIPHER_RECEIVE_BYTES> _cipher_receive;
-        Stage<CIPHER_SEND_BYTES>    _cipher_send;
-        ssl_st*                     _ssl;
-        bio_st*                     _network;
-        TlsStatus                   _status;
-        bool                        _failed;
+        Stage     _cipher_receive;
+        Stage     _cipher_send;
+        ssl_st*   _ssl;
+        bio_st*   _network;
+        TlsStatus _status;
+        bool      _failed;
     };
 }

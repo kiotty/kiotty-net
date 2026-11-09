@@ -47,6 +47,7 @@ namespace kiotty::net::implementation
 
         KiottyNetCode   initialize(PoolHandle id, ConnectionConfiguration&& configuration);
         void            reset() noexcept;
+        void            reserve(ConnectionLimits limits, TlsCapacity cipher);
         IoAction        onOpened(const Handler& handler);
         IoAction        dispatch(const IoCompletion& completion,
                                  const Handler& handler,
@@ -65,10 +66,6 @@ namespace kiotty::net::implementation
         void         shutdown() override;
 
     private:
-        using PlainStages = StageSet<MemoryLimits::RECEIVE_CAPACITY,
-                                     MemoryLimits::SEND_CAPACITY,
-                                     MemoryLimits::PUSH_CAPACITY>;
-
         KiottyNetCode   open(TlsProfile& profile, const char* hostname, TlsCapacity capacity);
         IoAction        react(const IoCompletion& completion,
                               const Handler& handler,
@@ -90,7 +87,7 @@ namespace kiotty::net::implementation
         Caller          callerFor(const Handler& handler);
         ConnectionParts parts();
 
-        PlainStages                _plain;
+        StageSet                   _plain;
         TlsEngine                  _tls;
         ActiveSocket               _socket;
         KiottyNetConnectionInfo    _info;

@@ -6,7 +6,7 @@
 
 static void StageProvideConsume(benchmark::State& state)
 {
-    kiotty::net::implementation::Stage<4096> stage;
+    kiotty::net::implementation::Stage stage{ 4096 };
     char message[64] = {};
     for (auto _ : state)
     {

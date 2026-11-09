@@ -63,12 +63,12 @@ namespace kiotty::net::implementation
         KiottyNetCode    secure();
         ConnectionStream stream();
 
-        Stage<MemoryLimits::RECEIVE_CAPACITY> _receive;
-        Stage<MemoryLimits::SEND_CAPACITY>    _send;
-        TlsEngine                             _tls;
-        TlsProfile                            _profile;
-        ActiveSocket                          _socket;
-        KiottyNetClientConfiguration          _configuration;
-        std::atomic<bool>                     _is_stopping;
+        Stage                        _receive;
+        Stage                        _send;
+        TlsEngine                    _tls;
+        TlsProfile                   _profile;
+        ActiveSocket                 _socket;
+        KiottyNetClientConfiguration _configuration;
+        std::atomic<bool>            _is_stopping;
     };
 }

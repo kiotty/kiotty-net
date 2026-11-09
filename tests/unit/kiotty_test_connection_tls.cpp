@@ -97,6 +97,7 @@ namespace
             connection = &acquired.value();
             const char* peer_name = _side == Side::SERVER ? "localhost" : nullptr;
             net::TlsCapacity capacity = { CAPACITY, CAPACITY };
+            net::reserveTlsStages(peer.stages(), capacity);
             ASSERT_EQ(peer.open(peer_profile, peer_name, capacity), KIOTTY_NET_CODE_SUCCESS);
             peer_done = false;
         }
@@ -211,7 +212,7 @@ namespace
 
         std::string peerReceives()
         {
-            net::Stage<CAPACITY> plain;
+            net::Stage plain{ CAPACITY };
             const net::DecodeResult decoded = peer.decode(plain);
             EXPECT_TRUE(decoded) << decoded.code;
             return kiotty_test::take(plain);

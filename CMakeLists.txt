@@ -4,9 +4,6 @@ project(kiotty_net LANGUAGES C CXX)
 
 option(KIOTTY_NET_USE_TLS "Use OpenSSL (fetched by openssl-cmake) for TLS. OFF builds the stub backend without OpenSSL" ON)
 option(KIOTTY_NET_OPENSSL_PREBUILT "Download prebuilt static OpenSSL from openssl-cmake. OFF builds OpenSSL from source" ON)
-set(KIOTTY_NET_MAX_RECEIVE_CAPACITY "65536" CACHE STRING "Upper bound of receive_capacity in bytes")
-set(KIOTTY_NET_MAX_SEND_CAPACITY "16384" CACHE STRING "Upper bound of send_capacity in bytes")
-set(KIOTTY_NET_MAX_PUSH_CAPACITY "16384" CACHE STRING "Upper bound of push_capacity in bytes")
 option(KIOTTY_NET_BUILD_TESTS "Build unit and integration tests" OFF)
 option(KIOTTY_NET_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
 set(KIOTTY_NET_SANITIZER "" CACHE STRING "Sanitizer for every target: address, thread, undefined or a comma list")
@@ -40,15 +37,6 @@ target_compile_options(kiotty_net_hardening INTERFACE
 target_compile_definitions(kiotty_net_hardening INTERFACE
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_HAS_EXCEPTIONS=0>
 )
-
-if(KIOTTY_NET_USE_TLS)
-    set(KIOTTY_NET_TLS_VALUE "true")
-else()
-    set(KIOTTY_NET_TLS_VALUE "false")
-endif()
-set(KIOTTY_NET_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
-configure_file(cmake/kiotty_memory_limits_configuration.h.in
-    ${KIOTTY_NET_GENERATED_DIR}/kiotty_memory_limits_configuration.h @ONLY)
 
 set(KIOTTY_NET_SOURCES
     src/kiotty_net_base.cpp
@@ -96,6 +84,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/connection/kiotty_send_flow.cpp
     src/implementation/data/repository/connection/kiotty_work_flow.cpp
     src/implementation/data/repository/connection/kiotty_connection.cpp
+    src/implementation/data/repository/connection/kiotty_connection_parts.cpp
     src/implementation/data/repository/connection/kiotty_connection_host.cpp
     src/implementation/data/repository/connection/kiotty_notification_desk.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop.cpp
@@ -118,7 +107,7 @@ add_library(kiotty_net STATIC ${KIOTTY_NET_SOURCES})
 
 target_include_directories(kiotty_net
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation ${KIOTTY_NET_GENERATED_DIR}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation
 )
 
 target_compile_features(kiotty_net PUBLIC cxx_std_17 c_std_99)
