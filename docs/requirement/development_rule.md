@@ -341,6 +341,7 @@ ServerResult createServer(Context& context, const ServerConfiguration& configura
 | namespace | `<organization>::<project>::implementation`. 예: `kiotty::spec::implementation`. 조직·프로젝트 이름은 사용자가 정한다. | |
 
 - 약어를 쓰지 않는다. 이름은 네 단어 이하.
+- 예외: `App` 은 약어가 아니라 소프트웨어로서의 application 을 뜻하는 한 단어로 본다 (`app_context`, `KiottyNetAppContext`). `Application` 으로 풀어 쓰지 않는다.
 
 ### 4.6 bool 인자를 쓰지 않는다. `enum class` 로 바꾼다. 출력 인자를 쓰지 않는다. 리턴값으로 돌려준다.
 

@@ -239,7 +239,7 @@ KiottyNetConnectionDecision StatefulHandler::admit(const KiottyNetConnectionInfo
     if (session == nullptr)
     {
         report(info, KIOTTY_NET_CODE_SESSION_EXHAUSTED, SESSION_EXHAUSTED_MESSAGE);
-        return KiottyNet_ignoreConnection();           // requirement 8절. CONNECTED 도 release 도 없다. 14절 2
+        return KiottyNet_ignoreConnection();           // 받은 socket 을 바로 닫는다. Session 이 없으므로 CONNECTED 도 CLOSED 행도 release 도 없다. 14절 2
     }
     return KiottyNet_acceptConnection(session);
 }
@@ -358,7 +358,7 @@ echo 서버 (구현 가이드 3절의 표) 로 한 연결의 흐름을 적는다
 
 | 바퀴 | 일어나는 일 | Handler 가 하는 일 | Connection 의 `_machine_state` |
 |---|---|---|---|
-| accept | IoLoop 이 `handler.admit(info)` | `createConnectionContext(app, info)` → Session. NULL 이면 `report(SESSION_EXHAUSTED)` 뒤 ignore | initialize 가 `initialState()` = ReadingHeader 로 |
+| accept | IoLoop 이 `handler.admit(info)` | `createConnectionContext(app, info)` → Session. NULL 이면 `report(SESSION_EXHAUSTED)` 뒤 socket 을 닫는다 | initialize 가 `initialState()` = ReadingHeader 로 |
 | onOpened (평문) / 핸드셰이크 DONE (TLS) | `Connection::onReady` → `dispatch(connectedEvent())` | `findRule(ReadingHeader, CONNECTED)` 는 ANY 행 → `onConnected(session, handle, event)` → `{ ReadingHeader, thenRead(4, 5000) }` | ReadingHeader |
 | RECEIVE 완료, 4 바이트 | `ReceiveFlow::deliver` → `dispatch(readEvent(data))` | `(ReadingHeader, READ)` → `onHeader` → `{ ReadingBody, thenRead(length, 5000) }` | ReadingBody |
 | RECEIVE 완료, body | 같은 길 | `(ReadingBody, READ)` → `onBody` 가 Session 에 복사하고 `{ Writing, thenWrite(frame, 5000) }` | Writing |
@@ -536,7 +536,7 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 | 인자 `config` | `configuration` | base.h 의 initialize / configure 함수 전부, create* 셋, C++ builder 와 wrapper 의 생성자 |
 | 인자 `cert_file` | `certificate_file` | TLS 설정 둘, `KiottyNetTlsIdentity.cert_file` 필드도 |
 | 인자 `ws` | `websocket` | websocket.h 의 handle 함수와 콜백 |
-| `KiottyNetAppContext`, `app_context` | `KiottyNetApplicationContext`, `application_context` | base.h, statemachine.h, http.h, websocket.h 전부. 14절 4 에서 확인받는다 |
+| `KiottyNetAppContext`, `app_context` | 그대로 | `App` 은 약어가 아니라 소프트웨어로서의 application 을 뜻하는 한 단어로 본다 (사용자 결정 2026-11-09, 수칙 4.5 의 예외) |
 | `tls` (인자), `Tls` (타입), `Http`, `Tcp`, `Url`, `Id` | 그대로 | 약어가 아니라 이름이다 (설계 v5 3절의 cipher suite 와 같은 이유). `del` (C++ wrapper 의 DELETE) 도 예약어 때문의 예외로 둔다 |
 
 ### 12.3 헤더 넷은 그대로
@@ -592,12 +592,12 @@ M1 의 이름 변경은 `tools/rename_public_api.tsv` 와 `wrap_parameters.py` �
 
 ## 14. 정할 것
 
-1. **`KiottyNetStatefulAppContext` 에 `onError` 를 더한다** (2절). NULL 이면 부르지 않는다. 없으면 TLS 실패, 거부된 action, `UNHANDLED_EVENT`, `ILLEGAL_TRANSITION`, Session 부족이 조용히 닫힌다. 제안: 더한다.
-2. **Session 이 NULL 일 때.** requirement 8절은 ignore (CONNECTED 도 release 도 없다), 구현 가이드 2.5 는 `SESSION_EXHAUSTED` 로 닫고 CLOSED 행을 돌린다. 구현 가이드는 onConnected 가 handle 을 받던 때의 글이다. 제안: requirement 대로 ignore 하고 `onError(SESSION_EXHAUSTED)` 로 알린다 (4.1).
-3. **`ILLEGAL_TRANSITION` 검사를 release 에서도 한다.** requirement 8절은 debug 빌드만이다. 비용은 정수 비교 4 번 이하다. 제안: 항상.
-4. **`KiottyNetAppContext` → `KiottyNetApplicationContext`.** DV13 은 `config`, `cert_file` 만 적었지만 `app` 도 약어다. 네 헤더와 모든 예제가 바뀐다. 제안: 판 v1 에서 같이 바꾼다. 바꾸지 않으면 DV13 에 그 줄만 남긴다.
+1. (정했다, 2026-11-09) **`KiottyNetStatefulAppContext` 에 `onError` 를 더한다** (2절). NULL 이면 부르지 않는다.
+2. (정했다, 2026-11-09) **Session 이 NULL 이면 Session 이 다 닳은 것이고 연결을 닫는다.** `onError(SESSION_EXHAUSTED)` 로 알리고 받은 socket 을 바로 닫는다 (`ignoreConnection` 의 동작). Session 이 없으므로 CONNECTED 도 CLOSED 행도 release 도 없다 (4.1). 라이브러리가 Session 을 갖는 HTTP / WebSocket 은 Session 배열을 Connection 슬롯과 같은 크기, 같은 index 로 두어 이 일이 생기지 않게 하는 것을 다음 설계에서 본다 (11절).
+3. (정했다, 2026-11-09) **`ILLEGAL_TRANSITION` 검사는 release 빌드에서도 한다.**
+4. (정했다, 2026-11-09) **`KiottyNetAppContext` 는 그대로.** `App` 은 소프트웨어로서의 application 을 뜻하는 한 단어로 보고 약어 금지 (수칙 4.5) 의 예외로 둔다.
 5. **문자열 상수는 수칙 2.6 의 대상이 아니다** (8.2). DV12 의 "TLS 실패 메시지 상수" 를 편차 목록에서 뺀다. 제안: 뺀다.
-6. **HTTP 의 handle 둘을 `{ server, id }` struct 로** (12.6). 구현 가이드 4.5 의 `ownerOf` 미결이 닫힌다. 제안: 그렇게.
+6. (정했다, 2026-11-09) **HTTP 의 handle 둘을 `{ server, id }` struct 로** (12.6). 구현 가이드 4.5 의 `ownerOf` 미결이 닫힌다.
 7. **WebSocket 의 메시지 버퍼는 HTTP 의 body 버퍼를 같이 쓴다** (11절). Upgrade 경로의 `max_message_bytes` 가 `max_body_bytes` 보다 크면 `addWebSocketUpgrade` 가 INVALID_ARGUMENT. 제안: 그렇게. 대안은 HttpLimits 에 필드 하나.
 8. **HTTP 와 WebSocket 은 한 표, 한 Session** (11절). 구현 가이드 5절과 user_guide_websocket 9절의 미결. 제안: 한 표.
 9. **`KiottyNet_HttpServer` 를 `routes()` / `files()` 로 나눈다** (12.5). 대안은 wrapper 를 DV9 처럼 "C API 의 거울" 로 보고 7 개 한계의 예외로 두는 것. 제안: 나눈다.
