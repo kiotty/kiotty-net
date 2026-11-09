@@ -47,8 +47,25 @@ WSL2 는 맨 TCP loopback 도 약 200 µs 라 두 backend 의 차이가 잡음 �
 | BroadcastFanOut 128 | 66.8 k/s | 71.0 k/s |
 | ConnectionChurn | 1.78 k/s | 1.75 k/s |
 
+### CI ubuntu, 같은 runner (run 42564248374)
+
+benchmark job 이 이제 기본 (io_uring) 빌드와 epoll 전용 빌드를 같은 runner 에서 차례로 돌려 `benchmark.json`, `benchmark-epoll.json` 을 남긴다. runner 마다 CPU 가 달라 (3.69 GHz, 3.26 GHz) 다른 run 끼리는 비교할 수 없었다.
+
+| 벤치 | epoll | io_uring | 차이 |
+|---|---|---|---|
+| EchoRoundtrip clients 1, max 1024 | 27.4 µs | 26.1 µs | +5% |
+| EchoRoundtrip clients 128, max 1024 | 924 µs | 1096 µs | −19% |
+| ReadHeavy 64 KiB, max 1024 | 4.72 GB/s | 4.56 GB/s | −3% |
+| WriteHeavy | 4.85 GB/s | 4.78 GB/s | −1% |
+| BroadcastFanOut 128 | 179 k/s | 181 k/s | +1% |
+| ConnectionChurn | 15.5 k/s | 15.9 k/s | +2% |
+| WorkHandoff | 19.9 k/s | 14.2 k/s | −29% |
+| EventClientReadHeavy 16 KiB | 3.20 GB/s | 4.34 GB/s | +36% |
+
+한 번의 측정이라 잡음이 크다. listener 를 쓰지 않는 StreamClient 벤치도 같은 run 에서 −5 ~ +27% 로 흔들렸다. 그 폭을 넘는 것은 WorkHandoff 의 −29% 와 128 client echo 의 −19% 다. 둘 다 io_uring 쪽이 느리다. WorkHandoff 는 worker 의 wake 가 eventfd 를 거쳐 ring 의 READ 완료로 오는 길이라 epoll 보다 한 단계 길다.
+
 ## 정할 것
 
-1. 기본을 io_uring 으로 둘지. 지금 기본 ON 이고 커널이 막으면 epoll 이다. WSL2 에서는 이득이 안 보인다. CI 수치를 보고 정한다.
+1. 기본을 io_uring 으로 둘지. 지금 기본 ON 이고 커널이 막으면 epoll 이다. 같은 runner 측정에서 이득은 없고 WorkHandoff 와 다수 client echo 가 느리다. 고치는 후보는 wake 를 `IORING_OP_MSG_RING` 이나 multishot poll 로 바꾸기, `IORING_SETUP_DEFER_TASKRUN | SINGLE_ISSUER` (loop thread 가 open 하도록 바꿔야 한다), SQE 를 바퀴마다 한 번에 제출하기.
 2. 버퍼 등록 (`IORING_REGISTER_BUFFERS`, fixed buffer), multishot recv, `SEND_ZC` 는 넣지 않았다. 이득은 큰 메시지와 연결 수가 많을 때인데 지금 목표 (기본 1024 연결) 에서는 측정이 먼저다.
 3. `ringForget` 은 CQ 가 가득 차서 커널의 overflow 목록에 그 완료가 있으면 최대 5 초 기다린 뒤 포기한다. 포기하면 그 event 주소가 나중에 읽힌다. 실제로는 IoLoop 의 shutdown 이 event 를 소멸 전에 전부 settle 하므로 테스트의 지역 event 에서만 이 길을 탄다.
