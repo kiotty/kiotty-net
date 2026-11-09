@@ -1,5 +1,7 @@
 #include "data/repository/connection/kiotty_receive_flow.h"
 
+#include "domain/entity/kiotty_connection_event.h"
+
 #include <cstring>
 
 namespace kiotty::net::implementation
@@ -22,7 +24,6 @@ namespace kiotty::net::implementation
     ReceiveFlow::ReceiveFlow(const ConnectionParts& parts)
         : _receive(parts.receive)
         , _tls(parts.tls)
-        , _machine_state(0)
     {
     }
 
@@ -59,20 +60,9 @@ namespace kiotty::net::implementation
         stageFor(purpose).provider().commit(length);
     }
 
-    int32_t ReceiveFlow::machineState() const
-    {
-        return _machine_state.load();
-    }
-
-    void ReceiveFlow::setMachineState(int32_t state)
-    {
-        _machine_state.store(state);
-    }
-
     IoAction ReceiveFlow::deliver(KiottyNetSpan data, const Caller& caller)
     {
-        const KiottyNetConnectionAction next =
-            caller.handler.callbacks.onRead(caller.context, caller.handle(), data);
+        const KiottyNetConnectionAction next = caller.handler.dispatch(caller, readEvent(data));
         _receive.consumer().commit(data.length);
         return caller.admit(next);
     }

@@ -1,6 +1,8 @@
 #include "data/repository/connection/kiotty_connection.h"
 #include "core/kiotty_clock.h"
 #include "core/kiotty_deadline.h"
+#include "data/repository/connection/kiotty_caller.h"
+#include "domain/entity/kiotty_handler.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 
@@ -9,6 +11,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace net = kiotty::net::implementation;
 
@@ -43,6 +46,67 @@ namespace
         net::IoPayload payload = connection.resolve(action);
         return std::string(static_cast<const char*>(payload.buffer), payload.length);
     }
+
+    class StateProbe final : public net::Handler
+    {
+    public:
+        StateProbe(KiottyNetEndpoint& owner, int32_t initial)
+            : net::Handler(owner)
+            , on_connected(thenHold(0))
+            , on_work_started(thenWork())
+            , _initial(initial)
+        {
+        }
+
+        KiottyNetCode validate() const override
+        {
+            return KIOTTY_NET_CODE_SUCCESS;
+        }
+
+        int32_t initialState() const override
+        {
+            return _initial;
+        }
+
+        KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo&) const override
+        {
+            return KiottyNet_ignoreConnection();
+        }
+
+        KiottyNetConnectionAction dispatch(const net::Caller& caller, const KiottyNetConnectionEvent& event) const override
+        {
+            states.push_back(caller.machine_state);
+            types.push_back(event.type);
+            caller.machine_state = caller.machine_state + 1;
+            switch (event.type)
+            {
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED:
+                return on_connected;
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED:
+                return on_work_started;
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_READ:
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN:
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT:
+            case KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED:
+                break;
+            }
+            return thenHold(0);
+        }
+
+        void report(const KiottyNetConnectionInfo&, KiottyNetCode code, const char*) const override
+        {
+            reported.push_back(code);
+        }
+
+        KiottyNetConnectionAction                         on_connected;
+        KiottyNetConnectionAction                         on_work_started;
+        mutable std::vector<int32_t>                      states;
+        mutable std::vector<KiottyNetConnectionEventType> types;
+        mutable std::vector<KiottyNetCode>                reported;
+
+    private:
+        int32_t _initial;
+    };
 
     void startWork(Bench& bench, net::Connection& connection)
     {
@@ -1258,15 +1322,58 @@ TEST(Connection, ReleaseReturnsToIdleClearsStagesAndResetsWork)
     EXPECT_FALSE(isWorking(reopened));
 }
 
-TEST(Connection, MachineStateStartsAtZeroAndIsClearedOnRelease)
+TEST(Connection, MachineStateStartsFromTheHandlerAndTheCallerCarriesItBetweenEvents)
 {
     Bench bench(smallLimits());
+    StateProbe probe(bench.owner, 7);
     net::Connection& connection = bench.open();
-    EXPECT_EQ(0, connection.flows().receive.machineState());
-    connection.flows().receive.setMachineState(7);
-    EXPECT_EQ(7, connection.flows().receive.machineState());
+    EXPECT_EQ(net::IoActionKind::HOLD, connection.onOpened(probe).kind);
+    connection.close(KIOTTY_NET_CODE_SUCCESS, probe);
+    EXPECT_EQ((std::vector<int32_t>{ 7, 8 }), probe.states);
+    EXPECT_EQ((std::vector<KiottyNetConnectionEventType>{ KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED, KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED }), probe.types);
     bench.host.release(connection);
-    EXPECT_EQ(0, connection.flows().receive.machineState());
+    StateProbe second(bench.owner, 3);
     net::Connection& reopened = bench.open();
-    EXPECT_EQ(0, reopened.flows().receive.machineState());
+    reopened.onOpened(second);
+    EXPECT_EQ((std::vector<int32_t>{ 3 }), second.states);
+}
+
+TEST(Connection, WorkStartedReturningReadIsAppliedToTheStreamWithoutAWorker)
+{
+    Bench bench(smallLimits());
+    StateProbe probe(bench.owner, 0);
+    probe.on_connected = thenWork();
+    probe.on_work_started = thenRead(4, 0);
+    net::Connection& connection = bench.open();
+    EXPECT_EQ(net::IoActionKind::START_WORK, connection.onOpened(probe).kind);
+    EXPECT_EQ(net::IoActionKind::NONE, connection.dispatch(completion::workReady(), probe, bench.host.notificationMutex()).kind);
+    ASSERT_TRUE(connection.flows().work.isFinished());
+    net::IoAction outcome = connection.flows().work.takeOutcome();
+    EXPECT_EQ(net::IoActionKind::READ, outcome.kind);
+    EXPECT_TRUE(probe.reported.empty());
+}
+
+TEST(Connection, WorkStartedReturningStartWorkLeavesTheStreamToTheWorker)
+{
+    Bench bench(smallLimits());
+    StateProbe probe(bench.owner, 0);
+    probe.on_connected = thenWork();
+    net::Connection& connection = bench.open();
+    connection.onOpened(probe);
+    connection.dispatch(completion::workReady(), probe, bench.host.notificationMutex());
+    EXPECT_FALSE(connection.flows().work.isFinished());
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, connection.flows().work.verify(connection.state().id.generation));
+}
+
+TEST(Connection, WorkStartedReturningAnInvalidActionIsReportedAndTheStreamStaysOpen)
+{
+    Bench bench(smallLimits());
+    StateProbe probe(bench.owner, 0);
+    probe.on_connected = thenWork();
+    probe.on_work_started = thenRead(0, 0);
+    net::Connection& connection = bench.open();
+    connection.onOpened(probe);
+    connection.dispatch(completion::workReady(), probe, bench.host.notificationMutex());
+    EXPECT_FALSE(connection.flows().work.isFinished());
+    EXPECT_EQ((std::vector<KiottyNetCode>{ KIOTTY_NET_CODE_INVALID_ARGUMENT }), probe.reported);
 }

@@ -48,6 +48,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/core/kiotty_parse_integer.cpp
     src/implementation/core/kiotty_stage.cpp
     src/implementation/core/kiotty_text.cpp
+    src/implementation/domain/entity/kiotty_connection_event.cpp
     src/implementation/data/infra/error/kiotty_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_windows_socket_error.cpp
@@ -92,6 +93,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/file/backend/kiotty_windows_file.cpp
     src/implementation/data/repository/connection/kiotty_acceptor.cpp
     src/implementation/data/repository/connection/kiotty_adopt_action.cpp
+    src/implementation/data/repository/connection/kiotty_callback_handler.cpp
     src/implementation/data/repository/connection/kiotty_caller.cpp
     src/implementation/data/repository/connection/kiotty_receive_flow.cpp
     src/implementation/data/repository/connection/kiotty_send_flow.cpp

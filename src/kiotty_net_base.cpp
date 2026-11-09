@@ -4,6 +4,7 @@
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_context.h"
 #include "context/kiotty_tls_configuration.h"
+#include "data/repository/connection/kiotty_callback_handler.h"
 #include "core/kiotty_text.h"
 #include "data/repository/connection/kiotty_connection.h"
 
@@ -464,7 +465,8 @@ KiottyNetCode KiottyNet_runEventClient(KiottyNetEventClientHandle client,
                                        KiottyNetAppContext app_context)
 {
     if (client == nullptr || handler == nullptr) { return INVALID; }
-    return client->run(*handler, app_context);
+    const net::CallbackHandler callbacks(*handler, app_context, *client);
+    return client->run(callbacks);
 }
 
 void KiottyNet_closeEventClient(KiottyNetEventClientHandle client)
@@ -515,7 +517,8 @@ KiottyNetCode KiottyNet_runServer(KiottyNetServerHandle server,
                                   KiottyNetAppContext app_context)
 {
     if (server == nullptr || handler == nullptr) { return INVALID; }
-    return server->run(*handler, app_context);
+    const net::CallbackHandler callbacks(*handler, app_context, *server);
+    return server->run(callbacks);
 }
 
 void KiottyNet_closeServer(KiottyNetServerHandle server)

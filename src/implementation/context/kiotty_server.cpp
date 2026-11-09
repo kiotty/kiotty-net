@@ -62,13 +62,13 @@ namespace kiotty::net::implementation
         _is_abandoned.store(false);
     }
 
-    KiottyNetCode Server::run(const KiottyNetConnectionHandler& callbacks,
-                              KiottyNetAppContext app_context)
+    KiottyNetCode Server::run(const Handler& handler)
     {
+        const KiottyNetCode checked = handler.validate();
+        if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const bool entered = _gate.enter();
         if (!entered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _loop.reset();
-        const Handler handler(callbacks, app_context, *this);
         const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
         const KiottyNetCode opened = listen();
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return leave(opened); }

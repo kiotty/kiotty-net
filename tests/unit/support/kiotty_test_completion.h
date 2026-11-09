@@ -6,6 +6,7 @@
 #include "data/repository/connection/kiotty_notification_desk.h"
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
+#include "data/repository/connection/kiotty_callback_handler.h"
 #include "support/kiotty_test_handler.h"
 #include "support/kiotty_test_text.h"
 
@@ -151,7 +152,7 @@ namespace kiotty_test
         FakeEndpoint                                           owner;
         Recorder                                            recorder;
         const KiottyNetConnectionHandler                    callbacks;
-        kiotty::net::implementation::Handler                handler;
+        kiotty::net::implementation::CallbackHandler        handler;
     };
 
     inline kiotty::net::implementation::IoEvent& readEventOf(kiotty::net::implementation::Connection& connection)

@@ -47,8 +47,7 @@ namespace kiotty::net::implementation
 
         KiottyNetCode initialize(PoolHandle id, ServerConfiguration configuration);
         void          reset() noexcept;
-        KiottyNetCode run(const KiottyNetConnectionHandler& callbacks,
-                          KiottyNetAppContext app_context);
+        KiottyNetCode run(const Handler& handler);
         void          close();
         KiottyNetCode await(uint64_t timeout_milliseconds);
         KiottyNetCode broadcast(KiottyNetSpan data);

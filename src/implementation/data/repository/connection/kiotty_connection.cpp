@@ -2,6 +2,7 @@
 
 #include "core/kiotty_clock.h"
 #include "data/datasource/kiotty_memory_layout.h"
+#include "domain/entity/kiotty_connection_event.h"
 
 #include <utility>
 
@@ -11,6 +12,7 @@ namespace kiotty::net::implementation
     {
         const char* const BUSY_ACTION_MESSAGE = "action rejected: io outstanding. use notify";
         const char* const HANDSHAKE_TIMEOUT_MESSAGE = "tls: handshake timeout";
+        const char* const WORK_CLOSE_MESSAGE = "work rejected: the work started action is invalid";
 
         bool     fits(size_t requested, size_t maximum);
         IoAction closedBy(SocketCode code);
@@ -30,6 +32,7 @@ namespace kiotty::net::implementation
         , _deadline(0)
         , _context(nullptr)
         , _id{ 0, -1 }
+        , _machine_state(0)
         , _phase(Phase::IDLE)
     {
     }
@@ -52,7 +55,7 @@ namespace kiotty::net::implementation
         _info = _socket.peer();
         _context = configuration.context;
         _deadline.store(0);
-        _receive_flow.setMachineState(0);
+        _machine_state = 0;
         const TlsCapacity capacity{ limits.receive, largerOf(limits.send, limits.notify) };
         return open(configuration.profile, configuration.hostname, capacity);
     }
@@ -66,12 +69,13 @@ namespace kiotty::net::implementation
         _deadline.store(0);
         _context = nullptr;
         _info = KiottyNetConnectionInfo{};
-        _receive_flow.setMachineState(0);
+        _machine_state = 0;
         _phase.store(Phase::IDLE);
     }
 
     IoAction Connection::onOpened(const Handler& handler)
     {
+        _machine_state = handler.initialState();
         const bool secure = _tls.status().is_active;
         if (secure)
         {
@@ -244,8 +248,7 @@ namespace kiotty::net::implementation
     IoAction Connection::onWritten(size_t length, const Handler& handler)
     {
         const Caller caller = callerFor(handler);
-        const KiottyNetConnectionAction returned =
-            handler.callbacks.onWritten(_context, caller.handle(), length);
+        const KiottyNetConnectionAction returned = handler.dispatch(caller, writtenEvent(length));
         return _receive_flow.drive(caller.admit(returned), caller);
     }
 
@@ -259,8 +262,7 @@ namespace kiotty::net::implementation
             caller.reject(KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT, HANDSHAKE_TIMEOUT_MESSAGE);
             return IoAction::close(KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT);
         }
-        const KiottyNetConnectionAction returned =
-            handler.callbacks.onTimeout(_context, caller.handle());
+        const KiottyNetConnectionAction returned = handler.dispatch(caller, timeoutEvent());
         const bool pending = isUserActionPending();
         if (pending)
         {
@@ -272,7 +274,12 @@ namespace kiotty::net::implementation
     IoAction Connection::onWorkReady(const Handler& handler)
     {
         _work.start(_id.generation);
-        handler.callbacks.onWorkStarted(_context, callerFor(handler).stream());
+        const Caller caller = callerFor(handler);
+        const KiottyNetConnectionEvent started = workStartedEvent(caller.stream());
+        const KiottyNetConnectionAction returned = handler.dispatch(caller, started);
+        if (returned.type == KIOTTY_NET_ACTION_TYPE_START_WORK) { return IoAction::none(); }
+        const KiottyNetCode closed = _work_flow.closeStream(_id.generation, returned);
+        if (closed != KIOTTY_NET_CODE_SUCCESS) { caller.reject(closed, WORK_CLOSE_MESSAGE); }
         return IoAction::none();
     }
 
@@ -299,8 +306,7 @@ namespace kiotty::net::implementation
     IoAction Connection::onReady(const Handler& handler)
     {
         const Caller caller = callerFor(handler);
-        const KiottyNetConnectionAction returned =
-            handler.callbacks.onReady(_context, caller.handle());
+        const KiottyNetConnectionAction returned = handler.dispatch(caller, connectedEvent());
         return _receive_flow.drive(caller.admit(returned), caller);
     }
 
@@ -353,8 +359,8 @@ namespace kiotty::net::implementation
         _deadline.store(0);
         _phase.store(Phase::CLOSING);
         _work.abandon();
-        const KiottyNetConnectionHandle caller = callerFor(handler).handle();
-        handler.callbacks.onDisconnected(handler.app_context, _context, caller, reason);
+        const Caller caller = callerFor(handler);
+        static_cast<void>(handler.dispatch(caller, closedEvent(reason)));
     }
 
     bool Connection::isUserActionPending()

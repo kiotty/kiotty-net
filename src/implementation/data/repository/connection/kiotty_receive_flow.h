@@ -9,7 +9,6 @@
 #include "domain/entity/kiotty_io_payload.h"
 #include "kiotty_net_base.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -25,8 +24,6 @@ namespace kiotty::net::implementation
         IoAction  drive(IoAction action, const Caller& caller);
         IoPayload room(IoPurpose purpose);
         void      commit(IoPurpose purpose, size_t length);
-        int32_t   machineState() const;
-        void      setMachineState(int32_t state);
 
     private:
         using RefillResult = Result<size_t, KiottyNetCode>;
@@ -36,8 +33,7 @@ namespace kiotty::net::implementation
         IoAction     refuse(KiottyNetCode code, const Caller& caller);
         StageBase&   stageFor(IoPurpose purpose);
 
-        StageBase&           _receive;
-        TlsEngine&           _tls;
-        std::atomic<int32_t> _machine_state;
+        StageBase& _receive;
+        TlsEngine& _tls;
     };
 }

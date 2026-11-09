@@ -10,7 +10,7 @@ namespace kiotty::net::implementation
 
     Caller Connection::callerFor(const Handler& handler)
     {
-        return Caller{ handler, _info, _plain.send, _context, _id };
+        return Caller{ handler, _info, _plain.send, _machine_state, _context, _id };
     }
 
     ConnectionParts Connection::parts()

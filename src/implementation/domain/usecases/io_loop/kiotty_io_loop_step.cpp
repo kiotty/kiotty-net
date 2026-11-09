@@ -114,12 +114,10 @@ namespace kiotty::net::implementation
         }
         if (parts.host.full())
         {
-            parts.handler.callbacks.onError(parts.handler.app_context, info,
-                                            KIOTTY_NET_CODE_TABLE_FULL, TABLE_FULL_MESSAGE);
+            parts.handler.report(info, KIOTTY_NET_CODE_TABLE_FULL, TABLE_FULL_MESSAGE);
             return;
         }
-        const KiottyNetConnectionDecision decision =
-            parts.handler.callbacks.onConnected(parts.handler.app_context, info);
+        const KiottyNetConnectionDecision decision = parts.handler.admit(info);
         if (!decision.accepted)
         {
             return;
@@ -138,8 +136,7 @@ namespace kiotty::net::implementation
         ConnectionResult acquired = parts.host.acquire(std::move(configuration));
         if (!acquired)
         {
-            parts.handler.callbacks.onError(parts.handler.app_context, info,
-                                            acquired.code, OPEN_FAILED_MESSAGE);
+            parts.handler.report(info, acquired.code, OPEN_FAILED_MESSAGE);
             return;
         }
         Connection& connection = acquired.value();
@@ -171,7 +168,6 @@ namespace kiotty::net::implementation
         {
             return;
         }
-        parts.handler.callbacks.onError(parts.handler.app_context, KiottyNetConnectionInfo{},
-                                        code, ACCEPT_FAILED_MESSAGE);
+        parts.handler.report(KiottyNetConnectionInfo{}, code, ACCEPT_FAILED_MESSAGE);
     }
 }

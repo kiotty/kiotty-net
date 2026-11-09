@@ -100,6 +100,7 @@ namespace kiotty::net::implementation
         std::atomic<uint64_t>      _deadline;
         KiottyNetConnectionContext _context;
         PoolHandle                 _id;
+        int32_t                    _machine_state;
         std::atomic<Phase>         _phase;
     };
 

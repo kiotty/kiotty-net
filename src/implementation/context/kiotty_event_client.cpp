@@ -64,16 +64,16 @@ namespace kiotty::net::implementation
         _is_abandoned.store(false);
     }
 
-    KiottyNetCode EventClient::run(const KiottyNetConnectionHandler& callbacks,
-                                   KiottyNetAppContext app_context)
+    KiottyNetCode EventClient::run(const Handler& handler)
     {
+        const KiottyNetCode checked = handler.validate();
+        if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const bool entered = _gate.enter();
         if (!entered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _is_closing.store(false);
         _loop.reset();
         ConnectedResult connected = connectWithRetry(_configuration, _is_closing);
         if (!connected) { return leave(connected.code); }
-        const Handler handler(callbacks, app_context, *this);
         const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
         _gate.start();
         _loop.admit(parts, std::move(connected.value), hostnameOf(_configuration));

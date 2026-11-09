@@ -21,7 +21,7 @@ namespace kiotty::net::implementation
 
     void Caller::reject(KiottyNetCode code, const char* message) const
     {
-        handler.callbacks.onError(handler.app_context, info, code, message);
+        handler.report(info, code, message);
     }
 
     IoAction Caller::admit(const KiottyNetConnectionAction& returned) const

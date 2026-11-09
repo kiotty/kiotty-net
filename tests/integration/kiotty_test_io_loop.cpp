@@ -2,6 +2,7 @@
 
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/repository/connection/kiotty_acceptor.h"
+#include "data/repository/connection/kiotty_callback_handler.h"
 #include "data/repository/connection/kiotty_connection.h"
 #include "data/repository/connection/kiotty_connection_host.h"
 #include "data/repository/connection/kiotty_connection_status.h"
@@ -345,7 +346,7 @@ namespace
         kiotty_test::FakeEndpoint              owner;
         Probe                               probe;
         const KiottyNetConnectionHandler    callbacks;
-        net::Handler                        handler;
+        net::CallbackHandler                handler;
         net::IoLoop                         loop;
 
     private:

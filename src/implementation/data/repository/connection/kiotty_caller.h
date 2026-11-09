@@ -6,6 +6,8 @@
 #include "domain/entity/kiotty_io_action.h"
 #include "kiotty_net_base.h"
 
+#include <cstdint>
+
 namespace kiotty::net::implementation
 {
     struct Caller
@@ -13,6 +15,7 @@ namespace kiotty::net::implementation
         const Handler&                 handler;
         const KiottyNetConnectionInfo& info;
         StageBase&                     send;
+        int32_t&                       machine_state;
         KiottyNetConnectionContext     context;
         PoolHandle                     id;
 
@@ -23,6 +26,6 @@ namespace kiotty::net::implementation
     };
 
     static constexpr size_t CALLER_BYTES =
-        3 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle);
+        4 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle);
     static_assert(sizeof(Caller) == CALLER_BYTES, "Caller: unexpected padding");
 }
