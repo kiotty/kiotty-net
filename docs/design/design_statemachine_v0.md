@@ -40,7 +40,7 @@ KiottyNet_runServer(server, callbacks, app)            KiottyNet_runStatefulServ
 | `domain/usecases/statemachine/` | 없음 | `StatefulHandler`, 표 찾기 / 검사 |
 | `core/` | `Span`, `Result`, `checked` | + `FixedString<N>`, `parseText`, `parseUnsigned`, `parseHexadecimal` (DV12) |
 | 내부 `const char*` (hostname, path) | 다섯 자리 (DV12) | 전부 `Span<const char>`. OS 에 C 문자열이 필요한 backend 안에서만 `FixedString<N>` 으로 복사 |
-| 공개 API | v0 이름 + DV13 | 판 v1 (12절). bool 인자 → enum, 약어 → 단어, wrapper 는 7 개 이하 (제안). 헤더 넷은 그대로 |
+| 공개 API | v0 이름 + DV13 | 판 v1 (12절). bool 인자 → enum, 약어 → 단어 (제안). 헤더 넷과 `KiottyNet_HttpServer` 의 메서드 17 개는 그대로 |
 
 ## 1. 폴더
 
@@ -510,8 +510,11 @@ enum class ProtocolState : int32_t
 };
 ```
 
-- HttpServer 의 표는 HTTP 행 + WebSocket 행이다. Upgrade 요청을 받은 HTTP 행의 action 이 `{ WEB_SOCKET_OPENING, thenWrite(101) }` 을 돌려주면 그 연결은 그 뒤로 WebSocket 행만 밟는다. WebSocketServer (WebSocket 만 쓰는 앱) 의 표는 HTTP 행 중 Upgrade 에 필요한 것 (request line, header line) + WebSocket 행이다. WebSocketClient 의 표는 Upgrade 요청을 보내고 101 을 읽는 행 둘 + WebSocket 행 (mask 를 씌우는 쪽).
-- Session 도 하나다. `ProtocolSession` 이 HTTP 부분과 WebSocket 부분을 갖는다. HTTP 의 body 버퍼와 WebSocket 의 메시지 버퍼는 같은 연결에서 동시에 쓰이지 않으므로 한 버퍼를 둘이 나눠 쓴다 (`max(max_body_bytes, max_message_bytes)`). 그래서 WebSocket 의 `max_message_bytes` 는 create 때 알아야 한다. `KiottyNet_addWebSocketUpgrade(http_server, &websocket)` 가 run 전에 불리더라도 create 뒤라 할당할 수 없으므로, HttpLimits 에 `max_web_socket_message_bytes` 를 두거나 (기본 64 KiB = `max_body_bytes` 기본과 같아 추가 메모리 0), Upgrade 경로의 `KiottyNetWebSocketConfiguration.max_message_bytes` 가 `max_body_bytes` 를 넘으면 `INVALID_ARGUMENT` 로 거절한다. 뒤의 것을 제안한다 (14절 7).
+- 사용자는 표를 보지 않는다. 사용자가 넘기는 것은 HTTP 의 route (`onRequest`, `onWorkStarted`) 와 Upgrade 경로의 WebSocket 콜백 (`onOpen`, `onMessage`, `onClose`) 이고, 라이브러리의 transition action 이 그 콜백을 부른다. 표는 라이브러리 안의 `static constexpr` 하나다.
+- HttpServer 의 표는 HTTP 행 + WebSocket 행이다. Upgrade 경로가 없으면 WebSocket 행에 닿는 일이 없을 뿐이다. Upgrade 요청을 받은 HTTP 행의 action 이 `{ WEB_SOCKET_OPENING, thenWrite(101) }` 을 돌려주면 그 연결은 그 뒤로 WebSocket 행만 밟는다. WebSocketServer (WebSocket 만 쓰는 앱) 의 표는 HTTP 행 중 Upgrade 에 필요한 것 (request line, header line) + WebSocket 행이다. WebSocketClient 의 표는 Upgrade 요청을 보내고 101 을 읽는 행 둘 + WebSocket 행 (mask 를 씌우는 쪽).
+- Session 도 하나다. Session 배열은 Connection 풀과 같은 크기 (`max_clients`) 이고 Connection 슬롯 번호를 그대로 index 로 쓴다 (14절 2). 그래서 HTTP / WebSocket 에는 `SESSION_EXHAUSTED` 가 없다.
+- Session 의 큰 버퍼는 `core/` 의 `Stage` 하나다. `Stage` 는 이미 프로토콜을 모르는 버퍼다 (Provider 가 쓰고 Consumer 가 읽는다). HTTP 는 이것을 요청 body 로, Upgrade 뒤의 WebSocket 은 같은 Stage 를 메시지 조립 버퍼로 쓴다. 한 연결에서 둘이 동시에 쓰이지 않으므로 슬롯마다 하나다. 새 버퍼 클래스는 만들지 않는다. 각 프로토콜이 Stage 를 자기 뜻으로 읽는 것은 `domain/usecases/http/`, `domain/usecases/websocket/` 의 함수 몫이다 (body 를 채우기, frame payload 를 unmask 하며 채우기).
+- Stage 의 크기는 `max(max_body_bytes, max_message_bytes)` 다. 크기는 create 때 정해지므로 WebSocket 의 `max_message_bytes` 도 create 때 알아야 한다. `KiottyNet_addWebSocketUpgrade(http_server, &websocket)` 는 create 뒤라 할당할 수 없으므로, Upgrade 경로의 `KiottyNetWebSocketConfiguration.max_message_bytes` 가 `max_body_bytes` 를 넘으면 `INVALID_ARGUMENT` 로 거절한다 (14절 7).
 - 송신 control frame (pong, ping, close) 과 사용자의 `send` 는 전부 push lane (`KiottyNet_notifyConnection`) 이다 (user_guide_websocket 2절). IO thread 의 action 안에서 부르면 그 자리에서 복사된다. 다른 thread 의 `closeWebSocket` 은 close frame 을 notify 로 넣고 Session 의 atomic 플래그를 세운다. 다음 이벤트 (WRITTEN 은 notify 에 없으므로 READ / TIMEOUT) 에서 action 이 플래그를 보고 CLOSING 으로 간다. 이것은 다음 설계의 일이다.
 
 ## 12. 공개 API 판 v1 (DV13)
@@ -562,7 +565,7 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 | 클래스 | 지금 | v1 |
 |---|---|---|
 | `KiottyNet_EventClient` | 8 (valid, code, handle, run, close, await, connection, notify) | `valid()` 를 `explicit operator bool() const` 로 → 7. 연산자는 세지 않는다 (DV11). `KiottyNet_Server`, `KiottyNet_StreamClient`, `KiottyNet_Context`, HTTP / WebSocket 의 소유 wrapper 도 같은 모양으로 맞춘다 (일관성) |
-| `KiottyNet_HttpServer` | 17 | 수명 넷 (`code, handle, run, close, await` 의 5 와 operator bool) + `routes()` + `files()` 로 7. `KiottyNet_HttpRoutes` (비소유, server handle 하나): `add(method, path, route)`, `get / post / put / patch / del (path, route)`, `notFound(route)` 로 7. `head` 와 `options` 는 자동 처리가 기본이라 별칭을 두지 않고 `add(KIOTTY_NET_HTTP_METHOD_HEAD, ...)` 로. `KiottyNet_HttpFiles` (비소유): `directory(url_prefix, path)`, `file(url_path, file_path)`, `memory(url_path, data, content_type)` 셋. 사용 예: `server.routes().get("/health", onHealth); server.files().directory("/", "./www/");` |
+| `KiottyNet_HttpServer` | 17 | 그대로 (사용자 결정 2026-11-09). 라우트와 파일 등록이 한 객체에 모이는 모양을 유지하고 7 개와의 차이는 DV13 에 둔다 |
 | `KiottyNet_HttpResponse` | 7 | 그대로 |
 | `KiottyNet_WebSocket` | 6 | 그대로 |
 | `KiottyNet_WebSocketClient` | 7 (valid, handle, run, close, await, socket, send) | valid → operator bool 로 6 |
@@ -596,9 +599,9 @@ M1 의 이름 변경은 `tools/rename_public_api.tsv` 와 `wrap_parameters.py` �
 2. (정했다, 2026-11-09) **Session 이 NULL 이면 Session 이 다 닳은 것이고 연결을 닫는다.** `onError(SESSION_EXHAUSTED)` 로 알리고 받은 socket 을 바로 닫는다 (`ignoreConnection` 의 동작). Session 이 없으므로 CONNECTED 도 CLOSED 행도 release 도 없다 (4.1). 라이브러리가 Session 을 갖는 HTTP / WebSocket 은 Session 배열을 Connection 슬롯과 같은 크기, 같은 index 로 두어 이 일이 생기지 않게 하는 것을 다음 설계에서 본다 (11절).
 3. (정했다, 2026-11-09) **`ILLEGAL_TRANSITION` 검사는 release 빌드에서도 한다.**
 4. (정했다, 2026-11-09) **`KiottyNetAppContext` 는 그대로.** `App` 은 소프트웨어로서의 application 을 뜻하는 한 단어로 보고 약어 금지 (수칙 4.5) 의 예외로 둔다.
-5. **문자열 상수는 수칙 2.6 의 대상이 아니다** (8.2). DV12 의 "TLS 실패 메시지 상수" 를 편차 목록에서 뺀다. 제안: 뺀다.
+5. (정했다, 2026-11-09) **문자열 상수는 수칙 2.6 의 대상이 아니다** (8.2). DV12 의 "TLS 실패 메시지 상수" 를 편차 목록에서 뺀다. 경로와 hostname 은 사용자가 넘긴 값이라 믿지 않고 `parseText` 를 지난다.
 6. (정했다, 2026-11-09) **HTTP 의 handle 둘을 `{ server, id }` struct 로** (12.6). 구현 가이드 4.5 의 `ownerOf` 미결이 닫힌다.
-7. **WebSocket 의 메시지 버퍼는 HTTP 의 body 버퍼를 같이 쓴다** (11절). Upgrade 경로의 `max_message_bytes` 가 `max_body_bytes` 보다 크면 `addWebSocketUpgrade` 가 INVALID_ARGUMENT. 제안: 그렇게. 대안은 HttpLimits 에 필드 하나.
-8. **HTTP 와 WebSocket 은 한 표, 한 Session** (11절). 구현 가이드 5절과 user_guide_websocket 9절의 미결. 제안: 한 표.
-9. **`KiottyNet_HttpServer` 를 `routes()` / `files()` 로 나눈다** (12.5). 대안은 wrapper 를 DV9 처럼 "C API 의 거울" 로 보고 7 개 한계의 예외로 두는 것. 제안: 나눈다.
+7. (정했다, 2026-11-09) **HTTP body 와 WebSocket 메시지는 Session 의 `Stage` 하나를 같이 쓴다** (11절). Stage 가 프로토콜을 모르는 상위 버퍼이고 HTTP / WebSocket 의 함수가 자기 뜻으로 쓴다. Upgrade 경로의 `max_message_bytes` 가 `max_body_bytes` 보다 크면 `addWebSocketUpgrade` 가 INVALID_ARGUMENT.
+8. (정했다, 2026-11-09) **HTTP 와 WebSocket 은 한 표, 한 Session** (11절). 사용자는 HTTP route 와 WebSocket 콜백을 넘기고, 라이브러리의 표 하나가 Upgrade 전후를 다 밟는다.
+9. (정했다, 2026-11-09) **`KiottyNet_HttpServer` 의 메서드 17 개는 그대로** (12.5). 7 개와의 차이는 DV13 에 둔다.
 10. (정했다, 2026-11-09) **공개 헤더는 넷 그대로** (12.3). 나누지 않고 400 줄과의 차이는 DV13 에 둔다. `include/` 는 수칙이 아니라 사용자가 지정한 모양을 따른다 (수칙 0.2).
