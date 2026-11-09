@@ -60,7 +60,8 @@ namespace kiotty::net::implementation
         return _io_thread.load() == std::this_thread::get_id();
     }
 
-    void IoLoop::admit(const LoopParts& parts, ActiveSocket&& socket, const char* hostname)
+    void IoLoop::admit(const LoopParts& parts, ActiveSocket&& socket,
+                       Span<const char> hostname)
     {
         welcome(std::move(socket), hostname, parts);
     }

@@ -138,21 +138,18 @@ namespace kiotty::net::implementation
             return finishPiece(transmission, request, deadline);
         }
 
-        bool isUsablePath(const char* path)
+        bool isUsablePath(Span<const char> path)
         {
-            if (path == nullptr)
-            {
-                return false;
-            }
-            const size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
-            return length > 0 && length < KIOTTY_NET_MAX_PATH_LENGTH;
+            return !path.empty() && path.length < KIOTTY_NET_MAX_PATH_LENGTH;
         }
 
-        HANDLE openForRead(const char* path)
+        HANDLE openForRead(Span<const char> path)
         {
             wchar_t wide[KIOTTY_NET_MAX_PATH_LENGTH] = {};
-            const int written = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
-                wide, KIOTTY_NET_MAX_PATH_LENGTH);
+            const int length = static_cast<int>(path.length);
+            const int room = static_cast<int>(KIOTTY_NET_MAX_PATH_LENGTH - 1);
+            const int written = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data,
+                length, wide, room);
             if (written <= 0)
             {
                 return INVALID_HANDLE_VALUE;
@@ -173,7 +170,7 @@ namespace kiotty::net::implementation
         close();
     }
 
-    KiottyNetCode InputFile::open(const char* path)
+    KiottyNetCode InputFile::open(Span<const char> path)
     {
         close();
         if (!isUsablePath(path))

@@ -24,10 +24,11 @@ struct KiottyNetEndpoint
     virtual KiottyNetResult         writeStream(int64_t id,
                                                 KiottyNetSpan data,
                                                 uint32_t timeout_milliseconds) = 0;
-    virtual KiottyNetCode           writeStreamFile(int64_t id,
-                                                    const char* path,
-                                                    FileRange range,
-                                                    uint32_t timeout_milliseconds) = 0;
+    virtual KiottyNetCode           writeStreamFile(
+        int64_t id,
+        kiotty::net::implementation::Span<const char> path,
+        FileRange range,
+        uint32_t timeout_milliseconds) = 0;
     virtual bool                    isStreamOpen(int64_t id) = 0;
     virtual KiottyNetCode           closeStream(int64_t id,
                                                 const KiottyNetConnectionAction& then) = 0;

@@ -120,7 +120,7 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode StreamClient::writeStreamFile(int64_t id,
-                                                const char* path,
+                                                Span<const char> path,
                                                 FileRange range,
                                                 uint32_t timeout_milliseconds)
     {

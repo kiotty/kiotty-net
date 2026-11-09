@@ -8,6 +8,7 @@
 #include "data/repository/connection/kiotty_notification_desk.h"
 #include "support/kiotty_test_handler.h"
 #include "support/kiotty_test_peer.h"
+#include "support/kiotty_test_text.h"
 #include "support/kiotty_test_wait.h"
 
 #include <gtest/gtest.h>
@@ -719,7 +720,7 @@ TEST(IoLoop, AdmittedConnectionStartsWorkBeforeTheFirstWait)
     net::ActiveSocketResult opened = net::ActiveSocket::open(KIOTTY_NET_TRANSPORT_TCP);
     ASSERT_TRUE(opened);
     ASSERT_EQ(opened.value.connect(loopbackAddress(server.port()), WAIT_MS), net::SocketCode::SUCCESS);
-    rig.loop.admit(rig.parts(), std::move(opened.value), LOOPBACK_HOST);
+    rig.loop.admit(rig.parts(), std::move(opened.value), kiotty_test::textOf(LOOPBACK_HOST));
 
     std::thread worker([&]() {
         if (!waitForWorkStart(rig.probe))

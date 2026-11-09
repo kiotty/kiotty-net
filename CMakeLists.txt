@@ -45,7 +45,9 @@ set(KIOTTY_NET_SOURCES
     src/kiotty_net_statemachine.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_deadline.cpp
+    src/implementation/core/kiotty_parse_integer.cpp
     src/implementation/core/kiotty_stage.cpp
+    src/implementation/core/kiotty_text.cpp
     src/implementation/data/infra/error/kiotty_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_windows_socket_error.cpp

@@ -156,7 +156,7 @@ TEST(TlsProfile, StubBuildReturnsNotSupportedForBothOpens)
     EXPECT_FALSE(server.valid());
     EXPECT_FALSE(client.valid());
     TlsEngine engine;
-    EXPECT_EQ(engine.open(server, nullptr, TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
+    EXPECT_EQ(engine.open(server, kiotty_test::textOf(nullptr), TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_TLS_NOT_SUPPORTED);
     EXPECT_FALSE(engine.status().is_active);
 }
 
@@ -166,7 +166,7 @@ TEST(TlsEngine, InactiveEngineReportsActiveFalseAndAllocatesNoStage)
     Profiles profiles;
     openDefaults(profiles);
     TlsEngine engine;
-    EXPECT_EQ(engine.open(profiles.server, nullptr, TlsCapacity{ 0, 0 }), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(engine.open(profiles.server, kiotty_test::textOf(nullptr), TlsCapacity{ 0, 0 }), KIOTTY_NET_CODE_INVALID_ARGUMENT);
     EXPECT_EQ(engine.stages().receive.capacity(), 0u);
     EXPECT_EQ(engine.stages().send.capacity(), 0u);
     EXPECT_FALSE(engine.status().is_active);
@@ -416,7 +416,7 @@ TEST(TlsEngine, PlaintextBytesFromPeerReturnHandshakeFailed)
     openDefaults(profiles);
     TlsEngine server;
     kiotty::net::implementation::reserveTlsStages(server.stages(), TlsCapacity{ 4096, 4096 });
-    ASSERT_EQ(server.open(profiles.server, nullptr, TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_SUCCESS);
+    ASSERT_EQ(server.open(profiles.server, kiotty_test::textOf(nullptr), TlsCapacity{ 4096, 4096 }), KIOTTY_NET_CODE_SUCCESS);
     put(server.stages().receive, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
     EXPECT_EQ(server.handshake(), TlsStep::FAILED);
     EXPECT_EQ(server.status().failure.code, KIOTTY_NET_CODE_TLS_HANDSHAKE_FAILED);

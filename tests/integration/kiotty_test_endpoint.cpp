@@ -168,14 +168,14 @@ namespace
     KiottyNetServerConfiguration serverConfiguration(uint16_t port)
     {
         KiottyNetServerConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpServerConfiguration(configuration, LOOPBACK_HOST, port));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port));
         return configuration;
     }
 
     KiottyNetClientConfiguration clientConfiguration(uint16_t port)
     {
         KiottyNetClientConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpClientConfiguration(configuration, LOOPBACK_HOST, port));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, port));
         return configuration;
     }
 
@@ -184,7 +184,7 @@ namespace
         KiottyNetTlsServerConfiguration configuration{};
         std::string cert = kiotty_test::certPath("server.pem");
         std::string key = kiotty_test::certPath("server.key");
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTlsServerConfiguration(configuration, cert.c_str(), key.c_str(), nullptr));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsServerConfiguration(&configuration, cert.c_str(), key.c_str(), nullptr));
         return configuration;
     }
 
@@ -193,7 +193,7 @@ namespace
         KiottyNetTlsClientConfiguration configuration{};
         std::string trust = kiotty_test::certPath("ca.pem");
         EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTlsClientConfiguration(configuration));
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureTlsClientTrustStore(configuration, trust.c_str()));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureTlsClientTrustStore(&configuration, trust.c_str()));
         return configuration;
     }
 

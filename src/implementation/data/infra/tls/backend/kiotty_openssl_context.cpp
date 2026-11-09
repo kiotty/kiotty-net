@@ -2,7 +2,9 @@
 
 #include "data/infra/tls/backend/kiotty_openssl_context.h"
 
+#include "core/kiotty_fixed_string.h"
 #include "core/kiotty_span.h"
+#include "core/kiotty_text.h"
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -61,7 +63,15 @@ namespace kiotty::net::implementation
         const size_t SEPARATOR_AND_TERMINATOR_BYTES = 2;
         const long   MAX_CERT_LIST_BYTES = 16 * 1024;
 
-        typedef char TrustStorePath[KIOTTY_NET_MAX_PATH_LENGTH];
+        using PathName = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
+        using Password = FixedString<KIOTTY_NET_MAX_PASSWORD_LENGTH>;
+
+        struct IdentityFiles
+        {
+            PathName certificate;
+            PathName key;
+            Password password;
+        };
 
         KiottyNetCode configureProtocol(SSL_CTX* context, ProtocolSelection protocol);
         KiottyNetCode applyV12Suites(SSL_CTX* context, uint32_t bits);
@@ -69,16 +79,13 @@ namespace kiotty::net::implementation
         bool          buildSuiteList(Span<char> list, uint32_t bits, Span<const SuiteName> suites);
         void          restrictFeatures(SSL_CTX* context);
         KiottyNetCode loadIdentity(SSL_CTX* context, const KiottyNetTlsIdentity& identity);
-        bool          identityTerminated(const KiottyNetTlsIdentity& identity);
-        bool          identityFilesExist(const KiottyNetTlsIdentity& identity);
-        int           useIdentityFiles(SSL_CTX* context, const KiottyNetTlsIdentity& identity);
+        int           useIdentityFiles(SSL_CTX* context, const IdentityFiles& files);
         int           passwordCallback(char* buffer, int size, int writing, void* user);
-        KiottyNetCode loadClientTrust(SSL_CTX* context, const TrustStorePath& path);
-        KiottyNetCode loadTrustStore(SSL_CTX* context, const TrustStorePath& path);
+        KiottyNetCode loadClientTrust(SSL_CTX* context, Span<const char> path);
+        KiottyNetCode loadTrustStore(SSL_CTX* context, Span<const char> path);
         void          loadDefaultTrustStore(SSL_CTX* context);
-        bool          terminated(Span<const char> text);
-        bool          fileExists(const char* path);
-        bool          pathExists(const char* path);
+        bool          fileExists(const PathName& path);
+        bool          pathExists(const PathName& path);
     }
 
     KiottyNetCode prepareServerContext(SSL_CTX* context,
@@ -94,7 +101,7 @@ namespace kiotty::net::implementation
         const KiottyNetClientAuthentication authentication = configuration.client_authentication;
         const bool authenticates = authentication != KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
         if (!authenticates) { return KIOTTY_NET_CODE_SUCCESS; }
-        return loadTrustStore(context, configuration.trust_store_path);
+        return loadTrustStore(context, textOf(configuration.trust_store_path));
     }
 
     KiottyNetCode prepareClientContext(SSL_CTX* context,
@@ -105,7 +112,8 @@ namespace kiotty::net::implementation
                                           configuration.v13_cipher_suites };
         const KiottyNetCode configured = configureProtocol(context, protocol);
         if (configured != KIOTTY_NET_CODE_SUCCESS) { return configured; }
-        const KiottyNetCode trusted = loadClientTrust(context, configuration.trust_store_path);
+        const Span<const char> trust_store_path = textOf(configuration.trust_store_path);
+        const KiottyNetCode trusted = loadClientTrust(context, trust_store_path);
         if (trusted != KIOTTY_NET_CODE_SUCCESS) { return trusted; }
         const bool has_identity = configuration.identity.certificate_file[0] != '\0';
         if (!has_identity) { return KIOTTY_NET_CODE_SUCCESS; }
@@ -204,48 +212,32 @@ namespace kiotty::net::implementation
 
         KiottyNetCode loadIdentity(SSL_CTX* context, const KiottyNetTlsIdentity& identity)
         {
-            const bool is_terminated = identityTerminated(identity);
-            if (!is_terminated) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-            const bool is_found = identityFilesExist(identity);
+            IdentityFiles files;
+            const bool certificate = files.certificate.assign(textOf(identity.certificate_file));
+            const bool key = files.key.assign(textOf(identity.key_file));
+            const bool password = files.password.assign(textOf(identity.key_password));
+            const bool is_assigned = certificate && key && password;
+            if (!is_assigned) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+            const bool is_found = fileExists(files.certificate) && fileExists(files.key);
             if (!is_found) { return KIOTTY_NET_CODE_TLS_CERTIFICATE_NOT_FOUND; }
-            const int keyed = useIdentityFiles(context, identity);
+            const int keyed = useIdentityFiles(context, files);
             if (keyed != 1) { return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID; }
             const int matched = SSL_CTX_check_private_key(context);
             if (matched != 1) { return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID; }
             return KIOTTY_NET_CODE_SUCCESS;
         }
 
-        bool identityTerminated(const KiottyNetTlsIdentity& identity)
+        int useIdentityFiles(SSL_CTX* context, const IdentityFiles& files)
         {
-            const Span<const char> certificate{ identity.certificate_file,
-                                                sizeof(identity.certificate_file) };
-            const Span<const char> key{ identity.key_file, sizeof(identity.key_file) };
-            const Span<const char> password{
-                identity.key_password, sizeof(identity.key_password) };
-            const bool is_certificate_terminated = terminated(certificate);
-            const bool is_key_terminated = terminated(key);
-            const bool is_password_terminated = terminated(password);
-            return is_certificate_terminated && is_key_terminated && is_password_terminated;
-        }
-
-        bool identityFilesExist(const KiottyNetTlsIdentity& identity)
-        {
-            const bool certificate = fileExists(identity.certificate_file);
-            if (!certificate) { return false; }
-            return fileExists(identity.key_file);
-        }
-
-        int useIdentityFiles(SSL_CTX* context, const KiottyNetTlsIdentity& identity)
-        {
-            void* password = const_cast<char*>(identity.key_password);
+            void* password = const_cast<Password*>(&files.password);
             SSL_CTX_set_default_passwd_cb(context, passwordCallback);
             SSL_CTX_set_default_passwd_cb_userdata(context, password);
-            const char* certificate_file = identity.certificate_file;
-            const int certified = SSL_CTX_use_certificate_chain_file(context, certificate_file);
+            const char* certificate = files.certificate.c_str();
+            const int certified = SSL_CTX_use_certificate_chain_file(context, certificate);
             int keyed = 0;
             if (certified == 1)
             {
-                keyed = SSL_CTX_use_PrivateKey_file(context, identity.key_file, SSL_FILETYPE_PEM);
+                keyed = SSL_CTX_use_PrivateKey_file(context, files.key.c_str(), SSL_FILETYPE_PEM);
             }
             SSL_CTX_set_default_passwd_cb_userdata(context, nullptr);
             return keyed;
@@ -255,36 +247,35 @@ namespace kiotty::net::implementation
         {
             (void)writing;
             if (user == nullptr || size <= 0) { return 0; }
-            const char* password = static_cast<const char*>(user);
+            const Span<const char> stored = static_cast<const Password*>(user)->span();
             const size_t room = static_cast<size_t>(size);
-            const size_t stored = strnlen(password, KIOTTY_NET_MAX_PASSWORD_LENGTH);
-            const size_t length = stored < room ? stored : room;
+            const size_t length = stored.length < room ? stored.length : room;
             const Span<char> target{ buffer, room };
-            const bool copied = target.copyFrom(Span<const char>{ password, length });
+            const bool copied = target.copyFrom(Span<const char>{ stored.data, length });
             if (!copied) { return 0; }
             return static_cast<int>(length);
         }
 
-        KiottyNetCode loadClientTrust(SSL_CTX* context, const TrustStorePath& path)
+        KiottyNetCode loadClientTrust(SSL_CTX* context, Span<const char> path)
         {
-            const bool has_path = path[0] != '\0';
-            if (has_path)
+            if (path.empty())
             {
-                return loadTrustStore(context, path);
+                loadDefaultTrustStore(context);
+                return KIOTTY_NET_CODE_SUCCESS;
             }
-            loadDefaultTrustStore(context);
-            return KIOTTY_NET_CODE_SUCCESS;
+            return loadTrustStore(context, path);
         }
 
-        KiottyNetCode loadTrustStore(SSL_CTX* context, const TrustStorePath& path)
+        KiottyNetCode loadTrustStore(SSL_CTX* context, Span<const char> path)
         {
-            const bool is_terminated = terminated(Span<const char>{ path, sizeof(path) });
-            if (!is_terminated) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-            const bool is_found = pathExists(path);
+            PathName name;
+            const bool is_assigned = name.assign(path);
+            if (!is_assigned) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+            const bool is_found = pathExists(name);
             if (!is_found) { return KIOTTY_NET_CODE_TLS_CERTIFICATE_NOT_FOUND; }
-            const int file_loaded = SSL_CTX_load_verify_file(context, path);
+            const int file_loaded = SSL_CTX_load_verify_file(context, name.c_str());
             if (file_loaded == 1) { return KIOTTY_NET_CODE_SUCCESS; }
-            const int directory_loaded = SSL_CTX_load_verify_dir(context, path);
+            const int directory_loaded = SSL_CTX_load_verify_dir(context, name.c_str());
             if (directory_loaded != 1) { return KIOTTY_NET_CODE_TLS_CERTIFICATE_INVALID; }
             ERR_clear_error();
             return KIOTTY_NET_CODE_SUCCESS;
@@ -299,26 +290,20 @@ namespace kiotty::net::implementation
             ERR_clear_error();
         }
 
-        bool terminated(Span<const char> text)
+        bool fileExists(const PathName& path)
         {
-            const size_t length = strnlen(text.data, text.length);
-            return length < text.length;
-        }
-
-        bool fileExists(const char* path)
-        {
-            std::ifstream file(path, std::ios::binary);
+            std::ifstream file(path.c_str(), std::ios::binary);
             return file.is_open();
         }
 
-        bool pathExists(const char* path)
+        bool pathExists(const PathName& path)
         {
 #if defined(_WIN32)
             struct _stat64 info{};
-            return _stat64(path, &info) == 0;
+            return _stat64(path.c_str(), &info) == 0;
 #else
             struct stat info{};
-            return stat(path, &info) == 0;
+            return stat(path.c_str(), &info) == 0;
 #endif
         }
     }

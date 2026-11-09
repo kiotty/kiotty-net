@@ -24,7 +24,7 @@ namespace kiotty::net::implementation
 
         KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
-        KiottyNetCode   writeFile(const char* path,
+        KiottyNetCode   writeFile(Span<const char> path,
                                   uint64_t offset,
                                   uint64_t length,
                                   uint32_t timeout_milliseconds);

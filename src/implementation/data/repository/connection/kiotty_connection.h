@@ -66,7 +66,7 @@ namespace kiotty::net::implementation
         void         shutdown() override;
 
     private:
-        KiottyNetCode   open(TlsProfile& profile, const char* hostname, TlsCapacity capacity);
+        KiottyNetCode   open(TlsProfile& profile, Span<const char> hostname, TlsCapacity capacity);
         IoAction        react(const IoCompletion& completion,
                               const Handler& handler,
                               std::mutex& notification);

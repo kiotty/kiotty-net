@@ -20,7 +20,7 @@ namespace kiotty::net::implementation
         KiottyNetResult readStream(int64_t id, Span<char> buffer, uint32_t timeout_milliseconds);
         KiottyNetResult writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds);
         KiottyNetCode   writeStreamFile(int64_t id,
-                                        const char* path,
+                                        Span<const char> path,
                                         FileRange range,
                                         uint32_t timeout_milliseconds);
         bool            isStreamOpen(int64_t id);

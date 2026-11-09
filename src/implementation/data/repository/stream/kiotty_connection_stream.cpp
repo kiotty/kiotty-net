@@ -47,7 +47,7 @@ namespace kiotty::net::implementation
         return send(data, deadline);
     }
 
-    KiottyNetCode ConnectionStream::writeFile(const char* path,
+    KiottyNetCode ConnectionStream::writeFile(Span<const char> path,
                                               uint64_t offset,
                                               uint64_t length,
                                               uint32_t timeout_milliseconds)

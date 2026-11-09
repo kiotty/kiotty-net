@@ -2,10 +2,8 @@
 
 #include "context/kiotty_configuration.h"
 #include "core/kiotty_result.h"
-#include "core/kiotty_span.h"
 
 #include <cstddef>
-#include <cstring>
 
 namespace kiotty::net::implementation
 {
@@ -26,45 +24,25 @@ namespace kiotty::net::implementation
             | static_cast<uint32_t>(KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_CCM_SHA256)
             | static_cast<uint32_t>(KIOTTY_NET_TLS_V13_CIPHER_SUITE_AES_128_CCM8_SHA256);
 
-        struct IdentityText
-        {
-            const char* certificate_file;
-            const char* key_file;
-            const char* key_password;
-            size_t      certificate_length;
-            size_t      key_length;
-            size_t      password_length;
-        };
-
-        static_assert(sizeof(IdentityText) == 3 * sizeof(void*) + 3 * sizeof(size_t),
-                      "IdentityText: unexpected padding");
-
-        using IdentityResult = Result<IdentityText, KiottyNetCode>;
-
-        IdentityResult measureIdentity(const char* certificate_file,
-                                       const char* key_file,
-                                       const char* key_password);
-        TextLength     measurePassword(const char* key_password);
-        TextLength     measureTrust(KiottyNetClientAuthentication mode, const char* path);
-        void           writeIdentity(KiottyNetTlsIdentity& identity, const IdentityText& text);
-        bool           isSuiteSetValid(uint32_t suites, uint32_t known);
-        bool           isVerificationKnown(KiottyNetTlsVerification verification);
+        bool isIdentityValid(const TlsIdentityText& text);
+        void writeIdentity(KiottyNetTlsIdentity& identity, const TlsIdentityText& text);
+        bool isTrustAccepted(KiottyNetClientAuthentication mode, Span<const char> path);
+        bool writePath(char (&field)[KIOTTY_NET_MAX_PATH_LENGTH], Span<const char> path);
+        bool isSuiteSetValid(uint32_t suites, uint32_t known);
+        bool isVerificationKnown(KiottyNetTlsVerification verification);
     }
 
     KiottyNetCode initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration& configuration,
-                                                   const char* certificate_file,
-                                                   const char* key_file,
-                                                   const char* key_password)
+                                                   const TlsIdentityText& identity)
     {
-        const IdentityResult identity = measureIdentity(certificate_file, key_file, key_password);
-        if (!identity) { return identity.code; }
+        if (!isIdentityValid(identity)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         configuration = KiottyNetTlsServerConfiguration{};
         configuration.initialization_mark = INITIALIZATION_MARK;
         configuration.versions = ALL_VERSIONS;
         configuration.v12_cipher_suites = ALL_V12_SUITES;
         configuration.v13_cipher_suites = ALL_V13_SUITES;
         configuration.client_authentication = KIOTTY_NET_CLIENT_AUTHENTICATION_NONE;
-        writeIdentity(configuration.identity, identity.value);
+        writeIdentity(configuration.identity, identity);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -98,15 +76,14 @@ namespace kiotty::net::implementation
     KiottyNetCode configureTlsServerClientAuthentication(
         KiottyNetTlsServerConfiguration& configuration,
         KiottyNetClientAuthentication mode,
-        const char* trust_store_path)
+        Span<const char> trust_store_path)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const TextLength trust = measureTrust(mode, trust_store_path);
-        if (!trust) { return trust.code; }
+        const bool is_accepted = isTrustAccepted(mode, trust_store_path);
+        if (!is_accepted) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const bool written = writePath(configuration.trust_store_path, trust_store_path);
+        if (!written) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         configuration.client_authentication = mode;
-        const Span<char> target{ configuration.trust_store_path,
-                                 sizeof(configuration.trust_store_path) };
-        writeText(target, trust_store_path, trust.value);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -149,14 +126,12 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureTlsClientTrustStore(KiottyNetTlsClientConfiguration& configuration,
-                                               const char* trust_store_path)
+                                               Span<const char> trust_store_path)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const TextLength trust = measureText(trust_store_path, KIOTTY_NET_MAX_PATH_LENGTH);
-        if (!trust) { return trust.code; }
-        const Span<char> target{ configuration.trust_store_path,
-                                 sizeof(configuration.trust_store_path) };
-        writeText(target, trust_store_path, trust.value);
+        if (trust_store_path.empty()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const bool written = writePath(configuration.trust_store_path, trust_store_path);
+        if (!written) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -170,14 +145,11 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode configureTlsClientIdentity(KiottyNetTlsClientConfiguration& configuration,
-                                             const char* certificate_file,
-                                             const char* key_file,
-                                             const char* key_password)
+                                             const TlsIdentityText& identity)
     {
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const IdentityResult identity = measureIdentity(certificate_file, key_file, key_password);
-        if (!identity) { return identity.code; }
-        writeIdentity(configuration.identity, identity.value);
+        if (!isIdentityValid(identity)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        writeIdentity(configuration.identity, identity);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -193,59 +165,41 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        IdentityResult measureIdentity(const char* certificate_file,
-                                       const char* key_file,
-                                       const char* key_password)
+        bool isIdentityValid(const TlsIdentityText& text)
         {
-            const TextLength certificate_length =
-                measureText(certificate_file, KIOTTY_NET_MAX_PATH_LENGTH);
-            const TextLength key_length = measureText(key_file, KIOTTY_NET_MAX_PATH_LENGTH);
-            const TextLength password_length = measurePassword(key_password);
-            const bool is_valid = certificate_length && key_length && password_length;
-            if (!is_valid) { return IdentityResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-            const char* password = key_password == nullptr ? "" : key_password;
-            const IdentityText text{ certificate_file,
-                                     key_file,
-                                     password,
-                                     certificate_length.value,
-                                     key_length.value,
-                                     password_length.value };
-            return IdentityResult::success(text);
+            const size_t path_limit = KIOTTY_NET_MAX_PATH_LENGTH;
+            const size_t password_limit = KIOTTY_NET_MAX_PASSWORD_LENGTH;
+            const bool is_named = !text.certificate_file.empty() && !text.key_file.empty();
+            const bool is_certificate_fitting = text.certificate_file.length < path_limit;
+            const bool is_key_fitting = text.key_file.length < path_limit;
+            const bool is_password_fitting = text.key_password.length < password_limit;
+            return is_named && is_certificate_fitting && is_key_fitting && is_password_fitting;
         }
 
-        TextLength measurePassword(const char* key_password)
+        void writeIdentity(KiottyNetTlsIdentity& identity, const TlsIdentityText& text)
         {
-            if (key_password == nullptr) { return TextLength::success(0); }
-            const size_t length = strnlen(key_password, KIOTTY_NET_MAX_PASSWORD_LENGTH);
-            if (length == KIOTTY_NET_MAX_PASSWORD_LENGTH)
-            {
-                return TextLength::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
-            }
-            return TextLength::success(length);
+            const Span<char> password{ identity.key_password, sizeof(identity.key_password) };
+            static_cast<void>(writePath(identity.certificate_file, text.certificate_file));
+            static_cast<void>(writePath(identity.key_file, text.key_file));
+            static_cast<void>(writeText(password, text.key_password));
         }
 
-        TextLength measureTrust(KiottyNetClientAuthentication mode, const char* path)
+        bool isTrustAccepted(KiottyNetClientAuthentication mode, Span<const char> path)
         {
             switch (mode)
             {
             case KIOTTY_NET_CLIENT_AUTHENTICATION_NONE:
-                if (path == nullptr) { return TextLength::success(0); }
-                return TextLength::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+                return path.empty();
             case KIOTTY_NET_CLIENT_AUTHENTICATION_OPTIONAL:
             case KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED:
-                return measureText(path, KIOTTY_NET_MAX_PATH_LENGTH);
+                return !path.empty();
             }
-            return TextLength::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+            return false;
         }
 
-        void writeIdentity(KiottyNetTlsIdentity& identity, const IdentityText& text)
+        bool writePath(char (&field)[KIOTTY_NET_MAX_PATH_LENGTH], Span<const char> path)
         {
-            const Span<char> cert{ identity.certificate_file, sizeof(identity.certificate_file) };
-            const Span<char> key{ identity.key_file, sizeof(identity.key_file) };
-            const Span<char> password{ identity.key_password, sizeof(identity.key_password) };
-            writeText(cert, text.certificate_file, text.certificate_length);
-            writeText(key, text.key_file, text.key_length);
-            writeText(password, text.key_password, text.password_length);
+            return writeText(Span<char>{ field, KIOTTY_NET_MAX_PATH_LENGTH }, path);
         }
 
         bool isSuiteSetValid(uint32_t suites, uint32_t known)

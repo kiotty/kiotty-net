@@ -1,6 +1,7 @@
 #if !defined(_WIN32)
 
 #include "data/infra/error/kiotty_socket_error.h"
+#include "core/kiotty_fixed_string.h"
 #include "data/infra/file/kiotty_input_file.h"
 
 #include <fcntl.h>
@@ -121,19 +122,16 @@ namespace kiotty::net::implementation
         close();
     }
 
-    KiottyNetCode InputFile::open(const char* path)
+    KiottyNetCode InputFile::open(Span<const char> path)
     {
         close();
-        if (path == nullptr)
+        FixedString<KIOTTY_NET_MAX_PATH_LENGTH> name;
+        const bool is_named = !path.empty() && name.assign(path);
+        if (!is_named)
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;
         }
-        const size_t length = strnlen(path, KIOTTY_NET_MAX_PATH_LENGTH);
-        if (length == 0 || length == KIOTTY_NET_MAX_PATH_LENGTH)
-        {
-            return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-        }
-        const int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
+        const int descriptor = ::open(name.c_str(), O_RDONLY | O_CLOEXEC);
         if (descriptor < 0)
         {
             return KIOTTY_NET_CODE_INVALID_ARGUMENT;

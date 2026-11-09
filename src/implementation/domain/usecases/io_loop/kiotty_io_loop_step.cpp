@@ -102,10 +102,10 @@ namespace kiotty::net::implementation
             return;
         }
         _accept_retry_at = 0;
-        welcome(std::move(accepted.value), "", parts);
+        welcome(std::move(accepted.value), Span<const char>{ nullptr, 0 }, parts);
     }
 
-    void IoLoop::welcome(ActiveSocket&& socket, const char* hostname, const LoopParts& parts)
+    void IoLoop::welcome(ActiveSocket&& socket, Span<const char> hostname, const LoopParts& parts)
     {
         const KiottyNetConnectionInfo info = socket.peer();
         if (_stopped.load())

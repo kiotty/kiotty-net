@@ -6,6 +6,7 @@
 
 #include "support/kiotty_test_os.h"
 #include "support/kiotty_test_peer.h"
+#include "support/kiotty_test_text.h"
 #include "support/kiotty_test_tls.h"
 #include "support/kiotty_test_wait.h"
 
@@ -161,11 +162,11 @@ namespace
         {
             return false;
         }
-        if (server.engine.open(profiles.server, nullptr, server.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
+        if (server.engine.open(profiles.server, kiotty_test::textOf(nullptr), server.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
         {
             return false;
         }
-        if (client.engine.open(profiles.client, "localhost", client.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
+        if (client.engine.open(profiles.client, kiotty_test::textOf("localhost"), client.tls_capacity) != KIOTTY_NET_CODE_SUCCESS)
         {
             return false;
         }
@@ -378,7 +379,7 @@ TEST(ConnectionStream, WriteFileSendsExactRange)
     std::thread receiver([&]() {
         arrived = peer.recvExactly(&received[0], received.size(), WAIT_MS);
     });
-    KiottyNetCode code = side.stream().writeFile(path.c_str(), 1000, 5000, WAIT_MS);
+    KiottyNetCode code = side.stream().writeFile(kiotty_test::textOf(path.c_str()), 1000, 5000, WAIT_MS);
     receiver.join();
     kiotty_test::removeFile(path.c_str());
     EXPECT_EQ(code, KIOTTY_NET_CODE_SUCCESS);
@@ -396,10 +397,10 @@ TEST(ConnectionStream, WriteFileMissingPathIsInvalidArgument)
     ASSERT_TRUE(connect(peer, side));
     std::string path = writeFileWith(pattern(100));
     std::string missing = path + ".missing";
-    EXPECT_EQ(side.stream().writeFile(missing.c_str(), 0, 1, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
-    EXPECT_EQ(side.stream().writeFile(nullptr, 0, 1, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
-    EXPECT_EQ(side.stream().writeFile(path.c_str(), 50, 51, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
-    EXPECT_EQ(side.stream().writeFile(path.c_str(), 101, 0, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().writeFile(kiotty_test::textOf(missing.c_str()), 0, 1, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().writeFile(kiotty_test::textOf(nullptr), 0, 1, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().writeFile(kiotty_test::textOf(path.c_str()), 50, 51, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
+    EXPECT_EQ(side.stream().writeFile(kiotty_test::textOf(path.c_str()), 101, 0, WAIT_MS), KIOTTY_NET_CODE_INVALID_ARGUMENT);
     kiotty_test::removeFile(path.c_str());
     char extra = 0;
     EXPECT_FALSE(peer.recvExactly(&extra, 1, 100));
@@ -511,7 +512,7 @@ TEST(ConnectionStream, WriteFileOverTlsSendsExactRange)
     std::thread receiver([&]() {
         received = readExactly(server->stream(), 5000);
     });
-    KiottyNetCode code = client->stream().writeFile(path.c_str(), 1000, 5000, WAIT_MS);
+    KiottyNetCode code = client->stream().writeFile(kiotty_test::textOf(path.c_str()), 1000, 5000, WAIT_MS);
     receiver.join();
     kiotty_test::removeFile(path.c_str());
     EXPECT_EQ(code, KIOTTY_NET_CODE_SUCCESS);

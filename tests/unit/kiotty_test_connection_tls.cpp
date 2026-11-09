@@ -91,14 +91,14 @@ namespace
         {
             openProfiles();
             const char* hostname = _side == Side::CLIENT ? "localhost" : "";
-            net::ConnectionConfiguration configuration = { net::ActiveSocket(), limitsOf(0, 0, 0), &bench.recorder, hostname, bench.profile };
+            net::ConnectionConfiguration configuration = { net::ActiveSocket(), limitsOf(0, 0, 0), &bench.recorder, kiotty_test::textOf(hostname), bench.profile };
             net::ConnectionResult acquired = bench.host.acquire(std::move(configuration));
             ASSERT_TRUE(acquired) << acquired.code;
             connection = &acquired.value();
             const char* peer_name = _side == Side::SERVER ? "localhost" : nullptr;
             net::TlsCapacity capacity = { CAPACITY, CAPACITY };
             net::reserveTlsStages(peer.stages(), capacity);
-            ASSERT_EQ(peer.open(peer_profile, peer_name, capacity), KIOTTY_NET_CODE_SUCCESS);
+            ASSERT_EQ(peer.open(peer_profile, kiotty_test::textOf(peer_name), capacity), KIOTTY_NET_CODE_SUCCESS);
             peer_done = false;
         }
 

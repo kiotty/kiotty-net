@@ -29,7 +29,7 @@ namespace kiotty::net::implementation
         InputFile(const InputFile&) = delete;
         InputFile& operator=(const InputFile&) = delete;
 
-        KiottyNetCode  open(const char* path);
+        KiottyNetCode  open(Span<const char> path);
         FileReadResult read(uint64_t offset, Span<char> target);
         void           close();
 

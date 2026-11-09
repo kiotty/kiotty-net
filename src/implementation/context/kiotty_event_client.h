@@ -58,7 +58,7 @@ namespace kiotty::net::implementation
                                             KiottyNetSpan data,
                                             uint32_t timeout_milliseconds) override;
         KiottyNetCode           writeStreamFile(int64_t id,
-                                                const char* path,
+                                                Span<const char> path,
                                                 FileRange range,
                                                 uint32_t timeout_milliseconds) override;
         bool                    isStreamOpen(int64_t id) override;

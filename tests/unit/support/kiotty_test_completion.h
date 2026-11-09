@@ -7,6 +7,7 @@
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_handler.h"
+#include "support/kiotty_test_text.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -85,7 +86,7 @@ namespace kiotty_test
 
         kiotty::net::implementation::ConnectionResult acquire()
         {
-            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), limitsOf(0, 0, 0), &recorder, "", profile };
+            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), limitsOf(0, 0, 0), &recorder, kiotty_test::textOf(""), profile };
             return host.acquire(std::move(configuration));
         }
 

@@ -7,6 +7,9 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_stage.cpp
     kiotty_test_stage_set.cpp
     kiotty_test_span.cpp
+    kiotty_test_fixed_string.cpp
+    kiotty_test_text.cpp
+    kiotty_test_parse_integer.cpp
     kiotty_test_checked.cpp
     kiotty_test_pool_handle.cpp
     kiotty_test_memory_layout.cpp

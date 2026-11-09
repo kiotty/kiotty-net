@@ -24,7 +24,7 @@ namespace kiotty::net::implementation
         BIO_free(_network);
     }
 
-    KiottyNetCode TlsEngine::open(const TlsProfile& profile, const char* hostname,
+    KiottyNetCode TlsEngine::open(const TlsProfile& profile, Span<const char> hostname,
                                   TlsCapacity capacity)
     {
         close();
@@ -37,7 +37,8 @@ namespace kiotty::net::implementation
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
         const TlsSettings settings = profile.settings();
         startRole(_ssl, settings);
-        setHostname(_ssl, settings, hostname);
+        const KiottyNetCode named = setHostname(_ssl, settings, hostname);
+        if (named != KIOTTY_NET_CODE_SUCCESS) { return named; }
         _status = TlsStatus{ TlsFailure{ "", KIOTTY_NET_CODE_SUCCESS }, true };
         _failed = false;
         return KIOTTY_NET_CODE_SUCCESS;

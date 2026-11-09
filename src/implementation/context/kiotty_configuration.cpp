@@ -1,8 +1,7 @@
 #include "context/kiotty_configuration.h"
 
+#include "core/kiotty_text.h"
 #include "data/datasource/kiotty_memory_limits.h"
-
-#include <cstring>
 
 namespace kiotty::net::implementation
 {
@@ -23,10 +22,11 @@ namespace kiotty::net::implementation
 
         static_assert(sizeof(Capacities) == 3 * sizeof(size_t), "Capacities: unexpected padding");
 
-        KiottyNetAddress            addressOf(KiottyNetTransport transport,
-                                                const char* name,
-                                                size_t length,
-                                                uint16_t port);
+        using AddressResult = Result<KiottyNetAddress, KiottyNetCode>;
+
+        AddressResult                addressOf(KiottyNetTransport transport,
+                                               Span<const char> name,
+                                               uint16_t port);
         KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address);
         KiottyNetClientConfiguration defaultClient(const KiottyNetAddress& address);
         Capacities                   defaultCapacities();
@@ -37,26 +37,22 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode initializeTcpServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                   const char* host,
+                                                   Span<const char> host,
                                                    uint16_t port)
     {
-        const TextLength measured = measureText(host, KIOTTY_NET_MAX_HOST_LENGTH);
-        if (!measured) { return measured.code; }
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetAddress address =
-            addressOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
-        configuration = defaultServer(address);
+        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
+        if (!address) { return address.code; }
+        configuration = defaultServer(address.value);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode initializePipeServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                    const char* pipe_name)
+                                                    Span<const char> pipe_name)
     {
-        const TextLength measured = measureText(pipe_name, KIOTTY_NET_MAX_HOST_LENGTH);
-        if (!measured) { return measured.code; }
-        const KiottyNetAddress address =
-            addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
-        configuration = defaultServer(address);
+        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
+        if (!address) { return address.code; }
+        configuration = defaultServer(address.value);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -94,26 +90,22 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                   const char* host,
+                                                   Span<const char> host,
                                                    uint16_t port)
     {
-        const TextLength measured = measureText(host, KIOTTY_NET_MAX_HOST_LENGTH);
-        if (!measured) { return measured.code; }
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetAddress address =
-            addressOf(KIOTTY_NET_TRANSPORT_TCP, host, measured.value, port);
-        configuration = defaultClient(address);
+        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
+        if (!address) { return address.code; }
+        configuration = defaultClient(address.value);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode initializePipeClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                    const char* pipe_name)
+                                                    Span<const char> pipe_name)
     {
-        const TextLength measured = measureText(pipe_name, KIOTTY_NET_MAX_HOST_LENGTH);
-        if (!measured) { return measured.code; }
-        const KiottyNetAddress address =
-            addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, measured.value, 0);
-        configuration = defaultClient(address);
+        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
+        if (!address) { return address.code; }
+        configuration = defaultClient(address.value);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -169,26 +161,19 @@ namespace kiotty::net::implementation
         return configuration.initialization_mark == INITIALIZATION_MARK;
     }
 
-    const char* hostnameOf(const KiottyNetClientConfiguration& configuration)
+    Span<const char> hostnameOf(const KiottyNetClientConfiguration& configuration)
     {
         const bool is_tcp = configuration.address.transport == KIOTTY_NET_TRANSPORT_TCP;
-        return is_tcp ? configuration.address.host : "";
+        if (!is_tcp) { return Span<const char>{ configuration.address.host, 0 }; }
+        return textOf(configuration.address.host);
     }
 
-    TextLength measureText(const char* text, size_t capacity)
+    bool writeText(Span<char> field, Span<const char> text)
     {
-        if (text == nullptr) { return TextLength::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-        const size_t length = strnlen(text, capacity);
-        const bool is_fitting = length > 0 && length < capacity;
-        if (!is_fitting) { return TextLength::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-        return TextLength::success(length);
-    }
-
-    void writeText(Span<char> target, const char* text, size_t length)
-    {
-        target.fill('\0');
-        const bool copied = target.copyFrom(Span<const char>{ text, length });
-        (void)copied;
+        field.fill('\0');
+        if (field.empty()) { return false; }
+        const Span<char> room{ field.data, field.length - 1 };
+        return room.copyFrom(text);
     }
 
     NoDelay noDelayOf(KiottyNetNoDelay no_delay)
@@ -210,16 +195,18 @@ namespace kiotty::net::implementation
             return false;
         }
 
-        KiottyNetAddress addressOf(KiottyNetTransport transport,
-                                     const char* name,
-                                     size_t length,
-                                     uint16_t port)
+        AddressResult addressOf(KiottyNetTransport transport,
+                                Span<const char> name,
+                                uint16_t port)
         {
+            if (name.empty()) { return AddressResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             KiottyNetAddress address{};
             address.transport = transport;
-            writeText(Span<char>{ address.host, sizeof(address.host) }, name, length);
+            const Span<char> field{ address.host, sizeof(address.host) };
+            const bool written = writeText(field, name);
+            if (!written) { return AddressResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             address.port = port;
-            return address;
+            return AddressResult::success(address);
         }
 
         KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address)

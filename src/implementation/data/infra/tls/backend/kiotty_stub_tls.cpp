@@ -45,7 +45,7 @@ namespace kiotty::net::implementation
     {
     }
 
-    KiottyNetCode TlsEngine::open(const TlsProfile& profile, const char* hostname,
+    KiottyNetCode TlsEngine::open(const TlsProfile& profile, Span<const char> hostname,
                                   TlsCapacity capacity)
     {
         (void)profile;

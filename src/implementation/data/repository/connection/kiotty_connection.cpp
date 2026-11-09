@@ -175,7 +175,8 @@ namespace kiotty::net::implementation
         (void)implementation::shutdownWrite(_socket);
     }
 
-    KiottyNetCode Connection::open(TlsProfile& profile, const char* hostname, TlsCapacity capacity)
+    KiottyNetCode Connection::open(TlsProfile& profile, Span<const char> hostname,
+                                   TlsCapacity capacity)
     {
         const bool secure = profile.valid();
         if (!secure)
@@ -183,8 +184,7 @@ namespace kiotty::net::implementation
             _phase.store(Phase::READY);
             return KIOTTY_NET_CODE_SUCCESS;
         }
-        const char* name = hostname == nullptr ? "" : hostname;
-        const KiottyNetCode opened = _tls.open(profile, name, capacity);
+        const KiottyNetCode opened = _tls.open(profile, hostname, capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
         _phase.store(Phase::HANDSHAKING);
         return KIOTTY_NET_CODE_SUCCESS;

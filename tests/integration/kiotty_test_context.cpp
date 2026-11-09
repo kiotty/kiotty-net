@@ -20,14 +20,14 @@ namespace
     KiottyNetServerConfiguration serverConfiguration()
     {
         KiottyNetServerConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpServerConfiguration(configuration, "127.0.0.1", kiotty_test::unusedPort()));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, "127.0.0.1", kiotty_test::unusedPort()));
         return configuration;
     }
 
     KiottyNetClientConfiguration clientConfiguration()
     {
         KiottyNetClientConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::initializeTcpClientConfiguration(configuration, "127.0.0.1", CLOSED_PORT));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&configuration, "127.0.0.1", CLOSED_PORT));
         return configuration;
     }
 

@@ -5,6 +5,7 @@
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "core/kiotty_stage.h"
 #include "data/datasource/kiotty_memory_limits.h"
+#include "support/kiotty_test_text.h"
 
 #include <cstring>
 #include <string>
@@ -117,12 +118,12 @@ namespace kiotty_test
             client_steps.clear();
             kiotty::net::implementation::reserveTlsStages(server.stages(), _capacity);
             kiotty::net::implementation::reserveTlsStages(client.stages(), _capacity);
-            KiottyNetCode code = server.open(server_profile, nullptr, _capacity);
+            KiottyNetCode code = server.open(server_profile, textOf(nullptr), _capacity);
             if (code != KIOTTY_NET_CODE_SUCCESS)
             {
                 return code;
             }
-            return client.open(client_profile, hostname, _capacity);
+            return client.open(client_profile, textOf(hostname), _capacity);
         }
 
         int handshake(int limit = 20)

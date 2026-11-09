@@ -2,10 +2,11 @@
 
 #include "data/infra/tls/backend/kiotty_openssl_session.h"
 
+#include "core/kiotty_fixed_string.h"
+
 #include <openssl/err.h>
 #include <openssl/x509_vfy.h>
 
-#include <cstring>
 
 namespace kiotty::net::implementation
 {
@@ -14,10 +15,11 @@ namespace kiotty::net::implementation
         const char* const CLOSE_NOTIFY_MESSAGE = "tls: close_notify from peer";
         const char* const UNKNOWN_ERROR_MESSAGE = "tls: unknown error";
 
+        using HostName = FixedString<KIOTTY_NET_MAX_HOST_LENGTH>;
+
         SSL*       discardSsl(SSL* ssl);
-        bool       isServerName(const char* hostname);
-        bool       isNamed(const char* hostname);
-        bool       isIpLiteral(const char* hostname);
+        bool       isServerName(Span<const char> hostname);
+        bool       isIpLiteral(Span<const char> hostname);
         bool       isAddressCharacter(char character);
         TlsFailure verificationFailure(const SSL* ssl);
     }
@@ -42,20 +44,22 @@ namespace kiotty::net::implementation
         SSL_set_connect_state(ssl);
     }
 
-    void setHostname(SSL* ssl, TlsSettings settings, const char* hostname)
+    KiottyNetCode setHostname(SSL* ssl, TlsSettings settings, Span<const char> hostname)
     {
-        const bool is_server_name = isServerName(hostname);
-        if (is_server_name)
+        HostName name;
+        const bool is_assigned = name.assign(hostname);
+        if (!is_assigned) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (isServerName(name.span()))
         {
-            SSL_set_tlsext_host_name(ssl, hostname);
+            SSL_set_tlsext_host_name(ssl, name.c_str());
         }
         SSL_set1_host(ssl, nullptr);
-        const bool is_named = isNamed(hostname);
-        const bool is_verified = is_named && settings.has_hostname_verification;
+        const bool is_verified = !name.empty() && settings.has_hostname_verification;
         if (is_verified)
         {
-            SSL_set1_host(ssl, hostname);
+            SSL_set1_host(ssl, name.c_str());
         }
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     bool isRetryable(int reason)
@@ -110,25 +114,17 @@ namespace kiotty::net::implementation
             return nullptr;
         }
 
-        bool isServerName(const char* hostname)
+        bool isServerName(Span<const char> hostname)
         {
-            const bool is_named = isNamed(hostname);
-            if (!is_named) { return false; }
+            if (hostname.empty()) { return false; }
             const bool is_literal = isIpLiteral(hostname);
             return !is_literal;
         }
 
-        bool isNamed(const char* hostname)
+        bool isIpLiteral(Span<const char> hostname)
         {
-            return hostname != nullptr && hostname[0] != '\0';
-        }
-
-        bool isIpLiteral(const char* hostname)
-        {
-            const size_t length = strnlen(hostname, KIOTTY_NET_MAX_HOST_LENGTH);
-            const Span<const char> name{ hostname, length };
             bool is_digits_and_dots = true;
-            for (const char character : name)
+            for (const char character : hostname)
             {
                 if (character == ':') { return true; }
                 const bool is_address = isAddressCharacter(character);

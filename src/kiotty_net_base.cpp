@@ -4,6 +4,7 @@
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_context.h"
 #include "context/kiotty_tls_configuration.h"
+#include "core/kiotty_text.h"
 #include "data/repository/connection/kiotty_connection.h"
 
 namespace net = kiotty::net::implementation;
@@ -11,6 +12,30 @@ namespace net = kiotty::net::implementation;
 namespace
 {
     constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    constexpr size_t        MAX_HOST_TEXT = KIOTTY_NET_MAX_HOST_LENGTH - 1;
+    constexpr size_t        MAX_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
+    constexpr size_t        MAX_PASSWORD_TEXT = KIOTTY_NET_MAX_PASSWORD_LENGTH - 1;
+
+    using IdentityResult = net::Result<net::TlsIdentityText, KiottyNetCode>;
+
+    net::TextResult parseOptionalText(const char* text, size_t max_length)
+    {
+        if (text == nullptr) { return net::TextResult::success(net::Span<const char>{ text, 0 }); }
+        return net::parseText(text, max_length);
+    }
+
+    IdentityResult parseIdentity(const char* certificate_file,
+                                 const char* key_file,
+                                 const char* key_password)
+    {
+        const net::TextResult certificate = net::parseText(certificate_file, MAX_PATH_TEXT);
+        const net::TextResult key = net::parseText(key_file, MAX_PATH_TEXT);
+        const net::TextResult password = parseOptionalText(key_password, MAX_PASSWORD_TEXT);
+        const bool is_parsed = certificate && key && password;
+        if (!is_parsed) { return IdentityResult::failure(INVALID); }
+        const net::TlsIdentityText identity{ certificate.value, key.value, password.value };
+        return IdentityResult::success(identity);
+    }
 
     KiottyNetResult invalidResult()
     {
@@ -40,11 +65,9 @@ KiottyNetCode KiottyNet_initializeTlsServerConfiguration(
     const char* key_password)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::initializeTlsServerConfiguration(
-        *configuration,
-        certificate_file,
-        key_file,
-        key_password);
+    const IdentityResult identity = parseIdentity(certificate_file, key_file, key_password);
+    if (!identity) { return identity.code; }
+    return net::initializeTlsServerConfiguration(*configuration, identity.value);
 }
 
 KiottyNetCode KiottyNet_configureTlsServerVersions(KiottyNetTlsServerConfiguration* configuration,
@@ -76,7 +99,9 @@ KiottyNetCode KiottyNet_configureTlsServerClientAuthentication(
     const char* trust_store_path)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::configureTlsServerClientAuthentication(*configuration, mode, trust_store_path);
+    const net::TextResult path = parseOptionalText(trust_store_path, MAX_PATH_TEXT);
+    if (!path) { return path.code; }
+    return net::configureTlsServerClientAuthentication(*configuration, mode, path.value);
 }
 
 KiottyNetCode KiottyNet_initializeTlsClientConfiguration(
@@ -113,7 +138,9 @@ KiottyNetCode KiottyNet_configureTlsClientTrustStore(KiottyNetTlsClientConfigura
                                                      const char* trust_store_path)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::configureTlsClientTrustStore(*configuration, trust_store_path);
+    const net::TextResult path = net::parseText(trust_store_path, MAX_PATH_TEXT);
+    if (!path) { return path.code; }
+    return net::configureTlsClientTrustStore(*configuration, path.value);
 }
 
 KiottyNetCode KiottyNet_configureTlsClientVerification(
@@ -130,11 +157,9 @@ KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfigurati
                                                    const char* key_password)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::configureTlsClientIdentity(
-        *configuration,
-        certificate_file,
-        key_file,
-        key_password);
+    const IdentityResult identity = parseIdentity(certificate_file, key_file, key_password);
+    if (!identity) { return identity.code; }
+    return net::configureTlsClientIdentity(*configuration, identity.value);
 }
 
 KiottyNetCode KiottyNet_initializeTcpServerConfiguration(
@@ -143,7 +168,9 @@ KiottyNetCode KiottyNet_initializeTcpServerConfiguration(
     uint16_t port)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::initializeTcpServerConfiguration(*configuration, host, port);
+    const net::TextResult text = net::parseText(host, MAX_HOST_TEXT);
+    if (!text) { return text.code; }
+    return net::initializeTcpServerConfiguration(*configuration, text.value, port);
 }
 
 KiottyNetCode KiottyNet_initializePipeServerConfiguration(
@@ -151,7 +178,9 @@ KiottyNetCode KiottyNet_initializePipeServerConfiguration(
     const char* pipe_name)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::initializePipeServerConfiguration(*configuration, pipe_name);
+    const net::TextResult text = net::parseText(pipe_name, MAX_HOST_TEXT);
+    if (!text) { return text.code; }
+    return net::initializePipeServerConfiguration(*configuration, text.value);
 }
 
 KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration,
@@ -184,7 +213,9 @@ KiottyNetCode KiottyNet_initializeTcpClientConfiguration(
     uint16_t port)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::initializeTcpClientConfiguration(*configuration, host, port);
+    const net::TextResult text = net::parseText(host, MAX_HOST_TEXT);
+    if (!text) { return text.code; }
+    return net::initializeTcpClientConfiguration(*configuration, text.value, port);
 }
 
 KiottyNetCode KiottyNet_initializePipeClientConfiguration(
@@ -192,7 +223,9 @@ KiottyNetCode KiottyNet_initializePipeClientConfiguration(
     const char* pipe_name)
 {
     if (configuration == nullptr) { return INVALID; }
-    return net::initializePipeClientConfiguration(*configuration, pipe_name);
+    const net::TextResult text = net::parseText(pipe_name, MAX_HOST_TEXT);
+    if (!text) { return text.code; }
+    return net::initializePipeClientConfiguration(*configuration, text.value);
 }
 
 KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* configuration,
@@ -307,8 +340,10 @@ KiottyNetCode KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream stre
                                                   uint32_t timeout_milliseconds)
 {
     if (stream.owner == nullptr) { return INVALID; }
+    const net::TextResult text = net::parseText(path, MAX_PATH_TEXT);
+    if (!text) { return text.code; }
     const net::FileRange range{ offset, length };
-    return stream.owner->writeStreamFile(stream.id, path, range, timeout_milliseconds);
+    return stream.owner->writeStreamFile(stream.id, text.value, range, timeout_milliseconds);
 }
 
 bool KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream)

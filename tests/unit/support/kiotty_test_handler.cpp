@@ -278,7 +278,7 @@ namespace kiotty_test
         return result;
     }
 
-    KiottyNetCode FakeEndpoint::writeStreamFile(int64_t, const char*, FileRange, uint32_t)
+    KiottyNetCode FakeEndpoint::writeStreamFile(int64_t, kiotty::net::implementation::Span<const char>, FileRange, uint32_t)
     {
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }

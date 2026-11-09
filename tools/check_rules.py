@@ -12,7 +12,7 @@ It is a heuristic scanner, not a parser. It reports:
   PUBLIC    class with more than 7 public methods   (rule 4.1, overrides counted apart: DV9;
             constructors, operators and static named constructors are not counted, overloads once)
   DEFAULT   switch default                          (rule 2.8)
-  BANNED    banned function                         (rule 2.3)
+  BANNED    banned function                         (rule 2.3), c_str() outside infra backend (DV12)
   CAST      reinterpret_cast outside infra backend  (rule 2.3)
   COMMENT   comment in source                       (rule 4.9)
   MACRO     #define in source                       (rule 4.14)
@@ -229,6 +229,8 @@ def check_file(path, report):
     if not is_backend(path):
         for m in re.finditer(r"\breinterpret_cast\b", code):
             report(path, line_of(code, m.start()), "CAST", "reinterpret_cast")
+        for m in re.finditer(r"\.c_str\s*\(", code):
+            report(path, line_of(code, m.start()), "BANNED", "c_str outside infra backend")
     check_classes(path, code, report)
 
     stack = []

@@ -67,7 +67,8 @@ namespace kiotty::net::implementation
         TlsEngine(const TlsEngine&) = delete;
         TlsEngine& operator=(const TlsEngine&) = delete;
 
-        KiottyNetCode open(const TlsProfile& profile, const char* hostname, TlsCapacity capacity);
+        KiottyNetCode open(const TlsProfile& profile, Span<const char> hostname,
+                           TlsCapacity capacity);
         void          close();
         TlsStep       handshake();
         DecodeResult  decode(StageBase& plain);

@@ -3,7 +3,9 @@
 #include "data/infra/socket/backend/kiotty_posix_address.h"
 
 #include "core/kiotty_clock.h"
+#include "core/kiotty_fixed_string.h"
 #include "core/kiotty_span.h"
+#include "core/kiotty_text.h"
 #include "data/infra/error/kiotty_socket_error.h"
 
 #include <arpa/inet.h>
@@ -20,7 +22,9 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        AddressResult unixAddressOf(const char* path);
+        using HostName = FixedString<KIOTTY_NET_MAX_HOST_LENGTH>;
+
+        AddressResult unixAddressOf(Span<const char> path);
         AddressResult inetAddressOf(const KiottyNetAddress& address, AddressRole role);
         int           waitMillisecondsOf(uint64_t deadline, uint32_t timeout_milliseconds);
         SocketCode    disableSigpipe(int descriptor);
@@ -60,7 +64,7 @@ namespace kiotty::net::implementation
     AddressResult resolveAddress(KiottyNetTransport transport, const KiottyNetAddress& address,
         AddressRole role)
     {
-        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(address.host); }
+        if (transport == KIOTTY_NET_TRANSPORT_PIPE) { return unixAddressOf(textOf(address.host)); }
         return inetAddressOf(address, role);
     }
 
@@ -102,17 +106,16 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        AddressResult unixAddressOf(const char* path)
+        AddressResult unixAddressOf(Span<const char> path)
         {
             Address native{};
             sockaddr_un* unix_address = reinterpret_cast<sockaddr_un*>(&native.storage);
-            const size_t length = strnlen(path, sizeof(unix_address->sun_path));
-            const bool is_fitting = length > 0 && length < sizeof(unix_address->sun_path);
+            const size_t room = sizeof(unix_address->sun_path);
+            const bool is_fitting = !path.empty() && path.length < room;
             if (!is_fitting) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
             unix_address->sun_family = AF_UNIX;
-            const Span<char> target{ unix_address->sun_path, sizeof(unix_address->sun_path) };
-            const Span<const char> source{ path, length };
-            static_cast<void>(target.copyFrom(source));
+            const Span<char> target{ unix_address->sun_path, room };
+            static_cast<void>(target.copyFrom(path));
             native.length = static_cast<socklen_t>(sizeof(sockaddr_un));
             return AddressResult::success(native);
         }
@@ -123,7 +126,10 @@ namespace kiotty::net::implementation
             hints.ai_family = AF_INET;
             hints.ai_socktype = SOCK_STREAM;
             hints.ai_flags = role == AddressRole::PASSIVE ? AI_PASSIVE : 0;
-            const char* host = address.host[0] == '\0' ? nullptr : address.host;
+            HostName name;
+            const bool is_assigned = name.assign(textOf(address.host));
+            if (!is_assigned) { return AddressResult::failure(SocketCode::INVALID_ARGUMENT); }
+            const char* host = name.empty() ? nullptr : name.c_str();
             addrinfo* found = nullptr;
             const int resolved = ::getaddrinfo(host, nullptr, &hints, &found);
             const bool is_found = resolved == 0 && found != nullptr;

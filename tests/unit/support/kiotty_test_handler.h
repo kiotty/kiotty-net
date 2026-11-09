@@ -80,7 +80,7 @@ namespace kiotty_test
         KiottyNetConnectionInfo info(int64_t id) const override;
         KiottyNetResult         readStream(int64_t id, kiotty::net::implementation::Span<char> buffer, uint32_t timeout_milliseconds) override;
         KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) override;
-        KiottyNetCode           writeStreamFile(int64_t id, const char* path, FileRange range, uint32_t timeout_milliseconds) override;
+        KiottyNetCode           writeStreamFile(int64_t id, kiotty::net::implementation::Span<const char> path, FileRange range, uint32_t timeout_milliseconds) override;
         bool                    isStreamOpen(int64_t id) override;
         KiottyNetCode           closeStream(int64_t id, const KiottyNetConnectionAction& then) override;
     };
