@@ -13,7 +13,6 @@
 
 namespace
 {
-    const uint32_t WAIT_MS = 5000;
     const char*    LOOPBACK_HOST = "127.0.0.1";
     const size_t   MESSAGE_BYTES = 4;
 
@@ -302,7 +301,8 @@ TEST_F(BaseApiTest, NullArgumentsAreRejectedWithoutTouchingAnything)
 
 namespace
 {
-    const int64_t RANDOM_ID = 0x1234567890LL;
+    const uint32_t WAIT_MS = 5000;
+    const int64_t  RANDOM_ID = 0x1234567890LL;
 
     bool receive(kiotty_test::LoopbackPeer& peer, const std::string& expected)
     {
