@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kiotty_net_http.h 설계 v0</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .keep { background: var(--agree); }
+  .new { background: var(--partial); }
+  .drop { background: var(--concern); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .rule { border-left: 3px solid var(--agree); padding: 4px 12px; margin: 8px 0; font-weight: 600; }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>kiotty_net_http.h 설계 v0</h1>
+<p class="sub">2026-11-10. HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이고 안쪽은 7절에서 base 의 모양으로만 적는다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
+
+<p>우선순위: 공개 헤더의 모양은 사용자가 정한 것을 따른다 (수칙 0.2, DV13). 두 문서가 다르면 <code>requirement_v0.md</code> 9절보다 <code>user_guide_http.md</code> 가, 그보다 이 문서가 새것이다. 8절이 셋의 차이다. 이 문서의 코드 블록 안 주석은 설명용이다. 소스에는 주석을 두지 않는다 (수칙 4.9).</p>
+
+<p>표기: <span class="tag keep">유지</span> 지금 헤더 그대로, <span class="tag new">추가</span> 이 판이 더하는 것, <span class="tag drop">제거</span> 이 판이 빼는 것.</p>
+
+<h3>목차</h3>
+<ol class="toc">
+  <li><a href="#s0">한눈에</a></li>
+  <li><a href="#s1">목표와 범위 : Streamable HTTP</a></li>
+  <li><a href="#s2">응답의 세 모양</a></li>
+  <li><a href="#s3">공개 API (C)</a></li>
+  <li><a href="#s4">C++ wrapper</a></li>
+  <li><a href="#s5">예제 : MCP 서버</a></li>
+  <li><a href="#s6">규칙 : thread, 수명, 코드</a></li>
+  <li><a href="#s7">안에서 : base 의 어느 모양인가</a></li>
+  <li><a href="#s8">지금 헤더, user_guide, requirement 9절과 달라진 점</a></li>
+  <li><a href="#s9">정할 것</a></li>
+  <li><a href="#s10">사이클</a></li>
+</ol>
+
+<h3>설계 방침</h3>
+<ol>
+  <li><b>새 개념은 없다.</b> 스트리밍 응답은 base 에 이미 있는 두 모양 (Work 로 동기 write, Hold 뒤 notify 로 push) 을 HTTP 의 이름으로 드러낸 것이다. 새 객체, 새 thread, 새 버퍼 클래스는 두지 않는다.</li>
+  <li><b>HTTP 는 Session 하나와 표 하나다.</b> <code>design_statemachine_v0.md</code> 11절 그대로. 라이브러리의 표가 Connection 을 밟고, 사용자 콜백은 transition action 안에서 불린다. 사용자는 표를 보지 않는다.</li>
+  <li><b>응답은 "body 의 종류" 로 나뉜다.</b> 복사, 참조, 파일, 스트림 넷 중 하나이고 setter 하나가 종류를 정한다. 스트림이면 chunk 를 누가 쓰느냐 (worker 가 동기로, 아무 thread 가 push 로) 가 2절의 두 모양이다.</li>
+  <li><b>메모리는 create 때 끝난다.</b> 라우트 표와 Session 배열 (<code>max_clients</code> 개) 을 <code>createHttpServer</code> 가 잡는다. run 중 할당 0 (수칙 1.1, DV1).</li>
+</ol>
+
+<h2 id="s0">0. 한눈에</h2>
+
+<table>
+  <tr><th>것</th><th>지금 헤더 (v1)</th><th>이 판 (v2)</th></tr>
+  <tr><td>라우트 등록, 정적 서빙, run / close / await</td><td>17 함수</td><td><span class="tag keep">유지</span> 그대로. <code>createHttpServer</code> 만 base 처럼 <code>{ code, handle }</code> 을 돌려준다</td></tr>
+  <tr><td>요청</td><td><code>KiottyNetHttpRequest</code>, <code>findHttpHeader</code></td><td><span class="tag keep">유지</span></td></tr>
+  <tr><td>응답 body</td><td>복사 / 참조 / 파일 셋</td><td><span class="tag new">추가</span> 넷째 종류 스트림. <code>KiottyNet_setHttpBodyStream(response, content_type)</code>. <code>Transfer-Encoding: chunked</code> 로 나간다</td></tr>
+  <tr><td>Work 안의 스트림</td><td>없음 (finish 둘뿐)</td><td><span class="tag new">추가</span> <code>KiottyNet_writeHttpWorkChunk(work, data, timeout)</code>. 동기, worker thread. <code>finishHttpWorkWithResponse</code> 가 끝 chunk 를 보낸다</td></tr>
+  <tr><td>Work 없는 긴 스트림</td><td>없음</td><td><span class="tag new">추가</span> <code>KiottyNet_pushHttpChunk(response, data)</code>, <code>KiottyNet_endHttpStream(response)</code>. 아무 thread. push lane (notify)</td></tr>
+  <tr><td>라우트의 콜백</td><td><code>onRequest</code>, <code>onWorkStarted</code></td><td><span class="tag new">추가</span> <code>onStreamClosed(app_context, response, reason)</code>. push 스트림이 끝났을 때 (상대가 끊음, 서버 close, 앱의 end)</td></tr>
+  <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> http.h 에 두지 않는다. <code>KiottyNet_addWebSocketUpgrade</code> 는 websocket.h (<code>design_websocket_v0.html</code> 2절)</td></tr>
+  <tr><td>HttpClient</td><td>없음 (requirement 11절 초안)</td><td>이 판에 넣지 않는다. 9절의 정할 것 8</td></tr>
+</table>
+
+<p>MCP Streamable HTTP 가 서버에 요구하는 것과의 대응이다. 네트워크 밖의 것 (JSON, JSON-RPC 디스패치, 세션 표, Origin 검사, 인가) 은 앱의 몫이다.</p>
+
+<table>
+  <tr><th>MCP 요구</th><th>이 판에서</th></tr>
+  <tr><td>엔드포인트 하나 (<code>/mcp</code>) 에 POST, GET, DELETE</td><td>같은 path 에 라우트 셋. 등록하지 않은 메서드는 405 + <code>Allow</code> 자동</td></tr>
+  <tr><td><code>Mcp-Session-Id</code>, <code>MCP-Protocol-Version</code>, <code>Origin</code>, <code>Accept</code>, <code>Last-Event-ID</code> 읽기</td><td><code>KiottyNet_findHttpHeader</code></td></tr>
+  <tr><td>응답 헤더에 <code>Mcp-Session-Id</code></td><td><code>KiottyNet_setHttpHeader</code></td></tr>
+  <tr><td>알림 / 응답만 담은 POST 에 202, body 없음</td><td><code>setHttpStatus(202)</code> 뒤 return. <code>Content-Length: 0</code></td></tr>
+  <tr><td>요청 POST 에 <code>application/json</code> 단일 응답</td><td><code>setHttpBody</code> (IO thread 에서 바로, 또는 Work 뒤 <code>finishHttpWorkWithResponse</code>)</td></tr>
+  <tr><td>요청 POST 에 <code>text/event-stream</code> 응답 (진행 알림 여러 개 뒤 최종 응답)</td><td>Work 스트림 (2.2). worker 가 <code>setHttpBodyStream</code> → <code>writeHttpWorkChunk</code> 여러 번 → <code>finishHttpWorkWithResponse</code></td></tr>
+  <tr><td>GET 으로 연 오래 가는 SSE 스트림 (서버가 먼저 보내는 메시지)</td><td>push 스트림 (2.3). <code>onRequest</code> 가 <code>setHttpBodyStream</code> 하고 return, 그 뒤 아무 thread 가 <code>pushHttpChunk</code></td></tr>
+  <tr><td>세션 없음 / 만료에 404, DELETE 에 405 또는 2xx</td><td><code>setHttpStatus</code></td></tr>
+  <tr><td>SSE 재개 (<code>Last-Event-ID</code>), 이벤트 id, <code>: ping</code></td><td>앱. chunk 의 내용은 라이브러리가 보지 않는다</td></tr>
+</table>
+
+<h2 id="s1">1. 목표와 범위 : Streamable HTTP</h2>
+
+<p>MCP 의 Streamable HTTP transport 는 HTTP/1.1 위의 두 가지다. 하나는 보통의 요청 - 응답 (JSON 하나), 다른 하나는 <b>Server-Sent Events</b> 다. SSE 는 <code>Content-Type: text/event-stream</code> 인 응답 body 를 끝내지 않고 이벤트 (<code>event:</code>, <code>data:</code>, <code>id:</code> 줄과 빈 줄) 를 계속 보내는 것이다. HTTP/1.1 에서 길이를 모르는 body 는 <code>Transfer-Encoding: chunked</code> 로 보낸다. 그래서 라이브러리가 할 일은 하나다. <b>응답 body 를 chunk 단위로, 끝을 정하지 않고, 나중에 보낼 수 있게 한다.</b> SSE 의 줄 형식은 앱이 chunk 안에 쓴다.</p>
+
+<p>지금 헤더 (v1) 로는 되지 않는 이유는 둘이다. 응답은 body 하나뿐이고 <code>Content-Length</code> 를 라이브러리가 채운다. Work 에는 <code>finishWithResponse / finishWithClose</code> 만 있고 중간에 쓰는 함수가 없다. 이 판은 그 둘을 더하고 나머지는 그대로 둔다.</p>
+
+<p>범위 밖: HTTP/2, 요청 body 스트리밍 (요청은 <code>max_body_bytes</code> 안에 다 받는다), 압축, Range, 파라미터 파싱, CORS 자동 처리. 전부 user_guide 1.11 그대로다.</p>
+
+<h2 id="s2">2. 응답의 세 모양</h2>
+
+<p>셋 다 같은 setter 로 status 와 헤더를 놓는다. 다른 것은 body 의 종류와 그 body 를 누가 언제 쓰느냐다.</p>
+
+<table>
+  <tr><th></th><th>2.1 완성 응답</th><th>2.2 Work 스트림</th><th>2.3 push 스트림</th></tr>
+  <tr><td>body 종류</td><td>복사 / 참조 / 파일 / 없음</td><td>스트림</td><td>스트림</td></tr>
+  <tr><td>누가 쓰나</td><td>IO thread 의 <code>onRequest</code> 안, 또는 Work 를 든 worker</td><td>Work 를 든 worker 하나</td><td>아무 thread (notify 와 같다)</td></tr>
+  <tr><td>언제 나가나</td><td><code>onRequest</code> 가 return 할 때 / <code>finishHttpWorkWithResponse</code></td><td><code>writeHttpWorkChunk</code> 마다 바로 (동기, timeout)</td><td><code>pushHttpChunk</code> 마다 push lane 에 복사, IO thread 가 보낸다</td></tr>
+  <tr><td>끝</td><td>body 끝 = 응답 끝</td><td><code>finishHttpWorkWithResponse</code> 가 끝 chunk. keep-alive 로 다음 요청</td><td><code>endHttpStream</code> 또는 상대의 끊음. 연결은 닫힌다</td></tr>
+  <tr><td>backpressure</td><td>write lane 조각마다 WRITTEN</td><td>write 가 돌아올 때까지 worker 가 기다린다 (timeout 0 = 무한)</td><td>push lane 이 차면 <code>BUFFER_FULL</code>. 그 chunk 는 버려진다</td></tr>
+  <tr><td>thread 를 붙잡나</td><td>아니오</td><td>예 (worker 하나가 스트림 동안)</td><td>아니오</td></tr>
+  <tr><td>MCP 에서</td><td>JSON 응답, 202, 404, 405</td><td>POST 에 대한 SSE (진행 알림 → 최종 응답)</td><td>GET 으로 연 서버 → 클라이언트 스트림</td></tr>
+</table>
+
+<h3>2.1 완성 응답 <span class="tag keep">유지</span></h3>
+
+<p>user_guide 1.4, 1.5 그대로다. <code>onRequest</code> 안에서 setter 를 부르고 return 하면 보내지고, <code>startHttpWork</code> 를 불렀으면 worker 가 setter 로 채운 뒤 <code>finishHttpWorkWithResponse</code> 가 보낸다. 라이브러리가 <code>Content-Length</code>, <code>Connection</code>, <code>Date</code>, <code>Content-Type</code> (body setter 의 인자) 을 채운다.</p>
+
+<div class="flow">IO thread : READ(요청 끝) → onRequest(request, response) { setHttpStatus, setHttpBody, ... } → return → [Sending] write 조각들 → WRITTEN ... → keep-alive 면 다음 요청, 아니면 close</div>
+
+<h3>2.2 Work 스트림 <span class="tag new">추가</span></h3>
+
+<p>base 의 Work 모양이다. <code>onRequest</code> 가 <code>startHttpWork</code> 를 부르고, <code>onWorkStarted</code> 가 <code>work</code> 를 worker 에게 넘긴다. worker 는 <code>setHttpBodyStream(response, "text/event-stream")</code> 으로 body 종류를 스트림으로 놓고 (status 와 다른 헤더도 이때), <code>writeHttpWorkChunk(work, data, timeout)</code> 를 부른다. 첫 번째 write 가 상태줄 + 헤더 (<code>Transfer-Encoding: chunked</code>) 와 첫 chunk 를 보낸다. 그 뒤의 write 는 chunk 하나씩이다. <code>finishHttpWorkWithResponse(work)</code> 가 끝 chunk (<code>0\r\n\r\n</code>) 를 보내고 keep-alive 면 다음 요청으로 돌아간다. <code>finishHttpWorkWithClose</code> 는 끝 chunk 없이 끊는다.</p>
+
+<div class="flow">IO thread : READ(요청 끝) → onRequest { startHttpWork } → return → [Working] thenWork → WORK_STARTED → onWorkStarted(request, response, work) → thenWork
+worker    : setHttpBodyStream(response, "text/event-stream")
+            writeHttpWorkChunk(work, "event: message\ndata: {...progress...}\n\n", 5000)     ← 첫 write 가 헤더 + chunk
+            writeHttpWorkChunk(work, "...", 5000)                                           ← chunk
+            ...
+            setHttpStatus 는 더 못 바꾼다 (이미 나갔다)
+            finishHttpWorkWithResponse(work)                                                ← 끝 chunk "0\r\n\r\n". closeConnectionStream(thenWrite(끝 chunk))
+IO thread : WRITTEN → keep-alive 면 [ReadingRequestLine], 아니면 close</div>
+
+<ul>
+  <li>write 는 <code>KiottyNet_writeConnectionStream</code> 그대로다 (동기, 전부 보내거나 실패, timeout 0 은 무한). 돌아온 뒤 <code>data</code> 는 버려도 된다. 코드는 Stream 의 것 (<code>PEER_CLOSED</code>, <code>TIMEOUT</code>, <code>CLOSED</code> = 서버 close, <code>BUSY</code> = 이미 finish 함).</li>
+  <li>chunk 하나의 길이에 상한은 없다. 라이브러리가 chunk 머리 (<code>길이 hex + CRLF</code>) 와 꼬리 (<code>CRLF</code>) 를 붙여 Stream 에 세 번 write 하거나, <code>send_capacity</code> 안이면 Session 의 응답 버퍼에 모아 한 번 write 한다 (7절). 사용자는 모른다.</li>
+  <li>헤더가 나간 뒤의 setter (<code>setHttpStatus</code>, <code>setHttpHeader</code>, body setter) 는 <code>BUSY</code> 다.</li>
+  <li>스트림이 아닌 응답 (body 복사 / 참조 / 파일) 에 <code>writeHttpWorkChunk</code> 를 부르면 <code>INVALID_ARGUMENT</code>. body setter 를 하나도 부르지 않고 <code>writeHttpWorkChunk</code> 를 부르면 그것도 <code>INVALID_ARGUMENT</code> 다. 스트림은 명시적으로 고른다.</li>
+  <li>진행 알림을 다 보내고 "최종 응답" 을 같은 스트림에 보내는 것 (MCP 의 POST SSE) 은 마지막 chunk 에 그 이벤트를 쓰고 finish 하는 것이다. 라이브러리에 "최종" 이라는 개념은 없다.</li>
+  <li>끝 chunk 를 보내는 것은 <code>closeConnectionStream(stream, thenWrite(끝 chunk))</code> 다. 끝 chunk 는 상수 문자열이라 수명 문제가 없다.</li>
+</ul>
+
+<h3>2.3 push 스트림 <span class="tag new">추가</span></h3>
+
+<p>base 의 Hold + notify 모양이다. <code>onRequest</code> 가 <code>setHttpBodyStream</code> 을 부르고 Work 없이 return 한다. 라이브러리가 상태줄 + 헤더 (<code>Transfer-Encoding: chunked</code>, <code>Connection: close</code>) 를 write lane 으로 보내고 그 연결을 스트림 상태로 둔다. 그 뒤 아무 thread 가 <code>pushHttpChunk(response, data)</code> 로 chunk 를 push lane (notify) 에 넣는다. <code>endHttpStream(response)</code> 이 끝 chunk 를 push lane 에 넣고 연결을 닫는다. 상대가 끊거나 서버가 close 하면 라우트의 <code>onStreamClosed(app_context, response, reason)</code> 가 온다. 앱의 end 에도 온다 (<code>reason = SUCCESS</code>).</p>
+
+<div class="flow">IO thread : READ(요청 끝) → onRequest { setHttpStatus(200), setHttpHeader(...), setHttpBodyStream(response, "text/event-stream"), 앱이 response 를 보관 } → return
+            → [SendingStreamHeader] thenWrite(상태줄 + 헤더) → WRITTEN → [Streaming] thenRead(1, 0)      ← 상대가 끊으면 바로 안다. 데이터가 오면 400 close
+아무 thread : pushHttpChunk(response, "event: message\ndata: {...}\n\n")      ← chunk 머리 / 꼬리를 붙여 KiottyNet_notifyConnection. IO thread 의 drain 이 보낸다
+             pushHttpChunk(response, ": ping\n\n")                                ← 주기적 ping 은 앱이
+             ...
+             endHttpStream(response)                                              ← 끝 chunk 를 notify 로, 닫힘 플래그
+IO thread : (끝 chunk 가 나간 뒤) close(SUCCESS) → CLOSED → onStreamClosed(app_context, response, SUCCESS) → 다음 요청 없음
+   또는    : READ 가 PEER_CLOSED → onStreamClosed(app_context, response, PEER_CLOSED). 그 뒤 pushHttpChunk 는 PEER_CLOSED
+   또는    : 서버 close → onStreamClosed(app_context, response, CLOSED)</div>
+
+<ul>
+  <li><code>pushHttpChunk</code> 의 규칙과 코드는 <code>KiottyNet_notifyConnection</code> 과 같다. push lane 에 복사하고 돌아온다. 돌아온 뒤 <code>data</code> 는 버려도 된다. 완료 콜백은 없다. chunk 머리와 꼬리를 더한 길이가 <code>push_capacity</code> 보다 크면 <code>INVALID_ARGUMENT</code>, 자리가 없으면 <code>BUFFER_FULL</code> (그 chunk 는 버려진다. 끊을지는 앱이 정한다). 빈 chunk 는 <code>INVALID_ARGUMENT</code> (HTTP 에서 길이 0 chunk 는 끝이다).</li>
+  <li>스트림 동안 라이브러리는 1 바이트 read 를 걸어 둔다. 상대가 FIN 을 보내면 <code>PEER_CLOSED</code> 로 바로 닫히고 <code>onStreamClosed</code> 가 온다. 데이터가 오면 (pipelining 은 지원하지 않는다) 400 없이 <code>PROTOCOL_ERROR</code> 로 닫는다. 그래서 끊김을 알기 위한 ping 은 필요 없다. 앱이 ping 을 보내는 것은 proxy 를 지나기 위해서다 (MCP 권고).</li>
+  <li><b>push 스트림은 <code>Connection: close</code> 다.</b> 끝 chunk 뒤에 다음 요청을 기다리지 않고 닫는다. notify 에는 완료 이벤트가 없어 "끝 chunk 가 나갔다" 를 표가 보지 못하므로, 닫힘 플래그를 세우고 push lane 이 빈 뒤 close 하는 것이 가장 단순하다 (7절). keep-alive 를 유지하며 스트림을 끝내려면 Work 스트림을 쓴다. MCP 의 GET 스트림은 서버가 언제든 끊어도 되고 클라이언트가 다시 연다. 9절의 정할 것 2.</li>
+  <li><code>onStreamClosed</code> 는 IO thread 에서, 그 연결의 마지막 콜백이다. 그 뒤 <code>response</code> handle 은 무효다 (generation). <code>onStreamClosed</code> 가 NULL 인 라우트에서 <code>setHttpBodyStream</code> 을 Work 없이 부르면 <code>INVALID_ARGUMENT</code> 다. 끝을 모르는 채 handle 을 들고 있게 하지 않는다.</li>
+  <li>스트림 상태의 연결에는 deadline 이 없다 (<code>thenRead(1, 0)</code>). keep-alive timeout 은 스트림에 적용되지 않는다. 오래 조용한 스트림을 끊는 것은 앱이 <code>endHttpStream</code> 으로 한다.</li>
+  <li>HEAD 로 스트림 라우트에 오면 (GET 라우트의 자동 처리) 헤더만 보내고 끝낸다. <code>onStreamClosed</code> 는 오지 않는다. <code>setHttpBodyStream</code> 이 HEAD 요청에서는 <code>SUCCESS</code> 를 돌려주되 스트림 상태로 가지 않는다.</li>
+</ul>
+
+<h2 id="s3">3. 공개 API (C)</h2>
+
+<p><code>include/kiotty_net_http.h</code> 판 v2 의 C 부분 전체다. <span class="tag new">추가</span> 와 <span class="tag drop">제거</span> 만 표시했고 나머지는 v1 그대로다. 이름은 수칙 5.2 (<code>KIOTTY_NET_&lt;TYPE&gt;_&lt;MEMBER&gt;</code>, 약어 없음) 를 따른다. "SSE" 는 약어라 API 이름에 쓰지 않고 "stream" 과 "chunk" 를 쓴다.</p>
+
+<h3>3.1 상수, 메서드, limits <span class="tag keep">유지</span></h3>
+
+<pre><code>#define KIOTTY_NET_MAX_URL_LENGTH          256
+#define KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH 64
+
+typedef enum KiottyNetHttpMethod { GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, COUNT } KiottyNetHttpMethod;   /* KIOTTY_NET_HTTP_METHOD_ 접두 */
+#define KIOTTY_NET_HTTP_METHOD_BIT(method) (1u &lt;&lt; (method))
+
+typedef struct KiottyNetHttpLimits {
+    uint32_t initialization_mark;
+    size_t   max_routes;                          /* 64.  라우트 + 정적 경로 + Upgrade 경로 */
+    size_t   max_header_bytes;                    /* 8 KiB. request line + 헤더. 넘으면 431 */
+    size_t   max_headers;                         /* 32 */
+    size_t   max_body_bytes;                      /* 64 KiB. 요청 body. 넘으면 413. Upgrade 뒤 WebSocket 메시지 버퍼도 이 크기 */
+    size_t   response_bytes;                      /* 64 KiB. 응답 버퍼 (상태줄 + 헤더 + 복사된 body). 스트림은 chunk 하나를 여기서 조립한다 */
+    uint32_t header_timeout_milliseconds;         /* 10000 */
+    uint32_t keep_alive_timeout_milliseconds;     /* 15000. 스트림 상태에는 적용되지 않는다 */
+} KiottyNetHttpLimits;
+
+KiottyNetCode KiottyNet_initializeHttpLimits(KiottyNetHttpLimits* limits);
+KiottyNetCode KiottyNet_configureHttpMaxRoutes(KiottyNetHttpLimits* limits, size_t max_routes);
+KiottyNetCode KiottyNet_configureHttpHeaderCapacity(KiottyNetHttpLimits* limits, size_t max_header_bytes, size_t max_headers);
+KiottyNetCode KiottyNet_configureHttpBodyCapacity(KiottyNetHttpLimits* limits, size_t max_body_bytes);
+KiottyNetCode KiottyNet_configureHttpResponseCapacity(KiottyNetHttpLimits* limits, size_t response_bytes);
+KiottyNetCode KiottyNet_configureHttpTimeouts(KiottyNetHttpLimits* limits, uint32_t header_timeout_milliseconds, uint32_t keep_alive_timeout_milliseconds);</code></pre>
+
+<p>스트림을 위한 limit 은 더하지 않는다. Work 스트림의 timeout 은 write 마다 인자로 받고 (base 의 Stream 과 같다), push 스트림의 chunk 상한은 base 의 <code>push_capacity</code> 다.</p>
+
+<h3>3.2 요청 <span class="tag keep">유지</span></h3>
+
+<pre><code>typedef struct KiottyNetHttpHeader { KiottyNetSpan name; KiottyNetSpan value; } KiottyNetHttpHeader;
+
+typedef struct KiottyNetHttpRequest {
+    KiottyNetConnectionHandle  connection;        /* KiottyNet_getConnectionInfo 로 peer 주소 */
+    KiottyNetHttpMethod        method;
+    KiottyNetSpan              path;              /* '?' 앞. percent-decoding 없음 */
+    KiottyNetSpan              query;
+    const KiottyNetHttpHeader* headers;
+    size_t                     header_count;
+    KiottyNetSpan              body;              /* Content-Length 또는 chunked 를 합친 것 */
+    int                        keep_alive;
+} KiottyNetHttpRequest;
+
+KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */</code></pre>
+
+<p><code>request</code> 가 가리키는 것은 Session 의 요청 버퍼다. <code>onRequest</code> 가 return 하면 무효이고, Work 면 finish 까지, push 스트림이면 <code>onRequest</code> 가 return 할 때까지다 (스트림 동안 요청은 더 이상 필요 없고 Session 의 요청 버퍼는 chunk 조립에 쓰인다). MCP 의 <code>Mcp-Session-Id</code> 처럼 스트림 동안 필요한 값은 <code>onRequest</code> 안에서 복사한다.</p>
+
+<h3>3.3 handle <span class="tag keep">유지</span></h3>
+
+<pre><code>typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
+
+typedef struct KiottyNetHttpResponseHandle { KiottyNetHttpServerHandle server; int64_t id; } KiottyNetHttpResponseHandle;
+typedef struct KiottyNetHttpWorkHandle     { KiottyNetHttpServerHandle server; int64_t id; } KiottyNetHttpWorkHandle;</code></pre>
+
+<p><code>id</code> 는 generation + Session index 다. 요청마다, 연결이 닫힐 때, 스트림이 끝날 때 generation 이 오른다. 옛 handle 로 부른 함수는 <code>PEER_CLOSED</code> 를 돌려준다. push 스트림은 response handle 을 다른 thread 에 넘겨 두는 첫 사용처다. 소유자는 handle 의 <code>server</code> 이고 전역 표는 없다.</p>
+
+<h3>3.4 응답 setter</h3>
+
+<pre><code>KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int32_t status);                                     /* 100..599. 부르지 않으면 200, 아무 setter 도 없으면 404 */
+KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response, const char* name, const char* value);                /* Content-Length, Transfer-Encoding, Connection, Date 는 라이브러리 것. 넣으면 INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);         /* 복사 */
+KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);      /* 참조. 송신 완료까지 유효해야 한다 */
+KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response, const char* path, const char* content_type);           /* 파일 */
+KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response, const char* content_type);                       /* 스트림. 추가 */
+KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);</code></pre>
+
+<table>
+  <tr><th>함수</th><th>하는 일</th><th>실패</th></tr>
+  <tr><td><code>setHttpBodyStream</code> <span class="tag new">추가</span></td><td>body 종류를 스트림으로. <code>content_type</code> 이 NULL 이면 <code>application/octet-stream</code>. 응답 헤더에 <code>Transfer-Encoding: chunked</code> 가 들어가고 <code>Content-Length</code> 는 없다. 다른 body setter 를 먼저 불렀으면 대체한다 (셋 중 하나만의 규칙 그대로). Work 없이 (<code>onRequest</code> 안에서) 부르면 push 스트림 (2.3), Work 를 든 worker 가 부르면 Work 스트림 (2.2) 이다</td><td><code>PEER_CLOSED</code> 닫힌 handle. <code>BUSY</code> 헤더가 이미 나감. <code>INVALID_ARGUMENT</code> content type 길이 초과, 또는 <code>onRequest</code> 안인데 라우트에 <code>onStreamClosed</code> 가 없음</td></tr>
+  <tr><td><code>setHttpHeader</code></td><td>v1 과 같다. <code>Content-Type</code> 은 body setter 의 인자로만 들어간다 (중복 방지). 스트림이면 <code>setHttpBodyStream</code> 의 인자</td><td><code>BUFFER_FULL</code>, 라이브러리 헤더 이름은 <code>INVALID_ARGUMENT</code></td></tr>
+  <tr><td>나머지</td><td>v1 과 같다</td><td></td></tr>
+</table>
+
+<h3>3.5 Work</h3>
+
+<pre><code>KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work, KiottyNetSpan data, uint32_t timeout_milliseconds);   /* 추가. 동기. 첫 호출이 헤더도 보낸다 */
+KiottyNetCode   KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);                                              /* 완성 응답이면 응답 전체, 스트림이면 끝 chunk */
+KiottyNetCode   KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);
+bool            KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);</code></pre>
+
+<table>
+  <tr><th>함수</th><th>하는 일</th><th>코드</th></tr>
+  <tr><td><code>writeHttpWorkChunk</code> <span class="tag new">추가</span></td><td>chunk 하나를 보내고 다 나갈 때까지 기다린다. 첫 호출이면 상태줄 + 헤더를 먼저 보낸다. <code>bytes</code> 는 <code>data.length</code> (머리 / 꼬리는 세지 않는다). timeout 0 은 무한. 호출 전체의 한도다</td><td><code>SUCCESS</code>, <code>PEER_CLOSED</code>, <code>TIMEOUT</code> (일부가 나갔을 수 있다. 그 뒤는 <code>finishHttpWorkWithClose</code> 뿐이다), <code>CLOSED</code> (서버 close), <code>BUSY</code> (이미 finish), <code>INVALID_ARGUMENT</code> (body 가 스트림이 아님, 빈 data)</td></tr>
+  <tr><td><code>finishHttpWorkWithResponse</code></td><td>스트림이면 끝 chunk 를 보내고 keep-alive 면 다음 요청. chunk 를 한 번도 쓰지 않은 스트림이면 헤더 + 끝 chunk (빈 스트림). 스트림이 아니면 v1 과 같다</td><td>v1 과 같다</td></tr>
+  <tr><td><code>finishHttpWorkWithClose</code></td><td>끝 chunk 없이 끊는다. 스트림 중간에 실패했을 때</td><td>v1 과 같다</td></tr>
+</table>
+
+<h3>3.6 push 스트림 <span class="tag new">추가</span></h3>
+
+<pre><code>KiottyNetCode KiottyNet_pushHttpChunk(KiottyNetHttpResponseHandle response, KiottyNetSpan data);   /* 아무 thread. push lane 에 복사 */
+KiottyNetCode KiottyNet_endHttpStream(KiottyNetHttpResponseHandle response);                       /* 아무 thread. 끝 chunk 뒤 닫는다 */</code></pre>
+
+<table>
+  <tr><th>함수</th><th>코드</th></tr>
+  <tr><td><code>pushHttpChunk</code></td><td><code>SUCCESS</code> 들어갔다. <code>BUFFER_FULL</code> 자리 없음, 아무것도 넣지 않았고 연결은 그대로. <code>INVALID_ARGUMENT</code> 빈 data, 머리 / 꼬리를 더해 <code>push_capacity</code> 초과. <code>PEER_CLOSED</code> 닫힌 handle (스트림이 끝났거나 상대가 끊음). <code>BUSY</code> 스트림이 아닌 응답, 헤더가 아직 나가기 전은 아니다 (아래), 또는 <code>endHttpStream</code> 뒤. <code>CLOSED</code> 서버 close 뒤</td></tr>
+  <tr><td><code>endHttpStream</code></td><td><code>SUCCESS</code>, <code>PEER_CLOSED</code>, <code>BUSY</code> 두 번째 호출. 돌아온 뒤 handle 은 곧 무효가 된다. <code>onStreamClosed(SUCCESS)</code> 가 IO thread 에서 온다</td></tr>
+</table>
+
+<p><code>onRequest</code> 안에서 (헤더가 나가기 전에) push 한 chunk 가 헤더보다 먼저 나가지 않는 것은 base 의 lane 규칙 (write lane 이 먼저, 메시지 경계에서만 lane 을 바꾼다) 에 기댄다. 그래서 "헤더가 나갔다" 를 앱에 알리는 콜백을 두지 않는다. 9절의 정할 것 3 에서 테스트로 확인한다.</p>
+
+<h3>3.7 라우트</h3>
+
+<pre><code>typedef void (*KiottyNetHttpRequestAction)(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response);
+typedef void (*KiottyNetHttpWorkAction)(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work);
+typedef void (*KiottyNetHttpStreamClosedAction)(KiottyNetAppContext app_context, KiottyNetHttpResponseHandle response, KiottyNetCode reason);   /* 추가 */
+
+typedef struct KiottyNetHttpRoute {
+    KiottyNetAppContext             app_context;
+    KiottyNetHttpRequestAction      onRequest;        /* 필수 */
+    KiottyNetHttpWorkAction         onWorkStarted;    /* startHttpWork 를 쓰는 라우트만 */
+    KiottyNetHttpStreamClosedAction onStreamClosed;   /* push 스트림을 쓰는 라우트만. 추가 */
+} KiottyNetHttpRoute;
+
+KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context, KiottyNetHttpRequestAction onRequest, KiottyNetHttpWorkAction onWorkStarted, KiottyNetHttpStreamClosedAction onStreamClosed);</code></pre>
+
+<p><code>onStreamClosed</code> 의 <code>reason</code>: <code>SUCCESS</code> 앱의 <code>endHttpStream</code>, <code>PEER_CLOSED</code> 상대가 끊음, <code>CLOSED</code> 서버 close, <code>PROTOCOL_ERROR</code> 스트림 중에 상대가 데이터를 보냄, <code>SOCKET_ERROR</code>. <code>request</code> 는 주지 않는다 (요청 버퍼는 이미 다른 용도다). 앱이 식별에 쓰는 것은 <code>response</code> handle 이다.</p>
+
+<h3>3.8 서버</h3>
+
+<pre><code>typedef struct KiottyNetHttpServerResult { KiottyNetCode code; KiottyNetHttpServerHandle handle; } KiottyNetHttpServerResult;   /* 추가. base 의 create* 와 같은 모양 */
+
+KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpLimits* limits);
+void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
+KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
+KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);
+KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);
+KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);
+KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetSpan data, const char* content_type);
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server);
+void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
+KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);</code></pre>
+
+<p><code>createHttpServer</code> 가 <code>{ code, handle }</code> 을 돌려주는 것만 바뀐다 (base 판 v1 과 같은 모양. 실패 이유가 보인다: <code>INVALID_ARGUMENT</code> 설정 미초기화, <code>TLS_*</code>, <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>). 라우트 함수의 코드는 user_guide 1.10 그대로다. 같은 path 에 다른 method 를 등록하는 것은 중복이 아니다. MCP 의 <code>/mcp</code> 에 POST, GET, DELETE 셋을 등록한다.</p>
+
+<h2 id="s4">4. C++ wrapper</h2>
+
+<p>C 함수를 하나씩 부르는 inline wrapper 다 (user_guide 헤더 구성). 바뀌는 것만 적는다.</p>
+
+<pre><code>class KiottyNet_HttpResponse {                                  // 비소유 값 타입. 7 → 10 메서드 (DV13)
+public:
+    explicit KiottyNet_HttpResponse(KiottyNetHttpResponseHandle handle);
+    KiottyNetHttpResponseHandle handle() const;
+    KiottyNetCode status(int32_t status);
+    KiottyNetCode header(const char* name, const char* value);
+    KiottyNetCode body(KiottyNetSpan data, const char* content_type);
+    KiottyNetCode bodyRef(KiottyNetSpan data, const char* content_type);
+    KiottyNetCode file(const char* path, const char* content_type = nullptr);
+    KiottyNetCode bodyStream(const char* content_type);           // 추가
+    KiottyNetCode push(KiottyNetSpan data);                       // 추가. KiottyNet_pushHttpChunk
+    KiottyNetCode end();                                          // 추가. KiottyNet_endHttpStream
+    KiottyNetCode startWork();
+};
+
+class KiottyNet_HttpWork {                                      // finish 의무를 소유. 이동만
+public:
+    ...
+    bool            connected() const;
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);   // 추가. KiottyNet_writeHttpWorkChunk
+    KiottyNetCode   finishWithResponse();
+    KiottyNetCode   finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
+};
+
+class KiottyNet_HttpServer {                                    // 17 메서드 그대로 (사용자 결정, DV13)
+public:
+    ...
+    explicit operator bool() const;
+    KiottyNetCode             code() const;                     // 추가. create 의 code
+    KiottyNetHttpServerHandle handle() const;
+    ...                                                         // route / get / ... / notFound 의 두 overload, serve*, run / close / await 그대로
+};
+
+KiottyNetHttpRoute KiottyNet_makeHttpRoute(..., onWorkStarted, onStreamClosed);   // C 와 같다. 인자 넷</code></pre>
+
+<p><code>KiottyNet_HttpServer</code> 의 함수 포인터 overload (<code>get(path, on_request)</code>) 는 <code>makeHttpRoute(nullptr, on_request, nullptr, nullptr)</code> 다. 스트림이나 Work 를 쓰는 라우트는 <code>KiottyNetHttpRoute</code> overload 로 넷을 다 넘긴다. push 스트림용 overload (<code>get(path, on_request, on_stream_closed)</code>) 는 두지 않는다. 메서드 수가 늘고, 넷을 쓰는 라우트는 어차피 <code>app_context</code> 가 필요하다.</p>
+
+<h2 id="s5">5. 예제 : MCP 서버</h2>
+
+<p>엔드포인트 <code>/mcp</code> 하나에 POST (JSON-RPC 요청. 응답은 JSON 하나이거나 SSE), GET (서버 → 클라이언트 스트림), DELETE (세션 종료) 다. JSON 과 세션 표는 앱의 것이다. 여기서는 라이브러리 호출만 보인다.</p>
+
+<h3>5.1 C++</h3>
+
+<pre><code>#include "kiotty_net_http.h"
+
+struct McpApp
+{
+    WorkerPool                  pool;
+    SessionTable                sessions;      // Mcp-Session-Id → { 상태, GET 스트림의 response handle (없으면 { nullptr, 0 }) }. 앱이 잠근다
+};
+
+// POST /mcp : JSON-RPC. 알림 / 응답만이면 202. 요청이면 Work 로
+static void onPost(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r)
+{
+    McpApp*       app     = static_cast&lt;McpApp*&gt;(app_context);
+    KiottyNet_HttpResponse response(r);
+    KiottyNetSpan accept  = KiottyNet_findHttpHeader(request, "Accept");
+    KiottyNetSpan session = KiottyNet_findHttpHeader(request, "Mcp-Session-Id");
+    if (!acceptsJsonAndEventStream(accept))            { response.status(406); return; }
+    if (!isInitialize(request-&gt;body) &amp;&amp; !app-&gt;sessions.has(session)) { response.status(404); return; }
+    if (isNotificationOrResponseOnly(request-&gt;body))   { response.status(202); return; }      // body 없음. Content-Length: 0
+    response.startWork();                                                                       // onWorkStarted 로
+}
+
+static void onPostWork(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r, KiottyNetHttpWorkHandle w)
+{
+    McpApp*            app = static_cast&lt;McpApp*&gt;(app_context);
+    std::string        body(request-&gt;body.data, request-&gt;body.length);                          // request 는 finish 까지 유효하지만 worker 로 넘기므로 복사
+    std::string        session = textOf(KiottyNet_findHttpHeader(request, "Mcp-Session-Id"));
+    KiottyNet_HttpWork work(w);
+    app-&gt;pool.post([app, body, session, r, work = std::move(work)]() mutable
+    {
+        KiottyNet_HttpResponse response(r);
+        JsonRpcRequest         rpc = parse(body);
+        if (rpc.isInitialize())
+        {
+            std::string id = app-&gt;sessions.create();
+            response.header("Mcp-Session-Id", id.c_str());
+            response.body(span(initializeResult(rpc)), "application/json");
+            work.finishWithResponse();
+            return;
+        }
+        if (!rpc.isLong())                                                                       // 빠른 요청 : JSON 하나
+        {
+            response.body(span(handle(rpc)), "application/json");
+            work.finishWithResponse();
+            return;
+        }
+        response.bodyStream("text/event-stream");                                                // 긴 요청 : SSE. 진행 알림 여러 개 뒤 최종 응답
+        for (Progress p : run(rpc))
+        {
+            std::string event = "event: message\ndata: " + progressNotification(p) + "\n\n";
+            if (work.write(span(event), 5000).code != KIOTTY_NET_CODE_SUCCESS)                   // 상대가 끊었거나 timeout
+            {
+                work.finishWithClose();
+                return;
+            }
+        }
+        std::string last = "event: message\ndata: " + finalResponse(rpc) + "\n\n";
+        work.write(span(last), 5000);
+        work.finishWithResponse();                                                               // 끝 chunk. keep-alive 로 다음 요청
+    });
+}
+
+// GET /mcp : 서버 → 클라이언트 스트림. 연결을 붙잡지 않고 아무 thread 가 push
+static void onGet(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r)
+{
+    McpApp*       app     = static_cast&lt;McpApp*&gt;(app_context);
+    KiottyNet_HttpResponse response(r);
+    KiottyNetSpan session = KiottyNet_findHttpHeader(request, "Mcp-Session-Id");
+    if (!acceptsEventStream(KiottyNet_findHttpHeader(request, "Accept"))) { response.status(405); return; }
+    if (!app-&gt;sessions.has(session))                                        { response.status(404); return; }
+    if (!app-&gt;sessions.attachStream(session, r))                            { response.status(409); return; }   // 세션당 스트림 하나
+    response.status(200);
+    response.header("Cache-Control", "no-cache");
+    response.bodyStream("text/event-stream");                                                    // return 하면 헤더가 나가고 Streaming
+    // Last-Event-ID 가 있으면 여기서 밀린 이벤트를 push 해 둔다. 헤더보다 먼저 나가지 않는다 (3.6)
+}
+
+static void onGetClosed(KiottyNetAppContext app_context, KiottyNetHttpResponseHandle r, KiottyNetCode)
+{
+    static_cast&lt;McpApp*&gt;(app_context)-&gt;sessions.detachStream(r);                                   // 이 뒤 r 은 무효
+}
+
+// DELETE /mcp : 세션 종료
+static void onDelete(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r)
+{
+    McpApp* app = static_cast&lt;McpApp*&gt;(app_context);
+    KiottyNetHttpResponseHandle stream = app-&gt;sessions.remove(KiottyNet_findHttpHeader(request, "Mcp-Session-Id"));
+    if (stream.server != nullptr) { KiottyNet_endHttpStream(stream); }                           // 열린 GET 스트림이 있으면 닫는다. onGetClosed(SUCCESS) 가 온다
+    KiottyNet_HttpResponse(r).status(204);
+}
+
+// 앱 thread : 서버가 먼저 보내는 알림 / 요청
+void McpApp::notify(const std::string&amp; session_id, const std::string&amp; json)
+{
+    KiottyNetHttpResponseHandle stream = sessions.streamOf(session_id);
+    std::string                 event  = "id: " + nextEventId(session_id) + "\nevent: message\ndata: " + json + "\n\n";
+    KiottyNetCode               code   = KiottyNet_pushHttpChunk(stream, span(event));
+    if (code == KIOTTY_NET_CODE_BUFFER_FULL) { /* 이벤트는 버려졌다. id 로그가 있으면 Last-Event-ID 재개로 채워진다 */ }
+    // PEER_CLOSED 면 onGetClosed 가 이미 왔거나 곧 온다
+}
+
+int main()
+{
+    KiottyNet_Context context;
+    KiottyNetServerConfiguration configuration;
+    KiottyNet_ServerConfigurationBuilder::tcp(configuration, "127.0.0.1", 8080).maxClients(64).bufferCapacity(4096, 4096, 16384).build();   // push_capacity 가 SSE 이벤트 하나의 상한
+    KiottyNetHttpLimits limits;
+    KiottyNet_HttpLimitsBuilder(limits).bodyCapacity(256 * 1024).build();
+
+    McpApp               app;
+    KiottyNet_HttpServer server(context.handle(), configuration, limits);
+    server.post("/mcp", KiottyNet_makeHttpRoute(&amp;app, onPost,   onPostWork, nullptr));
+    server.get ("/mcp", KiottyNet_makeHttpRoute(&amp;app, onGet,    nullptr,    onGetClosed));
+    server.del ("/mcp", KiottyNet_makeHttpRoute(&amp;app, onDelete, nullptr,    nullptr));
+
+    std::thread io([&amp;] { server.run(); });
+    ...
+    server.close();
+    io.join();
+}</code></pre>
+
+<h3>5.2 C</h3>
+
+<p>콜백 넷과 등록만 다르다. 조립은 user_guide 1.8 과 같다.</p>
+
+<pre><code>static void on_get(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response)
+{
+    McpApp* app = (McpApp*)app_context;
+    if (!session_attach_stream(app, KiottyNet_findHttpHeader(request, "Mcp-Session-Id"), response))
+    {
+        KiottyNet_setHttpStatus(response, 404);
+        return;
+    }
+    KiottyNet_setHttpHeader(response, "Cache-Control", "no-cache");
+    KiottyNet_setHttpBodyStream(response, "text/event-stream");
+}
+
+static void on_get_closed(KiottyNetAppContext app_context, KiottyNetHttpResponseHandle response, KiottyNetCode reason)
+{
+    (void)reason;
+    session_detach_stream((McpApp*)app_context, response);
+}
+
+KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_POST,   "/mcp", KiottyNet_makeHttpRoute(&amp;app, on_post,   on_post_work, NULL));
+KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET,    "/mcp", KiottyNet_makeHttpRoute(&amp;app, on_get,    NULL,         on_get_closed));
+KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_DELETE, "/mcp", KiottyNet_makeHttpRoute(&amp;app, on_delete, NULL,         NULL));</code></pre>
+
+<p>MCP 가 요구하는 보안은 앱이 한다. <code>Origin</code> 을 보고 아니면 403 (DNS rebinding), 로컬 용도면 <code>127.0.0.1</code> 에만 bind, 원격이면 TLS (<code>KiottyNetTlsServerConfiguration</code>) 와 <code>Authorization</code> 검사.</p>
+
+<h2 id="s6">6. 규칙 : thread, 수명, 코드</h2>
+
+<table>
+  <tr><th>어디서든</th><th>IO thread (<code>onRequest</code> 안) 또는 Work 를 든 worker</th><th>IO thread 만</th></tr>
+  <tr><td><code>pushHttpChunk</code>, <code>endHttpStream</code>, <code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>closeHttpServer</code>, <code>awaitHttpServer</code></td><td>setter 일곱 (<code>setHttpStatus</code> ~ <code>setHttpBodyStream</code>, <code>startHttpWork</code> 은 <code>onRequest</code> 안만), <code>writeHttpWorkChunk</code> (worker 만)</td><td><code>findHttpHeader</code> (request 가 유효한 동안), 라우트 등록 (run 전)</td></tr>
+</table>
+
+<ul>
+  <li><b>같은 응답을 두 thread 가 동시에 만지는 순간은 없다.</b> 완성 응답과 Work 는 v1 그대로 (RUNNING 이면 IO thread, WORKING 이면 worker). push 스트림은 <code>onRequest</code> 가 return 한 뒤 Session 의 응답 버퍼를 IO thread 가 헤더 송신에 쓰고, 그 뒤로는 push lane 만 쓴다. <code>pushHttpChunk</code> 는 응답 버퍼를 보지 않는다 (chunk 머리는 stack 의 작은 버퍼에서 만든다).</li>
+  <li><b>handle 의 수명.</b> response handle 은 요청 하나의 것이다. 완성 응답은 <code>onRequest</code> return 까지 (Work 면 finish 까지), push 스트림은 <code>onStreamClosed</code> 까지. 그 뒤는 generation 이 올라 <code>PEER_CLOSED</code>. 소유자 destroy 뒤에도 <code>PEER_CLOSED</code> 만 돌아온다 (Owner 는 은퇴할 뿐 사라지지 않는다. base 19.1).</li>
+  <li><b>서버의 close.</b> Work 중인 연결에는 FIN 만 보내고 finish 를 기다린다 (v1). push 스트림 연결은 바로 닫히고 <code>onStreamClosed(CLOSED)</code> 가 온다. run 은 모든 Work 가 finish 된 뒤 <code>CLOSED</code> 로 돌아온다.</li>
+  <li><b>timeout.</b> 헤더 수신 <code>header_timeout</code>, 다음 요청 대기 <code>keep_alive_timeout</code>, Work 와 스트림 상태에는 없음. Work 스트림의 write 는 호출마다 인자. 응답 송신 (write lane 조각) 에도 timeout 이 없다 (v1 과 같다. 느린 클라이언트는 close 로 끊는다. 9절의 정할 것 5).</li>
+</ul>
+
+<table>
+  <tr><th>함수</th><th>코드</th><th>뜻</th></tr>
+  <tr><td><code>setHttpBodyStream</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>onRequest</code> 안인데 라우트에 <code>onStreamClosed</code> 가 없다. content type 길이</td></tr>
+  <tr><td>setter 전부</td><td><code>BUSY</code></td><td>헤더가 이미 나갔다 (스트림의 첫 write / push 뒤, 또는 송신 중)</td></tr>
+  <tr><td><code>writeHttpWorkChunk</code></td><td><code>INVALID_ARGUMENT</code></td><td>body 가 스트림이 아니다. data 가 비었다</td></tr>
+  <tr><td></td><td><code>TIMEOUT</code>, <code>PEER_CLOSED</code>, <code>CLOSED</code></td><td>Stream 의 코드 그대로. 그 뒤 할 수 있는 것은 <code>finishHttpWorkWithClose</code> 뿐</td></tr>
+  <tr><td><code>pushHttpChunk</code></td><td><code>BUFFER_FULL</code></td><td>push lane 에 자리가 없다. chunk 는 버려졌다</td></tr>
+  <tr><td></td><td><code>INVALID_ARGUMENT</code></td><td>빈 chunk, 또는 머리 / 꼬리를 더해 <code>push_capacity</code> 초과</td></tr>
+  <tr><td></td><td><code>BUSY</code></td><td>스트림이 아닌 응답, 또는 <code>endHttpStream</code> 뒤</td></tr>
+  <tr><td><code>endHttpStream</code></td><td><code>BUSY</code></td><td>두 번째</td></tr>
+  <tr><td>handle 을 받는 전부</td><td><code>PEER_CLOSED</code></td><td>닫힌 handle</td></tr>
+  <tr><td><code>createHttpServer</code></td><td><code>INVALID_ARGUMENT</code></td><td>설정 미초기화, <code>response_bytes</code> 가 상태줄 + 라이브러리 헤더 자리보다 작음</td></tr>
+</table>
+
+<h2 id="s7">7. 안에서 : base 의 어느 모양인가</h2>
+
+<p>구현 가이드 4절 (HttpSession, 응답 버퍼, Work, 송신) 을 그대로 두고 스트림이 더하는 것만 적는다. 새 클래스는 없다. 폴더는 <code>design_statemachine_v0.md</code> 11절의 모양 (<code>context/kiotty_http_server</code>, <code>domain/usecases/http/</code>, <code>data/repository/http/</code>).</p>
+
+<table>
+  <tr><th>것</th><th>base 의 모양</th><th>HTTP 에서</th></tr>
+  <tr><td>Session</td><td><code>createConnectionContext</code> 가 돌려주는 것. 배열은 Connection 슬롯과 같은 크기, 같은 index</td><td><code>HttpSession</code>. 요청 버퍼, 헤더 span 배열, body 용 <code>Stage</code> (Upgrade 뒤 WebSocket 메시지 버퍼와 공유), 응답 버퍼, body 종류 (<code>NONE / COPIED / REF / FILE / STREAM</code>), phase (<code>FILLING / WORKING / SENDING / STREAMING</code>), Work stream, 닫힘 플래그 (<code>std::atomic&lt;bool&gt;</code>. <code>endHttpStream</code> 이 세운다)</td></tr>
+  <tr><td>표</td><td>run 마다 하나, <code>static constexpr</code>, <code>KiottyNet_rules</code></td><td><code>HTTP_MACHINE</code>. 상태는 구현 가이드 4.3 의 여섯 + <code>SendingStreamHeader</code>, <code>Streaming</code> 둘. WebSocket 행은 같은 표에 (websocket 설계 5절)</td></tr>
+  <tr><td>Work 스트림의 write</td><td><code>KiottyNet_writeConnectionStream(stream, data, timeout)</code></td><td><code>writeHttpWorkChunk</code> = (첫 호출이면 헤더 write) + chunk 머리 write + data write + 꼬리 write. 머리 + data + 꼬리가 <code>send_capacity</code> 안이면 응답 버퍼에서 조립해 한 번. Stream 의 write 는 전부 보내거나 실패하므로 조각 사이에 다른 것이 끼지 않는다 (WORKING 중 push lane 은 쌓이기만 한다)</td></tr>
+  <tr><td>Work 스트림의 끝</td><td><code>closeConnectionStream(stream, thenWrite(...))</code></td><td><code>finishHttpWorkWithResponse</code> = <code>closeConnectionStream(stream, thenWrite("0\r\n\r\n"))</code>. WRITTEN 이 <code>Sending</code> 행으로 오고 그 행이 keep-alive 를 가른다 (구현 가이드 4.7 의 <code>onSent</code> 그대로. 보낼 조각이 더 없으므로 바로 다음 요청)</td></tr>
+  <tr><td>push 스트림의 헤더</td><td>entry action <code>thenWrite</code> → WRITTEN</td><td><code>onRequest</code> return 뒤 <code>afterHandle</code> 이 body 가 STREAM 이고 Work 가 아니면 <code>{ SendingStreamHeader, thenWrite(헤더 블록) }</code>. WRITTEN 행이 <code>{ Streaming, thenRead(1, 0) }</code></td></tr>
+  <tr><td>push 스트림의 chunk</td><td><code>KiottyNet_notifyConnection</code></td><td><code>pushHttpChunk</code> = Session 의 phase 가 STREAMING 인지 (아니면 BUSY), 닫힘 플래그 (BUSY), 길이 검사 뒤 <code>notifyConnection(connection, 머리 + data + 꼬리)</code>. notify 는 Span 하나를 받으므로 stack 의 작은 버퍼에 머리를 만들고 notify 를 세 번 부르거나, notify 가 Span 둘을 받는 내부 overload 를 쓴다. 세 번 부르면 사이에 다른 thread 의 push 가 끼어 chunk 가 섞인다. <b>내부 overload (gather) 로 한 번에 넣는다.</b> 공개 API 는 바뀌지 않는다 (9절의 정할 것 4)</td></tr>
+  <tr><td>push 스트림의 끝</td><td>notify + 플래그 + 다음 이벤트</td><td><code>endHttpStream</code> = 플래그 세움 + <code>notifyConnection("0\r\n\r\n")</code>. IO thread 는 drain 이 push lane 을 비운 뒤 플래그를 보고 <code>close(SUCCESS)</code> 로 간다. "drain 뒤 플래그 검사" 는 IoLoop 의 한 줄이고 WebSocket 의 다른 thread close 도 같은 줄을 쓴다 (websocket 설계 6절). 그래서 keep-alive 로 돌아가지 않고 닫는다</td></tr>
+  <tr><td>상대의 끊음</td><td>READ 완료가 PEER_CLOSED → CLOSED 이벤트</td><td><code>Streaming</code> 의 <code>thenRead(1, 0)</code> 이 받는다. CLOSED 행이 phase 가 STREAMING 이면 <code>onStreamClosed(reason)</code> 을 부른 뒤 release. 데이터가 오면 READ 행이 <code>thenClose(PROTOCOL_ERROR)</code></td></tr>
+  <tr><td>HEAD 와 스트림</td><td></td><td><code>afterHandle</code> 이 HEAD 면 STREAM 을 "헤더만" 으로 바꿔 <code>Sending</code> 으로. <code>Transfer-Encoding: chunked</code> 는 붙이고 body 는 없다</td></tr>
+</table>
+
+<p>메모리는 v1 과 같다. Session 하나에 스트림이 더하는 것은 phase 값 하나와 atomic bool 하나다. chunk 조립은 응답 버퍼 (Work 스트림) 또는 stack (push 스트림의 머리 20 바이트) 이다.</p>
+
+<h2 id="s8">8. 지금 헤더, user_guide, requirement 9절과 달라진 점</h2>
+
+<table>
+  <tr><th>것</th><th>requirement 9절</th><th>user_guide 1절 / 헤더 v1</th><th>이 판</th></tr>
+  <tr><td>긴 작업</td><td><code>deferHttpResponse</code> + <code>resumeConnection(payload)</code> + <code>resumed</code> 콜백</td><td>Work (<code>startHttpWork</code>, <code>onWorkStarted</code>, <code>finishHttpWork*</code>)</td><td>Work 그대로. 9절은 이 판에 맞춰 고쳐 쓴다 (사이클 H7)</td></tr>
+  <tr><td>handle</td><td><code>int64_t</code></td><td><code>{ server, id }</code></td><td>그대로</td></tr>
+  <tr><td>스트리밍 응답</td><td>없음</td><td>없음</td><td><code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>, <code>pushHttpChunk</code>, <code>endHttpStream</code>, <code>onStreamClosed</code></td></tr>
+  <tr><td><code>KiottyNetHttpRoute</code></td><td>셋 (<code>user_context</code>, <code>handle</code>, <code>resumed</code>)</td><td>셋 (<code>app_context</code>, <code>onRequest</code>, <code>onWorkStarted</code>)</td><td>넷. <code>makeHttpRoute</code> 도 인자 넷</td></tr>
+  <tr><td><code>createHttpServer</code></td><td>handle</td><td>handle</td><td><code>KiottyNetHttpServerResult</code>. wrapper 에 <code>code()</code></td></tr>
+  <tr><td><code>setHttpHeader</code> 의 금지 이름</td><td><code>Content-Length</code>, <code>Connection</code>, <code>Date</code></td><td>같다</td><td>+ <code>Transfer-Encoding</code>, <code>Content-Type</code> (body setter 의 인자로만)</td></tr>
+  <tr><td>WebSocket Upgrade</td><td><code>addWebSocketUpgrade</code> 가 http.h 에, <code>HttpServer::upgrade</code></td><td>websocket.h 에 두기로 (1.11)</td><td>websocket.h. <code>HttpServer::upgrade</code> 는 없다 (http.h 가 websocket.h 를 모른다)</td></tr>
+  <tr><td>정적 파일 송신</td><td>sendfile / TransmitFile "가능하면"</td><td>chunk 로 (구현 가이드 4.7 은 v0 에서 쓰지 않음)</td><td>정할 것 6</td></tr>
+  <tr><td>HttpClient</td><td>11절 초안 (동기, StreamClient 위)</td><td>없음</td><td>정할 것 8</td></tr>
+</table>
+
+<h2 id="s9">9. 정할 것</h2>
+
+<ol>
+  <li><b><code>onStreamClosed</code> 를 라우트의 넷째 필드로 둘지.</b> 대안은 콜백 없이 <code>pushHttpChunk</code> 의 <code>PEER_CLOSED</code> 로만 아는 것이다. 그러면 push 할 것이 없는 동안 끊긴 클라이언트를 모르고 앱의 세션 표가 낡는다. MCP 는 세션 ↔ 스트림 대응을 들고 있어야 해서 콜백을 두는 쪽을 추천한다. base 의 <code>onDisconnected</code> 와 같은 자리다.</li>
+  <li><b>push 스트림의 끝이 연결을 닫는 것.</b> keep-alive 로 돌아가려면 "끝 chunk 가 나갔다" 를 표가 알아야 하는데 notify 에는 완료 이벤트가 없다. 닫는 쪽을 추천한다 (MCP 의 GET 스트림은 끊어도 되고, 헤더에 <code>Connection: close</code> 를 넣어 클라이언트가 안다). keep-alive 가 필요하면 Work 스트림.</li>
+  <li><b><code>onRequest</code> 안의 push 가 헤더보다 먼저 나가지 않는 것.</b> base 의 lane 규칙에 기댄다. 사이클 H5 의 테스트 (<code>PushFromInsideOnRequestGoesOutAfterTheHeader</code>) 가 확인한다. 깨지면 "헤더가 나가기 전의 push 는 BUSY" 로 바꾸고 <code>onStreamOpened</code> 를 더해야 한다. 그러고 싶지 않다.</li>
+  <li><b>notify 의 gather.</b> chunk 머리 + data + 꼬리를 한 번에 push lane 에 넣으려면 내부의 <code>Connection::push</code> 가 Span 둘 또는 셋을 받아야 한다. 공개 <code>KiottyNet_notifyConnection</code> 은 그대로 둔다. WebSocket 의 frame 머리 + payload 도 같은 길이다. base 의 작은 변경 (사이클 H5 에서 같이).</li>
+  <li><b>송신 timeout.</b> 응답 조각 (write lane) 과 push lane 의 drain 에는 timeout 이 없다. 느린 클라이언트가 Session 을 붙잡는다. v1 과 같은 상태라 이 판에서는 두지 않고, 필요하면 <code>KiottyNetHttpLimits</code> 에 <code>send_timeout_milliseconds</code> 를 더한다.</li>
+  <li><b>정적 파일.</b> base 에 <code>KiottyNet_writeConnectionStreamFile</code> (sendfile / TransmitFile) 이 생겼다. 파일 응답을 Work 모양으로 (IO thread 가 아닌 worker 가 <code>writeConnectionStreamFile</code>) 보낼지, 구현 가이드 4.7 대로 응답 버퍼 조각으로 보낼지. 조각 송신은 thread 를 붙잡지 않고, sendfile 은 복사가 없다. 임베디드 타깃에서는 조각 송신을 추천한다 (worker 가 없어도 된다). 사이클 H6.</li>
+  <li><b>Work 스트림의 chunk 를 응답 버퍼에서 조립하는 것.</b> 머리 + data + 꼬리가 <code>send_capacity</code> 안이면 한 번의 write, 아니면 세 번. 세 번일 때 base 의 Stream write 가 조각 사이에 다른 것을 끼우지 않는 것은 WORKING 의 규칙 (push lane 은 쌓이기만) 으로 보장된다. 확인만.</li>
+  <li><b>HttpClient.</b> MCP 클라이언트를 만들 때만 필요하다. requirement 11절의 동기 API (StreamClient 위) 에 SSE 를 읽는 함수 하나 (<code>KiottyNet_readHttpReplyChunk(client, buffer, length, timeout)</code>: chunked 응답을 chunk 단위로 돌려준다) 를 더하면 Streamable HTTP 클라이언트가 된다. 이 판에는 넣지 않고 다음 판 (<code>design_http_v1</code>) 에서 서버가 돈 뒤에 정한다.</li>
+  <li><b><code>Content-Type</code> 을 <code>setHttpHeader</code> 로 넣는 것을 막을지.</b> 막는 쪽을 적었다 (body setter 의 인자로만). 열어 두면 중복 헤더가 나갈 수 있다.</li>
+</ol>
+
+<h2 id="s10">10. 사이클</h2>
+
+<p>base 와 StateMachine 의 사이클 정의 그대로다 (로컬 매트릭스 초록, commit 하나, progress 문서). 사용자가 9절에 답하면 이 문서를 v1 로 고치고 (또는 제자리 수정) H1 부터 간다.</p>
+
+<table>
+  <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>H1 공개 API 판 v2</td><td>3절의 http.h (C 와 C++). <code>KiottyNetHttpServerResult</code>, 라우트 넷, 스트림 함수 넷. 헤더 compile 검사 (C99 / C++11, MSVC / clang). user_guide_http 를 이 판으로. <code>src/kiotty_net_http.cpp</code> 는 아직 비어 있다</td><td>네 헤더가 syntax check 통과. <code>Headers.*</code> 테스트에 http 의 struct 와 enum</td></tr>
+  <tr><td>H2 파서</td><td><code>domain/usecases/http/</code>: request line, header line, chunk size, <code>Content-Length</code>, <code>Connection</code>, keep-alive 판정, path 매칭 (정확 / <code>/*</code> / 디렉토리 접두). core 의 <code>parseUnsigned / parseHexadecimal / equalsIgnoreCase</code> 위. 수칙 2.10 의 다섯 입력</td><td>unit 전부 초록. 할당 0</td></tr>
+  <tr><td>H3 완성 응답</td><td>HttpSession, 라우트 표, HTTP_MACHINE (구현 가이드 4.3 의 여섯 상태), setter 다섯, 자동 응답 (404 / 405 / 501 / 413 / 431 / OPTIONS / HEAD), keep-alive, <code>runHttpServer</code>. 2.1 만</td><td>integration: 라우트 각 메서드, keep-alive 로 요청 둘, 413 / 431, HEAD 가 GET 의 헤더. 공개 C API 만 쓰는 테스트</td></tr>
+  <tr><td>H4 Work 와 Work 스트림</td><td><code>startHttpWork</code>, <code>onWorkStarted</code>, <code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>setHttpBodyStream</code> (Work 쪽), <code>writeHttpWorkChunk</code>. 2.2</td><td>integration: Work 뒤 JSON 응답, Work 스트림으로 이벤트 셋 뒤 keep-alive 로 다음 요청, 상대가 끊었을 때 write 의 PEER_CLOSED, 서버 close 중 finish 의 CLOSED</td></tr>
+  <tr><td>H5 push 스트림</td><td><code>setHttpBodyStream</code> (<code>onRequest</code> 쪽), <code>pushHttpChunk</code>, <code>endHttpStream</code>, <code>onStreamClosed</code>, <code>Streaming</code> 상태의 <code>thenRead(1, 0)</code>, 닫힘 플래그. base 의 notify gather (정할 것 4) 와 "drain 뒤 플래그" 한 줄. 2.3</td><td>integration: GET 스트림에 다른 thread 가 push 셋 → 클라이언트가 chunk 셋, <code>onRequest</code> 안의 push 가 헤더 뒤에, 상대가 끊으면 <code>onStreamClosed(PEER_CLOSED)</code>, end 뒤 <code>onStreamClosed(SUCCESS)</code> 와 연결 닫힘, BUFFER_FULL, 서버 close 의 <code>onStreamClosed(CLOSED)</code>. benchmark: 연결 128 에 push 1 KiB × 1000 의 latency</td></tr>
+  <tr><td>H6 정적 서빙</td><td><code>serveHttpDirectory / File / Memory</code>, <code>setHttpFile</code>, 확장자 → content type, <code>..</code> 거부. 정할 것 6 의 송신 길</td><td>integration: 디렉토리 밑 파일, 없는 파일 404, <code>..</code> 403, 메모리 바이너리, 큰 파일 (<code>send_capacity</code> 의 여러 배)</td></tr>
+  <tr><td>H7 문서와 MCP 예제</td><td>requirement 9절을 이 판으로, 구현 가이드 4절에 스트림, 테스트 계획 17절, <code>tests/integration</code> 에 5절의 MCP 서버 골격을 테스트로 (JSON 없이 문자열), progress</td><td>문서. MCP 예제 테스트 초록</td></tr>
+</table>
+
+<p>WebSocket (<code>design_websocket_v0.html</code> 의 W1 ~ W5) 은 H3 뒤에 시작할 수 있고 H5 의 notify gather 를 같이 쓴다.</p>
+
+</body>
+</html>

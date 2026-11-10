@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kiotty_net_websocket.h 설계 v0</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .keep { background: var(--agree); }
+  .new { background: var(--partial); }
+  .drop { background: var(--concern); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>kiotty_net_websocket.h 설계 v0</h1>
+<p class="sub">2026-11-10. WebSocket (RFC 6455) 층의 첫 설계다. <code>design_http_v0.html</code> 과 같은 날의 짝이고, <code>include/kiotty_net_websocket.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 HttpServer 위에 얹히도록 고친 판 v2 를 정한다. 사용 모델은 <code>user_guide_websocket.md</code> (2026-11-08) 가 기준이고 이 문서는 그 가이드가 미뤄 둔 것 (handle 의 모양, Upgrade 등록 자리, 표 바꿔 타기, 다른 thread 의 close) 을 닫는다. 공개 인터페이스가 중심이다.</p>
+
+<p>표기: <span class="tag keep">유지</span> 지금 헤더 그대로, <span class="tag new">추가</span> 이 판이 더하는 것, <span class="tag drop">제거</span> 이 판이 빼는 것.</p>
+
+<h3>목차</h3>
+<ol class="toc">
+  <li><a href="#s0">한눈에</a></li>
+  <li><a href="#s1">범위</a></li>
+  <li><a href="#s2">공개 API (C) 에서 바뀌는 것</a></li>
+  <li><a href="#s3">헤더 초안 (C)</a></li>
+  <li><a href="#s4">C++ wrapper</a></li>
+  <li><a href="#s5">HttpServer 위의 Upgrade : 한 표, 한 Session</a></li>
+  <li><a href="#s6">다른 thread 의 send 와 close</a></li>
+  <li><a href="#s7">지금 헤더, user_guide 와 달라진 점</a></li>
+  <li><a href="#s8">정할 것</a></li>
+  <li><a href="#s9">사이클</a></li>
+</ol>
+
+<h3>설계 방침</h3>
+<ol>
+  <li><b>WebSocket 은 HTTP 의 연장이다.</b> 소유자 셋 (HttpServer 위의 Upgrade, WebSocketServer, WebSocketClient) 이 모두 같은 표의 WebSocket 행을 밟고 같은 Session 을 쓴다. WebSocketServer 는 Upgrade 경로 하나만 등록한 HttpServer 다 (requirement 10절). 새 Session 종류, 새 버퍼는 없다.</li>
+  <li><b>모든 송신은 push lane 이다.</b> 사용자의 <code>send</code>, <code>broadcast</code>, 라이브러리의 pong / ping / close frame 전부 <code>notify</code> 의 길이다. 그래서 아무 thread 에서나 되고 완료 콜백이 없다 (user_guide 2절). write lane 은 핸드셰이크 (101 / Upgrade 요청) 에만 쓴다.</li>
+  <li><b>handle 은 base 와 같은 모양이다.</b> <code>{ owner, id }</code>. 소유자를 handle 이 들고 전역 표가 없다 (설계 v5 3절, statemachine 설계 12.6 의 미결).</li>
+  <li><b>http.h 와 websocket.h 는 서로 include 하지 않는다.</b> Upgrade 등록은 websocket.h 에 있고 HttpServer handle 의 typedef 만 가드로 복사한다 (<code>OwnedHandle</code> 과 같은 방법).</li>
+</ol>
+
+<h2 id="s0">0. 한눈에</h2>
+
+<table>
+  <tr><th>것</th><th>지금 헤더 (v1)</th><th>이 판 (v2)</th></tr>
+  <tr><td>설정 <code>KiottyNetWebSocketConfiguration</code>, builder</td><td>path, protocols, max_message_bytes, 타이머 넷</td><td><span class="tag keep">유지</span></td></tr>
+  <tr><td>콜백 <code>KiottyNetWebSocketHandler</code> 넷</td><td><code>onUpgrade / onOpen / onMessage / onClose</code></td><td><span class="tag keep">유지</span></td></tr>
+  <tr><td>소켓 하나의 handle</td><td><code>typedef int64_t KiottyNetWebSocketHandle</code></td><td><span class="tag new">추가</span> <code>{ KiottyNetWebSocketOwner* owner; int64_t id; }</code>. 무효는 <code>{ NULL, 0 }</code></td></tr>
+  <tr><td>HttpServer 에 Upgrade 경로</td><td>없음 (user_guide 9절이 http.h 쪽으로 미룸)</td><td><span class="tag new">추가</span> <code>KiottyNet_addWebSocketUpgrade(http_server, &amp;websocket, handler, app_context)</code>. websocket.h 에</td></tr>
+  <tr><td><code>createWebSocketServer / Client</code></td><td>handle 만</td><td><span class="tag new">추가</span> <code>{ code, handle }</code> (base 판 v1 과 같은 모양). wrapper 에 <code>code()</code></td></tr>
+  <tr><td>소켓 함수 다섯, 서버 / 클라이언트 함수</td><td></td><td><span class="tag keep">유지</span> 시그니처는 handle 의 타입만 바뀐다</td></tr>
+  <tr><td>Upgrade 요청의 상한</td><td><code>receive_capacity</code> (user_guide 10절 6)</td><td>HttpServer 의 <code>max_header_bytes</code> (8 KiB). WebSocketServer 도 안에서 HttpServer 라 같다</td></tr>
+</table>
+
+<h2 id="s1">1. 범위</h2>
+
+<p>이 판이 정하는 것: handle 의 모양, Upgrade 등록 함수와 두 헤더의 독립, 세 소유자가 한 표 / 한 Session 을 쓰는 방법, 다른 thread 의 send / close 가 IO thread 에 닿는 길, 메시지 버퍼와 HTTP body 버퍼의 공유. 사용자가 보는 흐름 (설정 → create → run → 콜백 넷 → send / close) 은 user_guide 그대로이고 여기서 다시 쓰지 않는다.</p>
+
+<p>범위 밖 (user_guide 10절의 열린 질문 그대로): Work (backpressure), 조각 송신 (<code>push_capacity</code> 가 메시지 하나의 상한), 동기 WebSocketClient, permessage-deflate. MCP 는 WebSocket 을 쓰지 않는다. 이 층은 HTTP 가 돈 뒤에 온다 (9절).</p>
+
+<h2 id="s2">2. 공개 API (C) 에서 바뀌는 것</h2>
+
+<h3>2.1 handle <span class="tag new">추가</span></h3>
+
+<pre><code>typedef struct KiottyNetWebSocketOwner KiottyNetWebSocketOwner;              /* 불투명. HttpServer, WebSocketServer, WebSocketClient 가 안에서 이것이다 */
+
+typedef struct KiottyNetWebSocketHandle {
+    KiottyNetWebSocketOwner* owner;
+    int64_t                  id;                                             /* generation + Session index. 0 은 무효 */
+} KiottyNetWebSocketHandle;</code></pre>
+
+<ul>
+  <li>base 의 <code>KiottyNetConnectionHandle { KiottyNetEndpoint* owner; int64_t id; }</code> 와 같은 모양이다. <code>KiottyNetEndpoint</code> 가 Server / StreamClient / EventClient 의 공통 base 이듯 <code>KiottyNetWebSocketOwner</code> 는 WebSocket 소켓을 가질 수 있는 셋의 공통 base 다. 안에서는 "WebSocket 행을 가진 표 + Session 배열을 든 것" 하나이고 (5절), 셋이 그것을 상속한다 (DV16 의 빈 struct 표지와 같은 패턴).</li>
+  <li><code>id</code> 는 HTTP 의 response handle 과 같은 generation + index 다. 같은 Session 이므로 같은 값이다. Upgrade 뒤 <code>onOpen</code> 이 주는 WebSocket handle 과 그 전 HTTP 응답 handle 은 generation 이 다르다 (101 을 보낼 때 올린다). HTTP 쪽 handle 로 WebSocket 을 만질 수 없다.</li>
+  <li>무효는 <code>{ NULL, 0 }</code>. <code>KiottyNet_getWebSocketClientSocket</code> 이 <code>onOpen</code> 전에 돌려주는 값. 닫힌 handle 로 부른 함수는 <code>PEER_CLOSED</code> (user_guide 2절 그대로).</li>
+  <li>C++ 의 <code>KiottyNet_WebSocket</code> 에 <code>operator== / != / &lt;</code> 를 둔다 (<code>KiottyNet_Connection</code> 과 같다). 앱이 handle 목록을 <code>std::vector</code> / <code>std::set</code> 에 들기 위해서다.</li>
+</ul>
+
+<h3>2.2 Upgrade 등록 <span class="tag new">추가</span></h3>
+
+<pre><code>#ifndef KIOTTY_NET_HTTP_SERVER_HANDLE_DEFINED
+#define KIOTTY_NET_HTTP_SERVER_HANDLE_DEFINED
+typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;                 /* http.h 와 글자까지 같은 한 줄. 먼저 include 된 쪽이 정의한다 */
+#endif
+
+KiottyNetCode KiottyNet_addWebSocketUpgrade(
+    KiottyNetHttpServerHandle server,
+    const KiottyNetWebSocketConfiguration* websocket,                        /* path 가 여기 있다. 라우트 표의 한 항목이 된다 */
+    KiottyNetWebSocketHandler handler,                                       /* 값으로 복사. run 뒤 사용자 struct 는 버려도 된다 */
+    KiottyNetAppContext app_context);                                        /* onUpgrade / onOpen / onClose 가 받는다 */</code></pre>
+
+<ul>
+  <li>C99 는 같은 typedef 를 두 번 쓸 수 없어 (C11 부터 허용) 가드가 필요하다. <code>OwnedHandle</code> 의 <code>KIOTTY_NET_OWNED_HANDLE_DEFINED</code> 와 같은 규칙이다 (user_guide 헤더 구성: 두 정의는 글자까지 같아야 하고 고칠 때는 둘을 함께 고친다). http.h 도 같은 가드로 감싼다.</li>
+  <li>HttpServer 의 run 은 handler 를 받지 않는다 (라우트가 <code>app_context</code> 를 든다). 그래서 Upgrade 경로도 등록 때 handler 와 <code>app_context</code> 를 받아 라우트 표의 항목에 복사한다 (구현 가이드 4.1 의 <code>RouteEntry::UPGRADE</code>). WebSocketServer / Client 의 <code>run(handler, app_context)</code> 은 그대로다. 둘은 run 마다 handler 를 바꿀 수 있고 HttpServer 의 Upgrade 는 등록 때 고정된다는 차이가 있다.</li>
+  <li>코드: run 뒤 <code>BUSY</code>, 표가 차면 <code>TABLE_FULL</code>, 같은 path 가 이미 (라우트든 Upgrade 든) 있으면 <code>DUPLICATE_RULE</code>, <code>websocket</code> 미초기화 / handler 의 <code>onOpen</code> 또는 <code>onMessage</code> 가 NULL / <code>max_message_bytes &gt; max_body_bytes</code> 면 <code>INVALID_ARGUMENT</code> (statemachine 설계 14절 7. 메시지 버퍼가 HTTP body 의 <code>Stage</code> 라 create 뒤에는 키울 수 없다).</li>
+  <li>Upgrade 경로는 GET 만 받는다. 다른 메서드는 405. Upgrade 헤더가 없는 GET 은 426 (<code>Upgrade: websocket</code> 헤더와 함께) 으로 거절하고 <code>onUpgrade</code> 는 부르지 않는다.</li>
+  <li>C++ 의 <code>KiottyNet_HttpServer</code> 에 <code>upgrade(...)</code> 메서드는 두지 않는다. http.h 가 websocket.h 를 모르기 때문이다. C++ 사용자도 <code>KiottyNet_addWebSocketUpgrade(server.handle(), ...)</code> 를 부른다.</li>
+</ul>
+
+<h3>2.3 create 의 반환 <span class="tag new">추가</span></h3>
+
+<pre><code>typedef struct KiottyNetWebSocketServerResult { KiottyNetCode code; KiottyNetWebSocketServerHandle handle; } KiottyNetWebSocketServerResult;
+typedef struct KiottyNetWebSocketClientResult { KiottyNetCode code; KiottyNetWebSocketClientHandle handle; } KiottyNetWebSocketClientResult;
+
+KiottyNetWebSocketServerResult KiottyNet_createWebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);
+KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);</code></pre>
+
+<p>base 판 v1 과 http 판 v2 와 같은 모양이다. 실패 이유 (<code>TLS_*</code>, <code>INVALID_ARGUMENT</code>, <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>) 가 보인다.</p>
+
+<h3>2.4 그대로인 것 <span class="tag keep">유지</span></h3>
+
+<p>상수 셋, <code>KiottyNetWebSocketOpcode</code>, <code>KiottyNetWebSocketStatus</code>, <code>KiottyNetWebSocketMessage</code>, <code>KiottyNetWebSocketClose</code>, <code>KiottyNetWebSocketConfiguration</code> 과 initialize / configure 여섯, <code>KiottyNetWebSocketContext</code>, <code>KiottyNetWebSocketUpgrade</code>, <code>KiottyNetWebSocketInfo</code>, <code>KiottyNetWebSocketHandler</code>, 소켓 함수 다섯 (<code>getWebSocketInfo</code>, <code>findWebSocketUpgradeHeader</code>, <code>selectWebSocketProtocol</code>, <code>sendWebSocket</code>, <code>closeWebSocket</code>), 서버 함수 여섯, 클라이언트 함수 일곱. handle 인자의 타입만 struct 로 바뀐다.</p>
+
+<h2 id="s3">3. 헤더 초안 (C)</h2>
+
+<p>바뀌는 부분만 모은 것이다. 나머지는 지금 헤더의 줄 그대로다.</p>
+
+<pre><code>#ifndef KIOTTY_NET_WEBSOCKET_H
+#define KIOTTY_NET_WEBSOCKET_H
+
+#include "kiotty_net_base.h"                                                  /* statemachine.h 가 아니다. 사용자는 표를 보지 않는다 (7절) */
+
+#ifndef KIOTTY_NET_HTTP_SERVER_HANDLE_DEFINED
+#define KIOTTY_NET_HTTP_SERVER_HANDLE_DEFINED
+typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
+#endif
+
+/* ... 상수, enum 둘, Message, Close, Configuration + initialize / configure 여섯 : 유지 ... */
+
+typedef struct KiottyNetWebSocketOwner KiottyNetWebSocketOwner;
+
+typedef struct KiottyNetWebSocketHandle {
+    KiottyNetWebSocketOwner* owner;
+    int64_t                  id;
+} KiottyNetWebSocketHandle;
+
+typedef void* KiottyNetWebSocketContext;
+
+/* ... Upgrade, Info, Handler, 소켓 함수 다섯 : 유지 (handle 타입만) ... */
+
+typedef struct KiottyNetWebSocketServer* KiottyNetWebSocketServerHandle;
+typedef struct KiottyNetWebSocketServerResult { KiottyNetCode code; KiottyNetWebSocketServerHandle handle; } KiottyNetWebSocketServerResult;
+
+KiottyNetWebSocketServerResult KiottyNet_createWebSocketServer(...);
+/* ... destroy / run / close / await / broadcast : 유지 ... */
+
+typedef struct KiottyNetWebSocketClient* KiottyNetWebSocketClientHandle;
+typedef struct KiottyNetWebSocketClientResult { KiottyNetCode code; KiottyNetWebSocketClientHandle handle; } KiottyNetWebSocketClientResult;
+
+KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(...);
+/* ... destroy / run / close / await / getWebSocketClientSocket / sendWebSocketClient : 유지 ... */
+
+KiottyNetCode KiottyNet_addWebSocketUpgrade(
+    KiottyNetHttpServerHandle server,
+    const KiottyNetWebSocketConfiguration* websocket,
+    KiottyNetWebSocketHandler handler,
+    KiottyNetAppContext app_context);
+
+#ifdef __cplusplus
+}
+/* OwnedHandle (가드), builder, KiottyNet_WebSocket, KiottyNet_WebSocketServer, KiottyNet_WebSocketClient */
+#endif
+#endif</code></pre>
+
+<h2 id="s4">4. C++ wrapper</h2>
+
+<pre><code>class KiottyNet_WebSocket {                                   // 비소유 값 타입. 6 메서드 + 연산자 셋 (연산자는 세지 않는다, DV11)
+public:
+    explicit KiottyNet_WebSocket(KiottyNetWebSocketHandle handle);
+    KiottyNetWebSocketHandle handle() const;
+    KiottyNetWebSocketInfo   info() const;
+    KiottyNetSpan            upgradeHeader(const char* name) const;
+    KiottyNetCode            selectProtocol(const char* protocol);
+    KiottyNetCode            send(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
+    KiottyNetCode            close(uint16_t status = KIOTTY_NET_WEB_SOCKET_STATUS_NORMAL_CLOSURE, const char* reason = nullptr);
+    bool operator==(const KiottyNet_WebSocket&amp; other) const;   // 추가
+    bool operator!=(const KiottyNet_WebSocket&amp; other) const;   // 추가
+    bool operator&lt;(const KiottyNet_WebSocket&amp; other) const;    // 추가. std::less 로 owner 를 비교
+};
+
+class KiottyNet_WebSocketServer {                             // explicit operator bool, code() 추가, handle, run, close, await, broadcast
+class KiottyNet_WebSocketClient {                             // explicit operator bool, code() 추가, handle, run, close, await, socket, send</code></pre>
+
+<p><code>KiottyNet_HttpServer</code> 는 바뀌지 않는다 (2.2).</p>
+
+<h2 id="s5">5. HttpServer 위의 Upgrade : 한 표, 한 Session</h2>
+
+<p>statemachine 설계 11절의 결정 (한 표, 한 Session, Session 의 <code>Stage</code> 하나를 body 와 메시지가 같이 쓴다) 을 소유자 셋에 펼친 것이다.</p>
+
+<table>
+  <tr><th>소유자</th><th>base 의 소유자</th><th>표</th><th>Session</th></tr>
+  <tr><td>HttpServer (Upgrade 경로 있음)</td><td>Server</td><td>HTTP 행 전부 + WebSocket 행 (서버 쪽, mask 검사)</td><td>HttpSession. Upgrade 뒤 같은 Session 이 WebSocket 상태를 든다</td></tr>
+  <tr><td>WebSocketServer</td><td>Server</td><td>같은 표. 라우트 표에 <code>UPGRADE</code> 항목 하나 (path 는 설정의 것). 다른 path 는 404, 다른 메서드는 405</td><td>HttpSession. limits 는 라이브러리가 정한다: <code>max_routes 1</code>, <code>max_header_bytes 8 KiB</code>, <code>max_headers 32</code>, <code>max_body_bytes = max_message_bytes</code>, <code>response_bytes 1 KiB</code> (101 / 403 / 404 / 426), <code>header_timeout = handshake_timeout</code></td></tr>
+  <tr><td>WebSocketClient</td><td>EventClient</td><td>Upgrade 요청을 보내고 101 을 읽는 행 둘 + WebSocket 행 (클라이언트 쪽, mask 씌움)</td><td>HttpSession 하나 (응답 헤더 파싱에 요청 버퍼를, 메시지에 <code>Stage</code> 를 쓴다)</td></tr>
+</table>
+
+<p>셋 다 "HttpSession 배열 + 라우트 표 + HTTP_MACHINE 을 든 것" 이고 그것이 <code>KiottyNetWebSocketOwner</code> 다. HttpServer 가 그 자체이고, WebSocketServer 는 Upgrade 하나를 등록한 HttpServer 를 멤버로 들며, WebSocketClient 는 같은 Session 타입 하나와 EventClient 를 든다. 소유자 셋의 공통 base 를 어디에 두는지는 사이클 W1 의 코드 모양이고 공개 API 는 <code>owner</code> 포인터의 타입 하나다.</p>
+
+<div class="flow">HttpServer 의 연결 하나 (Upgrade 경로 "/chat")
+
+[ReadingRequestLine] → [ReadingHeaderLine]... → afterHeaders : match 가 UPGRADE 항목
+    GET 이 아니면 405. Upgrade / Connection / Sec-WebSocket-Key / Version 13 이 없으면 426
+    onUpgrade(app_context, websocket handle, { path, query, host, origin, protocols }) → false 면 403 (완성 응답, keep_alive 0)
+    true 면 응답 버퍼에 101 + Sec-WebSocket-Accept + (고른) Sec-WebSocket-Protocol → { WebSocketOpening, thenWrite(101) }       ← generation 을 올린다
+[WebSocketOpening] WRITTEN → onOpen(app_context, websocket) → websocket_context 를 Session 에 → { WebSocketReadingHeader, thenRead(2, ping_interval) }
+[WebSocketReadingHeader] READ(2) → FIN / opcode / mask 비트 / 길이 7 비트 → 126 / 127 이면 [ReadingExtendedLength], mask 면 [ReadingMask], 아니면 [ReadingPayload]
+[WebSocketReadingPayload] READ(min(남은 길이, receive_capacity)) → unmask 하며 Stage 에 붙인다 → 남으면 같은 상태, 다 받으면 :
+    control frame : ping → push lane 에 pong, pong → 타이머 리셋, close → [WebSocketClosing] (상대가 시작). 데이터 frame : FIN 이면 onMessage(websocket_context, websocket, { opcode, Stage }) → Stage 비움
+    → { WebSocketReadingHeader, thenRead(2, ping_interval) }
+TIMEOUT (어느 WebSocket 상태에서든) : ping 차례면 push lane 에 ping 하고 pong_timeout 으로 다시, pong 이 안 왔으면 close(TIMEOUT, 1001)
+[WebSocketClosing] 상대 close frame 을 받거나 close_timeout → thenClose(...) → CLOSED → onClose(app_context, websocket_context, websocket, { code, status, reason }) → release</div>
+
+<ul>
+  <li>HTTP body 와 WebSocket 메시지가 같은 <code>Stage</code> 를 쓴다. Upgrade 요청에는 body 가 없고 (있으면 400), 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다. <code>max_message_bytes</code> 를 넘는 메시지는 1009 로 닫는다.</li>
+  <li>수신 frame 의 payload 는 <code>receive_capacity</code> 조각으로 읽어 Stage 에 붙인다 (user_guide 8절). 조각마다 unmask 의 key offset 을 Session 이 든다.</li>
+  <li>송신 frame (pong / ping / close / 사용자 send) 은 전부 push lane 이고, frame 머리 (2 ~ 14 바이트) + payload 를 한 번에 넣는다. http 설계 9절 정할 것 4 의 notify gather 를 같이 쓴다. 클라이언트는 mask key 4 바이트를 더하고 payload 를 씌워 넣는다 (복사하면서 XOR).</li>
+  <li><code>onMessage</code> 의 <code>data</code> 는 Stage 를 가리키고 return 하면 무효다 (Stage 를 비운다). TEXT 는 UTF-8 검사를 지나지 않으면 1007.</li>
+  <li>HttpServer 의 close 는 WebSocket 연결도 close handshake 없이 끊는다 (<code>onClose(CLOSED, 1001)</code>). user_guide 5절 그대로.</li>
+</ul>
+
+<h2 id="s6">6. 다른 thread 의 send 와 close</h2>
+
+<p><code>send</code> 는 notify 라 끝이다 (push lane 에 복사, IO thread 의 drain 이 보낸다). <code>close</code> 는 close frame 을 보낸 뒤 "데이터 frame 거부 + close 타이머" 로 상태가 바뀌어야 하는데 notify 에는 이벤트가 없다. http 설계 7절의 push 스트림 끝과 같은 문제이고 같은 답이다.</p>
+
+<ol>
+  <li><code>closeWebSocket(handle, status, reason)</code> (아무 thread): Session 의 닫힘 플래그 (<code>std::atomic&lt;uint16_t&gt;</code> 에 status, 0 이면 열림) 를 CAS 로 세운다. 이미 세워져 있으면 <code>BUSY</code>. 그 뒤 close frame 을 push lane 에 넣는다. 돌아온 뒤의 <code>send</code> 는 플래그를 보고 <code>CLOSED</code>.</li>
+  <li>IO thread: drain 이 push lane 을 비운 뒤 플래그가 서 있고 상태가 아직 WebSocket 데이터 상태면 <code>{ WebSocketClosing, thenRead(2, close_timeout) }</code> 로 옮긴다. "drain 뒤 플래그 검사" 는 IoLoop 의 한 줄이고 HTTP push 스트림의 end 가 같은 줄을 쓴다. 표의 행이 아니라 Handler 가 drain 뒤에 받는 작은 훅 하나다 (8절의 정할 것 2).</li>
+  <li>상대의 close frame 이 오면 (<code>WebSocketClosing</code> 의 READ) <code>thenClose(SUCCESS)</code>, 안 오면 TIMEOUT 행이 <code>thenClose(TIMEOUT)</code>. CLOSED 행이 <code>onClose</code>.</li>
+</ol>
+
+<p>IO thread 콜백 안에서 부른 <code>close</code> 도 같은 길이다 (플래그 + notify). action 이 return 한 뒤 다음 drain 에서 전이된다. 콜백 안이라고 특별히 다루지 않는다.</p>
+
+<h2 id="s7">7. 지금 헤더, user_guide 와 달라진 점</h2>
+
+<table>
+  <tr><th>것</th><th>헤더 v1 / user_guide</th><th>이 판</th><th>왜</th></tr>
+  <tr><td><code>KiottyNetWebSocketHandle</code></td><td><code>int64_t</code>, 0 이 무효</td><td><code>{ owner, id }</code>, <code>{ NULL, 0 }</code> 이 무효</td><td>소유자를 handle 이 든다. base / HTTP 와 같은 모양 (statemachine 설계 12.6)</td></tr>
+  <tr><td>include</td><td><code>kiotty_net_statemachine.h</code></td><td><code>kiotty_net_base.h</code></td><td>사용자가 표를 보지 않는다. statemachine.h 는 라이브러리 안에서 include 한다. user_guide 8절의 "모양은 이렇다" 는 설명용</td></tr>
+  <tr><td>Upgrade 등록</td><td>없음 (http.h 가 생길 때 그쪽에서)</td><td>websocket.h 의 <code>addWebSocketUpgrade</code> + 가드된 typedef</td><td>http.h 가 websocket.h 를 끌어오지 않게 (memory: 두 헤더는 독립)</td></tr>
+  <tr><td>create</td><td>handle</td><td><code>{ code, handle }</code></td><td>base 판 v1 과 같다</td></tr>
+  <tr><td>Upgrade 요청 상한</td><td><code>receive_capacity</code> (열린 질문 6)</td><td><code>max_header_bytes</code> (HttpServer 의 것, WebSocketServer 는 8 KiB)</td><td>줄 단위로 읽어 요청 버퍼에 복사한다 (구현 가이드 4.3). 닫힘</td></tr>
+  <tr><td>101 / 403 응답</td><td>write lane 으로 (user_guide 3절)</td><td>같다. HttpSession 의 응답 버퍼에서 나간다</td><td>Upgrade 는 HTTP 응답이다</td></tr>
+  <tr><td>다른 thread 의 close</td><td>열린 질문 2 (atomic 플래그)</td><td>6절. 플래그 + notify + drain 뒤 훅</td><td>닫힘</td></tr>
+  <tr><td>C++ <code>KiottyNet_WebSocket</code></td><td>6 메서드</td><td>+ 연산자 셋</td><td>목록 / 집합에 들기 위해. 세지 않는다 (DV11)</td></tr>
+  <tr><td><code>KiottyNet_WebSocketServer / Client</code></td><td><code>explicit operator bool</code></td><td>+ <code>code()</code></td><td>create 의 이유</td></tr>
+</table>
+
+<h2 id="s8">8. 정할 것</h2>
+
+<ol>
+  <li><b>websocket.h 가 base.h 만 include 하는 것.</b> 지금은 statemachine.h 다. 사용자 코드에서 표의 타입이 필요한 자리가 없다. 바꾸는 쪽을 추천한다. single header 에는 영향이 없다.</li>
+  <li><b>"drain 뒤 플래그 검사" 를 어디에 둘지.</b> 안쪽의 일이지만 Handler 인터페이스 (5 메서드) 에 하나를 더하는 것이라 적는다. 대안: (a) <code>Handler::afterDrain(caller)</code> 여섯째 메서드, (b) 플래그를 본 IoLoop 이 가짜 <code>TIMEOUT</code> 이벤트를 넣어 표의 TIMEOUT 행이 플래그를 보게 하는 것. (b) 는 표만으로 되지만 TIMEOUT 의 뜻이 흐려진다. (a) 를 추천한다. HTTP 의 push 스트림 끝과 같이 쓴다.</li>
+  <li><b>WebSocketServer 의 내부 limits.</b> 5절의 값 (header 8 KiB / 32, response 1 KiB, body = max_message_bytes). 쿠키가 큰 브라우저 요청은 8 KiB 를 넘을 수 있다. 그런 앱은 HttpServer + Upgrade 로 가서 limits 를 직접 둔다. WebSocketServer 에 limits 인자를 더하지 않는다.</li>
+  <li><b>Upgrade 경로의 handler 를 등록 때 값으로 복사하는 것.</b> WebSocketServer / Client 는 run 마다 handler 를 받는데 HttpServer 의 Upgrade 는 등록 때 고정된다. 통일하려면 HttpServer 의 run 이 handler 를 받아야 하는데 라우트 모델과 맞지 않는다. 지금 모양을 추천한다.</li>
+  <li><b><code>KiottyNetWebSocketUpgrade</code> 의 필드.</b> user_guide 10절 5 그대로 (<code>path</code>, <code>query</code>, <code>host</code>, <code>origin</code>, <code>protocols</code>). 나머지는 <code>findWebSocketUpgradeHeader</code>. 바꾸지 않는다.</li>
+  <li><b>WebSocketClient 의 TLS hostname.</b> <code>Host</code> 헤더와 SNI 는 <code>KiottyNetClientConfiguration.address.host</code> 에서 온다. 설정에 따로 두지 않는다.</li>
+</ol>
+
+<h2 id="s9">9. 사이클</h2>
+
+<p>HTTP 의 H3 (완성 응답, HttpSession, 라우트 표) 뒤에 시작한다. W3 은 H5 의 notify gather 와 drain 뒤 훅을 쓴다.</p>
+
+<table>
+  <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>W1 공개 API 판 v2</td><td>3절의 websocket.h. handle struct, Result 둘, <code>addWebSocketUpgrade</code>, 가드된 typedef, base.h include. user_guide_websocket 을 이 판으로. H1 과 같이 해도 된다</td><td>네 헤더 syntax check. <code>Headers.*</code> 에 websocket 의 struct</td></tr>
+  <tr><td>W2 frame codec</td><td><code>domain/usecases/websocket/</code>: frame 머리 파싱 / 만들기, mask / unmask (offset 포함), close frame 의 status + reason, UTF-8 검사 (core 에 이미 있는 것), <code>Sec-WebSocket-Accept</code> (SHA-1 + base64. core 에 작은 구현. zero-dependency)</td><td>unit. RFC 6455 의 예제 frame 들, 수칙 2.10 의 다섯 입력</td></tr>
+  <tr><td>W3 서버</td><td>HTTP_MACHINE 의 WebSocket 행 (5절), Upgrade 항목, <code>onUpgrade / onOpen / onMessage / onClose</code>, ping / pong / close 타이머, 다른 thread 의 send / close (6절), broadcast, WebSocketServer (HttpServer 를 든 것)</td><td>integration: Upgrade → echo (텍스트 / 바이너리 / 조각 둘), 1009, ping 타이머, 다른 thread 의 close 뒤 onClose, 403, 426, 405, HttpServer 에서 HTTP 라우트와 Upgrade 가 같이. 외부 클라이언트 (Python websockets) 로 한 번</td></tr>
+  <tr><td>W4 클라이언트</td><td>EventClient 위의 표 (Upgrade 요청 → 101), mask, <code>getWebSocketClientSocket</code>, <code>sendWebSocketClient</code></td><td>integration: W3 의 서버와 왕복, TLS (wss), 101 아님 → PROTOCOL_ERROR, 재시도</td></tr>
+  <tr><td>W5 문서</td><td>requirement 10 / 11절을 이 판으로, 구현 가이드 5절, 테스트 계획 18절, progress</td><td>문서</td></tr>
+</table>
+
+</body>
+</html>
