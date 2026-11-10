@@ -148,8 +148,8 @@ typedef enum KiottyNetCode {
     KIOTTY_NET_CODE_PROTOCOL_ERROR,       /* readUntil 의 max 안에 delimiter 가 없음, 프로토콜 파서 실패 */
     KIOTTY_NET_CODE_REQUEST_TOO_LARGE,    /* read 요구 길이가 수신 Stage capacity 보다 큼 */
     KIOTTY_NET_CODE_UNHANDLED_EVENT,      /* StateMachine 표에 (state, event) 행이 없음 */
-    KIOTTY_NET_CODE_ILLEGAL_TRANSITION,   /* StateMachine 핸들러가 .to() 목록에 없는 상태로 감 (debug) */
-    KIOTTY_NET_CODE_SESSION_EXHAUSTED,    /* max_clients 초과 */
+    KIOTTY_NET_CODE_ILLEGAL_TRANSITION,   /* StateMachine action 이 .to() 목록에 없는 상태로 감. release 빌드에서도 검사한다 */
+    KIOTTY_NET_CODE_SESSION_EXHAUSTED,    /* StateMachine 의 createConnectionContext 가 NULL 을 돌려줌 (Session 이 다 닳음). onError 로 알리고 연결을 받지 않는다 */
     KIOTTY_NET_CODE_DUPLICATE_RULE,       /* C StateMachine 표에 같은 (state, event) 가 두 번 */
     KIOTTY_NET_CODE_TIMEOUT,              /* 동기 API 의 timeout 만료 */
     KIOTTY_NET_CODE_TABLE_FULL,           /* 라우트 / 정적 경로 / 승격 경로 등록 표가 가득 참 */
@@ -179,7 +179,7 @@ typedef enum KiottyNetCode {
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
 - 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 16 KiB. 빌드 설정으로 바꾸지 않는다. `KiottyNet_serverMemorySize(config)` 와 `KiottyNet_clientMemorySize(config)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_NET_CODE_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
-- handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `valid()` 와 `code()` 로 보여준다.
+- handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `explicit operator bool` 과 `code()` 로 보여준다 (판 v1, 2026-11-09. 전에는 `valid()`).
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
 
 ```c
@@ -846,16 +846,17 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 규칙
 
 - 라이브러리가 기억하는 것은 둘이다. **state** 는 연결마다 하나이고 Connection 안에 있다. **machine** (표 + 초기 상태) 은 run 마다 하나이고 `KiottyNetStatefulAppContext` 안에 있다. Session 에 state 멤버를 두지 않는다.
-- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, info)` 가 5절의 onConnected 자리에서 연결마다 하나를 돌려주고 (handle 은 아직 없다), `releaseConnectionContext(app_context, session, c)` 가 돌려받는다. create 가 NULL 을 돌려주면 그 연결은 받지 않는다 (`ignoreConnection`. CONNECTED 도 release 도 오지 않는다). create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
+- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, info)` 가 5절의 onConnected 자리에서 연결마다 하나를 돌려주고 (handle 은 아직 없다), `releaseConnectionContext(app_context, session, c)` 가 돌려받는다. create 가 NULL 을 돌려주면 Session 이 다 닳은 것으로 보고 `onError(KIOTTY_NET_CODE_SESSION_EXHAUSTED)` 로 알린 뒤 그 연결은 받지 않는다 (`ignoreConnection`. CONNECTED 도 CLOSED 행도 release 도 오지 않는다). create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
+- `onError(app_context, info, code, message)` 는 라이브러리가 표 밖의 일을 알리는 자리다. `SESSION_EXHAUSTED`, `UNHANDLED_EVENT`, `ILLEGAL_TRANSITION`, 그리고 `WORK_STARTED` 행이 돌려준 action 이 잘못되었을 때 (`INVALID_ARGUMENT`, `BUFFER_FULL`) 부른다. NULL 이면 부르지 않고 그 뒤의 처리 (닫기) 는 같다. 5절의 `onError` 와 같은 시그니처이고 IO Thread 에서 불린다.
 - transition action 은 app_context 를 받지 않는다. action 이 앱 객체에 닿아야 하면 create 가 Session 에 그 포인터를 넣어 둔다.
 - `Event` 는 IO Thread 가 알려주는 "무슨 일이 일어났는가", entry action (`KiottyNetConnectionAction`) 은 표가 돌려주는 "다음 상태에 들어가면서 해 달라" 다. 한 Transition 은 entry action 하나만 가진다.
 - Transition 은 언제나 다음 상태를 정한다. 상태를 그대로 두는 Transition 은 없다. ANY 행도 갈 곳을 안다 (오류면 오류 상태, 닫히면 닫힌 상태). 다른 일 없이 머물려면 자기 상태로 move 하고 entry action 은 `KiottyNet_thenHold(0)` 이다.
 - 표는 수신 흐름과 그에 딸린 응답만 다룬다. 흐름과 무관한 송신은 표를 거치지 않고 `KiottyNet_notifyConnection` 으로 보낸다 (4절). 그래서 "어느 상태에서든 와서 상태를 건드리지 않는" 이벤트가 없다.
 - `CONNECTED` 는 첫 Event 다. 5절의 `onReady` 에 해당하며 create 가 Session 을 돌려준 뒤에 온다. 이 행이 첫 read / write 를 entry action 으로 낸다.
-- `WORK_STARTED` 에서 돌려준 entry action 은 Connection 이 아니라 Stream 에 적용된다. HOLD / READ / READ_UNTIL / WRITE / CLOSE 면 그 자리에서 `KiottyNet_closeConnectionStream(stream, entry_action)`. `thenWork()` 면 Stream 을 그대로 두는데, action 이 `stream` 을 worker 에게 넘겼다는 뜻이다.
-- `CLOSED` 는 마지막 Event 다. 그 action 의 Transition 은 무시된다. 그 뒤에 release 가 불린다.
-- 표에 (state, event) 행이 없으면 `close(KIOTTY_NET_CODE_UNHANDLED_EVENT)`. 조용히 무시하지 않는다. 정확 일치 행이 ANY 행보다 우선한다.
-- `.to(...)` 는 action 이 갈 수 있는 다음 상태 목록이다. debug 빌드는 목록 밖으로 가면 `close(KIOTTY_NET_CODE_ILLEGAL_TRANSITION)`. `.to()` 가 없는 행은 검사하지 않는다.
+- `WORK_STARTED` 에서 돌려준 entry action 은 Connection 이 아니라 Stream 에 적용된다. HOLD / READ / READ_UNTIL / WRITE / CLOSE 면 그 자리에서 `KiottyNet_closeConnectionStream(stream, entry_action)`. `thenWork()` 면 Stream 을 그대로 두는데, action 이 `stream` 을 worker 에게 넘겼다는 뜻이다. 그 action 이 잘못되었으면 (`INVALID_ARGUMENT`, `BUFFER_FULL`) `onError` 로 알리고 Stream 은 열린 채 남는다. `WORK_STARTED` 행이 없으면 `UNHANDLED_EVENT` 로 Stream 이 닫힌다.
+- `CLOSED` 는 마지막 Event 다. 그 action 의 Transition 은 무시된다. 그 뒤에 release 가 불린다. `CLOSED` 행이 없어도 release 는 하고, `UNHANDLED_EVENT` 는 알리지 않는다 (이미 닫힌 연결이다).
+- 표에 (state, event) 행이 없으면 `onError(KIOTTY_NET_CODE_UNHANDLED_EVENT)` 뒤 `thenClose`. 조용히 무시하지 않는다. 정확 일치 행이 ANY 행보다 우선한다.
+- `.to(...)` 는 action 이 갈 수 있는 다음 상태 목록이다. 목록 밖으로 가면 `onError(KIOTTY_NET_CODE_ILLEGAL_TRANSITION)` 뒤 `thenClose`. release 빌드에서도 검사한다 (사용자 결정 2026-11-09). `.to()` 가 없는 행 (`next.count` 0) 은 검사하지 않는다.
 - `event.as.read.data` 는 수신 Stage 를 가리키며 action 이 return 하면 무효다. 보관하려면 Session 으로 복사한다.
 - 표는 컴파일 타임 상수다. C++ 의 `KiottyNet_rules()` 는 (state, event) 로 정렬하고 중복 행을 컴파일 에러로 만든다. C 의 표는 `static const` 배열이며 run 이 시작할 때 중복을 검사해 `KIOTTY_NET_CODE_DUPLICATE_RULE` 을 돌려준다. machine 이나 표가 NULL 이면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
 
@@ -884,12 +885,16 @@ typedef struct KiottyNetTransition {
 
 typedef KiottyNetTransition (*KiottyNetTransitionAction)(KiottyNetConnectionContext session, KiottyNetConnectionHandle c, KiottyNetConnectionEvent event);
 
+typedef struct KiottyNetNextStates {
+    int32_t  at[KIOTTY_NET_MAX_NEXT];                      /* 갈 수 있는 다음 상태. release 에서도 검사 */
+    uint32_t count;                                        /* 0 이면 검사 안 함 */
+} KiottyNetNextStates;
+
 typedef struct KiottyNetRule {
     int32_t                      state;                    /* 사용자 enum 값 또는 KIOTTY_NET_ANY_STATE */
     KiottyNetConnectionEventType event;
     KiottyNetTransitionAction    transition_action;
-    int32_t                      next[KIOTTY_NET_MAX_NEXT];    /* 갈 수 있는 다음 상태. debug 에서 검사 */
-    uint32_t                     next_count;               /* 0 이면 검사 안 함 */
+    KiottyNetNextStates          next;
 } KiottyNetRule;
 
 typedef struct KiottyNetStateMachine {
@@ -903,14 +908,15 @@ typedef struct KiottyNetStatefulAppContext {
     const KiottyNetStateMachine* machine;
     KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);                               /* 연결마다 Session 하나. NULL 이면 받지 않는다 (ignore) */
     void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle c);              /* CLOSED 행 뒤에 */
+    void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);                         /* 표 밖의 일. NULL 이면 부르지 않는다 */
 } KiottyNetStatefulAppContext;
 ```
 
-C 함수. 표는 `static const KiottyNetRule[]` 이고 `KIOTTY_NET_RULE` 매크로가 next 개수를 컴파일 타임에 센다 (C99 이상).
+C 함수. 표는 `static const KiottyNetRule[]` 이고 `KIOTTY_NET_RULE` 매크로가 next 개수를 컴파일 타임에 센다 (C99 의 compound literal. C++ 에서는 정의되지 않고 아래의 builder 를 쓴다).
 
 ```c
-#define KIOTTY_NET_RULE(state, event, transition_action, ...)      { (state), (event), (transition_action), { __VA_ARGS__ }, (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) }
-#define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { 0 }, 0 }
+#define KIOTTY_NET_RULE(state, event, transition_action, ...)      { (state), (event), (transition_action), { { __VA_ARGS__ }, (uint32_t)(sizeof((int32_t[]){ __VA_ARGS__ }) / sizeof(int32_t)) } }
+#define KIOTTY_NET_RULE_UNCHECKED(state, event, transition_action) { (state), (event), (transition_action), { { 0 }, 0 } }
 #define KIOTTY_NET_RULE_COUNT(table)                               (sizeof(table) / sizeof((table)[0]))
 
 KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetConnectionAction entry_action);
@@ -937,7 +943,7 @@ static KiottyNetConnectionContext acquire_session(KiottyNetAppContext app, Kiott
 static void                       release_session(KiottyNetAppContext app, KiottyNetConnectionContext session, KiottyNetConnectionHandle c);
 
 HttpApp                     app = { ... };
-KiottyNetStatefulAppContext stateful = { &app, &HTTP_MACHINE, acquire_session, release_session };   /* run 동안만 살아 있으면 된다 */
+KiottyNetStatefulAppContext stateful = { &app, &HTTP_MACHINE, acquire_session, release_session, NULL };   /* run 동안만 살아 있으면 된다. onError 는 NULL 이어도 된다 */
 KiottyNetServerResult       server = KiottyNet_createServer(context, &config, NULL);
 KiottyNet_runStatefulServer(server.handle, &stateful);
 ```
@@ -988,7 +994,7 @@ static constexpr auto HTTP_RULES = KiottyNet_rules(
 static constexpr KiottyNetStateMachine HTTP_MACHINE = KiottyNet_makeStateMachine(HTTP_RULES, HttpState::Idle);
 
 HttpApp                     app;
-KiottyNetStatefulAppContext stateful = { &app, &HTTP_MACHINE, &HttpApp::acquireSession, &HttpApp::releaseSession };
+KiottyNetStatefulAppContext stateful = { &app, &HTTP_MACHINE, &HttpApp::acquireSession, &HttpApp::releaseSession, &HttpApp::onError };
 KiottyNet_Context           context;
 KiottyNet_Server            server(context.handle(), config);
 std::thread                 io([&] { KiottyNet_runStatefulServer(server.handle(), &stateful); });   // stateful 은 io 가 끝날 때까지 살아 있다

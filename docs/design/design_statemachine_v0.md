@@ -589,7 +589,7 @@ base 의 사이클 정의 (`plan_base_v0.md` 0절: 로컬 두 환경 초록, com
 | M2 core (DV12) (끝, 2026-11-09) | 8절. FixedString, parse 셋, 8.3 의 표 | 수칙 2.10 의 다섯 × 3 통과. `grep "const char\*" src/implementation` 이 리터럴 message 와 parseText 뿐 |
 | M3 Handler (끝, 2026-11-09) | 3절, 5절, 6절의 `run(const Handler&)`, CallbackHandler, Connection 의 `_machine_state`, onWorkReady | 기존 테스트 전부 그대로 통과 (동작 변화 없음). `EchoRoundtrip` 전후 비교 |
 | M4 StatefulHandler (끝, 2026-11-09) | 4절, statemachine.cpp, 10절의 unit + integration, 구현 가이드 3절의 echo 예제가 테스트로 | 매트릭스 초록 |
-| M5 문서 | deviations 의 DV6 / DV12 / DV13 닫힘, requirement 8절에 `onError` 와 ignore / debug 검사의 결정, 구현 가이드 2절을 3 ~ 6절로, user_guide 둘의 이름, 테스트 계획 16절, progress 문서 | — |
+| M5 문서 (끝, 2026-11-10) | deviations 의 DV6 / DV12 닫힘 (DV13 은 유지), requirement 1절의 코드 주석과 8절에 `onError`, `KiottyNetNextStates`, SESSION_EXHAUSTED, release 에서도 하는 ILLEGAL_TRANSITION 검사, 구현 가이드 2절 (11-09 에 먼저 끝), 테스트 계획 16절, progress 문서. user_guide 둘은 M1 이 이름을 바꿨고 나머지는 HTTP / WebSocket 재설계가 다시 쓴다 | 문서만. 코드 변경 없음 |
 
 M1 의 이름 변경은 `tools/rename_public_api.tsv` 와 `wrap_parameters.py` 로 단계 2 때처럼 기계적으로 한다.
 
