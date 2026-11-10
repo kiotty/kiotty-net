@@ -256,18 +256,18 @@ TIMEOUT (어느 WebSocket 상태에서든) : ping 차례면 push lane 에 ping �
 <ul>
   <li>HTTP body 와 WebSocket 메시지가 같은 <code>Stage</code> 를 쓴다. Upgrade 요청에는 body 가 없고 (있으면 400), 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다. <code>max_message_bytes</code> 를 넘는 메시지는 1009 로 닫는다.</li>
   <li>수신 frame 의 payload 는 <code>receive_capacity</code> 조각으로 읽어 Stage 에 붙인다 (user_guide 8절). 조각마다 unmask 의 key offset 을 Session 이 든다.</li>
-  <li>송신 frame (pong / ping / close / 사용자 send) 은 전부 push lane 이고, frame 머리 (2 ~ 14 바이트) + payload 를 한 번에 넣는다. http 설계 9절 정할 것 4 의 notify gather 를 같이 쓴다. 클라이언트는 mask key 4 바이트를 더하고 payload 를 씌워 넣는다 (복사하면서 XOR).</li>
+  <li>송신 frame (pong / ping / close / 사용자 send) 은 전부 push lane 이고, frame 머리 (2 ~ 14 바이트) + payload 를 한 번에 넣는다. <code>NotificationDesk</code> 가 머리와 payload 를 한 lock 안에서 이어 복사하고, 전부 들어가지 않으면 하나도 넣지 않는다 (http 설계 2.1). 클라이언트는 mask key 4 바이트를 더하고 payload 를 씌워 넣는다 (복사하면서 XOR).</li>
   <li><code>onMessage</code> 의 <code>data</code> 는 Stage 를 가리키고 return 하면 무효다 (Stage 를 비운다). TEXT 는 UTF-8 검사를 지나지 않으면 1007.</li>
   <li>HttpServer 의 close 는 WebSocket 연결도 close handshake 없이 끊는다 (<code>onClose(CLOSED, 1001)</code>). user_guide 5절 그대로.</li>
 </ul>
 
 <h2 id="s6">6. 다른 thread 의 send 와 close</h2>
 
-<p><code>send</code> 는 notify 라 끝이다 (push lane 에 복사, IO thread 의 drain 이 보낸다). <code>close</code> 는 close frame 을 보낸 뒤 "데이터 frame 거부 + close 타이머" 로 상태가 바뀌어야 하는데 notify 에는 이벤트가 없다. http 설계 7절의 push 스트림 끝과 같은 문제이고 같은 답이다.</p>
+<p><code>send</code> 는 notify 라 끝이다 (push lane 에 복사, IO thread 의 drain 이 보낸다). <code>close</code> 는 close frame 을 보낸 뒤 "데이터 frame 거부 + close 타이머" 로 상태가 바뀌어야 하는데 notify 에는 이벤트가 없다. notify 에는 완료 이벤트가 없어서 상태를 옮길 자리가 따로 필요하다.</p>
 
 <ol>
   <li><code>closeWebSocket(handle, status, reason)</code> (아무 thread): Session 의 닫힘 플래그 (<code>std::atomic&lt;uint16_t&gt;</code> 에 status, 0 이면 열림) 를 CAS 로 세운다. 이미 세워져 있으면 <code>BUSY</code>. 그 뒤 close frame 을 push lane 에 넣는다. 돌아온 뒤의 <code>send</code> 는 플래그를 보고 <code>CLOSED</code>.</li>
-  <li>IO thread: drain 이 push lane 을 비운 뒤 플래그가 서 있고 상태가 아직 WebSocket 데이터 상태면 <code>{ WebSocketClosing, thenRead(2, close_timeout) }</code> 로 옮긴다. "drain 뒤 플래그 검사" 는 IoLoop 의 한 줄이고 HTTP push 스트림의 end 가 같은 줄을 쓴다. 표의 행이 아니라 Handler 가 drain 뒤에 받는 작은 훅 하나다 (8절의 정할 것 2).</li>
+  <li>IO thread: drain 이 push lane 을 비운 뒤 플래그가 서 있고 상태가 아직 WebSocket 데이터 상태면 <code>{ WebSocketClosing, thenRead(2, close_timeout) }</code> 로 옮긴다. "drain 뒤 플래그 검사" 는 IoLoop 의 한 줄이고 지금은 WebSocket 만 쓴다 (HTTP 는 push 스트림을 두지 않기로 했다, http 설계 1절 결정 4). 표의 행이 아니라 Handler 가 drain 뒤에 받는 작은 훅 하나다 (8절의 정할 것 2).</li>
   <li>상대의 close frame 이 오면 (<code>WebSocketClosing</code> 의 READ) <code>thenClose(SUCCESS)</code>, 안 오면 TIMEOUT 행이 <code>thenClose(TIMEOUT)</code>. CLOSED 행이 <code>onClose</code>.</li>
 </ol>
 
@@ -292,7 +292,7 @@ TIMEOUT (어느 WebSocket 상태에서든) : ping 차례면 push lane 에 ping �
 
 <ol>
   <li><b>websocket.h 가 base.h 만 include 하는 것.</b> 지금은 statemachine.h 다. 사용자 코드에서 표의 타입이 필요한 자리가 없다. 바꾸는 쪽을 추천한다. single header 에는 영향이 없다.</li>
-  <li><b>"drain 뒤 플래그 검사" 를 어디에 둘지.</b> 안쪽의 일이지만 Handler 인터페이스 (5 메서드) 에 하나를 더하는 것이라 적는다. 대안: (a) <code>Handler::afterDrain(caller)</code> 여섯째 메서드, (b) 플래그를 본 IoLoop 이 가짜 <code>TIMEOUT</code> 이벤트를 넣어 표의 TIMEOUT 행이 플래그를 보게 하는 것. (b) 는 표만으로 되지만 TIMEOUT 의 뜻이 흐려진다. (a) 를 추천한다. HTTP 의 push 스트림 끝과 같이 쓴다.</li>
+  <li><b>"drain 뒤 플래그 검사" 를 어디에 둘지.</b> 안쪽의 일이지만 Handler 인터페이스 (5 메서드) 에 하나를 더하는 것이라 적는다. 대안: (a) <code>Handler::afterDrain(caller)</code> 여섯째 메서드, (b) 플래그를 본 IoLoop 이 가짜 <code>TIMEOUT</code> 이벤트를 넣어 표의 TIMEOUT 행이 플래그를 보게 하는 것. (b) 는 표만으로 되지만 TIMEOUT 의 뜻이 흐려진다. (a) 를 추천한다. 지금은 WebSocket 의 close 만 쓴다.</li>
   <li><b>WebSocketServer 의 내부 limits.</b> 5절의 값 (header 8 KiB / 32, response 1 KiB, body = max_message_bytes). 쿠키가 큰 브라우저 요청은 8 KiB 를 넘을 수 있다. 그런 앱은 HttpServer + Upgrade 로 가서 limits 를 직접 둔다. WebSocketServer 에 limits 인자를 더하지 않는다.</li>
   <li><b>Upgrade 경로의 handler 를 등록 때 값으로 복사하는 것.</b> WebSocketServer / Client 는 run 마다 handler 를 받는데 HttpServer 의 Upgrade 는 등록 때 고정된다. 통일하려면 HttpServer 의 run 이 handler 를 받아야 하는데 라우트 모델과 맞지 않는다. 지금 모양을 추천한다.</li>
   <li><b><code>KiottyNetWebSocketUpgrade</code> 의 필드.</b> user_guide 10절 5 그대로 (<code>path</code>, <code>query</code>, <code>host</code>, <code>origin</code>, <code>protocols</code>). 나머지는 <code>findWebSocketUpgradeHeader</code>. 바꾸지 않는다.</li>
@@ -301,7 +301,7 @@ TIMEOUT (어느 WebSocket 상태에서든) : ping 차례면 push lane 에 ping �
 
 <h2 id="s9">9. 사이클</h2>
 
-<p>HTTP 의 H3 (완성 응답, HttpSession, 라우트 표) 뒤에 시작한다. W3 은 H5 의 notify gather 와 drain 뒤 훅을 쓴다.</p>
+<p>HTTP 의 H3 (완성 응답, HttpSession, 라우트 표) 뒤에 시작한다. base 의 B1 (한 WRITE 에 send 와 notify, 송신 timeout, notify 의 여러 조각 복사) 뒤이고, drain 뒤 훅은 W3 이 더한다.</p>
 
 <table>
   <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
