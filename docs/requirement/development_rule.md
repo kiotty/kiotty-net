@@ -461,22 +461,22 @@ struct Result
 
 ### 5.6 에러 코드는 `include/` 에서만 정의한다.
 
-- 에러 enum 은 공개 헤더 `include/kiotty_spec.h` 의 하나뿐이다. `core/`, `domain/`, `data/`, `context/` 는 에러 enum 을 새로 만들지 않는다.
+- 에러 enum 은 공개 헤더 `include/kiotty_net_base.h` 의 `KiottyNetCode` 하나뿐이다. `core/`, `domain/`, `data/`, `context/` 는 에러 enum 을 새로 만들지 않는다.
 - 새 에러가 필요하면 공개 enum 끝에 값을 추가한다. 기존 값의 번호는 바꾸지 않는다.
 - 내부 모듈은 공개 enum 값을 그대로 `Result` 와 `failure` 에 넣는다.
 
 ### 5.2 C interface 는 `<Organization><Project>_` 접두사를 붙인다.
 
-- 함수: `<Organization><Project>_functionName`. 예: `KiottySpec_createServer`.
-- 타입: `<Organization><Project><TypeName>`. 예: `KiottySpecServer`.
-- enum 멤버: `<ORGANIZATION>_<PROJECT>_<TYPE>_<MEMBER>`. 예: `KIOTTY_SPEC_STATUS_SUCCESS`. C enum 은 이름 공간이 없으므로 타입 이름을 넣어 충돌을 막는다.
-- 매크로: `<ORGANIZATION>_<PROJECT>_<NAME>`. 예: `KIOTTY_SPEC_API`.
+- 함수: `<Organization><Project>_functionName`. 예: `KiottyNet_createServer`.
+- 타입: `<Organization><Project><TypeName>`. 예: `KiottyNetServer`.
+- enum 멤버: `<ORGANIZATION>_<PROJECT>_<TYPE>_<MEMBER>`. 예: `KIOTTY_NET_CODE_SUCCESS`. C enum 은 이름 공간이 없으므로 타입 이름을 넣어 충돌을 막는다.
+- 매크로: `<ORGANIZATION>_<PROJECT>_<NAME>`. 예: `KIOTTY_NET_API`.
 - 약어 금지(4.5)는 C interface 에도 적용한다. 예: `Db` 대신 `DATABASE`, `InvalidArg` 대신 `INVALID_ARGUMENT`.
 - 조직·프로젝트 이름은 사용자가 정한다. 임의로 정하지 않는다.
 - C interface 는 프로젝트의 모든 에러를 덮는 C enum 하나를 가진다.
 
 ```c
-ServerResult KiottySpec_createServer(GlobalContext* context, const ServerConfiguration configuration);
+KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls);
 ```
 
 ### 5.3 스택에 담기 큰 결과는 Context 안의 멤버 참조를 `Result<Value&, Code>` 로 돌려준다.
@@ -635,9 +635,9 @@ i18n      ← presentation
 ### 7.4 `core/` 는 범용 자료구조와 유틸만 둔다.
 
 - `core/` 는 도메인 용어(항목, 체크포인트, 링크, 마일스톤 등)와 도메인 레코드를 담지 않는다.
-- `core/` 는 C 인터페이스의 레코드 타입(`KiottySpec*` 구조체)을 담지 않는다. 에러 enum 만 `include/` 에서 가져온다.
+- `core/` 는 C 인터페이스의 레코드 타입(`KiottyNet*` 구조체)을 담지 않는다. 에러 enum 만 `include/` 에서 가져온다.
 - 도메인 레코드를 C 구조체로 바꾸는 코드(커서 상자 등)는 `context/` 에 둔다.
-- `core/` 는 `include/kiotty_spec.h` 의 에러 enum 외에는 프로젝트 고유 헤더에 의존하지 않는다.
+- `core/` 는 `include/kiotty_net_base.h` 의 에러 enum 외에는 프로젝트 고유 헤더에 의존하지 않는다.
 
 ---
 
@@ -674,6 +674,6 @@ PR 마다 아래 열여섯 가지에 모두 "예" 여야 한다.
 11. 새 C interface 함수는 `<Organization><Project>_` 접두사를 가진다.
 12. 추가된 소스 줄에 주석이 없다. Release 준비 PR 은 예외다.
 13. 새 method 는 동사로 시작하고, 멤버 접근 method 는 필요한 이유가 PR 에 적혀 있다. `core/` 는 예외다.
-14. `core/` 파일이 도메인 용어나 `KiottySpec*` 레코드 타입을 담지 않는다.
-15. 새 에러 enum 이 없고, 모든 에러는 `include/kiotty_spec.h` 의 값을 쓴다.
+14. `core/` 파일이 도메인 용어나 `KiottyNet*` 레코드 타입을 담지 않는다.
+15. 새 에러 enum 이 없고, 모든 에러는 `include/kiotty_net_base.h` 의 값을 쓴다.
 16. C ABI 를 건너는 struct, 리턴값, 콜백에 union 과 `bool` 이 없다 (5.7).

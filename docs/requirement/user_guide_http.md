@@ -2,6 +2,8 @@
 
 사용자가 헤더를 어떻게 쓰는지 적는 메모다. 인터페이스의 기준은 [requirement_v0.md](requirement_v0.md) 이고, 여기서는 "무엇을 어떤 순서로 부르는가" 만 다룬다. 내부 동작은 [implementation_guide_v0.md](implementation_guide_v0.md) 에 있다.
 
+이 문서는 지금의 `include/kiotty_net_http.h` 를 따른다. HTTP API 는 [design_http_v0.html](../design/design_http_v0.html) 의 사이클 H1 에서 바뀔 예정이다.
+
 ## 헤더 구성
 
 | 헤더 | 내용 | 누가 include 하나 |
@@ -9,11 +11,11 @@
 | `kiotty_net_base.h` | 공통 타입 (`KiottyNetCode`, `KiottyNetSpan`), 설정 struct, Context, Connection / Work, StreamClient, EventClient, Server | 직접 TCP / Pipe 프로토콜을 짜는 사용자 |
 | `kiotty_net_statemachine.h` | Connection 위에 얹는 표 기반 StateMachine | 자기 프로토콜을 표로 쓰려는 사용자. HTTP / WebSocket 사용자는 필요 없다 |
 | `kiotty_net_http.h` | HTTP/1.1 서버. Rest API 라우트와 정적 서빙 | HTTP 서버를 쓰는 사용자. **이 헤더 하나만 include 하면 된다** |
-| `kiotty_net_websocket.h` | WebSocket 서버 / 클라이언트, HttpServer 에 Upgrade 경로 추가 | WebSocket 사용자 |
+| `kiotty_net_websocket.h` | WebSocket 서버 / 클라이언트 | WebSocket 사용자 |
 
 - 각 헤더는 위에 C 인터페이스, 아래에 (`__cplusplus` 일 때만) 그 C 인터페이스를 부르는 C++ 래퍼가 있다. C 로 빌드하면 아래 절반은 보이지 않는다.
 - `kiotty_net_http.h` 는 `kiotty_net_base.h` 를 include 한다. 공통 타입과 `KiottyNetServerConfiguration`, `KiottyNetContext` 가 거기 있기 때문이다. StateMachine 은 HttpServer 의 내부 구현이라 `kiotty_net_statemachine.h` 는 include 하지 않는다.
-- C++ 소유 handle 래퍼는 `kiotty::net::OwnedHandle<Handle, Destroy>` 로 RAII 를 한다. 이 template 은 `KIOTTY_NET_OWNED_HANDLE_DEFINED` 매크로로 감싸 `kiotty_net_base.h` 와 `kiotty_net_http.h` 양쪽에 같은 정의가 있다. 먼저 include 된 쪽이 정의하고 나머지는 건너뛴다. 두 정의는 글자까지 같아야 하고, 고칠 때는 둘을 함께 고친다.
+- C++ 소유 handle 래퍼는 `kiotty::net::OwnedHandle<Handle, Destroy>` 로 RAII 를 한다. 이 template 은 `KIOTTY_NET_OWNED_HANDLE_DEFINED` 매크로로 감싸 `kiotty_net_base.h`, `kiotty_net_http.h`, `kiotty_net_websocket.h` 에 같은 정의가 있다. 먼저 include 된 쪽이 정의하고 나머지는 건너뛴다. 정의들은 글자까지 같아야 하고, 고칠 때는 함께 고친다.
 
 ## 1. HTTP 서버
 
@@ -21,7 +23,7 @@
 
 HttpServer 는 소유 handle 이다. `KiottyNet_createHttpServer` 가 만들고 `KiottyNet_destroyHttpServer` 가 없앤다. 만들 때 세 가지를 넘긴다.
 
-1. `KiottyNetContext` : `KiottyNet_initializeContext()` 로 만든 라이브러리 전역 컨텍스트. 소유 handle 은 모두 같은 context 를 받고, destroy 때도 같은 context 를 넘긴다.
+1. `KiottyNetContext` : `KiottyNet_initializeContext()` 가 돌려주는 `KiottyNetContextResult` 의 `handle`. 라이브러리 전역 컨텍스트다. 실패하면 `code` 가 `KIOTTY_NET_CODE_SUCCESS` 가 아니다. 소유 handle 은 모두 같은 context 를 받고, destroy 때도 같은 context 를 넘긴다.
 2. `KiottyNetServerConfiguration` : 주소와 `max_clients`, 버퍼 크기. `KiottyNet_initializeTcpServerConfiguration(&configuration, host, port)` 또는 `KiottyNet_initializePipeServerConfiguration(&configuration, name)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 따로 만들어 넘기고, 평문이면 `NULL`.
 3. `KiottyNetHttpLimits` : HTTP 층의 고정 크기 버퍼와 timeout. 아래 표.
 
@@ -127,7 +129,7 @@ DB 조회, 리포트 생성처럼 IO Thread 를 붙잡으면 안 되는 일은 b
 규칙은 base 의 Work 와 같다.
 
 - **Work 를 받았으면 반드시 finish 한다.** finish 는 한 번만 유효하고 두 번째는 `KIOTTY_NET_CODE_BUSY`. 소유자가 destroy 된 뒤에 불러도 `KIOTTY_NET_CODE_PEER_CLOSED` 만 돌아온다.
-- finish 전까지 그 연결에는 어떤 콜백도 없다. deadline 도 멈춘다. 라이브러리는 Work 에 timeout 을 두지 않는다. 오래 걸릴 것 같으면 `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 확인한다. 끊겼으면 finish 는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
+- finish 전까지 그 연결에는 어떤 콜백도 없다. deadline 도 멈춘다. 라이브러리는 Work 에 timeout 을 두지 않는다. 오래 걸릴 것 같으면 `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 확인한다. 반환은 `KiottyNetBool` 이고 0 이면 끊겼다 (C++ 의 `connected()` 는 `bool`). 끊겼으면 finish 는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
 - 소유자의 `close()` 는 Work 중인 연결에 FIN 만 보낸다. 연결은 finish 뒤에 닫히고, 그때까지 `run` 은 돌아오지 않는다. 그 finish 는 `KIOTTY_NET_CODE_CLOSED` 를 돌려준다.
 - Work 중에 그 연결로 들어온 notify (WebSocket 송신, broadcast) 는 쌓이기만 하고 finish 뒤에 나간다.
 - `finishHttpWorkWithResponse` 는 응답 버퍼의 내용을 그대로 보낸다. body 가 `response_bytes` 보다 커서 setter 가 `KIOTTY_NET_CODE_BUFFER_FULL` 이었다면 `setHttpBodyRef` 나 `setHttpFile` 로 바꾼다.
@@ -204,7 +206,7 @@ static void onReportWork(KiottyNetAppContext app, const KiottyNetHttpRequest* re
 static void run_job(ReportJob* job)
 {
     KiottyNetSpan json = build_report(job);
-    if (!KiottyNet_isHttpWorkConnected(job->work))
+    if (KiottyNet_isHttpWorkConnected(job->work) == 0)
     {
         KiottyNet_finishHttpWorkWithClose(job->work, KIOTTY_NET_CODE_PEER_CLOSED);
         return;
@@ -215,7 +217,12 @@ static void run_job(ReportJob* job)
 
 int main(void)
 {
-    KiottyNetContext context = KiottyNet_initializeContext();
+    KiottyNetContextResult initialized = KiottyNet_initializeContext();
+    if (initialized.code != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return 1;
+    }
+    KiottyNetContext context = initialized.handle;
 
     KiottyNetServerConfiguration configuration;
     KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", 8080);
@@ -337,5 +344,5 @@ int main()
 
 ### 1.11 아직 없는 것
 
-- WebSocket Upgrade 경로 (`KiottyNet_addWebSocketUpgrade(http_server, ...)`) 는 `kiotty_net_websocket.h` 에 있다.
+- WebSocket Upgrade 경로 (`KiottyNet_addWebSocketUpgrade(http_server, ...)`) 는 아직 어느 헤더에도 없다. WebSocket 은 `kiotty_net_websocket.h` 의 WebSocketServer 를 따로 쓴다.
 - 간단한 CORS 설정, `:id` 파라미터 파싱, 응답 압축, Range 요청, 요청 body 스트리밍은 지원하지 않는다.

@@ -155,3 +155,7 @@ v0 12절의 일곱 가지와 v1 4절의 다섯 가지는 그대로다. 19절로 
 ## 5. 지금 할 일
 
 R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`), 5b (11-07), 6, 7, 7b, 8 (11-09, `docs/progress/261109_progress_base_8.md`) 끝. R8 의 TlsMemory 는 만들었다가 뺐다 (OpenSSL 은 자기 malloc). 6 부터는 설계 v5 의 이름과 폴더로 읽는다 (IoLoop 은 `domain/usecases/io_loop/`, 인자는 `LoopParts`). base 뒤의 첫 backend 는 kqueue (11-09, `docs/progress/261109_progress_base_kqueue.md`). io_uring 은 11-09 (`docs/progress/261109_progress_base_io_uring.md`). StateMachine 층은 `docs/design/design_statemachine_v0.md` (11-09) 의 M1 ~ M5 (11-09 ~ 11-10, `docs/progress/261109_progress_statemachine_m1 ~ m4.md`, `261110_progress_statemachine_m5.md`) 로 끝났고 DV6 / DV12 를 닫았다 (DV13 은 유지). 남은 것은 HTTP 층. MCP 의 Streamable HTTP (SSE 응답, 긴 GET 스트림) 가 되도록 `include/kiotty_net_http.h` 와 `kiotty_net_websocket.h` 를 공개 인터페이스부터 다시 설계한다 (`docs/design/design_http_v0.html`, `design_websocket_v0.html`).
+
+2026-11-10 HTTP 설계 v0 를 고쳤다 (`c0b8933`): 스트림은 Work 스트림 하나, status 와 content type 은 enum, 송신은 한 WRITE 에 send Stage 다음 notify Stage (gather), 송신 timeout 과 `KIOTTY_NET_CODE_PEER_NOT_READING`. 코드로는 base 사이클 B1 이 먼저이고 H1 ~ H6, W1 ~ W5 가 뒤다. design_http_v0.html 10절의 정할 것에 답을 받으면 B1 을 시작한다.
+
+2026-11-11 C ABI 마샬링 수칙 5.7 (`development_rule.md`) 을 더하고 공개 헤더에 적용했다 (`91279fd`): `KiottyNetBool` (`int32_t`) 이 C `bool` 을 대신하고, `KiottyNetConnectionAction` / `KiottyNetConnectionEvent` 의 union `as` 를 순차 필드로 풀었다. H1, W1 의 새 struct 도 5.7 을 따른다.

@@ -830,7 +830,7 @@ struct HttpServer {
 };
 ```
 
-- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration, tls)` 를 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
+- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration, tls).handle` 을 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
 - `sessionBytes(limits) = sizeof(HttpSession) + max_header_bytes + max_headers × sizeof(KiottyNetHttpHeader) + max_body_bytes + response_bytes`. 곱셈과 덧셈은 오버플로를 먼저 검사한다.
 - `KiottyNet_destroyHttpServer` 는 base Server 를 destroy 하고 블록을 돌려준다. run 이 return 한 뒤에만 불린다는 것은 사용자 규칙이다 (base 와 같다).
 
@@ -882,14 +882,12 @@ session 하나의 포인터 넷 (`_header_buffer`, `_headers`, `_body_buffer`, `
 acquire / release 는 2.6 의 `createConnectionContext` / `releaseConnectionContext` 다.
 
 ```cpp
-static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, KiottyNetConnectionHandle connection)
+static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, KiottyNetConnectionInfo)
 {
     HttpServer* server = static_cast<HttpServer*>(app);
     if (server->_free_count == 0) return nullptr;                                // Stateful 계층이 KIOTTY_NET_CODE_SESSION_EXHAUSTED 로 닫는다 (2.5)
     HttpSession* s = &server->_sessions[server->_free[--server->_free_count]];
-    s->_connection = connection;
-    beginRequest(s);                                                             // 4.3. generation 을 올리고 요청 / 응답 필드를 비운다
-    return s;
+    return s;                                                                    // create 는 handle 을 받지 않는다. _connection 과 beginRequest (4.3) 는 CONNECTED action 이 한다
 }
 
 static void releaseSession(KiottyNetAppContext app, KiottyNetConnectionContext session, KiottyNetConnectionHandle)

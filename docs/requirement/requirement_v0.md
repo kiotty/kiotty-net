@@ -57,9 +57,12 @@
 README.md // 빌드에 포함하는 법, 사용법, 버전 관리 있음
 CMakeLists.txt  // 최상위 빌드 스크립트
 include/
-    kiotty-net.h // C interface. C++ interface는 C++로 build 시 포함됨.
+    kiotty_net_base.h          // 1~7절. C interface. C++ interface는 C++로 build 시 포함됨.
+    kiotty_net_statemachine.h  // 8절
+    kiotty_net_http.h          // 9절
+    kiotty_net_websocket.h     // 10절, 11절의 WebSocketClient
 src/ // 
-    kiotty-net.cpp // kiotty-net.h의 구현
+    kiotty_net_base.cpp, kiotty_net_statemachine.cpp, kiotty_net_http.cpp, kiotty_net_websocket.cpp // 각 헤더의 구현
     impl/
         core/
             kiotty-result.hpp // KiottyResult<Value, Code>. 내부 구현 전용. 공개 인터페이스에는 나오지 않는다
@@ -79,10 +82,10 @@ docs/
 
 인터페이스는 C 와 C++ 두 벌이다. 규약은 다음과 같다.
 
-- `include/kiotty-net.h` 하나에 C 인터페이스가 있고, C++ 로 빌드하면 같은 헤더가 C++ 인터페이스를 함께 노출한다.
+- `include/` 의 헤더 네 개 (`kiotty_net_base.h`, `kiotty_net_statemachine.h`, `kiotty_net_http.h`, `kiotty_net_websocket.h`) 에 C 인터페이스가 있고, C++ 로 빌드하면 같은 헤더가 C++ 인터페이스를 함께 노출한다.
 - 두 벌 모두 런타임 동적 할당이 없다. 객체 생성(`KiottyNet_create*`) 시점에 `max_clients` 분량을 한 번 잡고 재사용한다.
-- **thread 규칙.** 모든 콜백은 IO Thread 에서 순서대로 호출되고, Connection / WebSocket / HttpResponse 는 IO Thread 에서만 쓴다.
-  다른 thread 가 할 수 있는 일은 `KiottyNet_notifyConnection`, `KiottyNet_getConnectionInfo`, Work 를 받은 thread 의 `KiottyNet_*ConnectionStream` (5절), 소유자의 `close()`, `await()`, `broadcast` / `notify` 뿐이다.
+- **thread 규칙.** 모든 콜백은 IO Thread 에서 순서대로 호출되고, Connection 과 HttpResponse 는 IO Thread 에서만 쓴다.
+  다른 thread 가 할 수 있는 일은 `KiottyNet_notifyConnection`, `KiottyNet_getConnectionInfo`, Work 를 받은 thread 의 `KiottyNet_*ConnectionStream` (5절) 과 HttpResponse setter, `KiottyNet_finishHttpWork*` (9절), WebSocket 의 `send` / `close` (10절), 소유자의 `close()`, `await()`, `broadcast` / `notify` 뿐이다.
 - 각 절은 **공용 타입 → C 함수 → C++ 래퍼** 순서로 적는다. 이름은 1:1 로 대응한다.
 - **문자열 수명.** 설정 struct (ServerConfig, ClientConfig, TLS 설정) 안의 문자열은 포인터가 아니라 최대 길이가 정해진 `char[]` 에 값으로 들어간다. 사용자는 initialize / configure 함수 (3절) 로 넣고, 그 함수가 길이를 검사하며 복사한다. 함수의 `const char*` 인자는 따로 적지 않는 한 함수가 return 하기 전에 라이브러리 안으로 복사된다. 어느 쪽이든 호출자의 문자열(`std::string` 등)은 호출 뒤 사라져도 된다.
 
@@ -105,7 +108,7 @@ naming 규약 (C, C++ 공통)
    정리하면 **`KiottyNet_` 는 함수 또는 C++ 래퍼 클래스, `KiottyNet` 바로 뒤에 이름이 붙으면 C / C++ 공용 데이터 타입**이다.
 8. handle 은 두 종류이며 둘 다 공용 타입이다.
    - **소유 handle.** 사용자가 `KiottyNet_createX` 로 만들고 `KiottyNet_destroyX` 로 없애는 객체. StreamClient, EventClient, Server, HttpServer, WebSocketServer, HttpClient, WebSocketClient 가 여기에 속한다. `typedef struct KiottyNetServer* KiottyNetServerHandle;` 처럼 불투명 포인터다. C++ 래퍼는 생성자에서 create, 소멸자에서 destroy 를 부르고, 복사는 없고 이동만 있다.
-   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse 가 여기에 속한다. 외부에서는 소유자 포인터와 정수 id 를 나란히 둔 struct 다 (`KiottyNetConnectionHandle { KiottyNetEndpoint* owner; int64_t id; }`). `owner` 는 그 연결을 가진 Server / EventClient 의 불투명 포인터이고 `id` 는 내부에서 `{ int32_t generation; int32_t index; }` 로 해석한다. `owner == NULL` 또는 `id == 0` 은 무효 (`KIOTTY_NET_CODE_INVALID_ARGUMENT`). 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 id 가 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_NET_CODE_PEER_CLOSED`). 소유자를 destroy 해도 `owner` 포인터는 `releaseContext` 전까지 유효하다 (은퇴할 뿐 해제되지 않는다). 그래서 handle 은 복사해 두어도 되고 다른 thread 에 넘겨도 된다. C 에서 두 handle 이 같은지는 `owner` 와 `id` 둘을 비교한다. C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만들고 `operator==` / `operator<` 가 있어 map 의 key 가 된다. HttpResponse 와 WebSocket 의 handle 은 그 절의 모양 (`int64_t`) 그대로이고, base 가 끝난 뒤 같은 struct 모양으로 맞춘다. 예외는 `KiottyNet_ConnectionStream` 하나다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS))` 로 닫는다 (5절).
+   - **pool handle.** 소유자의 pool 안에 할당되는 per-connection 객체. Connection, ConnectionStream, WebSocket, HttpResponse, HttpWork 가 여기에 속한다. 외부에서는 소유자 포인터와 정수 id 를 나란히 둔 struct 다 (`KiottyNetConnectionHandle { KiottyNetEndpoint* owner; int64_t id; }`). `owner` 는 그 연결을 가진 Server / EventClient 의 불투명 포인터이고 `id` 는 내부에서 `{ int32_t generation; int32_t index; }` 로 해석한다. `owner == NULL` 또는 `id == 0` 은 무효 (`KIOTTY_NET_CODE_INVALID_ARGUMENT`). 연결이 닫히면 generation 이 바뀌므로 같은 slot 이라도 id 가 달라지고, 닫힌 handle 로 부른 함수는 아무 일도 하지 않는다 (코드를 돌려주는 함수는 `KIOTTY_NET_CODE_PEER_CLOSED`). 소유자를 destroy 해도 `owner` 포인터는 `releaseContext` 전까지 유효하다 (은퇴할 뿐 해제되지 않는다). 그래서 handle 은 복사해 두어도 되고 다른 thread 에 넘겨도 된다. C 에서 두 handle 이 같은지는 `owner` 와 `id` 둘을 비교한다. C++ 래퍼는 소유하지 않는 값 타입이며 콜백 안에서 handle 로 만들고 `operator==` / `operator<` 가 있어 map 의 key 가 된다. HttpResponse 와 HttpWork 의 handle 은 같은 모양의 `{ KiottyNetHttpServerHandle server; int64_t id; }` 이다 (9절). WebSocket 의 handle 은 10절의 모양 (`int64_t`) 그대로이고, 나중에 같은 struct 모양으로 맞춘다. 예외는 `KiottyNet_ConnectionStream` 과 `KiottyNet_HttpWork` 둘이다. Stream 은 "close 할 의무" 를 소유하므로 이동만 되고, 소멸자가 close 하지 않은 Stream 을 `KiottyNet_closeConnectionStream(stream, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS))` 로 닫는다 (5절). HttpWork 도 "finish 할 의무" 를 소유하며 소멸자가 `finishWithClose()` 를 부른다 (9절).
 
 공통 타입
 
@@ -179,9 +182,9 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 16 KiB. 빌드 설정으로 바꾸지 않는다. `KiottyNet_serverMemorySize(config)` 와 `KiottyNet_clientMemorySize(config)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 16 KiB. 빌드 설정으로 바꾸지 않는다. `KiottyNet_serverMemorySize(configuration)` 와 `KiottyNet_clientMemorySize(configuration)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_NET_CODE_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
-- handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `explicit operator bool` 과 `code()` 로 보여준다 (판 v1, 2026-11-09. 전에는 `valid()`).
+- handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `explicit operator bool` 과 `code()` 로 보여준다 (판 v1, 2026-11-09. 전에는 `valid()`). 예외로 HttpServer, WebSocketServer, WebSocketClient 의 create 는 아직 handle 만 돌려주고 (실패하면 NULL), C++ 래퍼에는 `explicit operator bool` 만 있다 (9, 10절).
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
 
 ```c
@@ -189,6 +192,27 @@ typedef struct KiottyNetResult {
     int32_t       bytes;   /* 전달 또는 송신한 길이. 에러면 0 */
     KiottyNetCode code;
 } KiottyNetResult;
+
+typedef struct KiottyNetContextImpl* KiottyNetContext;
+typedef struct KiottyNetContextResult { KiottyNetCode code; KiottyNetContext handle; } KiottyNetContextResult;
+KiottyNetContextResult KiottyNet_initializeContext(void);
+void                   KiottyNet_releaseContext(KiottyNetContext context);
+
+size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* configuration);
+size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* configuration);
+```
+
+```cpp
+class KiottyNet_Context {                            // KiottyNet_initializeContext / KiottyNet_releaseContext. 복사 없음, 이동만
+public:
+    KiottyNet_Context();
+    KiottyNet_Context(KiottyNet_Context&& other);
+    KiottyNet_Context& operator=(KiottyNet_Context&& other);
+    ~KiottyNet_Context();
+    explicit operator bool() const;
+    KiottyNetCode    code() const;
+    KiottyNetContext handle() const;
+};
 ```
 
 ### 3. Configuration 구성 방식
@@ -233,7 +257,7 @@ typedef enum KiottyNetTlsV13CipherSuite {
    - `KiottyNet_configureXxx` 는 항목 하나를 바꾼다. 서로 묶여야 하는 값 (클라이언트 인증 방식과 trust store 등) 은 한 configure 의 인자로 같이 받는다. 그래서 configure 하나가 성공하면 설정 전체도 여전히 유효하다.
    - 모든 함수는 `KiottyNetCode` 를 돌려준다. 값이 잘못되면 struct 를 바꾸지 않고 에러를 돌려준다. 잘못된 값은 `KIOTTY_NET_CODE_INVALID_ARGUMENT` (NULL, 빈 문자열, 최대 길이 초과, 모르는 비트, 0 이면 안 되는 값), 없는 파일이나 디렉토리는 `KIOTTY_NET_CODE_NOT_FOUND` 다.
    - struct 의 `initialization_mark` 는 initialize 가 쓰는 표식이다. initialize 하지 않은 struct 를 configure 하거나 create 에 넘기면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` (create 는 handle NULL) 다.
-   - C++ 의 `KiottyNet_XxxConfigBuilder` 는 외부 struct 를 참조로 받아서 생성 시점에 initialize 를 부르고, 각 메서드는 configure 하나를 부른다. 처음 실패한 코드를 기억해 두었다가 `build()` 가 돌려준다.
+   - C++ 의 `KiottyNet_XxxConfigurationBuilder` 는 외부 struct 를 참조로 받아서 생성 시점에 initialize 를 부르고, 각 메서드는 configure 하나를 부른다. 처음 실패한 코드를 기억해 두었다가 `build()` 가 돌려준다.
 
 5. Endpoint 와 Server / Client 설정. TLS 여부는 여기에 없다 (2번).
    create 함수는 설정 struct 를 통째로 복사해 두므로 설정 struct 는 create 뒤 사라져도 된다. 크기는 각각 약 0.3 KiB 이며 대부분 `host` 버퍼다.
@@ -247,6 +271,11 @@ typedef struct KiottyNetAddress {
     uint16_t           port;                           /* Pipe 면 0 */
 } KiottyNetAddress;
 
+typedef enum KiottyNetNoDelay {                        /* TCP_NODELAY. C ABI 에 bool 을 쓰지 않으므로 enum 이다 (수칙 5.7) */
+    KIOTTY_NET_NO_DELAY_OFF,
+    KIOTTY_NET_NO_DELAY_ON
+} KiottyNetNoDelay;
+
 typedef struct KiottyNetServerConfiguration {
     uint32_t          initialization_mark;
     KiottyNetAddress address;
@@ -254,7 +283,7 @@ typedef struct KiottyNetServerConfiguration {
     size_t            receive_capacity;    /* 기본 4 KiB, 상한 64 KiB. Connection 당 수신 Stage 크기. create 때 이만큼 잡는다 */
     size_t            send_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
-    bool              no_delay;         /* 기본 true. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
+    KiottyNetNoDelay  no_delay;         /* 기본 KIOTTY_NET_NO_DELAY_ON. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
 } KiottyNetServerConfiguration;
 
 typedef struct KiottyNetClientConfiguration {
@@ -266,47 +295,47 @@ typedef struct KiottyNetClientConfiguration {
     uint32_t          connect_timeout_milliseconds;/* 기본 5000 */
     uint32_t          max_trial;         /* 기본 1. 연결 시도 횟수 */
     uint32_t          trial_interval_milliseconds; /* 기본 1000. 시도 간격 */
-    bool              no_delay;          /* 기본 true. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
+    KiottyNetNoDelay  no_delay;          /* 기본 KIOTTY_NET_NO_DELAY_ON. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
 } KiottyNetClientConfiguration;
 
-KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* config, const char* host, uint16_t port);   /* port != 0 */
-KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfiguration* config, const char* pipe_name);
-KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* config, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* config, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 상한 (수신 64 KiB, 송신 16 KiB, push 16 KiB) 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
-KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* config, bool no_delay);
+KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* configuration, const char* host, uint16_t port);   /* port != 0 */
+KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfiguration* configuration, const char* pipe_name);
+KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* configuration, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 상한 (수신 64 KiB, 송신 16 KiB, push 16 KiB) 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
+KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration, KiottyNetNoDelay no_delay);            /* 모르는 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 
-KiottyNetCode KiottyNet_initializeTcpClientConfiguration(KiottyNetClientConfiguration* config, const char* host, uint16_t port);
-KiottyNetCode KiottyNet_initializePipeClientConfiguration(KiottyNetClientConfiguration* config, const char* pipe_name);
-KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* config, size_t receive_capacity, size_t send_capacity, size_t push_capacity);
-KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* config, uint32_t timeout_milliseconds);
-KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* config, uint32_t max_trial, uint32_t trial_interval_milliseconds);   /* max_trial >= 1 */
-KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* config, bool no_delay);
+KiottyNetCode KiottyNet_initializeTcpClientConfiguration(KiottyNetClientConfiguration* configuration, const char* host, uint16_t port);
+KiottyNetCode KiottyNet_initializePipeClientConfiguration(KiottyNetClientConfiguration* configuration, const char* pipe_name);
+KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* configuration, size_t receive_capacity, size_t send_capacity, size_t push_capacity);
+KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration, uint32_t timeout_milliseconds);
+KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration, uint32_t max_trial, uint32_t trial_interval_milliseconds);   /* max_trial >= 1 */
+KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration, KiottyNetNoDelay no_delay);
 ```
 
 ```cpp
 class KiottyNet_ServerConfigurationBuilder {
 public:
-    static KiottyNet_ServerConfigurationBuilder tcp(KiottyNetServerConfiguration& config, const char* host, uint16_t port);   // KiottyNet_initializeTcpServerConfiguration
-    static KiottyNet_ServerConfigurationBuilder pipe(KiottyNetServerConfiguration& config, const char* pipe_name);
+    static KiottyNet_ServerConfigurationBuilder tcp(KiottyNetServerConfiguration& configuration, const char* host, uint16_t port);   // KiottyNet_initializeTcpServerConfiguration
+    static KiottyNet_ServerConfigurationBuilder pipe(KiottyNetServerConfiguration& configuration, const char* pipe_name);
     KiottyNet_ServerConfigurationBuilder& maxClients(size_t max_clients);
     KiottyNet_ServerConfigurationBuilder& bufferCapacity(size_t receive_capacity, size_t send_capacity, size_t push_capacity);
-    KiottyNet_ServerConfigurationBuilder& noDelay(bool no_delay);
+    KiottyNet_ServerConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
     KiottyNetCode build() const;                                                                                  // 처음 실패한 코드
 };
 
 class KiottyNet_ClientConfigurationBuilder {
 public:
-    static KiottyNet_ClientConfigurationBuilder tcp(KiottyNetClientConfiguration& config, const char* host, uint16_t port);
-    static KiottyNet_ClientConfigurationBuilder pipe(KiottyNetClientConfiguration& config, const char* pipe_name);
+    static KiottyNet_ClientConfigurationBuilder tcp(KiottyNetClientConfiguration& configuration, const char* host, uint16_t port);
+    static KiottyNet_ClientConfigurationBuilder pipe(KiottyNetClientConfiguration& configuration, const char* pipe_name);
     KiottyNet_ClientConfigurationBuilder& bufferCapacity(size_t receive_capacity, size_t send_capacity, size_t push_capacity);
     KiottyNet_ClientConfigurationBuilder& connectTimeout(uint32_t timeout_milliseconds);
     KiottyNet_ClientConfigurationBuilder& retry(uint32_t max_trial, uint32_t trial_interval_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& noDelay(bool no_delay);
+    KiottyNet_ClientConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
     KiottyNetCode build() const;
 };
 ```
 
-6. TLS 설정. ServerConfig / ClientConfig 와 **따로** create 함수에 넘긴다 (`const KiottyNetTls*Config* tls`, 평문이면 NULL).
+6. TLS 설정. ServerConfig / ClientConfig 와 **따로** create 함수에 넘긴다 (`const KiottyNetTls*Configuration* tls`, 평문이면 NULL).
    C++ 래퍼는 NULL 포인터 대신 생성자 오버로드 두 개를 둔다. TLS 설정을 `const&` 로 받는 것이 TLS, 받지 않는 것이 평문이다.
    create 가 return 하기 전에 복사하므로 포인터는 create 호출 동안만 유효하면 된다. TLS 를 쓰지 않는 사용자는 TLS 설정 크기(약 0.9 KiB)를 부담하지 않는다.
 
@@ -324,8 +353,14 @@ typedef enum KiottyNetClientAuthentication {       /* 서버가 클라이언트 
     KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED
 } KiottyNetClientAuthentication;
 
+typedef enum KiottyNetTlsVerification {            /* 클라이언트가 서버를 검증하는 정도. 0 인 첫 값이 가장 안전하다 */
+    KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME,   /* 기본. 인증서 체인 + hostname. Pipe 면 hostname 은 보지 않는다 */
+    KIOTTY_NET_TLS_VERIFICATION_SERVER,                /* 인증서 체인만 */
+    KIOTTY_NET_TLS_VERIFICATION_NONE                   /* 개발용 */
+} KiottyNetTlsVerification;
+
 typedef struct KiottyNetTlsIdentity {    /* 자기 신원. 빈 문자열 == 지정 안 함 */
-    char cert_file[KIOTTY_NET_MAX_PATH_LENGTH];
+    char certificate_file[KIOTTY_NET_MAX_PATH_LENGTH];
     char key_file[KIOTTY_NET_MAX_PATH_LENGTH];
     char key_password[KIOTTY_NET_MAX_PASSWORD_LENGTH];
 } KiottyNetTlsIdentity;
@@ -345,32 +380,31 @@ typedef struct KiottyNetTlsClientConfiguration {
     uint32_t             versions;
     uint32_t             v12_cipher_suites;
     uint32_t             v13_cipher_suites;
-    int                  skip_server_verification;     /* 0 으로 채워진 설정이 안전하도록 skip 으로 이름 붙인다 */
-    int                  skip_hostname_verification;   /* Pipe 면 무시 */
+    KiottyNetTlsVerification verification;             /* 기본 KIOTTY_NET_TLS_VERIFICATION_SERVER_AND_HOSTNAME */
     char                 trust_store_path[KIOTTY_NET_MAX_PATH_LENGTH];   /* 빈 문자열이면 OS 기본 저장소 */
     KiottyNetTlsIdentity identity;
 } KiottyNetTlsClientConfiguration;
 
-KiottyNetCode KiottyNet_initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration* config, const char* cert_file, const char* key_file, const char* key_password);   /* key_password 는 NULL 가능 */
-KiottyNetCode KiottyNet_configureTlsServerVersions(KiottyNetTlsServerConfiguration* config, bool tls_1_2, bool tls_1_3);                 /* 둘 다 false 면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureTlsServerV12CipherSuites(KiottyNetTlsServerConfiguration* config, uint32_t suites);                     /* 0 이거나 모르는 비트면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureTlsServerV13CipherSuites(KiottyNetTlsServerConfiguration* config, uint32_t suites);
-KiottyNetCode KiottyNet_configureTlsServerClientAuthentication(KiottyNetTlsServerConfiguration* config, KiottyNetClientAuthentication mode, const char* trust_store_path);   /* mode == NONE 이면 trust_store_path 는 NULL */
+KiottyNetCode KiottyNet_initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration* configuration, const char* certificate_file, const char* key_file, const char* key_password);   /* key_password 는 NULL 가능 */
+KiottyNetCode KiottyNet_configureTlsServerVersions(KiottyNetTlsServerConfiguration* configuration, uint32_t versions);                  /* KiottyNetTlsVersion 비트 합. 0 이거나 모르는 비트면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureTlsServerV12CipherSuites(KiottyNetTlsServerConfiguration* configuration, uint32_t suites);              /* 0 이거나 모르는 비트면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureTlsServerV13CipherSuites(KiottyNetTlsServerConfiguration* configuration, uint32_t suites);
+KiottyNetCode KiottyNet_configureTlsServerClientAuthentication(KiottyNetTlsServerConfiguration* configuration, KiottyNetClientAuthentication mode, const char* trust_store_path);   /* mode == NONE 이면 trust_store_path 는 NULL */
 
-KiottyNetCode KiottyNet_initializeTlsClientConfiguration(KiottyNetTlsClientConfiguration* config);
-KiottyNetCode KiottyNet_configureTlsClientVersions(KiottyNetTlsClientConfiguration* config, bool tls_1_2, bool tls_1_3);
-KiottyNetCode KiottyNet_configureTlsClientV12CipherSuites(KiottyNetTlsClientConfiguration* config, uint32_t suites);
-KiottyNetCode KiottyNet_configureTlsClientV13CipherSuites(KiottyNetTlsClientConfiguration* config, uint32_t suites);
-KiottyNetCode KiottyNet_configureTlsClientTrustStore(KiottyNetTlsClientConfiguration* config, const char* trust_store_path);                 /* OS 기본 저장소 대신 CA 파일 또는 디렉토리 */
-KiottyNetCode KiottyNet_configureTlsClientVerification(KiottyNetTlsClientConfiguration* config, bool verify_server, bool verify_hostname);   /* verify_server == false 는 개발용. 서버를 검증하지 않으면서 hostname 만 검증하면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfiguration* config, const char* cert_file, const char* key_file, const char* key_password);   /* 서버가 클라이언트 인증을 요구할 때 */
+KiottyNetCode KiottyNet_initializeTlsClientConfiguration(KiottyNetTlsClientConfiguration* configuration);
+KiottyNetCode KiottyNet_configureTlsClientVersions(KiottyNetTlsClientConfiguration* configuration, uint32_t versions);
+KiottyNetCode KiottyNet_configureTlsClientV12CipherSuites(KiottyNetTlsClientConfiguration* configuration, uint32_t suites);
+KiottyNetCode KiottyNet_configureTlsClientV13CipherSuites(KiottyNetTlsClientConfiguration* configuration, uint32_t suites);
+KiottyNetCode KiottyNet_configureTlsClientTrustStore(KiottyNetTlsClientConfiguration* configuration, const char* trust_store_path);          /* OS 기본 저장소 대신 CA 파일 또는 디렉토리 */
+KiottyNetCode KiottyNet_configureTlsClientVerification(KiottyNetTlsClientConfiguration* configuration, KiottyNetTlsVerification verification);   /* KIOTTY_NET_TLS_VERIFICATION_NONE 은 개발용. 모르는 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfiguration* configuration, const char* certificate_file, const char* key_file, const char* key_password);   /* 서버가 클라이언트 인증을 요구할 때 */
 ```
 
 ```cpp
 class KiottyNet_TlsServerConfigurationBuilder {
 public:
-    KiottyNet_TlsServerConfigurationBuilder(KiottyNetTlsServerConfiguration& config, const char* cert_file, const char* key_file, const char* key_password = nullptr);
-    KiottyNet_TlsServerConfigurationBuilder& versions(bool tls_1_2, bool tls_1_3);
+    KiottyNet_TlsServerConfigurationBuilder(KiottyNetTlsServerConfiguration& configuration, const char* certificate_file, const char* key_file, const char* key_password = nullptr);
+    KiottyNet_TlsServerConfigurationBuilder& versions(uint32_t versions);
     KiottyNet_TlsServerConfigurationBuilder& v12CipherSuites(uint32_t suites);
     KiottyNet_TlsServerConfigurationBuilder& v13CipherSuites(uint32_t suites);
     KiottyNet_TlsServerConfigurationBuilder& clientAuthentication(KiottyNetClientAuthentication mode, const char* trust_store_path);
@@ -379,13 +413,13 @@ public:
 
 class KiottyNet_TlsClientConfigurationBuilder {
 public:
-    explicit KiottyNet_TlsClientConfigurationBuilder(KiottyNetTlsClientConfiguration& config);
-    KiottyNet_TlsClientConfigurationBuilder& versions(bool tls_1_2, bool tls_1_3);
+    explicit KiottyNet_TlsClientConfigurationBuilder(KiottyNetTlsClientConfiguration& configuration);
+    KiottyNet_TlsClientConfigurationBuilder& versions(uint32_t versions);
     KiottyNet_TlsClientConfigurationBuilder& v12CipherSuites(uint32_t suites);
     KiottyNet_TlsClientConfigurationBuilder& v13CipherSuites(uint32_t suites);
     KiottyNet_TlsClientConfigurationBuilder& trustStore(const char* trust_store_path);
-    KiottyNet_TlsClientConfigurationBuilder& verification(bool verify_server, bool verify_hostname);
-    KiottyNet_TlsClientConfigurationBuilder& identity(const char* cert_file, const char* key_file, const char* key_password = nullptr);
+    KiottyNet_TlsClientConfigurationBuilder& verification(KiottyNetTlsVerification verification);
+    KiottyNet_TlsClientConfigurationBuilder& identity(const char* certificate_file, const char* key_file, const char* key_password = nullptr);
     KiottyNetCode build() const;
 };
 ```
@@ -401,7 +435,7 @@ if (code != KIOTTY_NET_CODE_SUCCESS) { }
 
 KiottyNetTlsServerConfiguration tls;
 code = KiottyNet_TlsServerConfigurationBuilder(tls, settings.certPath().c_str(), settings.keyPath().c_str())   // std::string 도 그대로. 함수 안에서 복사된다
-    .versions(false, true)
+    .versions(KIOTTY_NET_TLS_VERSION_V13)
     .clientAuthentication(KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED, "./ca/")
     .build();
 if (code != KIOTTY_NET_CODE_SUCCESS) { }
@@ -422,7 +456,7 @@ if (KiottyNet_configureServerMaxClients(&config, 16) != KIOTTY_NET_CODE_SUCCESS)
 
 KiottyNetTlsServerConfiguration tls;
 if (KiottyNet_initializeTlsServerConfiguration(&tls, cert_path, key_path, NULL) != KIOTTY_NET_CODE_SUCCESS) { }
-if (KiottyNet_configureTlsServerVersions(&tls, false, true) != KIOTTY_NET_CODE_SUCCESS) { }
+if (KiottyNet_configureTlsServerVersions(&tls, KIOTTY_NET_TLS_VERSION_V13) != KIOTTY_NET_CODE_SUCCESS) { }
 if (KiottyNet_configureTlsServerClientAuthentication(&tls, KIOTTY_NET_CLIENT_AUTHENTICATION_REQUIRED, "./ca/") != KIOTTY_NET_CODE_SUCCESS) { }
 
 KiottyNetServerResult secure = KiottyNet_createServer(context, &config, &tls);
@@ -617,21 +651,21 @@ KiottyNetConnectionDecision KiottyNet_ignoreConnection(void);
 
 typedef struct KiottyNetConnectionHandler {
     KiottyNetConnectionDecision (*onConnected)   (KiottyNetAppContext app_context, KiottyNetConnectionInfo info);                                                       /* handle 은 아직 없다 */
-    KiottyNetConnectionAction   (*onReady)       (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c);                                          /* handshake 뒤 (평문은 바로). 첫 action */
-    KiottyNetConnectionAction   (*onRead)        (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c, KiottyNetSpan data);                      /* data 는 수신 Stage. return 하면 무효 */
-    KiottyNetConnectionAction   (*onWritten)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c, size_t length);                           /* write 하나의 완료 */
-    KiottyNetConnectionAction   (*onTimeout)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c);                                          /* action 의 timeout_milliseconds 만료 */
+    KiottyNetConnectionAction   (*onReady)       (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);                                          /* handshake 뒤 (평문은 바로). 첫 action */
+    KiottyNetConnectionAction   (*onRead)        (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetSpan data);                      /* data 는 수신 Stage. return 하면 무효 */
+    KiottyNetConnectionAction   (*onWritten)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, size_t length);                           /* write 하나의 완료 */
+    KiottyNetConnectionAction   (*onTimeout)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);                                          /* action 의 timeout_milliseconds 만료 */
     void                        (*onWorkStarted) (KiottyNetConnectionContext connection_context, KiottyNetConnectionStream stream);                                       /* 이 순간부터 closeConnectionStream 까지 연결은 worker 의 것 */
-    void                        (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle c, KiottyNetCode reason);   /* 마지막 콜백 */
+    void                        (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetCode reason);   /* 마지막 콜백 */
     void                        (*onError)       (KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);         /* info 는 상대. 연결 없는 오류는 소유자의 address. message 는 static */
 } KiottyNetConnectionHandler;
 
-KiottyNetConnectionInfo KiottyNet_getConnectionInfo(KiottyNetConnectionHandle c);   /* 아무 thread. 값으로 돌려준다. 닫힌 handle 이면 0 으로 채운 값 */
+KiottyNetConnectionInfo KiottyNet_getConnectionInfo(KiottyNetConnectionHandle connection);   /* 아무 thread. 값으로 돌려준다. 닫힌 handle 이면 0 으로 채운 값 */
 
 /* 아무 thread 에서나. 이 연결의 notify Stage 로 data 를 복사하고 바로 돌아온다 (4절). 돌아온 뒤 data 는 버려도 된다. 완료 콜백은 없다.
    action 을 return 하지 않고 보내는 유일한 길이다. Work 중인 연결에도 들어간다.
    여유가 없으면 KIOTTY_NET_CODE_BUFFER_FULL 이고 아무것도 넣지 않으며 연결은 유지된다. 닫힌 handle 이면 KIOTTY_NET_CODE_PEER_CLOSED */
-KiottyNetCode KiottyNet_notifyConnection(KiottyNetConnectionHandle c, KiottyNetSpan data);
+KiottyNetCode KiottyNet_notifyConnection(KiottyNetConnectionHandle connection, KiottyNetSpan data);
 
 /* 동기 통로. Work 를 받은 thread 만. IO Thread 에서 부르면 KIOTTY_NET_CODE_BUSY */
 KiottyNetResult KiottyNet_readConnectionStream     (KiottyNetConnectionStream stream, void* buffer, size_t length, uint32_t timeout_milliseconds);
@@ -649,6 +683,7 @@ public:
     KiottyNetConnectionInfo   info() const;
     KiottyNetCode             notify(KiottyNetSpan data);
     bool operator==(const KiottyNet_Connection& other) const;   // owner 와 id 둘 다 같다
+    bool operator!=(const KiottyNet_Connection& other) const;
     bool operator<(const KiottyNet_Connection& other) const;    // owner (std::less), 그 다음 id. std::map 의 key 로 쓴다
 };
 
@@ -656,6 +691,7 @@ class KiottyNet_ConnectionStream {                 // close 의무를 소유한�
 public:
     explicit KiottyNet_ConnectionStream(KiottyNetConnectionStream stream);
     KiottyNet_ConnectionStream(KiottyNet_ConnectionStream&& other);
+    KiottyNet_ConnectionStream& operator=(KiottyNet_ConnectionStream&& other);   // 받는 쪽이 아직 close 하지 않았으면 먼저 소멸자와 같이 닫는다
     ~KiottyNet_ConnectionStream();                 // 아직 close 하지 않았으면 close(KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS))
     KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
     KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
@@ -726,12 +762,10 @@ for (Session* s : app.sessions.live()) { KiottyNet_Connection(s->connection).not
 ```cpp
 class KiottyNet_StreamClient {
 public:
-    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& config);   // KiottyNet_createStreamClient
-    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& config, const KiottyNetTlsClientConfiguration& tls);   // TLS
-    ~KiottyNet_StreamClient();                                              // KiottyNet_destroyStreamClient
-    KiottyNet_StreamClient(KiottyNet_StreamClient&& other);                 // handle 이동. 복사는 없다
-    KiottyNet_StreamClient& operator=(KiottyNet_StreamClient&& other);
-    bool valid() const;                                                     // create 가 실패하면 false. 예외는 없다
+    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration);   // KiottyNet_createStreamClient
+    KiottyNet_StreamClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetTlsClientConfiguration& tls);   // TLS
+    // 소멸자 (KiottyNet_destroyStreamClient) 와 이동은 멤버 kiotty::net::OwnedHandle<KiottyNetStreamClientHandle, KiottyNet_destroyStreamClient> 가 맡는다. 복사는 없다
+    explicit operator bool() const;                                         // create 가 실패하면 false. 예외는 없다
     KiottyNetCode code() const;                                             // create 의 Result.code. 실패 이유
     KiottyNetStreamClientHandle handle() const;
     // 이하 메서드는 같은 이름의 C 함수를 그대로 부른다
@@ -745,30 +779,30 @@ public:
 ```c
 typedef struct KiottyNetStreamClient* KiottyNetStreamClientHandle;
 typedef struct KiottyNetStreamClientResult { KiottyNetCode code; KiottyNetStreamClientHandle handle; } KiottyNetStreamClientResult;
-KiottyNetStreamClientResult KiottyNet_createStreamClient(KiottyNetContext context, const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls);   /* 설정 오류나 메모리 부족이면 handle NULL, code 가 이유 */
-void            KiottyNet_destroyStreamClient(KiottyNetContext context, KiottyNetStreamClientHandle c);
-KiottyNetCode   KiottyNet_connectStreamClient(KiottyNetStreamClientHandle c);                  /* max_trial / trial_interval_milliseconds 만큼 재시도 */
-void            KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle c);
-KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle c, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 최대 length. 0 바이트면 KIOTTY_NET_CODE_PEER_CLOSED */
-KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle c, KiottyNetSpan data, uint32_t timeout_milliseconds);
+KiottyNetStreamClientResult KiottyNet_createStreamClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls);   /* 설정 오류나 메모리 부족이면 handle NULL, code 가 이유 */
+void            KiottyNet_destroyStreamClient(KiottyNetContext context, KiottyNetStreamClientHandle client);
+KiottyNetCode   KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client);                  /* max_trial / trial_interval_milliseconds 만큼 재시도 */
+void            KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client);
+KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 최대 length. 0 바이트면 KIOTTY_NET_CODE_PEER_CLOSED */
+KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client, KiottyNetSpan data, uint32_t timeout_milliseconds);
 
 typedef struct KiottyNetEventClient* KiottyNetEventClientHandle;
 typedef struct KiottyNetEventClientResult { KiottyNetCode code; KiottyNetEventClientHandle handle; } KiottyNetEventClientResult;
-KiottyNetEventClientResult KiottyNet_createEventClient(KiottyNetContext context, const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls);
-void          KiottyNet_destroyEventClient(KiottyNetContext context, KiottyNetEventClientHandle c);
-KiottyNetCode KiottyNet_runEventClient(KiottyNetEventClientHandle c, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);   /* 연결 (max_trial 만큼 재시도) 후 loop. 연결되면 onConnected, onReady */
-void          KiottyNet_closeEventClient(KiottyNetEventClientHandle c);
-KiottyNetCode KiottyNet_awaitEventClient(KiottyNetEventClientHandle c, uint64_t timeout_milliseconds);
-KiottyNetConnectionHandle KiottyNet_getEventClientConnection(KiottyNetEventClientHandle c);   /* onReady 전이면 0 */
+KiottyNetEventClientResult KiottyNet_createEventClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls);
+void          KiottyNet_destroyEventClient(KiottyNetContext context, KiottyNetEventClientHandle client);
+KiottyNetCode KiottyNet_runEventClient(KiottyNetEventClientHandle client, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);   /* 연결 (max_trial 만큼 재시도) 후 loop. 연결되면 onConnected, onReady */
+void          KiottyNet_closeEventClient(KiottyNetEventClientHandle client);
+KiottyNetCode KiottyNet_awaitEventClient(KiottyNetEventClientHandle client, uint64_t timeout_milliseconds);
+KiottyNetConnectionHandle KiottyNet_getEventClientConnection(KiottyNetEventClientHandle client);   /* onReady 전이면 0 */
 /* EventClient 가 가진 연결 하나의 KiottyNet_notifyConnection 이다. 규칙도 같다. 연결 전이면 KIOTTY_NET_CODE_PEER_CLOSED */
-KiottyNetCode KiottyNet_notifyEventClient(KiottyNetEventClientHandle c, KiottyNetSpan data);
+KiottyNetCode KiottyNet_notifyEventClient(KiottyNetEventClientHandle client, KiottyNetSpan data);
 ```
 
 ```cpp
 class KiottyNet_EventClient {                      // 골격은 KiottyNet_StreamClient 와 같다
 public:
-    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& config);
-    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& config, const KiottyNetTlsClientConfiguration& tls);   // TLS
+    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration);
+    KiottyNet_EventClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetTlsClientConfiguration& tls);   // TLS
     KiottyNetCode run(const KiottyNetConnectionHandler& handler, KiottyNetAppContext app_context);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
@@ -813,23 +847,23 @@ io.join();
 ```c
 typedef struct KiottyNetServer* KiottyNetServerHandle;
 typedef struct KiottyNetServerResult { KiottyNetCode code; KiottyNetServerHandle handle; } KiottyNetServerResult;
-KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context, const KiottyNetServerConfiguration* config, const KiottyNetTlsServerConfiguration* tls);   /* 실패하면 handle NULL, code 가 이유 */
-void          KiottyNet_destroyServer(KiottyNetContext context, KiottyNetServerHandle s);
-KiottyNetCode KiottyNet_runServer(KiottyNetServerHandle s, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);   /* bind + listen 후 loop */
-void          KiottyNet_closeServer(KiottyNetServerHandle s);
-KiottyNetCode KiottyNet_awaitServer(KiottyNetServerHandle s, uint64_t timeout_milliseconds);
+KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls);   /* 실패하면 handle NULL, code 가 이유 */
+void          KiottyNet_destroyServer(KiottyNetContext context, KiottyNetServerHandle server);
+KiottyNetCode KiottyNet_runServer(KiottyNetServerHandle server, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);   /* bind + listen 후 loop */
+void          KiottyNet_closeServer(KiottyNetServerHandle server);
+KiottyNetCode KiottyNet_awaitServer(KiottyNetServerHandle server, uint64_t timeout_milliseconds);
 
 /* 아무 thread 에서나. onReady 가 나간 모든 연결 (Work 중인 연결 포함) 의 notify Stage 에 data 를 복사하고 바로 돌아온다 (5절 notifyConnection).
    돌아온 시점에 복사는 끝났고 data 는 버려도 된다. 완료 콜백은 없다. socket 으로 나가는 것은 IO Thread 가 평소처럼 한다.
    하나라도 여유가 없으면 아무 데도 넣지 않고 KIOTTY_NET_CODE_BUFFER_FULL. 연결은 끊지 않는다. 연결이 없으면 KIOTTY_NET_CODE_SUCCESS */
-KiottyNetCode KiottyNet_broadcastServer(KiottyNetServerHandle s, KiottyNetSpan data);
+KiottyNetCode KiottyNet_broadcastServer(KiottyNetServerHandle server, KiottyNetSpan data);
 ```
 
 ```cpp
 class KiottyNet_Server {
 public:
-    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& config);
-    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& config, const KiottyNetTlsServerConfiguration& tls);   // TLS
+    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& configuration);
+    KiottyNet_Server(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetTlsServerConfiguration& tls);   // TLS
     KiottyNetCode run(const KiottyNetConnectionHandler& handler, KiottyNetAppContext app_context);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
@@ -882,7 +916,7 @@ typedef struct KiottyNetTransition {
     KiottyNetConnectionAction entry_action;   /* 5절의 action 함수로 만든다. timeout_milliseconds 가 시간이 들어오는 유일한 입구 */
 } KiottyNetTransition;
 
-typedef KiottyNetTransition (*KiottyNetTransitionAction)(KiottyNetConnectionContext session, KiottyNetConnectionHandle c, KiottyNetConnectionEvent event);
+typedef KiottyNetTransition (*KiottyNetTransitionAction)(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event);
 
 typedef struct KiottyNetNextStates {
     int32_t  at[KIOTTY_NET_MAX_NEXT];                      /* 갈 수 있는 다음 상태. release 에서도 검사 */
@@ -906,7 +940,7 @@ typedef struct KiottyNetStatefulAppContext {
     KiottyNetAppContext          app_context;              /* create / release 가 받는다 */
     const KiottyNetStateMachine* machine;
     KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);                               /* 연결마다 Session 하나. NULL 이면 받지 않는다 (ignore) */
-    void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle c);              /* CLOSED 행 뒤에 */
+    void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);              /* CLOSED 행 뒤에 */
     void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);                         /* 표 밖의 일. NULL 이면 부르지 않는다 */
 } KiottyNetStatefulAppContext;
 ```
@@ -1001,14 +1035,16 @@ std::thread                 io([&] { KiottyNet_runStatefulServer(server.handle()
 
 ### 9. HttpServer
 
+> 이 절은 지금의 `include/kiotty_net_http.h` 를 적는다. 다시 설계한 판 (Streamable HTTP, Work stream, status / content type enum) 은 [design_http_v0.html](../design/design_http_v0.html) 에 있고 cycle H1 에서 헤더와 이 절에 들어온다.
+
 HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다.
 
-- 라우트는 `KiottyNet_addHttpRoute(method, path, route)` 로 등록하며 C++ 의 `get / head / post / put / patch / del / options` 는 그 별칭이다 (`delete` 는 C++ 예약어라 `del`). 콜백을 등록하는 방식이지 하나의 handler 구조체를 넘기는 방식이 아니다. 등록은 `run` 전에만 되고 표는 고정 크기다 (`KiottyNetHttpLimits::max_routes`).
+- 라우트는 `KiottyNet_addHttpRoute(server, method, path, route)` 로 등록하며 C++ 의 `get / head / post / put / patch / del / options` 는 그 별칭이다 (`delete` 는 C++ 예약어라 `del`). 콜백을 등록하는 방식이지 하나의 handler 구조체를 넘기는 방식이 아니다. 등록은 `run` 전에만 되고 표는 고정 크기다 (`KiottyNetHttpLimits::max_routes`).
 - path 매칭은 정확 일치와 `/*` 접미 wildcard 두 가지다. 등록 순서대로 검사한다. `:id` 같은 파라미터 파싱은 하지 않으며 `request.path` 를 사용자가 파싱한다.
 - 정적 서빙은 세 가지다. 디렉토리 매핑, 파일 하나 매핑, 메모리 바이너리 매핑. 라우트와 같은 표에서 등록 순서대로 매칭하며 GET / HEAD 에만 적용된다.
 - path 가 맞는 라우트가 하나도 없으면 `notFound` 라우트, 그것도 없으면 404. path 는 맞지만 method 가 없으면 405 다 (아래 메서드별 동작).
 - 요청은 공용 struct `KiottyNetHttpRequest` 로 오고, 응답은 pool handle `KiottyNetHttpResponseHandle` 로 채운다. 둘 다 Connection 마다 고정 크기 버퍼(`KiottyNetHttpLimits`)에 있다. body 가 `max_body_bytes` 를 넘으면 413 으로 라이브러리가 거절한다. 응답 버퍼가 넘치면 setter 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려준다.
-- 긴 작업은 `KiottyNet_deferHttpResponse` 로 Connection 을 suspend 하고, worker 가 결과를 만든 뒤 `KiottyNet_resumeConnection(request.connection, payload)` 를 부르면 IO Thread 에서 같은 라우트의 `resumed` 콜백이 호출된다. 응답 객체는 IO Thread 에서만 만지므로 worker 는 결과를 자기 메모리에 만들어 payload 로 넘긴다. defer 한 뒤 resumed 까지 request 는 유효하다.
+- 긴 작업은 5절 Work 를 HTTP 에 맞게 줄인 것이다. `onRequest` 안에서 `KiottyNet_startHttpWork(response)` 를 부르고 return 하면 응답은 보내지 않고 연결을 IO Thread 에서 떼어낸 뒤, 같은 loop 안에서 라우트의 `onWorkStarted(app_context, request, response, work)` 가 한 번 온다. worker 는 `response` 를 setter 로 채우고 `KiottyNet_finishHttpWorkWithResponse(work)` 로 보내거나 `KiottyNet_finishHttpWorkWithClose(work, reason)` 로 끊는다. finish 는 한 번만이며 그때까지 request 는 유효하다. `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 본다.
 - keep-alive 는 라이브러리가 처리한다. `Connection: close` 또는 HTTP/1.0 이면 응답 후 닫는다.
 
 메서드별 동작
@@ -1033,6 +1069,9 @@ HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachi
 공용 타입
 
 ```c
+#define KIOTTY_NET_MAX_URL_LENGTH          256   /* 라우트 path, url_prefix, url_path 버퍼 (NUL 포함) */
+#define KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH 64    /* content_type 버퍼 (NUL 포함) */
+
 typedef enum KiottyNetHttpMethod {
     KIOTTY_NET_HTTP_METHOD_GET,
     KIOTTY_NET_HTTP_METHOD_HEAD,
@@ -1045,28 +1084,8 @@ typedef enum KiottyNetHttpMethod {
 } KiottyNetHttpMethod;
 #define KIOTTY_NET_HTTP_METHOD_BIT(method) (1u << (method))   /* 메서드 집합을 uint32_t 비트 합으로 다룰 때 (Allow 헤더 등) */
 
-typedef struct KiottyNetHttpHeader { KiottyNetSpan name; KiottyNetSpan value; } KiottyNetHttpHeader;
-
-typedef struct KiottyNetHttpRequest {
-    KiottyNetConnectionHandle  connection;      /* resume 과 peer 정보 (KiottyNet_getConnectionInfo) 에 쓴다 */
-    KiottyNetHttpMethod        method;
-    KiottyNetSpan              path;            /* query 제외. percent-decoding 하지 않음 */
-    KiottyNetSpan              query;           /* '?' 뒤. 없으면 길이 0 */
-    const KiottyNetHttpHeader* headers;
-    size_t                     header_count;    /* 최대 KiottyNetHttpLimits::max_headers */
-    KiottyNetSpan              body;            /* Content-Length 만큼. 없으면 길이 0 */
-    int                        keep_alive;
-} KiottyNetHttpRequest;
-
-typedef int64_t KiottyNetHttpResponseHandle;    /* pool handle. IO Thread 전용 */
-
-typedef struct KiottyNetHttpRoute {
-    void* user_context;
-    void (*handle) (void* user_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response);
-    void (*resumed)(void* user_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response, void* payload);   /* defer 한 뒤 resume 이 오면. defer 하지 않는 라우트는 NULL */
-} KiottyNetHttpRoute;
-
-typedef struct KiottyNetHttpLimits {
+typedef struct KiottyNetHttpLimits {     /* 3절의 설정 struct 규칙을 따른다. initialize 한 번, configure 여러 번 */
+    uint32_t initialization_mark;
     size_t   max_routes;            /* 라우트 + 정적 경로 + 승격 경로 합계. 기본 64 */
     size_t   max_header_bytes;      /* request line + headers. 기본 8 KiB */
     size_t   max_headers;           /* 기본 32 */
@@ -1075,82 +1094,151 @@ typedef struct KiottyNetHttpLimits {
     uint32_t header_timeout_milliseconds;     /* 헤더 수신 완료까지. 기본 10000 */
     uint32_t keep_alive_timeout_milliseconds; /* 다음 요청 대기. 기본 15000 */
 } KiottyNetHttpLimits;
+
+KiottyNetCode KiottyNet_initializeHttpLimits(KiottyNetHttpLimits* limits);
+KiottyNetCode KiottyNet_configureHttpMaxRoutes(KiottyNetHttpLimits* limits, size_t max_routes);
+KiottyNetCode KiottyNet_configureHttpHeaderCapacity(KiottyNetHttpLimits* limits, size_t max_header_bytes, size_t max_headers);
+KiottyNetCode KiottyNet_configureHttpBodyCapacity(KiottyNetHttpLimits* limits, size_t max_body_bytes);
+KiottyNetCode KiottyNet_configureHttpResponseCapacity(KiottyNetHttpLimits* limits, size_t response_bytes);
+KiottyNetCode KiottyNet_configureHttpTimeouts(KiottyNetHttpLimits* limits, uint32_t header_timeout_milliseconds, uint32_t keep_alive_timeout_milliseconds);
+
+typedef struct KiottyNetHttpHeader { KiottyNetSpan name; KiottyNetSpan value; } KiottyNetHttpHeader;
+
+typedef struct KiottyNetHttpRequest {
+    KiottyNetConnectionHandle  connection;      /* peer 정보 (KiottyNet_getConnectionInfo) 에 쓴다 */
+    KiottyNetHttpMethod        method;
+    KiottyNetSpan              path;            /* query 제외. percent-decoding 하지 않음 */
+    KiottyNetSpan              query;           /* '?' 뒤. 없으면 길이 0 */
+    const KiottyNetHttpHeader* headers;
+    size_t                     header_count;    /* 최대 KiottyNetHttpLimits::max_headers */
+    KiottyNetSpan              body;            /* Content-Length 만큼. 없으면 길이 0 */
+    int                        keep_alive;
+} KiottyNetHttpRequest;                         /* onRequest 가 return 하면 무효. startHttpWork 했으면 finish 까지 유효 */
+
+typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
+
+typedef struct KiottyNetHttpResponseHandle {    /* pool handle (규약 8). 응답을 채운다 */
+    KiottyNetHttpServerHandle server;
+    int64_t                   id;
+} KiottyNetHttpResponseHandle;
+
+typedef struct KiottyNetHttpWorkHandle {        /* pool handle. onWorkStarted 가 준다. finish 할 의무 */
+    KiottyNetHttpServerHandle server;
+    int64_t                   id;
+} KiottyNetHttpWorkHandle;
+
+typedef void (*KiottyNetHttpRequestAction)(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response);
+typedef void (*KiottyNetHttpWorkAction)   (KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work);
+
+typedef struct KiottyNetHttpRoute {
+    KiottyNetAppContext        app_context;     /* onRequest / onWorkStarted 의 첫 인자로 돌아온다. 라이브러리는 읽지 않는다 */
+    KiottyNetHttpRequestAction onRequest;       /* 요청이 다 들어오면 IO Thread 에서 한 번. NULL 이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+    KiottyNetHttpWorkAction    onWorkStarted;   /* startHttpWork 뒤 한 번. 긴 작업이 없는 라우트는 NULL */
+} KiottyNetHttpRoute;
 ```
 
 C 함수
 
 ```c
+KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context, KiottyNetHttpRequestAction onRequest, KiottyNetHttpWorkAction onWorkStarted);
+
 KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */
 
-KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle r, int code);                                            /* 기본 200. 호출하지 않으면 404 */
-KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle r, const char* name, const char* value);                  /* Content-Length, Connection, Date 는 라이브러리가 채운다 */
-KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle r, KiottyNetSpan data, const char* content_type);           /* 응답 버퍼로 복사 */
-KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle r, KiottyNetSpan data, const char* content_type);        /* 복사하지 않음. data 는 송신 완료까지 유효해야 한다 (정적 데이터, 메모리 바이너리) */
-KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle r, const char* path, const char* content_type);             /* 파일을 chunk 로 스트리밍. 가능하면 sendfile / TransmitFile. 없으면 KIOTTY_NET_CODE_NOT_FOUND */
-void          KiottyNet_deferHttpResponse(KiottyNetHttpResponseHandle r);                                                   /* 긴 작업. handle 이 return 하면 Connection 은 suspend. resume 으로 돌아온다 */
+KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int32_t status);                                  /* 100..599. 부르지 않으면 200. 아무 setter 도 부르지 않으면 404 */
+KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response, const char* name, const char* value);              /* Content-Length, Connection, Date 는 라이브러리가 채운다 */
+KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);       /* 응답 버퍼로 복사 */
+KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);    /* 복사하지 않음. data 는 송신 완료까지 유효해야 한다 (정적 데이터, 메모리 바이너리) */
+KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response, const char* path, const char* content_type);         /* 파일을 chunk 로 스트리밍. 가능하면 sendfile / TransmitFile. 없으면 KIOTTY_NET_CODE_NOT_FOUND */
+KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);                                                   /* onRequest 안에서. 라우트에 onWorkStarted 가 없으면 KIOTTY_NET_CODE_INVALID_ARGUMENT, 두 번째는 KIOTTY_NET_CODE_BUSY */
 
-typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
-KiottyNetHttpServerHandle KiottyNet_createHttpServer(const KiottyNetServerConfiguration* config, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpLimits* limits);
-void          KiottyNet_destroyHttpServer(KiottyNetHttpServerHandle s);
-KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle s, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
-KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle s, KiottyNetHttpRoute route);                            /* 아무 라우트도 안 맞을 때 */
-KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle s, const char* url_prefix, const char* directory);    /* "/static/" -> "./www/". ".." 포함 경로는 403. content type 은 확장자로 */
-KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle s, const char* url_path, const char* file_path);           /* "/favicon.ico" -> "./www/favicon.ico" */
-KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle s, const char* url_path, KiottyNetSpan data, const char* content_type);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
-KiottyNetCode KiottyNet_addWebSocketUpgrade(KiottyNetHttpServerHandle s, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits* limits);   /* 10절 */
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle s);
-void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle s);
-KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle s, uint64_t timeout_milliseconds);
+/* Work 를 받은 thread 에서. finish 는 한 번만이고 두 번째는 KIOTTY_NET_CODE_BUSY. 닫힌 연결이면 KIOTTY_NET_CODE_PEER_CLOSED */
+KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);                                              /* 응답 버퍼의 내용을 보낸다 */
+KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);                          /* 보내지 않고 닫는다 */
+KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
+
+KiottyNetHttpServerHandle KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpLimits* limits);   /* 실패하면 NULL */
+void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
+KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
+KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);                          /* 아무 라우트도 안 맞을 때 */
+KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);  /* "/static/" -> "./www/". ".." 포함 경로는 403. content type 은 확장자로 */
+KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);         /* "/favicon.ico" -> "./www/favicon.ico" */
+KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetSpan data, const char* content_type);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server);
+void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
+KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);
 ```
 
 C++ 래퍼
 
 ```cpp
+class KiottyNet_HttpLimitsBuilder {                  // 3절의 builder 와 같다. 생성 시점에 KiottyNet_initializeHttpLimits
+public:
+    explicit KiottyNet_HttpLimitsBuilder(KiottyNetHttpLimits& limits);
+    KiottyNet_HttpLimitsBuilder& maxRoutes(size_t max_routes);
+    KiottyNet_HttpLimitsBuilder& headerCapacity(size_t max_header_bytes, size_t max_headers);
+    KiottyNet_HttpLimitsBuilder& bodyCapacity(size_t max_body_bytes);
+    KiottyNet_HttpLimitsBuilder& responseCapacity(size_t response_bytes);
+    KiottyNet_HttpLimitsBuilder& timeouts(uint32_t header_timeout_milliseconds, uint32_t keep_alive_timeout_milliseconds);
+    KiottyNetCode build() const;                     // 처음 실패한 코드
+};
+
 class KiottyNet_HttpResponse {                       // pool handle 의 비소유 래퍼. 콜백 안에서 handle 로 만든다
 public:
     explicit KiottyNet_HttpResponse(KiottyNetHttpResponseHandle handle);
-    KiottyNetCode status(int code);
+    KiottyNetHttpResponseHandle handle() const;
+    KiottyNetCode status(int32_t status);
     KiottyNetCode header(const char* name, const char* value);
     KiottyNetCode body(KiottyNetSpan data, const char* content_type);
     KiottyNetCode bodyRef(KiottyNetSpan data, const char* content_type);
-    KiottyNetCode file(const char* path, const char* content_type);
-    void          defer();
+    KiottyNetCode file(const char* path, const char* content_type = nullptr);
+    KiottyNetCode startWork();
+};
+
+class KiottyNet_HttpWork {                           // finish 의무를 소유한다. 복사 없음, 이동만. worker thread 로 이동해서 넘긴다
+public:
+    explicit KiottyNet_HttpWork(KiottyNetHttpWorkHandle work);
+    KiottyNet_HttpWork(KiottyNet_HttpWork&& other);
+    KiottyNet_HttpWork& operator=(KiottyNet_HttpWork&& other);   // 받는 쪽이 아직 finish 하지 않았으면 먼저 finishWithClose()
+    ~KiottyNet_HttpWork();                           // 아직 finish 하지 않았으면 finishWithClose()
+    bool          connected() const;
+    KiottyNetCode finishWithResponse();
+    KiottyNetCode finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
 };
 
 class KiottyNet_HttpServer {
 public:
-    KiottyNet_HttpServer(const KiottyNetServerConfiguration& config, const KiottyNetHttpLimits& limits);
-    KiottyNet_HttpServer(const KiottyNetServerConfiguration& config, const KiottyNetTlsServerConfiguration& tls, const KiottyNetHttpLimits& limits);   // TLS
+    KiottyNet_HttpServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetHttpLimits& limits);
+    KiottyNet_HttpServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetTlsServerConfiguration& tls, const KiottyNetHttpLimits& limits);   // TLS
+    explicit operator bool() const;                  // create 가 실패하면 false
+    KiottyNetHttpServerHandle handle() const;
 
     // 라우트 등록. 두 가지 오버로드가 있다.
-    //   KiottyNetHttpRoute : user_context + 함수 포인터. C 와 같은 모양
-    //   함수 포인터        : capture 없는 람다가 여기로 온다. C 콜백 시그니처 그대로라서 변환 코드가 없다
-    //                        server.get("/health", [](void*, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
-    typedef void (*Handle) (void* user_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response);
-    typedef void (*Resumed)(void* user_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response, void* payload);
+    //   KiottyNetHttpRoute         : app_context + onRequest + onWorkStarted. C 와 같은 모양
+    //   KiottyNetHttpRequestAction : onRequest 하나. app_context, onWorkStarted 는 NULL. capture 없는 람다가 여기로 온다
+    //                                server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
     KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
-    KiottyNetCode route(KiottyNetHttpMethod method, const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
-    // 메서드별 별칭 : route(KIOTTY_HTTP_XXX, ...) 와 같다. 각각 위와 같은 두 오버로드가 있다
+    KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRequestAction on_request);
+    // 메서드별 별칭 : route(KIOTTY_NET_HTTP_METHOD_XXX, ...) 와 같다. 각각 위와 같은 두 오버로드가 있다
     KiottyNetCode get    (const char* path, KiottyNetHttpRoute route);
-    KiottyNetCode get    (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode get    (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode head   (const char* path, KiottyNetHttpRoute route);       // 등록하지 않으면 GET 라우트로 자동 처리
-    KiottyNetCode head   (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode head   (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode post   (const char* path, KiottyNetHttpRoute route);
-    KiottyNetCode post   (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode post   (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode put    (const char* path, KiottyNetHttpRoute route);
-    KiottyNetCode put    (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode put    (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode patch  (const char* path, KiottyNetHttpRoute route);
-    KiottyNetCode patch  (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode patch  (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode del    (const char* path, KiottyNetHttpRoute route);       // DELETE
-    KiottyNetCode del    (const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode del    (const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode options(const char* path, KiottyNetHttpRoute route);       // 등록하지 않으면 204 + Allow 자동 응답
-    KiottyNetCode options(const char* path, Handle handle, Resumed resumed = nullptr, void* user_context = nullptr);
+    KiottyNetCode options(const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode notFound(KiottyNetHttpRoute route);
+    KiottyNetCode notFound(KiottyNetHttpRequestAction on_request);
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
     KiottyNetCode serveMemory(const char* url_path, KiottyNetSpan data, const char* content_type);
-    KiottyNetCode upgrade(const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits& limits);
 
     KiottyNetCode run();
     void          close();
@@ -1161,114 +1249,175 @@ public:
 사용 예
 
 ```cpp
-KiottyNet_HttpServer server(config, limits);
+KiottyNet_HttpServer server(context.handle(), config, limits);
 
-server.get("/health", [](void*, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
+server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
 
-// 긴 작업 : handle 에서 defer, worker 가 KiottyNet_resumeConnection(q->connection, result), resumed 에서 응답
-server.get("/report",
-    [](void* ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r) {
-        KiottyNet_HttpResponse(r).defer();
-        static_cast<App*>(ctx)->workerPool.post(new_job(q->connection));
+// 긴 작업 : onRequest 에서 startWork, onWorkStarted 에서 worker 로 넘기고, worker 가 응답을 채워 finish
+server.get("/report", KiottyNet_makeHttpRoute(&app,
+    [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) {
+        KiottyNet_HttpResponse(r).startWork();
     },
-    [](void*, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r, void* result) {
-        KiottyNet_HttpResponse(r).body(static_cast<Result*>(result)->span(), "application/json");
-    },
-    &app);
+    [](KiottyNetAppContext ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r, KiottyNetHttpWorkHandle w) {
+        std::string        query(q->query.data, q->query.length);
+        KiottyNet_HttpWork work(w);
+        static_cast<App*>(ctx)->workerPool.post([query, r, work = std::move(work)]() mutable {   // C++14 init capture. C++11 은 shared_ptr 로
+            Result result = compute(query);
+            if (!work.connected()) { return; }                                                // 끊겼으면 소멸자의 finishWithClose
+            KiottyNet_HttpResponse(r).body(result.span(), "application/json");
+            work.finishWithResponse();
+        });
+    }));
 
 server.serveDirectory("/", "./www/");
 server.serveMemory("/app.wasm", wasm, "application/wasm");
-server.upgrade("/ws", wsHandler, wsLimits);
 std::thread io([&] { server.run(); });
 server.await(3000);
 ```
 
 ### 10. WebSocket / WebSocketServer
 
-WebSocket (RFC 6455) 은 HTTP Upgrade 로만 시작된다. 서버 쪽 진입점은 두 가지다.
+> 이 절은 지금의 `include/kiotty_net_websocket.h` 를 적는다. 다시 설계한 판 (WebSocket handle 을 `{ owner, id }` 로, 승격 경로 등록을 websocket.h 에) 은 [design_websocket_v0.html](../design/design_websocket_v0.html) 에 있고 cycle W1 에서 헤더와 이 절에 들어온다.
 
-- `KiottyNet_WebSocketServer` : WebSocket 만 쓰는 앱. 경로 하나와 handler 로 만든다. 내부는 승격 경로 하나만 등록한 HttpServer 이며 다른 요청은 404.
-- `KiottyNet_HttpServer::upgrade(url_path, handler, limits)` : HTTP 라우트와 WebSocket 을 같이 쓰는 앱.
+WebSocket (RFC 6455) 은 HTTP Upgrade 로만 시작된다. 서버 쪽 진입점은 `KiottyNet_WebSocketServer` 하나다. 설정의 경로 하나만 승격을 받고 다른 요청은 404 다. HttpServer 에 승격 경로를 더하는 함수는 아직 헤더에 없다 (`kiotty_net_http.h` 와 `kiotty_net_websocket.h` 는 서로를 include 하지 않는다).
 
-101 응답이 송신 완료되면 그 Connection 은 HTTP StateMachine 에서 WebSocket StateMachine 으로 넘어가고, 이후 HTTP 콜백은 오지 않는다.
+101 응답이 송신 완료되면 그 Connection 은 Upgrade StateMachine 에서 WebSocket frame StateMachine 으로 넘어가고, `onOpen` 이 온다. 이후 HTTP 는 없다.
 
+- 설정은 `KiottyNetWebSocketConfiguration` 하나이고 서버와 클라이언트가 같이 쓴다. 3절의 설정 struct 규칙 (initialize 한 번, configure 여러 번) 을 따른다. 경로는 initialize 의 필수 인자다.
+- handler 와 app_context 는 create 가 아니라 `run(handler, app_context)` 에 넘긴다 (7절). context 는 5절과 같이 둘이다. `KiottyNetAppContext` 는 `onUpgrade`, `onOpen`, `onClose` 가 받고, `onOpen` 이 return 한 `KiottyNetWebSocketContext` 는 소켓에 묶여 `onMessage` 의 첫 인자와 `onClose` 로 돌아온다.
 - 수신 frame 의 조각(fragment)은 라이브러리가 합쳐서 `onMessage` 에 메시지 하나로 준다. `max_message_bytes` 를 넘으면 1009 로 close 한다.
 - ping / pong 은 라이브러리가 처리한다. 들어온 ping 에는 pong 을 보내고, `ping_interval_milliseconds` 마다 ping 을 보내며 `pong_timeout_milliseconds` 안에 pong 이 없으면 1001 로 close 한다.
-- `send` 는 frame 으로 감싸 write lane 으로 복사한다. 여유가 없으면 `KIOTTY_NET_CODE_BUFFER_FULL` 이며 아무것도 보내지 않는다. 송신 frame 은 masking 하지 않는다 (서버).
-- `close` 는 close handshake 를 시작한다. 상대의 close frame 이 오거나 `close_timeout_milliseconds` 가 지나면 `onClose`.
-- **다른 thread 의 push** 는 `KiottyNet_resumeWebSocket(ws, payload)` 다. IO Thread 에서 `onResumed(ctx, ws, payload)` 가 호출되고 거기서 send 한다. 다른 thread 에서 WebSocket 을 직접 만지지 않는다.
+- `send` 는 frame 으로 감싸 push lane 으로 복사한다 (4절의 notify 와 같은 길). 그래서 아무 thread 에서나 부르고 완료 콜백이 없다. 여유가 없으면 `KIOTTY_NET_CODE_BUFFER_FULL` 이며 아무것도 보내지 않는다. 송신 frame 은 masking 하지 않는다 (서버). 모든 소켓에 보내는 것은 `KiottyNet_broadcastWebSocketServer` 다.
+- `close` 는 아무 thread 에서나 close handshake 를 시작한다. 상대의 close frame 이 오거나 `close_timeout_milliseconds` 가 지나면 `onClose`.
 
 공용 타입
 
 ```c
+#define KIOTTY_NET_MAX_URL_PATH_LENGTH            256   /* 설정의 path 버퍼 (NUL 포함) */
+#define KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH 128   /* 설정의 protocols, 고른 subprotocol 버퍼 (NUL 포함) */
+#define KIOTTY_NET_MAX_WEB_SOCKET_REASON_LENGTH   124   /* close reason (NUL 포함) */
+
 typedef enum KiottyNetWebSocketOpcode { KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT = 1, KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY = 2 } KiottyNetWebSocketOpcode;
+
+typedef enum KiottyNetWebSocketStatus {      /* close frame 의 status. 함수는 uint16_t 로 받으므로 앱 정의 값 (3000~4999) 도 넣는다 */
+    KIOTTY_NET_WEB_SOCKET_STATUS_NORMAL_CLOSURE   = 1000,
+    KIOTTY_NET_WEB_SOCKET_STATUS_GOING_AWAY       = 1001,
+    KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR   = 1002,
+    KIOTTY_NET_WEB_SOCKET_STATUS_UNSUPPORTED_DATA = 1003,
+    KIOTTY_NET_WEB_SOCKET_STATUS_NO_STATUS        = 1005,
+    KIOTTY_NET_WEB_SOCKET_STATUS_ABNORMAL_CLOSURE = 1006,
+    KIOTTY_NET_WEB_SOCKET_STATUS_INVALID_PAYLOAD  = 1007,
+    KIOTTY_NET_WEB_SOCKET_STATUS_POLICY_VIOLATION = 1008,
+    KIOTTY_NET_WEB_SOCKET_STATUS_MESSAGE_TOO_BIG  = 1009,
+    KIOTTY_NET_WEB_SOCKET_STATUS_INTERNAL_ERROR   = 1011
+} KiottyNetWebSocketStatus;
 
 typedef struct KiottyNetWebSocketMessage {
     KiottyNetWebSocketOpcode opcode;
     KiottyNetSpan            data;      /* 수신 버퍼. onMessage 가 return 하면 무효 */
 } KiottyNetWebSocketMessage;
 
-typedef int64_t KiottyNetWebSocketHandle;   /* pool handle. Connection 위의 per-connection 객체. IO Thread 전용 */
+typedef struct KiottyNetWebSocketClose {    /* onClose 가 받는다 */
+    KiottyNetCode code;                     /* 끊긴 이유. 정상 close handshake 면 KIOTTY_NET_CODE_SUCCESS */
+    uint16_t      status;                   /* 상대 close frame 의 status. 없으면 1005, frame 없이 끊기면 1006 */
+    KiottyNetSpan reason;                   /* 상대 close frame 의 reason. onClose 가 return 하면 무효 */
+} KiottyNetWebSocketClose;
 
-typedef struct KiottyNetWebSocketHandler {
-    void* user_context;
-    KiottyNetBool (*onUpgrade)(void* user_context, const KiottyNetHttpRequest* request, KiottyNetWebSocketHandle ws);   /* 0 이면 403 으로 거절하고 HTTP 로 남는다. NULL 이면 모두 허용. 여기서만 KiottyNet_setWebSocketProtocol */
-    void (*onOpen)   (void* user_context, KiottyNetWebSocketHandle ws);                                        /* 101 송신 완료 */
-    void (*onMessage)(void* user_context, KiottyNetWebSocketHandle ws, const KiottyNetWebSocketMessage* message);
-    void (*onResumed)(void* user_context, KiottyNetWebSocketHandle ws, void* payload);                         /* KiottyNet_resumeWebSocket(ws, payload). push 는 여기서 send */
-    void (*onClose)  (void* user_context, KiottyNetWebSocketHandle ws, uint16_t code, KiottyNetCode reason);   /* code: close frame 의 status. 없으면 1006. 마지막 콜백 */
+typedef struct KiottyNetWebSocketConfiguration {   /* 3절의 설정 struct 규칙. 서버와 클라이언트가 같이 쓴다 */
+    uint32_t initialization_mark;
+    char     path[KIOTTY_NET_MAX_URL_PATH_LENGTH];                  /* 서버: 승격을 받는 경로. 클라이언트: 요청 경로 */
+    char     protocols[KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH];  /* 지원 subprotocol 을 선호 순서대로. 기본 빈 문자열 */
+    size_t   max_message_bytes;                  /* 조각을 합친 메시지 최대 크기. 기본 64 KiB. 초과시 1009 */
+    uint32_t handshake_timeout_milliseconds;     /* 연결부터 101 까지. 기본 10000 */
+    uint32_t ping_interval_milliseconds;         /* 0 이면 ping 을 보내지 않음. 기본 30000 */
+    uint32_t pong_timeout_milliseconds;          /* 기본 10000 */
+    uint32_t close_timeout_milliseconds;         /* close handshake 대기. 기본 5000 */
+} KiottyNetWebSocketConfiguration;
+
+KiottyNetCode KiottyNet_initializeWebSocketConfiguration(KiottyNetWebSocketConfiguration* configuration, const char* path);   /* path 는 '/' 로 시작 */
+KiottyNetCode KiottyNet_configureWebSocketProtocols(KiottyNetWebSocketConfiguration* configuration, const char* protocols);    /* "chat, superchat" */
+KiottyNetCode KiottyNet_configureWebSocketMaxMessageBytes(KiottyNetWebSocketConfiguration* configuration, size_t max_message_bytes);
+KiottyNetCode KiottyNet_configureWebSocketHandshakeTimeout(KiottyNetWebSocketConfiguration* configuration, uint32_t timeout_milliseconds);
+KiottyNetCode KiottyNet_configureWebSocketPing(KiottyNetWebSocketConfiguration* configuration, uint32_t interval_milliseconds, uint32_t pong_timeout_milliseconds);
+KiottyNetCode KiottyNet_configureWebSocketCloseTimeout(KiottyNetWebSocketConfiguration* configuration, uint32_t timeout_milliseconds);
+
+typedef int64_t KiottyNetWebSocketHandle;   /* pool handle. Connection 위의 per-connection 객체. 0 이면 무효 */
+typedef void*   KiottyNetWebSocketContext;  /* 소켓마다의 데이터. onOpen 이 돌려준다. 라이브러리는 읽지 않는다 */
+
+typedef struct KiottyNetWebSocketUpgrade {  /* onUpgrade 가 받는 Upgrade 요청. 수신 Stage 를 가리키며 return 하면 무효 */
+    KiottyNetSpan path;
+    KiottyNetSpan query;
+    KiottyNetSpan host;
+    KiottyNetSpan origin;
+    KiottyNetSpan protocols;                /* 요청의 Sec-WebSocket-Protocol 원문 */
+} KiottyNetWebSocketUpgrade;
+
+typedef struct KiottyNetWebSocketInfo {
+    KiottyNetConnectionInfo connection;
+    char                    protocol[KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH];   /* 고른 subprotocol. 없으면 빈 문자열 */
+} KiottyNetWebSocketInfo;
+
+typedef struct KiottyNetWebSocketHandler {  /* 함수 표만 담는다. static const 로 두고 run 에 넘긴다 */
+    KiottyNetBool             (*onUpgrade)(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade);   /* 서버만. 0 이면 403 을 보내고 끊는다. NULL 이면 모두 허용 */
+    KiottyNetWebSocketContext (*onOpen)   (KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket);                                        /* 101 송신 완료 (서버) / 수신 (클라이언트). websocket_context 를 돌려준다 */
+    void                      (*onMessage)(KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketMessage message);
+    void                      (*onClose)  (KiottyNetAppContext app_context, KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketClose close);   /* 마지막 콜백. onOpen 이 나간 소켓에만 */
 } KiottyNetWebSocketHandler;
-
-typedef struct KiottyNetWebSocketLimits {
-    size_t   max_message_bytes;     /* 조각을 합친 메시지 최대 크기. 기본 64 KiB. 초과시 1009 */
-    uint32_t ping_interval_milliseconds;      /* 0 이면 ping 을 보내지 않음. 기본 30000 */
-    uint32_t pong_timeout_milliseconds;       /* 기본 10000 */
-    uint32_t close_timeout_milliseconds;      /* close handshake 대기. 기본 5000 */
-} KiottyNetWebSocketLimits;
 ```
 
 C 함수
 
 ```c
-KiottyNetConnectionInfo KiottyNet_getWebSocketInfo(KiottyNetWebSocketHandle ws);
-void*         KiottyNet_getWebSocketContext(KiottyNetWebSocketHandle ws);                /* per-connection slot. 라이브러리는 건드리지 않는다 */
-void          KiottyNet_setWebSocketContext(KiottyNetWebSocketHandle ws, void* context);
-KiottyNetCode KiottyNet_setWebSocketProtocol(KiottyNetWebSocketHandle ws, const char* subprotocol);   /* onUpgrade 안에서만. Sec-WebSocket-Protocol. 요청에 없던 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_sendWebSocket(KiottyNetWebSocketHandle ws, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
-KiottyNetCode KiottyNet_closeWebSocket(KiottyNetWebSocketHandle ws, uint16_t code, const char* reason);   /* reason 은 123 바이트 이하 */
-KiottyNetCode KiottyNet_resumeWebSocket(KiottyNetWebSocketHandle ws, void* payload);                     /* 아무 thread 에서나. 규칙은 KiottyNet_resumeConnection 과 같다 */
+KiottyNetWebSocketInfo KiottyNet_getWebSocketInfo(KiottyNetWebSocketHandle websocket);                                     /* IO Thread */
+KiottyNetSpan KiottyNet_findWebSocketUpgradeHeader(KiottyNetWebSocketHandle websocket, const char* name);                  /* onUpgrade 안에서만. 대소문자 무시. 없으면 { NULL, 0 } */
+KiottyNetCode KiottyNet_selectWebSocketProtocol(KiottyNetWebSocketHandle websocket, const char* protocol);                 /* onUpgrade 안에서만. 설정의 protocols 로 고른 것을 덮어쓴다. 요청에 없던 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_sendWebSocket(KiottyNetWebSocketHandle websocket, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);   /* 아무 thread 에서나. 규칙은 KiottyNet_notifyConnection 과 같다. 닫힌 handle 이면 KIOTTY_NET_CODE_PEER_CLOSED */
+KiottyNetCode KiottyNet_closeWebSocket(KiottyNetWebSocketHandle websocket, uint16_t status, const char* reason);           /* 아무 thread 에서나. reason 은 NULL 이거나 KIOTTY_NET_MAX_WEB_SOCKET_REASON_LENGTH 미만 */
 
 typedef struct KiottyNetWebSocketServer* KiottyNetWebSocketServerHandle;
-KiottyNetWebSocketServerHandle KiottyNet_createWebSocketServer(const KiottyNetServerConfiguration* config, const KiottyNetTlsServerConfiguration* tls, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits* limits);
-void          KiottyNet_destroyWebSocketServer(KiottyNetWebSocketServerHandle s);
-KiottyNetCode KiottyNet_runWebSocketServer(KiottyNetWebSocketServerHandle s);
-void          KiottyNet_closeWebSocketServer(KiottyNetWebSocketServerHandle s);
-KiottyNetCode KiottyNet_awaitWebSocketServer(KiottyNetWebSocketServerHandle s, uint64_t timeout_milliseconds);
+KiottyNetWebSocketServerHandle KiottyNet_createWebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL */
+void          KiottyNet_destroyWebSocketServer(KiottyNetContext context, KiottyNetWebSocketServerHandle server);
+KiottyNetCode KiottyNet_runWebSocketServer(KiottyNetWebSocketServerHandle server, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);
+void          KiottyNet_closeWebSocketServer(KiottyNetWebSocketServerHandle server);
+KiottyNetCode KiottyNet_awaitWebSocketServer(KiottyNetWebSocketServerHandle server, uint64_t timeout_milliseconds);
+KiottyNetCode KiottyNet_broadcastWebSocketServer(KiottyNetWebSocketServerHandle server, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);   /* onOpen 이 나간 모든 소켓에 send. 하나라도 건너뛰면 KIOTTY_NET_CODE_BUFFER_FULL */
 ```
 
 C++ 래퍼
 
 ```cpp
+class KiottyNet_WebSocketConfigurationBuilder {      // 3절의 builder 와 같다. 생성 시점에 KiottyNet_initializeWebSocketConfiguration
+public:
+    KiottyNet_WebSocketConfigurationBuilder(KiottyNetWebSocketConfiguration& configuration, const char* path);
+    KiottyNet_WebSocketConfigurationBuilder& protocols(const char* protocols);
+    KiottyNet_WebSocketConfigurationBuilder& maxMessageBytes(size_t max_message_bytes);
+    KiottyNet_WebSocketConfigurationBuilder& handshakeTimeout(uint32_t timeout_milliseconds);
+    KiottyNet_WebSocketConfigurationBuilder& ping(uint32_t interval_milliseconds, uint32_t pong_timeout_milliseconds);
+    KiottyNet_WebSocketConfigurationBuilder& closeTimeout(uint32_t timeout_milliseconds);
+    KiottyNetCode build() const;
+};
+
 class KiottyNet_WebSocket {                          // pool handle 의 비소유 래퍼
 public:
     explicit KiottyNet_WebSocket(KiottyNetWebSocketHandle handle);
     KiottyNetWebSocketHandle handle() const;         // 다른 thread 에 넘길 값
-    KiottyNetConnectionInfo info() const;
-    void*         context() const;
-    void          setContext(void* context);
-    KiottyNetCode protocol(const char* subprotocol); // onUpgrade 안에서만
-    KiottyNetCode send(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
-    KiottyNetCode close(uint16_t code, const char* reason);
-    KiottyNetCode resume(void* payload);             // 유일하게 다른 thread 에서 불러도 되는 메서드
+    KiottyNetWebSocketInfo   info() const;
+    KiottyNetSpan            upgradeHeader(const char* name) const;   // onUpgrade 안에서만
+    KiottyNetCode            selectProtocol(const char* protocol);    // onUpgrade 안에서만
+    KiottyNetCode            send(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
+    KiottyNetCode            close(uint16_t status = KIOTTY_NET_WEB_SOCKET_STATUS_NORMAL_CLOSURE, const char* reason = nullptr);
 };
 
 class KiottyNet_WebSocketServer {
 public:
-    KiottyNet_WebSocketServer(const KiottyNetServerConfiguration& config, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits& limits);
-    KiottyNet_WebSocketServer(const KiottyNetServerConfiguration& config, const KiottyNetTlsServerConfiguration& tls, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits& limits);   // TLS
-    KiottyNetCode run();
+    KiottyNet_WebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetWebSocketConfiguration& websocket);
+    KiottyNet_WebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetTlsServerConfiguration& tls, const KiottyNetWebSocketConfiguration& websocket);   // TLS
+    explicit operator bool() const;                  // create 가 실패하면 false
+    KiottyNetWebSocketServerHandle handle() const;
+    KiottyNetCode run(const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
+    KiottyNetCode broadcast(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
 };
 ```
 
@@ -1276,15 +1425,19 @@ public:
 
 ```cpp
 // IO Thread
-void onOpen(void* ctx, KiottyNetWebSocketHandle ws)                                      { app.clients.add(ws); }
-void onResumed(void* ctx, KiottyNetWebSocketHandle ws, void* payload)                    { KiottyNet_WebSocket(ws).send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, static_cast<Message*>(payload)->span()); }
-void onClose(void* ctx, KiottyNetWebSocketHandle ws, uint16_t, KiottyNetCode)            { app.clients.remove(ws); }
+KiottyNetWebSocketContext onOpen(KiottyNetAppContext ctx, KiottyNetWebSocketHandle ws)                                         { static_cast<App*>(ctx)->clients.add(ws); return nullptr; }
+void onMessage(KiottyNetWebSocketContext, KiottyNetWebSocketHandle ws, KiottyNetWebSocketMessage message)                        { KiottyNet_WebSocket(ws).send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.data); }   // echo
+void onClose(KiottyNetAppContext ctx, KiottyNetWebSocketContext, KiottyNetWebSocketHandle ws, KiottyNetWebSocketClose)          { static_cast<App*>(ctx)->clients.remove(ws); }
 
-KiottyNetWebSocketHandler handler = { &app, nullptr, onOpen, onMessage, onResumed, onClose };
-KiottyNet_WebSocketServer server(config, "/ws", handler, wsLimits);
+static const KiottyNetWebSocketHandler HANDLER = { nullptr, onOpen, onMessage, onClose };
+KiottyNetWebSocketConfiguration websocket;
+KiottyNet_WebSocketConfigurationBuilder(websocket, "/ws").build();
+KiottyNet_WebSocketServer server(context.handle(), config, websocket);
+std::thread io([&] { server.run(HANDLER, &app); });
 
-// 앱 thread : 센서 값이 바뀌면 모든 클라이언트에게 push
-for (KiottyNetWebSocketHandle ws : app.clients.snapshot()) KiottyNet_WebSocket(ws).resume(&message);   // 이미 닫힌 handle 은 KIOTTY_NET_CODE_PEER_CLOSED 를 돌려준다
+// 앱 thread : 센서 값이 바뀌면 모든 클라이언트에게 push. 아무 thread 에서나
+server.broadcast(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.span());
+for (KiottyNetWebSocketHandle ws : app.clients.snapshot()) KiottyNet_WebSocket(ws).send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.span());   // 이미 닫힌 handle 은 KIOTTY_NET_CODE_PEER_CLOSED 를 돌려준다
 ```
 
 ### 11. HttpClient / WebSocketClient (초안)
@@ -1337,7 +1490,7 @@ void          KiottyNet_destroyHttpClient(KiottyNetHttpClientHandle c);
 KiottyNetHttpReply KiottyNet_requestHttp(KiottyNetHttpClientHandle c, KiottyNetHttpMethod method, const char* path,
                                          const KiottyNetHttpHeader* headers, size_t header_count,
                                          KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-/* 메서드별. requestHttp(c, KIOTTY_HTTP_XXX, path, NULL, 0, body, content_type, timeout_milliseconds) 와 같다 */
+/* 메서드별. requestHttp(c, KIOTTY_NET_HTTP_METHOD_XXX, path, NULL, 0, body, content_type, timeout_milliseconds) 와 같다 */
 KiottyNetHttpReply KiottyNet_getHttp    (KiottyNetHttpClientHandle c, const char* path, uint32_t timeout_milliseconds);
 KiottyNetHttpReply KiottyNet_postHttp   (KiottyNetHttpClientHandle c, const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
 KiottyNetHttpReply KiottyNet_putHttp    (KiottyNetHttpClientHandle c, const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
@@ -1387,31 +1540,35 @@ KiottyNetHttpReply allow = client.options("/api/devices", 3000);
 if (allow.code == KIOTTY_NET_CODE_SUCCESS && (KiottyNet_getHttpAllowedMethods(&allow) & KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_PATCH))) { /* PATCH 지원 */ }
 ```
 
-**WebSocketClient.** 6절 EventClient 위에 10절과 같은 `KiottyNetWebSocketHandler` 를 올린 것이다. 서버와 같은 콜백을 쓰므로 서버 쪽 코드를 그대로 옮길 수 있다.
+**WebSocketClient.** 6절 EventClient 위에 10절과 같은 `KiottyNetWebSocketHandler` 와 `KiottyNetWebSocketConfiguration` 를 올린 것이다. 서버와 같은 콜백을 쓰므로 서버 쪽 코드를 그대로 옮길 수 있다. 선언은 `kiotty_net_websocket.h` 에 있다.
 
-- `run` 이 연결, HTTP Upgrade 핸드셰이크, loop 를 모두 한다. 101 을 받으면 `onOpen` 이고 그때부터 `await` 가 `KIOTTY_NET_CODE_SUCCESS` 다. `onUpgrade` 는 클라이언트에서 호출되지 않는다 (NULL 로 둔다).
-- 송신 frame 은 masking 한다 (클라이언트). 나머지 규칙(조각 합치기, ping / pong, close handshake, limits)은 10절과 같다.
-- 앱 thread 에서 보내려면 서버와 같이 `KiottyNet_resumeWebSocket(ws, payload)` 로 IO Thread 에 넘기고 `onResumed` 에서 send 한다.
+- `run(handler, app_context)` 이 연결, HTTP Upgrade 핸드셰이크, loop 를 모두 한다. 101 을 받으면 `onOpen` 이고 그때부터 `await` 가 `KIOTTY_NET_CODE_SUCCESS` 다. `onUpgrade` 는 클라이언트에서 호출되지 않는다 (NULL 로 둔다).
+- 송신 frame 은 masking 한다 (클라이언트). 나머지 규칙(조각 합치기, ping / pong, close handshake, 설정)은 10절과 같다.
+- 앱 thread 에서 보내려면 서버와 같이 `KiottyNet_sendWebSocket(ws, opcode, data)` 를 아무 thread 에서나 부른다. `KiottyNet_sendWebSocketClient(client, opcode, data)` 는 그 소켓 하나의 `sendWebSocket` 이다 (`notifyEventClient` 와 같은 관계).
 
 ```c
 typedef struct KiottyNetWebSocketClient* KiottyNetWebSocketClientHandle;
-KiottyNetWebSocketClientHandle KiottyNet_createWebSocketClient(const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits* limits);
-void          KiottyNet_destroyWebSocketClient(KiottyNetWebSocketClientHandle c);
-KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle c);                          /* 연결 + Upgrade + loop */
-void          KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle c);                        /* close handshake 없이 끊는다. 정상 종료는 KiottyNet_closeWebSocket */
-KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle c, uint64_t timeout_milliseconds);
-KiottyNetWebSocketHandle KiottyNet_getWebSocketClientSocket(KiottyNetWebSocketClientHandle c);   /* onOpen 전이면 0. 앱 thread 의 resume 에 쓴다 */
+KiottyNetWebSocketClientHandle KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL */
+void          KiottyNet_destroyWebSocketClient(KiottyNetContext context, KiottyNetWebSocketClientHandle client);
+KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);   /* 연결 + Upgrade + loop */
+void          KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client);                   /* close handshake 없이 끊는다. 정상 종료는 KiottyNet_closeWebSocket */
+KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle client, uint64_t timeout_milliseconds);
+KiottyNetWebSocketHandle KiottyNet_getWebSocketClientSocket(KiottyNetWebSocketClientHandle client);   /* onOpen 전이면 0 */
+KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);   /* 연결 전이면 KIOTTY_NET_CODE_PEER_CLOSED */
 ```
 
 ```cpp
 class KiottyNet_WebSocketClient {
 public:
-    KiottyNet_WebSocketClient(const KiottyNetClientConfiguration& config, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits& limits);
-    KiottyNet_WebSocketClient(const KiottyNetClientConfiguration& config, const KiottyNetTlsClientConfiguration& tls, const char* url_path, KiottyNetWebSocketHandler handler, const KiottyNetWebSocketLimits& limits);   // TLS
-    KiottyNetCode run();
-    void          close();
-    KiottyNetCode await(uint64_t timeout_milliseconds);
+    KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetWebSocketConfiguration& websocket);
+    KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetTlsClientConfiguration& tls, const KiottyNetWebSocketConfiguration& websocket);   // TLS
+    explicit operator bool() const;                  // create 가 실패하면 false
+    KiottyNetWebSocketClientHandle handle() const;
+    KiottyNetCode            run(const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
+    void                     close();
+    KiottyNetCode            await(uint64_t timeout_milliseconds);
     KiottyNetWebSocketHandle socket() const;
+    KiottyNetCode            send(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
 };
 ```
 
@@ -1424,10 +1581,9 @@ public:
 
 미결
 
-- **8, 9, 10, 11절의 suspend / resume / onResumed / defer 는 5절 Work 로 바뀐다. 아직 고치지 않았다.** StateMachine 은 `Request::suspend()` + `RESUMED` 가 `Request::startWork()` + `WORK_STARTED(work)` 로, HttpServer 는 `defer` + `resumed` 콜백이 HTTP 전용 Work (`finishWithBody` 등) 로, WebSocket 의 push 는 `startWork` + `onWorkStarted` 에서 `send` 로 바뀐다.
-- WebSocket 연결이 Work 중일 때도 ping / pong 과 close frame 은 IO Thread 가 계속 처리한다 (라이브러리 내부 로직이고 사용자 콜백이 아니므로 5절 4번 규칙과 어긋나지 않는다). 송신 control frame 은 push lane 으로 보낸다 (4절). 데이터 frame 은 finish 뒤에 `onMessage` 로 낸다. 10절을 고칠 때 반영한다.
+- WebSocket 에 Work 를 둘지. 지금 헤더에는 없고, 다른 thread 의 송신은 push lane 으로 가는 `send` 다. 송신 control frame 도 push lane 으로 보낸다 (4절).
 - pool handle 을 소유자 pool 로 되돌리는 방법 (전역 소유자 표 vs index 상위 비트에 소유자 번호). 구현 가이드에서 정한다.
-- HttpServer 라우트에 capture 있는 람다 / functor 를 받는 template 오버로드. 얇은 래퍼 규칙 때문에 뺐다. 필요하면 `KiottyNetHttpRoute::user_context` 로 대신한다.
+- HttpServer 라우트에 capture 있는 람다 / functor 를 받는 template 오버로드. 얇은 래퍼 규칙 때문에 뺐다. 필요하면 `KiottyNetHttpRoute::app_context` 로 대신한다.
 - WebSocketServer 와 HttpServer::upgrade 를 둘 다 둘지, 하나로 합칠지.
 - HttpServer 에 간단한 CORS 설정 (허용 origin 목록 하나로 preflight 자동 응답 + 헤더 자동 추가) 을 둘지.
 - 조각을 합치지 않고 그대로 전달하는 streaming 모드 (`max_message_bytes` 보다 큰 메시지).

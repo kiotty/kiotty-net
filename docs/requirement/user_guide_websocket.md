@@ -2,6 +2,8 @@
 
 `include/kiotty_net_websocket.h` 를 쓰는 방법이다. requirement_v0.md 10, 11절의 WebSocket 을 1~8절의 지금 모양 (run / close / await, 두 context, write lane / push lane, notify, StateMachine) 에 맞춰 다시 쓴 것이고, WebSocket 에 대해서는 이 문서가 10, 11절보다 우선한다. 달라진 점은 9절에 모아 두었다.
 
+이 문서는 지금의 `include/kiotty_net_websocket.h` 를 따른다. WebSocket API 는 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 사이클 W1 에서 바뀔 예정이다.
+
 헤더는 `kiotty_net_statemachine.h` 를 포함하고, 그것이 `kiotty_net_base.h` 를 포함한다. 사용자는 `kiotty_net_websocket.h` 하나만 포함하면 된다. 위는 C 인터페이스, 아래는 C 함수를 하나씩 부르는 C++ 래퍼다. C++ 래퍼가 쓰는 `kiotty::net::OwnedHandle` 은 `KIOTTY_NET_OWNED_HANDLE_DEFINED` 로 묶여 있어서, 먼저 정의한 헤더가 있으면 그것을 쓰고 없으면 이 헤더가 정의한다. 프로토콜 헤더 하나만 떼어 쓰거나 single header 로 합쳐도 같은 코드가 된다.
 
 ## 1. 한눈에
@@ -82,7 +84,7 @@ if (KiottyNet_configureWebSocketProtocols(&websocket, "chat") != KIOTTY_NET_CODE
 
 | 콜백 | 언제 | 받는 것 | 돌려주는 것 |
 |---|---|---|---|
-| `onUpgrade(app_context, websocket, upgrade)` | 서버. 경로가 맞는 Upgrade 요청을 다 읽었을 때. NULL 이면 모두 허용 | `KiottyNetWebSocketUpgrade` : `path`, `query`, `host`, `origin`, `protocols` (요청의 `Sec-WebSocket-Protocol` 원문). 모두 수신 Stage 를 가리키며 return 하면 무효 | `true` 면 101. `false` 면 403 을 보내고 끊는다. 이 연결에 더 이상 콜백은 없다 |
+| `onUpgrade(app_context, websocket, upgrade)` | 서버. 경로가 맞는 Upgrade 요청을 다 읽었을 때. NULL 이면 모두 허용 | `KiottyNetWebSocketUpgrade` : `path`, `query`, `host`, `origin`, `protocols` (요청의 `Sec-WebSocket-Protocol` 원문). 모두 수신 Stage 를 가리키며 return 하면 무효 | `KiottyNetBool`. 1 이면 101. 0 이면 403 을 보내고 끊는다. 이 연결에 더 이상 콜백은 없다 |
 | `onOpen(app_context, websocket)` | 101 송신 완료 (서버) / 101 수신 (클라이언트) | | 이 소켓의 `websocket_context`. NULL 이어도 된다 |
 | `onMessage(websocket_context, websocket, message)` | 메시지 하나가 완성됐을 때. 조각은 합쳐져 있다 | `KiottyNetWebSocketMessage { opcode, data }`. `data` 는 메시지 버퍼를 가리키며 return 하면 무효. TEXT 는 UTF-8 검사를 통과한 것 | |
 | `onClose(app_context, websocket_context, websocket, close)` | 마지막 콜백. `onOpen` 이 나간 소켓에만, 한 번 | `KiottyNetWebSocketClose { code, status, reason }` (아래 표). `reason` 은 return 하면 무효 | |
@@ -158,10 +160,14 @@ struct ChatApp
     SessionPool<ChatSession, 16>          sessions;    // 구현 가이드 3.2 의 고정 배열 저장소. acquire() 는 비면 nullptr
 };
 
-static bool onUpgrade(KiottyNetAppContext, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade)
+static KiottyNetBool onUpgrade(KiottyNetAppContext, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade)
 {
     KiottyNetSpan token = KiottyNet_WebSocket(websocket).upgradeHeader("Authorization");   // 요청 헤더. return 하면 무효
-    return token.length != 0 && upgrade.origin.length != 0;                         // false 면 403
+    if (token.length == 0 || upgrade.origin.length == 0)
+    {
+        return 0;                                                                    // 403
+    }
+    return 1;
 }
 
 static KiottyNetWebSocketContext onOpen(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket)
@@ -258,16 +264,18 @@ static const KiottyNetWebSocketHandler ECHO_HANDLER = { on_upgrade, on_open, on_
 
 int run_echo_server(uint16_t port)
 {
-    KiottyNetContext               context;
-    KiottyNetServerConfiguration          configuration;
-    KiottyNetWebSocketConfiguration       websocket;
-    KiottyNetWebSocketServerHandle server;
-    KiottyNetCode                  code;
+    KiottyNetContextResult          initialized;
+    KiottyNetContext                context;
+    KiottyNetServerConfiguration    configuration;
+    KiottyNetWebSocketConfiguration websocket;
+    KiottyNetWebSocketServerHandle  server;
+    KiottyNetCode                   code;
 
     if (KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS) { return 1; }
     if (KiottyNet_initializeWebSocketConfiguration(&websocket, "/echo") != KIOTTY_NET_CODE_SUCCESS)      { return 1; }
-    context = KiottyNet_initializeContext();
-    if (context == NULL) { return 1; }
+    initialized = KiottyNet_initializeContext();
+    if (initialized.code != KIOTTY_NET_CODE_SUCCESS) { return 1; }
+    context = initialized.handle;
     server = KiottyNet_createWebSocketServer(context, &configuration, NULL, &websocket);
     if (server == NULL) { KiottyNet_releaseContext(context); return 1; }
     code = KiottyNet_runWebSocketServer(server, &ECHO_HANDLER, NULL);                /* 이 thread 가 IO Thread. 다른 thread 의 KiottyNet_closeWebSocketServer 로 끝난다 */
@@ -344,7 +352,7 @@ Closing ──READ(상대 close frame) 또는 TIMEOUT──> close(KIOTTY_NET_CO
 
 - 수신 frame 이 `receive_capacity` 보다 커도 payload 를 그 크기 단위로 나눠 읽어 메시지 버퍼에 붙인다. 메시지 버퍼가 `max_message_bytes` 다.
 - 송신 control frame (pong, 우리가 보내는 ping 과 close) 은 IO Thread 가 `Connection::push` 로 push lane 에 직접 넣는다 (구현 가이드 1.6). 사용자의 `send` 와 같은 lane 이므로 순서가 섞이지 않는다.
-- ping 타이머는 `setConnectionTimeout` 하나를 쓴다. 상태마다 entry action 에 `ping_interval_milliseconds` 또는 `pong_timeout_milliseconds` 를 붙이고 TIMEOUT 행이 "ping 보낼 차례인가, pong 이 안 왔는가" 를 가른다.
+- ping 타이머는 entry action 의 `timeout_milliseconds` 하나를 쓴다. 상태마다 entry action (`KiottyNet_thenRead`, `KiottyNet_thenHold`) 에 `ping_interval_milliseconds` 또는 `pong_timeout_milliseconds` 를 붙이고 TIMEOUT 행이 "ping 보낼 차례인가, pong 이 안 왔는가" 를 가른다.
 - 서버와 클라이언트의 표는 Handshaking 두 행 (요청을 읽는가, 응답을 읽는가) 과 mask 유무만 다르다.
 
 ## 9. requirement 10, 11절과 달라진 점
@@ -362,7 +370,7 @@ Closing ──READ(상대 close frame) 또는 TIMEOUT──> close(KIOTTY_NET_CO
 | `KiottyNet_setWebSocketProtocol` | `KiottyNet_selectWebSocketProtocol` + 설정의 `protocols` 로 자동 선택 | 보통은 설정만으로 끝나고 `onUpgrade` 에서 고르는 것은 예외다 |
 | `KiottyNet_getWebSocketInfo` → `KiottyNetConnectionInfo` | `KiottyNetWebSocketInfo { connection, protocol }` | 고른 subprotocol 을 값으로 돌려준다 |
 | 서버 / 클라이언트 Limits 가 따로 | 하나의 `KiottyNetWebSocketConfiguration` | 모든 필드의 뜻이 양쪽에서 같다. base 가 Server / Client 설정을 나눈 이유 (TLS 역할, 재시도) 가 여기에는 없다 |
-| `KiottyNet_HttpServer::upgrade` | 이 헤더에 없음 | `kiotty_net_http.h` 가 생길 때 그쪽에서 이 헤더를 포함해 `KiottyNet_addWebSocketUpgrade(http_server, &websocket)` 를 둔다. handler 모양은 그대로 쓴다 |
+| `KiottyNet_HttpServer::upgrade` | 이 헤더에도 `kiotty_net_http.h` 에도 없음 | 두 헤더는 서로를 include 하지 않는다. `KiottyNet_addWebSocketUpgrade` 같은 HttpServer 의 Upgrade 등록은 아직 없다 |
 
 ## 10. 열린 질문
 
