@@ -62,15 +62,23 @@ namespace kiotty::net::implementation
         io_uring_sqe* const sqe = nextSqe(state);
         if (sqe == nullptr) { return false; }
         const bool is_write = event.action.kind == IoActionKind::WRITE;
-        const size_t offset = is_write ? event.done : 0;
-        char* const bytes = static_cast<char*>(event.payload.buffer) + offset;
-        const size_t rest = std::min(event.payload.length - offset, LARGEST_LENGTH);
-        sqe->opcode = static_cast<uint8_t>(is_write ? IORING_OP_SEND : IORING_OP_RECV);
         sqe->fd = event.fd;
+        sqe->user_data = tagOf(event);
+        if (is_write)
+        {
+            const msghdr* const message = restMessage(event);
+            sqe->opcode = static_cast<uint8_t>(IORING_OP_SENDMSG);
+            sqe->addr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(message));
+            sqe->len = 1;
+            sqe->msg_flags = static_cast<uint32_t>(MSG_NOSIGNAL);
+            track(state, event, false);
+            return true;
+        }
+        char* const bytes = static_cast<char*>(event.payload.first.buffer);
+        const size_t rest = std::min(event.payload.first.length, LARGEST_LENGTH);
+        sqe->opcode = static_cast<uint8_t>(IORING_OP_RECV);
         sqe->addr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(bytes));
         sqe->len = static_cast<uint32_t>(rest);
-        sqe->msg_flags = is_write ? static_cast<uint32_t>(MSG_NOSIGNAL) : 0u;
-        sqe->user_data = tagOf(event);
         track(state, event, false);
         return true;
     }

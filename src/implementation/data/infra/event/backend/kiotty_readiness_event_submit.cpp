@@ -47,11 +47,10 @@ namespace kiotty::net::implementation
 
     SocketCode backend::sendRest(IoEvent& event)
     {
-        const char* bytes = static_cast<const char*>(event.payload.buffer);
-        while (event.done < event.payload.length)
+        while (event.done < event.payload.total())
         {
-            const size_t rest = event.payload.length - event.done;
-            const ssize_t sent = ::send(event.fd, bytes + event.done, rest, sendFlags());
+            const msghdr* const message = restMessage(event);
+            const ssize_t sent = ::sendmsg(event.fd, message, sendFlags());
             if (sent > 0)
             {
                 event.done += static_cast<size_t>(sent);
@@ -70,6 +69,30 @@ namespace kiotty::net::implementation
         return SocketCode::SUCCESS;
     }
 
+    msghdr* backend::restMessage(IoEvent& event)
+    {
+        const IoPiece first = event.payload.first;
+        const IoPiece second = event.payload.second;
+        size_t count = 0;
+        if (event.done < first.length)
+        {
+            char* const bytes = static_cast<char*>(first.buffer) + event.done;
+            event.vectors[count] = iovec{ bytes, first.length - event.done };
+            count += 1;
+        }
+        const size_t second_done = event.done > first.length ? event.done - first.length : 0;
+        if (second_done < second.length)
+        {
+            char* const bytes = static_cast<char*>(second.buffer) + second_done;
+            event.vectors[count] = iovec{ bytes, second.length - second_done };
+            count += 1;
+        }
+        event.message = msghdr{};
+        event.message.msg_iov = event.vectors;
+        event.message.msg_iovlen = static_cast<decltype(event.message.msg_iovlen)>(count);
+        return &event.message;
+    }
+
     SocketCode backend::checkRequest(const IoAction& action, IoPayload payload)
     {
         switch (action.kind)
@@ -77,7 +100,7 @@ namespace kiotty::net::implementation
         case IoActionKind::READ:
         case IoActionKind::READ_UNTIL:
         case IoActionKind::WRITE:
-            if (payload.buffer == nullptr || payload.length == 0)
+            if (payload.first.buffer == nullptr || payload.first.length == 0)
             {
                 return SocketCode::INVALID_ARGUMENT;
             }

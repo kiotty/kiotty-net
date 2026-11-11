@@ -172,7 +172,8 @@ typedef enum KiottyNetCode {
     KIOTTY_NET_CODE_TLS_HANDSHAKE_TIMEOUT,
     KIOTTY_NET_CODE_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
     KIOTTY_NET_CODE_OUT_OF_MEMORY,              /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
-    KIOTTY_NET_CODE_INVALID_ENCODING            /* 문자열 인자 (host, pipe 이름, 경로, password) 가 UTF-8 이 아님 */
+    KIOTTY_NET_CODE_INVALID_ENCODING,           /* 문자열 인자 (host, pipe 이름, 경로, password) 가 UTF-8 이 아님 */
+    KIOTTY_NET_CODE_PEER_NOT_READING            /* 상대가 읽지 않아 send_timeout 안에 송신이 끝나지 않음. onDisconnected 의 reason (4절) */
 } KiottyNetCode;
 ```
 
@@ -284,6 +285,7 @@ typedef struct KiottyNetServerConfiguration {
     size_t            send_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket control frame 이 쌓이는 곳 (4절) */
     KiottyNetNoDelay  no_delay;         /* 기본 KIOTTY_NET_NO_DELAY_ON. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
+    uint32_t          send_timeout_milliseconds;   /* 기본 30000. 걸린 송신이 이 시간 안에 끝나지 않으면 KIOTTY_NET_CODE_PEER_NOT_READING 으로 끊는다. 0 은 무한 (4절) */
 } KiottyNetServerConfiguration;
 
 typedef struct KiottyNetClientConfiguration {
@@ -296,6 +298,7 @@ typedef struct KiottyNetClientConfiguration {
     uint32_t          max_trial;         /* 기본 1. 연결 시도 횟수 */
     uint32_t          trial_interval_milliseconds; /* 기본 1000. 시도 간격 */
     KiottyNetNoDelay  no_delay;          /* 기본 KIOTTY_NET_NO_DELAY_ON. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
+    uint32_t          send_timeout_milliseconds;   /* 기본 30000. EventClient 만 쓴다. StreamClient 는 호출마다 timeout 을 받는다 */
 } KiottyNetClientConfiguration;
 
 KiottyNetCode KiottyNet_initializeTcpServerConfiguration(KiottyNetServerConfiguration* configuration, const char* host, uint16_t port);   /* port != 0 */
@@ -303,6 +306,7 @@ KiottyNetCode KiottyNet_initializePipeServerConfiguration(KiottyNetServerConfigu
 KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* configuration, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 상한 (수신 64 KiB, 송신 16 KiB, push 16 KiB) 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
 KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration, KiottyNetNoDelay no_delay);            /* 모르는 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration* configuration, uint32_t timeout_milliseconds);    /* 0 은 무한 */
 
 KiottyNetCode KiottyNet_initializeTcpClientConfiguration(KiottyNetClientConfiguration* configuration, const char* host, uint16_t port);
 KiottyNetCode KiottyNet_initializePipeClientConfiguration(KiottyNetClientConfiguration* configuration, const char* pipe_name);
@@ -310,6 +314,7 @@ KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfigurati
 KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration, uint32_t timeout_milliseconds);
 KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration, uint32_t max_trial, uint32_t trial_interval_milliseconds);   /* max_trial >= 1 */
 KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration, KiottyNetNoDelay no_delay);
+KiottyNetCode KiottyNet_configureClientSendTimeout(KiottyNetClientConfiguration* configuration, uint32_t timeout_milliseconds);
 ```
 
 ```cpp
@@ -320,6 +325,7 @@ public:
     KiottyNet_ServerConfigurationBuilder& maxClients(size_t max_clients);
     KiottyNet_ServerConfigurationBuilder& bufferCapacity(size_t receive_capacity, size_t send_capacity, size_t push_capacity);
     KiottyNet_ServerConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
+    KiottyNet_ServerConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
     KiottyNetCode build() const;                                                                                  // 처음 실패한 코드
 };
 
@@ -331,6 +337,7 @@ public:
     KiottyNet_ClientConfigurationBuilder& connectTimeout(uint32_t timeout_milliseconds);
     KiottyNet_ClientConfigurationBuilder& retry(uint32_t max_trial, uint32_t trial_interval_milliseconds);
     KiottyNet_ClientConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
+    KiottyNet_ClientConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
     KiottyNetCode build() const;
 };
 ```
@@ -478,7 +485,8 @@ Connection 하나는 고정 크기 버퍼 셋을 가진다. 모두 라이브러�
 - **write lane.** 사용자의 프로토콜 흐름이다. 한 번에 메시지 하나만 들어 있고 (`write → onWritten → write`), 그래서 메시지 경계를 추적하는 큐가 없다. 다 나가면 `onWritten(length)` 한 번. 다음 action 은 onWritten 이 return 하므로 이전 메시지가 남은 채 write 가 걸리는 일은 없다. 메시지가 `send_capacity` 보다 크면 `close(KIOTTY_NET_CODE_BUFFER_FULL)`.
 - **push lane.** 사용자의 프로토콜 흐름과 무관하게 다른 thread 나 라이브러리가 끼워 넣는 바이트다. 넣는 동작의 이름은 **notify** 다. 완료 콜백이 없다. 여유가 없으면 그 notify 는 들어가지 않고 연결은 그대로 둔다. 끊을지는 호출자가 정한다. 두 lane 을 나눈 이유는, 사용자가 자기 흐름을 지켜도 broadcast 가 몰리면 자기 write 가 BUFFER_FULL 로 끊기는 일을 막기 위해서다. push lane 은 IO Thread 혼자 쓰고 읽으므로 Work 상태와 무관하게 Work 중인 연결에도 들어간다.
 - **어느 lane 으로 보낼까.** 송신이 프로토콜 흐름의 한 단계이면 (요청에 대한 응답처럼, 다 보낸 뒤에 다음 단계로 가야 하면) write 다. 흐름과 무관하게 아무 때나 나가는 것이면 (서버 알림, WebSocket 메시지처럼 수신 상태와 상관없는 송신이면) notify 다. 전이중 프로토콜에서 수신 흐름을 건드리지 않고 보내는 길이 notify 다.
-- **송신 순서.** IO Thread 의 drain 하나가 두 lane 을 소비하고 socket 에 쓴다. 보내던 메시지는 끝까지 보내고 메시지 경계에서만 lane 을 바꾸며, 둘 다 있으면 write lane 먼저다. WORKING 인 연결에서는 push lane 만 보낸다 (write lane 은 worker 것이다). 구현은 구현 가이드 1.6.
+- **송신 순서.** IO Thread 가 연결마다 송신 하나 (WRITE) 를 건다. 한 WRITE 에는 그때 write lane 에 있는 것 전부 **다음에** push lane 에 있는 것 전부가 실린다 (버퍼 둘을 한 번에 보내는 gather). 그래서 같은 WRITE 안에서는 write lane 이 먼저이고, push lane 이 계속 차도 write lane 이 밀리지 않는다. 걸린 WRITE 가 끝나야 다음 WRITE 를 건다. Work 중인 연결에서는 아무것도 보내지 않는다 (write lane 은 worker 것이고, push lane 은 쌓였다가 Work 가 끝난 뒤 나간다). TLS 에서도 같은 순서로 암호화한다. 구현은 구현 가이드 1.6.
+- **송신 timeout.** 걸린 WRITE 가 `send_timeout_milliseconds` (기본 30000) 안에 끝나지 않으면 (상대가 읽지 않아 상대 수신 창과 OS 송신 버퍼가 가득 차면) 그 WRITE 를 취소하고 `KIOTTY_NET_CODE_PEER_NOT_READING` 으로 끊는다. 콜백 API 는 `onDisconnected` 의 reason, StateMachine 은 CLOSED 이벤트의 reason 으로 받는다. 0 은 무한이다. 끊긴 상대는 자기가 가진 session 정보로 다시 연결해 이어 간다. Work 중 worker 의 동기 write 는 대상이 아니다 (호출마다 자기 timeout 이 있다). push lane 이 차서 notify 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려주는 동안에도 그 연결의 WRITE 는 걸려 있으므로, 읽지 않는 상대는 결국 이 timeout 으로 끊긴다.
 
 `Stage` 는 수신 Stage 의 구현이다. push lane 도 같은 클래스로 만든다.
 

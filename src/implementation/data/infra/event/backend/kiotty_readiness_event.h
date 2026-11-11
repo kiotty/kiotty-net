@@ -7,6 +7,9 @@
 #include "domain/entity/kiotty_io_completion.h"
 #include "domain/entity/kiotty_io_payload.h"
 
+#include <sys/socket.h>
+#include <sys/uio.h>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +39,8 @@ namespace kiotty::net::implementation
         IoPayload           payload;
         size_t              done;
         IoEvent*            next;
+        iovec               vectors[2];
+        msghdr              message;
     };
 
     inline IoEvent::IoEvent()
@@ -52,6 +57,8 @@ namespace kiotty::net::implementation
         , payload()
         , done(0)
         , next(nullptr)
+        , vectors()
+        , message()
     {
     }
 

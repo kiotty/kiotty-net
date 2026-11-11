@@ -115,7 +115,7 @@ namespace kiotty::net::implementation
                 return moved == 0 ? SocketCode::CLOSED : SocketCode::SUCCESS;
             }
             event.done += moved;
-            if (event.done < event.payload.length) { return restart(state, event, false); }
+            if (event.done < event.payload.total()) { return restart(state, event, false); }
             return SocketCode::SUCCESS;
         }
 

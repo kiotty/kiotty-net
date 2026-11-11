@@ -171,13 +171,14 @@ namespace kiotty::net::implementation
         {
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
-                                     configuration.push_capacity };
+                                     configuration.push_capacity,
+                                     configuration.send_timeout_milliseconds };
         }
 
         TlsCapacity cipherOf(ConnectionLimits limits, const KiottyNetTlsClientConfiguration* tls)
         {
             if (tls == nullptr) { return TlsCapacity{ 0, 0 }; }
-            return TlsCapacity{ limits.receive, largerOf(limits.send, limits.notify) };
+            return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         }
     }
 }

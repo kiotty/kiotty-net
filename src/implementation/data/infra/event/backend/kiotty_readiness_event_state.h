@@ -36,6 +36,7 @@ namespace kiotty::net::implementation
         IoCompletion completionOf(IoEvent& event, SocketCode code);
 
         SocketCode sendRest(IoEvent& event);
+        msghdr*    restMessage(IoEvent& event);
         SocketCode checkRequest(const IoAction& action, IoPayload payload);
         size_t     settle(EventListenerState& state, IoEvent& event, size_t count,
                           SocketCode eof_error);

@@ -31,7 +31,7 @@ namespace
     std::string payloadOf(net::Connection& connection, const net::IoAction& action)
     {
         net::IoPayload payload = connection.resolve(action);
-        return std::string(static_cast<const char*>(payload.buffer), payload.length);
+        return kiotty_test::bytesOf(payload);
     }
 
     template <size_t N>
@@ -245,6 +245,50 @@ TEST(ConnectionHost, BroadcastReturnsBufferFullAndWritesNowhereWhenOneConnection
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(first).kind);
     EXPECT_EQ("123456", pickedNotification(bench, second));
     EXPECT_EQ(net::IoActionKind::NONE, bench.pick(third).kind);
+}
+
+TEST(ConnectionHost, NotifyOfSeveralPiecesStagesThemBackToBackOrNoneWhenTheyDoNotAllFit)
+{
+    ConnectionBench<1> bench(limitsOf(64, 64, 8));
+    net::Connection& connection = bench.open();
+    bench.opened(connection);
+    const std::string head("ab");
+    const std::string body("cde");
+    const KiottyNetSpan pieces[] = { spanOf(head), spanOf(body) };
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.notify(connection.state().id, net::Span<const KiottyNetSpan>{ pieces, 2 }));
+    const std::string twelve("12");
+    const std::string thirty_four("34");
+    const KiottyNetSpan more[] = { spanOf(twelve), spanOf(thirty_four) };
+    EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.desk.notify(connection.state().id, net::Span<const KiottyNetSpan>{ more, 2 }));
+    EXPECT_EQ("abcde", pickedNotification(bench, connection));
+}
+
+TEST(ConnectionHost, BroadcastOfSeveralPiecesStagesThemBackToBackOnEveryConnection)
+{
+    ConnectionBench<2> bench(smallLimits());
+    net::Connection& first = bench.open();
+    net::Connection& second = bench.open();
+    bench.opened(first);
+    bench.opened(second);
+    const std::string head("head");
+    const std::string dash("-");
+    const std::string body("body");
+    const KiottyNetSpan pieces[] = { spanOf(head), spanOf(dash), spanOf(body) };
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.desk.broadcast(net::Span<const KiottyNetSpan>{ pieces, 3 }));
+    EXPECT_EQ("head-body", pickedNotification(bench, first));
+    EXPECT_EQ("head-body", pickedNotification(bench, second));
+}
+
+TEST(ConnectionHost, NotifyOfAPieceWithNullDataAndALengthIsInvalidAndStagesNothing)
+{
+    ConnectionBench<1> bench(smallLimits());
+    net::Connection& connection = bench.open();
+    bench.opened(connection);
+    const std::string ok("ok");
+    const KiottyNetSpan pieces[] = { spanOf(ok), KiottyNetSpan{ nullptr, 3 } };
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, bench.desk.notify(connection.state().id, net::Span<const KiottyNetSpan>{ pieces, 2 }));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, bench.desk.broadcast(net::Span<const KiottyNetSpan>{ pieces, 2 }));
+    EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
 }
 
 TEST(ConnectionHost, BroadcastWithNoAliveConnectionReturnsSuccess)

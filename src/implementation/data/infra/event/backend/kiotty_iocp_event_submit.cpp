@@ -28,7 +28,7 @@ namespace kiotty::net::implementation
         SocketCode startAccept(IoEvent& event, IoPayload payload);
         SocketCode loadAcceptEx(IoEvent& event);
         SocketCode postFailure(const EventListenerState& state, IoEvent& event, SocketCode failure);
-        WSABUF     bufferOf(IoPayload payload);
+        WSABUF     bufferOf(IoPiece piece);
         ULONG      clampLength(size_t length);
     }
 
@@ -60,13 +60,13 @@ namespace kiotty::net::implementation
 
         SocketCode checkRequest(const IoAction& action, IoPayload payload)
         {
-            if (payload.buffer == nullptr) { return SocketCode::INVALID_ARGUMENT; }
+            if (payload.first.buffer == nullptr) { return SocketCode::INVALID_ARGUMENT; }
             switch (action.kind)
             {
             case IoActionKind::READ:
             case IoActionKind::READ_UNTIL:
             case IoActionKind::WRITE:
-                if (payload.length == 0) { return SocketCode::INVALID_ARGUMENT; }
+                if (payload.first.length == 0) { return SocketCode::INVALID_ARGUMENT; }
                 return SocketCode::SUCCESS;
             case IoActionKind::ACCEPT:
                 return checkAccept(payload);
@@ -81,7 +81,7 @@ namespace kiotty::net::implementation
 
         SocketCode checkAccept(IoPayload payload)
         {
-            if (payload.length != sizeof(AcceptBuffer)) { return SocketCode::INVALID_ARGUMENT; }
+            if (payload.first.length != sizeof(AcceptBuffer)) { return SocketCode::INVALID_ARGUMENT; }
             return SocketCode::SUCCESS;
         }
 
@@ -116,7 +116,7 @@ namespace kiotty::net::implementation
 
         SocketCode startReceive(IoEvent& event, IoPayload payload)
         {
-            WSABUF buffer = bufferOf(payload);
+            WSABUF buffer = bufferOf(payload.first);
             DWORD flags = 0;
             OVERLAPPED* const overlapped = &event.request.overlapped;
             const int started =
@@ -130,10 +130,11 @@ namespace kiotty::net::implementation
 
         SocketCode startSend(IoEvent& event, IoPayload payload)
         {
-            WSABUF buffer = bufferOf(payload);
+            WSABUF buffers[2] = { bufferOf(payload.first), bufferOf(payload.second) };
+            const DWORD count = payload.second.length > 0 ? 2 : 1;
             OVERLAPPED* const overlapped = &event.request.overlapped;
             const int started =
-                ::WSASend(event.socket, &buffer, 1, nullptr, 0, overlapped, nullptr);
+                ::WSASend(event.socket, buffers, count, nullptr, 0, overlapped, nullptr);
             if (started != 0)
             {
                 return lastSocketCode();
@@ -143,7 +144,7 @@ namespace kiotty::net::implementation
 
         SocketCode startAccept(IoEvent& event, IoPayload payload)
         {
-            AcceptBuffer* const buffer = static_cast<AcceptBuffer*>(payload.buffer);
+            AcceptBuffer* const buffer = static_cast<AcceptBuffer*>(payload.first.buffer);
             if (buffer->socket == INVALID_SOCKET_HANDLE) { return SocketCode::INVALID_ARGUMENT; }
             const SocketCode loaded = loadAcceptEx(event);
             if (loaded != SocketCode::SUCCESS) { return loaded; }
@@ -191,11 +192,11 @@ namespace kiotty::net::implementation
             return SocketCode::SUCCESS;
         }
 
-        WSABUF bufferOf(IoPayload payload)
+        WSABUF bufferOf(IoPiece piece)
         {
             WSABUF buffer{};
-            buffer.len = clampLength(payload.length);
-            buffer.buf = static_cast<char*>(payload.buffer);
+            buffer.len = clampLength(piece.length);
+            buffer.buf = static_cast<char*>(piece.buffer);
             return buffer;
         }
 

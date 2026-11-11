@@ -20,6 +20,16 @@
 
 namespace kiotty_test
 {
+    inline std::string bytesOf(const kiotty::net::implementation::IoPayload& payload)
+    {
+        std::string bytes(static_cast<const char*>(payload.first.buffer), payload.first.length);
+        if (payload.second.length > 0)
+        {
+            bytes.append(static_cast<const char*>(payload.second.buffer), payload.second.length);
+        }
+        return bytes;
+    }
+
     namespace completion
     {
         inline kiotty::net::implementation::IoCompletion make(kiotty::net::implementation::IoKind kind, const kiotty::net::implementation::IoAction& action, size_t length, kiotty::net::implementation::SocketCode code)
@@ -56,14 +66,14 @@ namespace kiotty_test
 
     inline kiotty::net::implementation::ConnectionLimits limitsOf(size_t receive, size_t send, size_t notify)
     {
-        kiotty::net::implementation::ConnectionLimits limits = { receive, send, notify };
+        kiotty::net::implementation::ConnectionLimits limits = { receive, send, notify, 0 };
         return limits;
     }
 
     inline kiotty::net::implementation::TlsCapacity cipherOf(kiotty::net::implementation::ConnectionLimits limits)
     {
-        const size_t largest = limits.send > limits.notify ? limits.send : limits.notify;
-        return kiotty::net::implementation::TlsCapacity{ limits.receive, largest };
+        const size_t gathered = kiotty::net::implementation::gatheredPlainBytes(limits.send, limits.notify);
+        return kiotty::net::implementation::TlsCapacity{ limits.receive, gathered };
     }
 
     template <size_t N>
@@ -110,10 +120,10 @@ namespace kiotty_test
         size_t place(kiotty::net::implementation::Connection& connection, const kiotty::net::implementation::IoAction& read, const std::string& bytes)
         {
             kiotty::net::implementation::IoPayload room = connection.resolve(read);
-            size_t length = bytes.size() < room.length ? bytes.size() : room.length;
+            size_t length = bytes.size() < room.first.length ? bytes.size() : room.first.length;
             if (length > 0)
             {
-                std::memcpy(room.buffer, bytes.data(), length);
+                std::memcpy(room.first.buffer, bytes.data(), length);
             }
             return length;
         }

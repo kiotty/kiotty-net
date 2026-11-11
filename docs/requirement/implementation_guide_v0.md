@@ -166,7 +166,14 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 
 ### 1.6 송신 : write lane, notify, broadcast
 
-설계 v4 9.3 (Sender), 9.6 (drain 쪽 : pickWrite → resolve), 9.8 (NotificationContext, notify, broadcast) 와 10절 (한 바퀴의 drain) 이 이 절을 대신한다.
+설계 v4 9.3 (Sender), 9.6 (drain 쪽 : pickWrite → resolve), 9.8 (NotificationContext, notify, broadcast) 와 10절 (한 바퀴의 drain) 이 바탕이다. base 사이클 B1 (`design_http_v0.html` 2절) 에서 아래가 바뀌었다.
+
+- **한 WRITE 에 둘.** `SendFlow::pick` 은 send Stage 의 readable 전부와 notify Stage 의 readable 전부를 한 WRITE 로 고른다 (`IoAction::gather(length, notify_length)`). send 쪽 길이가 0 보다 크면 purpose 는 USER, 아니면 NOTIFY 다. TLS 의 cipher 가 남아 있으면 그것 먼저 (HANDSHAKE / CONTROL), 핸드셰이크 중이면 평문은 고르지 않는 것은 그대로다.
+- **IoPayload 조각 둘.** `IoPayload { IoPiece first; IoPiece second; }`. 평문 WRITE 는 first 가 send Stage, second 가 notify Stage 다 (send 가 비면 notify 가 first). READ 와 ACCEPT 는 first 만 쓴다. backend 는 IOCP `WSASend` 의 `WSABUF` 둘, epoll / kqueue `sendmsg` 의 iovec 둘, io_uring `IORING_OP_SENDMSG` (msghdr 와 iovec 은 `IoEvent` 의 멤버) 로 보낸다. 부분 송신은 `IoEvent::done` 하나로 두 조각을 이어서 센다 (`backend::restMessage`).
+- **TLS.** pick 때 send 다음 notify 를 cipher send Stage 에 encode 한다. 암호문은 버퍼 하나라 gather 가 없다. cipher send Stage 는 두 평문을 함께 담도록 `gatheredPlainBytes(send, notify)` (= send + notify + 레코드 하나의 overhead) 로 잡는다.
+- **release.** pick 때 정한 두 길이를 각자 치운다. notify 쪽은 notification lock 안에서 치운다. send 쪽 길이가 0 보다 크면 `onWritten(그 길이)` 가 한 번 온다.
+- **notify 의 여러 조각.** `NotificationDesk::notify(id, Span<const KiottyNetSpan>)` 와 `broadcast(Span<const KiottyNetSpan>)` 는 한 lock 안에서 조각들을 이어 복사하고, 다 들어가지 않으면 하나도 넣지 않는다 (`BUFFER_FULL`). WebSocket 의 frame 머리 + payload 가 이것을 쓴다. 공개 API 는 그대로다.
+- **송신 timeout.** `SendFlow` 가 송신 deadline 을 가진다. pick 이 WRITE 를 고르면 `now + send_timeout` 을 적고 (`limit` 으로 받은 값. 0 이면 적지 않는다), release 와 CLOSING 진입이 지운다. `ConnectionStatus::send_deadline` 으로 보이며, IoLoop 의 `stepSlot` 이 지나간 것을 `IoKind::SEND_TIMEOUT` 으로 Connection 에 주고 Connection 은 `close(PEER_NOT_READING)` 을 돌려준다. CLOSE 는 detach 로 걸린 WRITE 를 취소한다. IoLoop 의 대기 시간은 read deadline 과 송신 deadline 중 가까운 쪽이다.
 
 ## 2. StateMachine
 

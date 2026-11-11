@@ -161,7 +161,9 @@ namespace kiotty::net::implementation
         const Span<const int32_t> active = parts.host.active();
         for (size_t i = 0; i < active.length; ++i)
         {
-            timeout = nearer(timeout, parts.host.at(active[i]).status().deadline, now);
+            const ConnectionStatus status = parts.host.at(active[i]).status();
+            timeout = nearer(timeout, status.deadline, now);
+            timeout = nearer(timeout, status.send_deadline, now);
         }
         if (_accept_retry_at > now)
         {

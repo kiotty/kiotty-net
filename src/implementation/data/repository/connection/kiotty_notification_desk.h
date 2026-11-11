@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/kiotty_span.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "core/pool/kiotty_reusable_pool.h"
 #include "data/repository/connection/kiotty_connection.h"
@@ -17,7 +18,9 @@ namespace kiotty::net::implementation
         NotificationDesk& operator=(const NotificationDesk&) = delete;
 
         KiottyNetCode           notify(PoolHandle id, KiottyNetSpan data);
+        KiottyNetCode           notify(PoolHandle id, Span<const KiottyNetSpan> pieces);
         KiottyNetCode           broadcast(KiottyNetSpan data);
+        KiottyNetCode           broadcast(Span<const KiottyNetSpan> pieces);
         KiottyNetConnectionInfo info(PoolHandle id) const;
         ConnectionResult        working(PoolHandle id);
         KiottyNetCode           closeStream(PoolHandle id, const KiottyNetConnectionAction& then);

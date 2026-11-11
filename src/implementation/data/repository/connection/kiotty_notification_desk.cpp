@@ -15,26 +15,41 @@ namespace kiotty::net::implementation
 
     KiottyNetCode NotificationDesk::notify(PoolHandle id, KiottyNetSpan data)
     {
+        return notify(id, Span<const KiottyNetSpan>{ &data, 1 });
+    }
+
+    KiottyNetCode NotificationDesk::notify(PoolHandle id, Span<const KiottyNetSpan> pieces)
+    {
         const std::lock_guard<std::mutex> lock(_notification);
         const ConnectionResult found = _connections.get(id);
         if (!found) { return KIOTTY_NET_CODE_PEER_CLOSED; }
         const ConnectionState state = found.value().state();
         if (!state.is_alive) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        return found.value().flows().send.stageNotification(data);
+        return found.value().flows().send.stageNotification(pieces);
     }
 
     KiottyNetCode NotificationDesk::broadcast(KiottyNetSpan data)
     {
-        if (data.data == nullptr && data.length > 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        return broadcast(Span<const KiottyNetSpan>{ &data, 1 });
+    }
+
+    KiottyNetCode NotificationDesk::broadcast(Span<const KiottyNetSpan> pieces)
+    {
+        size_t total = 0;
+        for (const KiottyNetSpan& piece : pieces)
+        {
+            if (piece.data == nullptr && piece.length > 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+            total += piece.length;
+        }
         const std::lock_guard<std::mutex> lock(_notification);
-        const bool fitting = canTakeAll(data.length);
+        const bool fitting = canTakeAll(total);
         if (!fitting) { return KIOTTY_NET_CODE_BUFFER_FULL; }
         for (size_t i = 0; i < _connections.capacity(); ++i)
         {
             const bool target = isTarget(i);
             if (target)
             {
-                (void)_connections.at(i).flows().send.stageNotification(data);
+                (void)_connections.at(i).flows().send.stageNotification(pieces);
             }
         }
         return KIOTTY_NET_CODE_SUCCESS;

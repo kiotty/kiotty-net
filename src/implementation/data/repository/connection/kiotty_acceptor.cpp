@@ -91,9 +91,9 @@ namespace kiotty::net::implementation
         case IoActionKind::WRITE:
         case IoActionKind::START_WORK:
         case IoActionKind::CLOSE:
-            return IoPayload{ nullptr, 0 };
+            return IoPayload::empty();
         }
-        return IoPayload{ nullptr, 0 };
+        return IoPayload::empty();
     }
 
     SocketCode Acceptor::attach(EventListener& listener)
@@ -120,6 +120,6 @@ namespace kiotty::net::implementation
             if (prepared) { _prepared = std::move(prepared.value); }
         }
         _buffer.socket = _prepared.handle();
-        return IoPayload{ &_buffer, sizeof(_buffer) };
+        return IoPayload::single(&_buffer, sizeof(_buffer));
     }
 }

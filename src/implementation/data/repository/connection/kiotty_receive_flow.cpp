@@ -52,7 +52,7 @@ namespace kiotty::net::implementation
     {
         StageBase::Provider provider = stageFor(purpose).provider();
         const size_t writable = provider.writable();
-        return IoPayload{ provider.prepare(writable), writable };
+        return IoPayload::single(provider.prepare(writable), writable);
     }
 
     void ReceiveFlow::commit(IoPurpose purpose, size_t length)

@@ -367,7 +367,7 @@ namespace
         , loop()
         , _opened(false)
     {
-        const net::ConnectionLimits limits{ STAGE_BYTES, STAGE_BYTES, STAGE_BYTES };
+        const net::ConnectionLimits limits{ STAGE_BYTES, STAGE_BYTES, STAGE_BYTES, 0 };
         host.initialize(limits, POOL_SLOTS, net::TlsCapacity{ STAGE_BYTES, STAGE_BYTES });
         probe.host = &host;
         probe.desk = &desk;

@@ -127,9 +127,9 @@ namespace
             net::IoPayload room = connection->resolve(read);
             net::StageBase& source = peer.stages().send;
             size_t length = source.consumer().readable();
-            length = length < room.length ? length : room.length;
+            length = length < room.first.length ? length : room.first.length;
             length = length < limit ? length : limit;
-            std::memcpy(room.buffer, source.consumer().peek(), length);
+            std::memcpy(room.first.buffer, source.consumer().peek(), length);
             source.consumer().commit(length);
             source.compact();
             return complete(completion::receive(read, length));
@@ -138,12 +138,12 @@ namespace
         net::IoAction toPeer(const net::IoAction& write, size_t* cipher_length = nullptr)
         {
             net::IoPayload payload = connection->resolve(write);
-            kiotty_test::put(peer.stages().receive, std::string(static_cast<const char*>(payload.buffer), payload.length));
+            kiotty_test::put(peer.stages().receive, kiotty_test::bytesOf(payload));
             if (cipher_length != nullptr)
             {
-                *cipher_length = payload.length;
+                *cipher_length = payload.total();
             }
-            return complete(completion::sent(write, payload.length));
+            return complete(completion::sent(write, payload.total()));
         }
 
         net::IoAction exchange(net::IoAction action)
@@ -297,7 +297,7 @@ TEST_P(ConnectionTls, OnOpenedTlsClientReturnsNoneAndLeavesClientHelloForDrain)
     EXPECT_EQ(net::IoActionKind::WRITE, write.kind);
     EXPECT_EQ(net::IoPurpose::HANDSHAKE, write.purpose);
     EXPECT_EQ(0u, write.as.write.length);
-    EXPECT_GT(link.connection->resolve(write).length, 0u);
+    EXPECT_GT(link.connection->resolve(write).total(), 0u);
 }
 
 TEST_P(ConnectionTls, HandshakeReceiveThatNeedsToSendReturnsNoneAndLeavesBytesForDrain)
@@ -312,7 +312,7 @@ TEST_P(ConnectionTls, HandshakeReceiveThatNeedsToSendReturnsNoneAndLeavesBytesFo
     net::IoAction write = link.pick();
     EXPECT_EQ(net::IoActionKind::WRITE, write.kind);
     EXPECT_EQ(net::IoPurpose::HANDSHAKE, write.purpose);
-    EXPECT_GT(link.connection->resolve(write).length, 0u);
+    EXPECT_GT(link.connection->resolve(write).total(), 0u);
 }
 
 TEST_P(ConnectionTls, SendHandshakeConsumesCipherSendByCompletionLengthAndContinuesHandshake)
@@ -324,15 +324,15 @@ TEST_P(ConnectionTls, SendHandshakeConsumesCipherSendByCompletionLengthAndContin
     link.fromPeer(read);
     net::IoAction write = link.pick();
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
-    const size_t flight = link.connection->resolve(write).length;
+    const size_t flight = link.connection->resolve(write).total();
     ASSERT_GT(flight, 1u);
     net::IoAction partial = link.complete(completion::sent(write, 1));
     EXPECT_EQ(net::IoActionKind::NONE, partial.kind);
-    EXPECT_EQ(flight - 1, link.connection->resolve(write).length);
+    EXPECT_EQ(flight - 1, link.connection->resolve(write).total());
     net::IoAction next = link.complete(completion::sent(write, flight - 1));
     EXPECT_EQ(net::IoActionKind::READ, next.kind);
     EXPECT_EQ(net::IoPurpose::HANDSHAKE, next.purpose);
-    EXPECT_EQ(0u, link.connection->resolve(write).length);
+    EXPECT_EQ(0u, link.connection->resolve(write).total());
 }
 
 TEST_P(ConnectionTls, Tls13HandshakeIsDoneRightAfterClientFinishedWithoutATicket)
@@ -394,10 +394,10 @@ TEST_P(ConnectionTls, PickDuringHandshakingOffersOnlyCipherSendAndNotifyIsAccept
     }
     EXPECT_EQ(net::IoActionKind::WRITE, write.kind);
     EXPECT_EQ(net::IoPurpose::NOTIFY, write.purpose);
-    EXPECT_EQ(5u, write.as.write.length);
+    EXPECT_EQ(5u, write.as.write.notify_length);
 }
 
-TEST_P(ConnectionTls, PickPutsCipherSendBeforeNotifyAndSend)
+TEST_P(ConnectionTls, PickPutsCipherSendBeforeSendThenNotify)
 {
     REQUIRE_TLS13();
     TlsLink link(Side::SERVER, GetParam());
@@ -413,13 +413,13 @@ TEST_P(ConnectionTls, PickPutsCipherSendBeforeNotifyAndSend)
     EXPECT_EQ(net::IoPurpose::CONTROL, control.purpose);
     EXPECT_EQ(0u, control.as.write.length);
     EXPECT_EQ(net::IoActionKind::NONE, link.send(control).kind);
-    net::IoAction notify = link.pick();
-    EXPECT_EQ(net::IoPurpose::NOTIFY, notify.purpose);
-    link.send(notify);
-    net::IoAction user = link.pick();
-    EXPECT_EQ(net::IoPurpose::USER, user.purpose);
-    link.send(user);
-    EXPECT_EQ("notepong", link.peerReceives());
+    net::IoAction gathered = link.pick();
+    EXPECT_EQ(net::IoPurpose::USER, gathered.purpose);
+    EXPECT_EQ(reply.size(), gathered.as.write.length);
+    EXPECT_EQ(4u, gathered.as.write.notify_length);
+    link.send(gathered);
+    EXPECT_EQ(net::IoActionKind::NONE, link.pick().kind);
+    EXPECT_EQ("pongnote", link.peerReceives());
 }
 
 TEST_P(ConnectionTls, TimeoutDuringHandshakeReportsHandshakeTimeoutAndCloses)
@@ -565,7 +565,7 @@ TEST_P(ConnectionTls, WriteLengthIsPlaintextAndCompletionLengthIsCiphertext)
     EXPECT_GT(cipher, reply.size());
     ASSERT_EQ(1u, link.bench.recorder.count(Call::ON_WRITTEN));
     EXPECT_EQ(reply.size(), link.bench.recorder.last(Call::ON_WRITTEN).length);
-    EXPECT_EQ(0u, link.connection->resolve(write).length);
+    EXPECT_EQ(0u, link.connection->resolve(write).total());
     EXPECT_EQ(net::IoActionKind::NONE, link.pick().kind);
     EXPECT_EQ(reply, link.peerReceives());
 }
@@ -580,13 +580,14 @@ TEST_P(ConnectionTls, PickedContextIsEncodedAtPickTimeNotAtStage)
     link.fromPeer(read);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, link.bench.notify(*link.connection, "note"));
     const net::IoAction probe = net::IoAction::write(net::IoPurpose::USER, 0, 0);
-    EXPECT_EQ(0u, link.connection->resolve(probe).length);
+    EXPECT_EQ(0u, link.connection->resolve(probe).total());
     net::IoAction write = link.pick();
-    EXPECT_GT(link.connection->resolve(probe).length, 0u);
-    EXPECT_EQ(net::IoPurpose::NOTIFY, write.purpose);
+    EXPECT_GT(link.connection->resolve(probe).total(), 0u);
+    EXPECT_EQ(net::IoPurpose::USER, write.purpose);
+    EXPECT_EQ(4u, write.as.write.notify_length);
 }
 
-TEST_P(ConnectionTls, EncodeOrderEqualsSendOrderNotifyRecordFirst)
+TEST_P(ConnectionTls, EncodeOrderIsSendRecordThenNotifyRecordInOneWrite)
 {
     TlsLink link(Side::SERVER, GetParam());
     net::IoAction read = link.connect(thenRead(4, READ_TIMEOUT));
@@ -596,12 +597,12 @@ TEST_P(ConnectionTls, EncodeOrderEqualsSendOrderNotifyRecordFirst)
     link.fromPeer(read);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, link.bench.notify(*link.connection, "notify"));
     net::IoAction first = link.pick();
-    EXPECT_EQ(net::IoPurpose::NOTIFY, first.purpose);
+    EXPECT_EQ(net::IoPurpose::USER, first.purpose);
+    EXPECT_EQ(5u, first.as.write.length);
+    EXPECT_EQ(6u, first.as.write.notify_length);
     link.send(first);
-    net::IoAction second = link.pick();
-    EXPECT_EQ(net::IoPurpose::USER, second.purpose);
-    link.send(second);
-    EXPECT_EQ("notifyreply", link.peerReceives());
+    EXPECT_EQ(net::IoActionKind::NONE, link.pick().kind);
+    EXPECT_EQ("replynotify", link.peerReceives());
 }
 
 TEST_P(ConnectionTls, KeyUpdateReplyStaysInCipherSendAndNextPickSendsItAsControl)
@@ -641,12 +642,12 @@ TEST_P(ConnectionTls, CloseStreamWithThenWriteIsEncodedAtPickNotByTheWorker)
     std::string reply("done");
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, work.closeStream(generation, thenWriteSpan(spanOf(reply), READ_TIMEOUT)));
     const net::IoAction probe = net::IoAction::write(net::IoPurpose::USER, 0, 0);
-    EXPECT_EQ(0u, link.connection->resolve(probe).length);
+    EXPECT_EQ(0u, link.connection->resolve(probe).total());
     net::IoAction outcome = work.takeOutcome();
     EXPECT_EQ(net::IoActionKind::HOLD, link.complete(completion::workDone(outcome)).kind);
     net::IoAction write = link.pick();
     EXPECT_EQ(net::IoPurpose::USER, write.purpose);
-    EXPECT_GT(link.connection->resolve(probe).length, reply.size());
+    EXPECT_GT(link.connection->resolve(probe).total(), reply.size());
     link.send(write);
     EXPECT_EQ(reply, link.peerReceives());
 }
@@ -659,15 +660,15 @@ TEST_P(ConnectionTls, ReceiveStageIsCipherReceiveForHandshakeAndTlsUser)
     const net::IoAction handshake = net::IoAction::read(net::IoPurpose::HANDSHAKE, 0, 0);
     const net::IoAction user = net::IoAction::read(net::IoPurpose::USER, 0, 1);
     net::IoPayload during = link.connection->resolve(handshake);
-    EXPECT_EQ(during.buffer, link.connection->resolve(user).buffer);
-    EXPECT_EQ(CAPACITY, during.length);
+    EXPECT_EQ(during.first.buffer, link.connection->resolve(user).first.buffer);
+    EXPECT_EQ(CAPACITY, during.total());
 
     TlsLink ready(Side::SERVER, GetParam());
     ready.connect(thenHold(0));
     net::IoPayload after = ready.connection->resolve(user);
-    EXPECT_EQ(after.buffer, ready.connection->resolve(handshake).buffer);
-    EXPECT_EQ(after.length, ready.connection->resolve(handshake).length);
-    EXPECT_GT(after.length, 0u);
+    EXPECT_EQ(after.first.buffer, ready.connection->resolve(handshake).first.buffer);
+    EXPECT_EQ(after.total(), ready.connection->resolve(handshake).total());
+    EXPECT_GT(after.total(), 0u);
 }
 
 TEST_P(ConnectionTls, ResolveWriteOnTlsPointsAtCipherSendReadable)
@@ -682,10 +683,10 @@ TEST_P(ConnectionTls, ResolveWriteOnTlsPointsAtCipherSendReadable)
     for (net::IoPurpose purpose : purposes)
     {
         net::IoPayload other = link.connection->resolve(net::IoAction::write(purpose, 0, 0));
-        EXPECT_EQ(notify.buffer, other.buffer);
-        EXPECT_EQ(notify.length, other.length);
+        EXPECT_EQ(notify.first.buffer, other.first.buffer);
+        EXPECT_EQ(notify.total(), other.total());
     }
-    EXPECT_GT(notify.length, write.as.write.length);
+    EXPECT_GT(notify.total(), write.as.write.notify_length);
 }
 
 TEST_P(ConnectionTls, ReleaseThenOpenReusesTheEngineAndHandshakesAgain)

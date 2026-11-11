@@ -57,7 +57,7 @@ namespace
 
     IoPayload payloadOf(void* buffer, size_t length)
     {
-        IoPayload payload = { buffer, length };
+        IoPayload payload = IoPayload::single(buffer, length);
         return payload;
     }
 
@@ -225,6 +225,25 @@ TEST_F(EventListener, SubmitWriteCompletesWithFullLengthAndPeerReceivesBytes)
     EXPECT_EQ(received, sent);
 }
 
+TEST_F(EventListener, SubmitGatheredWriteSendsTheFirstPieceThenTheSecondAndCompletesWithTheTotal)
+{
+    std::string first("send-stage|");
+    std::string second("notify-stage");
+    IoAction write = IoAction::gather(first.size(), second.size());
+    IoPayload payload = IoPayload::pair(net::IoPiece{ &first[0], first.size() }, net::IoPiece{ &second[0], second.size() });
+    ASSERT_EQ(listener.submit(stream, write, payload), SocketCode::SUCCESS);
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS);
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].kind, IoKind::SEND);
+    EXPECT_EQ(completions[0].code, SocketCode::SUCCESS);
+    EXPECT_EQ(completions[0].length, first.size() + second.size());
+    EXPECT_EQ(completions[0].action.as.write.length, first.size());
+    EXPECT_EQ(completions[0].action.as.write.notify_length, second.size());
+    std::string received(first.size() + second.size(), ' ');
+    ASSERT_TRUE(link.peer.recvExactly(&received[0], received.size(), WAIT_MS));
+    EXPECT_EQ(received, first + second);
+}
+
 TEST_F(EventListener, PendingIsTrueAfterSubmitAndFalseAfterWaitReturnsIt)
 {
     char buffer[16];
@@ -345,6 +364,46 @@ TEST_F(EventListener, DetachWithPendingReadAndWriteDeliversTwoCancelled)
     }
     EXPECT_FALSE(stream.pending);
     EXPECT_FALSE(writer.pending);
+}
+
+TEST_F(EventListener, GatheredWriteLargerThanSocketBufferCrossesThePieceBoundaryInOrder)
+{
+    const size_t first_length = 300 * 1024 + 7;
+    const size_t second_length = 700 * 1024 + 13;
+    const size_t total = first_length + second_length;
+    ASSERT_TRUE(kiotty_test::setSendBuffer(link.socket.handle(), 4096));
+    std::vector<char> sent = pattern(total);
+    for (size_t i = first_length; i < total; ++i)
+    {
+        sent[i] = static_cast<char>('A' + i % 26);
+    }
+    std::vector<char> received(total);
+    bool all_received = false;
+    std::thread reader([&]() {
+        size_t done = 0;
+        const size_t chunk = 16 * 1024;
+        while (done < total)
+        {
+            size_t length = std::min(chunk, total - done);
+            if (!link.peer.recvExactly(received.data() + done, length, WAIT_MS))
+            {
+                return;
+            }
+            done += length;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        all_received = true;
+    });
+    IoAction write = IoAction::gather(first_length, second_length);
+    IoPayload payload = IoPayload::pair(net::IoPiece{ sent.data(), first_length }, net::IoPiece{ sent.data() + first_length, second_length });
+    ASSERT_EQ(listener.submit(stream, write, payload), SocketCode::SUCCESS);
+    std::vector<IoCompletion> completions = collect(listener, 1, WAIT_MS * 5);
+    reader.join();
+    ASSERT_EQ(completions.size(), 1u);
+    EXPECT_EQ(completions[0].code, SocketCode::SUCCESS);
+    EXPECT_EQ(completions[0].length, total);
+    EXPECT_TRUE(all_received);
+    EXPECT_EQ(received, sent);
 }
 
 TEST_F(EventListener, DetachWithNothingPendingDeliversNothing)

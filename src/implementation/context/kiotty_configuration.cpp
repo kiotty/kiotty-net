@@ -12,6 +12,7 @@ namespace kiotty::net::implementation
         constexpr uint32_t DEFAULT_CONNECT_TIMEOUT_MILLISECONDS = 5000;
         constexpr uint32_t DEFAULT_MAX_TRIAL = 1;
         constexpr uint32_t DEFAULT_TRIAL_INTERVAL_MILLISECONDS = 1000;
+        constexpr uint32_t DEFAULT_SEND_TIMEOUT_MILLISECONDS = 30000;
 
         struct Capacities
         {
@@ -89,6 +90,14 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
+    KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
+                                             uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.send_timeout_milliseconds = timeout_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
     KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
                                                    Span<const char> host,
                                                    uint16_t port)
@@ -148,6 +157,14 @@ namespace kiotty::net::implementation
         if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         configuration.no_delay = no_delay;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode configureClientSendTimeout(KiottyNetClientConfiguration& configuration,
+                                             uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        configuration.send_timeout_milliseconds = timeout_milliseconds;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -220,6 +237,7 @@ namespace kiotty::net::implementation
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
             configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
+            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 
@@ -236,6 +254,7 @@ namespace kiotty::net::implementation
             configuration.max_trial = DEFAULT_MAX_TRIAL;
             configuration.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
             configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
+            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 

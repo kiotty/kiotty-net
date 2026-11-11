@@ -24,6 +24,8 @@ namespace kiotty::net::implementation
                                                 size_t push_capacity);
     KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
                                          KiottyNetNoDelay no_delay);
+    KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
+                                             uint32_t timeout_milliseconds);
 
     KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
                                                    Span<const char> host,
@@ -41,6 +43,8 @@ namespace kiotty::net::implementation
                                        uint32_t trial_interval_milliseconds);
     KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
                                          KiottyNetNoDelay no_delay);
+    KiottyNetCode configureClientSendTimeout(KiottyNetClientConfiguration& configuration,
+                                             uint32_t timeout_milliseconds);
 
     NoDelay          noDelayOf(KiottyNetNoDelay no_delay);
     bool             isInitialized(const KiottyNetServerConfiguration& configuration);

@@ -838,5 +838,27 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 <p>하지 않은 것: 설계 10절의 C++ 중복 행 compile-fail 검사 (<code>try_compile</code>). 중복은 정의 없는 <code>duplicate_rule_in_table</code> 을 불러 <code>constexpr</code> 표면 compile 이, 아니면 link 가 실패한다. 그 실패를 CI 가 확인하는 검사만 없다.</p>
 
+<h2 id="s17">17. 케이스 : base 송신 (B1, 한 WRITE 에 send 다음 notify, 송신 timeout)</h2>
+<p><code>docs/design/design_http_v0.html</code> 2절. HTTP 와 WebSocket 이 쓰기 전에 base 에서 확인한다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Connection</td><td>PickWriteWithNotifyAndSendBothStagedCarriesSendThenNotifyInOneWrite</td><td><span class="tag ok">정상</span></td><td>한 WRITE 에 <code>length</code> (send) 와 <code>notify_length</code>, payload 의 first 가 send, second 가 notify, 바이트가 send → notify</td></tr>
+  <tr><td>Connection</td><td>NotifyKeptFullDoesNotStarveTheSendStage</td><td><span class="tag ok">정상</span></td><td>notify 가 계속 들어와도 WRITE 마다 send 가 같이 나간다</td></tr>
+  <tr><td>Connection</td><td>SendNotifyOnlyReleasesTheNotifyStageAndReturnsNone</td><td><span class="tag ok">정상</span></td><td>notify 만이면 purpose NOTIFY, onWritten 없음</td></tr>
+  <tr><td>Connection</td><td>SendOfAGatheredWriteReleasesBothStagesAndCallsOnWrittenWithTheSendLength</td><td><span class="tag ok">정상</span></td><td>두 길이를 각자 치우고 onWritten 은 send 길이로 한 번</td></tr>
+  <tr><td>Connection</td><td>PickedWriteStartsTheSendDeadlineAndItsCompletionClearsIt</td><td><span class="tag ok">정상</span></td><td>pick 이 <code>send_deadline</code> 을 적고 SEND 완료가 지운다</td></tr>
+  <tr><td>Connection</td><td>SendTimeoutZeroNeverStartsTheSendDeadline</td><td><span class="tag edge">엣지</span></td><td>0 은 무한</td></tr>
+  <tr><td>Connection</td><td>SendTimeoutClosesWithPeerNotReadingAndClearsTheSendDeadline</td><td><span class="tag edge">엣지</span></td><td><code>IoKind::SEND_TIMEOUT</code> → CLOSE(PEER_NOT_READING), onDisconnected 의 reason, deadline 이 지워져 IoLoop 가 다시 깨지 않는다</td></tr>
+  <tr><td>ConnectionTls</td><td>PickPutsCipherSendBeforeSendThenNotify</td><td><span class="tag ok">정상</span></td><td>남은 cipher (KeyUpdate 답장) 가 먼저, 그 다음 WRITE 가 send → notify</td></tr>
+  <tr><td>ConnectionTls</td><td>EncodeOrderIsSendRecordThenNotifyRecordInOneWrite</td><td><span class="tag ok">정상</span></td><td>TLS 에서도 같은 순서. 상대가 복호화한 바이트가 <code>replynotify</code></td></tr>
+  <tr><td>ConnectionHost</td><td>NotifyOfSeveralPiecesStagesThemBackToBackOrNoneWhenTheyDoNotAllFit</td><td><span class="tag edge">엣지</span></td><td>한 lock 안의 여러 조각 복사, 다 들어가지 않으면 하나도 넣지 않음 (BUFFER_FULL)</td></tr>
+  <tr><td>ConnectionHost</td><td>BroadcastOfSeveralPiecesStagesThemBackToBackOnEveryConnection</td><td><span class="tag ok">정상</span></td><td>broadcast 도 같다</td></tr>
+  <tr><td>ConnectionHost</td><td>NotifyOfAPieceWithNullDataAndALengthIsInvalidAndStagesNothing</td><td><span class="tag misuse">오용</span></td><td>INVALID_ARGUMENT</td></tr>
+  <tr><td>EventListener</td><td>SubmitGatheredWriteSendsTheFirstPieceThenTheSecondAndCompletesWithTheTotal</td><td><span class="tag ok">정상</span></td><td>backend 넷의 gather 송신 (WSASend 버퍼 둘, sendmsg, IORING_OP_SENDMSG)</td></tr>
+  <tr><td>EventListener</td><td>GatheredWriteLargerThanSocketBufferCrossesThePieceBoundaryInOrder</td><td><span class="tag edge">엣지</span></td><td>부분 송신이 두 조각의 경계를 넘어도 순서와 길이가 맞다</td></tr>
+  <tr><td>Configuration</td><td>SendTimeoutAcceptsZeroAsInfiniteAndAnyOtherValue, BuildersSetTheSendTimeout</td><td><span class="tag ok">정상</span></td><td>기본 30000 (서버와 클라이언트의 Defaults 테스트), configure 둘, builder 둘</td></tr>
+  <tr><td>BaseApi</td><td>APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheSendTimeout</td><td><span class="tag edge">엣지</span></td><td>공개 C API 만. 읽지 않는 상대에게 계속 write 하는 서버가 <code>send_timeout</code> (300 ms) 뒤 <code>onDisconnected(PEER_NOT_READING)</code></td></tr>
+</table>
+
 </body>
 </html>

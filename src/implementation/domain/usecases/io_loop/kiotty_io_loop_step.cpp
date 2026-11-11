@@ -41,6 +41,11 @@ namespace kiotty::net::implementation
     {
         Connection& connection = parts.host.at(slot);
         bool stepped = false;
+        if (connection.status().isSendExpired(now))
+        {
+            step(IoCompletion::sendTimeout(slot), parts);
+            stepped = true;
+        }
         if (connection.status().isExpired(now))
         {
             step(IoCompletion::timeout(slot), parts);
@@ -72,6 +77,7 @@ namespace kiotty::net::implementation
         case IoKind::RECEIVE:
         case IoKind::SEND:
         case IoKind::TIMEOUT:
+        case IoKind::SEND_TIMEOUT:
         case IoKind::WORK_READY:
         case IoKind::WORK_DONE:
         {
@@ -123,7 +129,7 @@ namespace kiotty::net::implementation
             return;
         }
         ConnectionConfiguration configuration = { std::move(socket),
-                                                  ConnectionLimits{ 0, 0, 0 },
+                                                  ConnectionLimits{ 0, 0, 0, 0 },
                                                   decision.connection_context,
                                                   hostname,
                                                   parts.profile };

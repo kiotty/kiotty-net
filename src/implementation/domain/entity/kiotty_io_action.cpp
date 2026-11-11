@@ -44,6 +44,15 @@ namespace kiotty::net::implementation
     {
         IoAction action = blank(IoActionKind::WRITE, purpose, timeout_milliseconds);
         action.as.write.length = length;
+        action.as.write.notify_length = 0;
+        return action;
+    }
+
+    IoAction IoAction::gather(size_t length, size_t notify_length)
+    {
+        const IoPurpose purpose = length > 0 ? IoPurpose::USER : IoPurpose::NOTIFY;
+        IoAction action = write(purpose, 0, length);
+        action.as.write.notify_length = notify_length;
         return action;
     }
 

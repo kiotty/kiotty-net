@@ -44,7 +44,7 @@ namespace
     std::string payloadOf(net::Connection& connection, const net::IoAction& action)
     {
         net::IoPayload payload = connection.resolve(action);
-        return std::string(static_cast<const char*>(payload.buffer), payload.length);
+        return kiotty_test::bytesOf(payload);
     }
 
     class StateProbe final : public net::Handler
@@ -391,8 +391,8 @@ TEST(Connection, RefillCompactsSoTheReturnedReadHasWritableRoom)
     net::IoAction next = bench.deliver(connection, read, "abcdef");
     ASSERT_EQ(net::IoActionKind::READ, next.kind);
     net::IoPayload room = connection.resolve(next);
-    EXPECT_NE(nullptr, room.buffer);
-    EXPECT_EQ(16u - 2u, room.length);
+    EXPECT_NE(nullptr, room.first.buffer);
+    EXPECT_EQ(16u - 2u, room.first.length);
 }
 
 TEST(Connection, FullStageWithoutTheConditionReturnsCloseRequestTooLarge)
@@ -623,7 +623,7 @@ TEST(Connection, PickWriteWithPendingWriteEventIsNone)
     EXPECT_EQ(net::IoActionKind::WRITE, bench.pick(connection).kind);
 }
 
-TEST(Connection, PickWriteWithNotifyAndSendBothStagedPicksNotifyFirst)
+TEST(Connection, PickWriteWithNotifyAndSendBothStagedCarriesSendThenNotifyInOneWrite)
 {
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
@@ -633,9 +633,30 @@ TEST(Connection, PickWriteWithNotifyAndSendBothStagedPicksNotifyFirst)
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "N2"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
-    EXPECT_EQ(net::IoPurpose::NOTIFY, write.purpose);
-    EXPECT_EQ(4u, write.as.write.length);
-    EXPECT_EQ("N1N2", payloadOf(connection, write));
+    EXPECT_EQ(net::IoPurpose::USER, write.purpose);
+    EXPECT_EQ(8u, write.as.write.length);
+    EXPECT_EQ(4u, write.as.write.notify_length);
+    net::IoPayload payload = connection.resolve(write);
+    EXPECT_EQ(8u, payload.first.length);
+    EXPECT_EQ(4u, payload.second.length);
+    EXPECT_EQ("responseN1N2", payloadOf(connection, write));
+}
+
+TEST(Connection, NotifyKeptFullDoesNotStarveTheSendStage)
+{
+    Bench bench(smallLimits());
+    net::Connection& connection = bench.open();
+    bench.recorder.thenWrite("resp", 0);
+    bench.opened(connection);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "a"));
+    net::IoAction first = bench.pick(connection);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "b"));
+    bench.recorder.thenWrite("more", 0);
+    bench.complete(connection, completion::sent(first, 5));
+    ASSERT_EQ(1u, bench.recorder.count(Call::ON_WRITTEN));
+    net::IoAction second = bench.pick(connection);
+    ASSERT_EQ(net::IoActionKind::WRITE, second.kind);
+    EXPECT_EQ("moreb", payloadOf(connection, second));
 }
 
 TEST(Connection, PickWriteWithOnlySendStagedReturnsWriteUserOfItsWholeReadable)
@@ -649,6 +670,52 @@ TEST(Connection, PickWriteWithOnlySendStagedReturnsWriteUserOfItsWholeReadable)
     EXPECT_EQ(net::IoPurpose::USER, write.purpose);
     EXPECT_EQ(8u, write.as.write.length);
     EXPECT_EQ("response", payloadOf(connection, write));
+}
+
+TEST(Connection, PickedWriteStartsTheSendDeadlineAndItsCompletionClearsIt)
+{
+    net::ConnectionLimits limits = limitsOf(64, 64, 64);
+    limits.send_timeout_milliseconds = 5000;
+    Bench bench(limits);
+    net::Connection& connection = bench.open();
+    bench.recorder.thenWrite("user", 0);
+    bench.opened(connection);
+    EXPECT_EQ(0u, connection.status().send_deadline);
+    net::IoAction write = bench.pick(connection);
+    ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
+    EXPECT_NE(0u, connection.status().send_deadline);
+    EXPECT_FALSE(connection.status().isSendExpired(connection.status().send_deadline - 1));
+    EXPECT_TRUE(connection.status().isSendExpired(connection.status().send_deadline));
+    bench.complete(connection, completion::sent(write, 4));
+    EXPECT_EQ(0u, connection.status().send_deadline);
+}
+
+TEST(Connection, SendTimeoutZeroNeverStartsTheSendDeadline)
+{
+    Bench bench(smallLimits());
+    net::Connection& connection = bench.open();
+    bench.recorder.thenWrite("user", 0);
+    bench.opened(connection);
+    ASSERT_EQ(net::IoActionKind::WRITE, bench.pick(connection).kind);
+    EXPECT_EQ(0u, connection.status().send_deadline);
+}
+
+TEST(Connection, SendTimeoutClosesWithPeerNotReadingAndClearsTheSendDeadline)
+{
+    net::ConnectionLimits limits = limitsOf(64, 64, 64);
+    limits.send_timeout_milliseconds = 5000;
+    Bench bench(limits);
+    net::Connection& connection = bench.open();
+    bench.recorder.thenWrite("user", 0);
+    bench.opened(connection);
+    ASSERT_EQ(net::IoActionKind::WRITE, bench.pick(connection).kind);
+    net::IoAction closing = bench.complete(connection, net::IoCompletion::sendTimeout(connection.slot()));
+    ASSERT_EQ(net::IoActionKind::CLOSE, closing.kind);
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_NOT_READING, closing.as.close.reason);
+    ASSERT_EQ(1u, bench.recorder.count(Call::ON_DISCONNECTED));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_NOT_READING, bench.recorder.last(Call::ON_DISCONNECTED).code);
+    EXPECT_EQ(net::Phase::CLOSING, connection.state().phase);
+    EXPECT_EQ(0u, connection.status().send_deadline);
 }
 
 TEST(Connection, PickWriteWithNothingStagedIsNone)
@@ -669,8 +736,8 @@ TEST(Connection, ResolveWriteOfNotifyKeepsThePickedLengthWhenMoreIsAppendedBefor
     net::IoPayload picked = connection.resolve(write);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "def"));
     net::IoPayload resolved = connection.resolve(write);
-    EXPECT_EQ(picked.buffer, resolved.buffer);
-    EXPECT_EQ(3u, resolved.length);
+    EXPECT_EQ(picked.first.buffer, resolved.first.buffer);
+    EXPECT_EQ(3u, resolved.total());
     EXPECT_EQ("abc", payloadOf(connection, write));
 }
 
@@ -681,12 +748,12 @@ TEST(Connection, ResolveReadPointsAtReceiveStageFreeSpaceOfWritableLength)
     bench.recorder.then(thenRead(4, 0));
     net::IoAction read = bench.opened(connection);
     net::IoPayload empty = connection.resolve(read);
-    EXPECT_NE(nullptr, empty.buffer);
-    EXPECT_EQ(64u, empty.length);
+    EXPECT_NE(nullptr, empty.first.buffer);
+    EXPECT_EQ(64u, empty.first.length);
     net::IoAction again = bench.deliver(connection, read, "abc");
     net::IoPayload rest = connection.resolve(again);
-    EXPECT_EQ(static_cast<char*>(empty.buffer) + 3, rest.buffer);
-    EXPECT_EQ(61u, rest.length);
+    EXPECT_EQ(static_cast<char*>(empty.first.buffer) + 3, rest.first.buffer);
+    EXPECT_EQ(61u, rest.first.length);
 }
 
 TEST(Connection, ResolveOfNoneHoldStartWorkCloseIsEmptyPayload)
@@ -698,12 +765,28 @@ TEST(Connection, ResolveOfNoneHoldStartWorkCloseIsEmptyPayload)
     for (const net::IoAction& action : actions)
     {
         net::IoPayload payload = connection.resolve(action);
-        EXPECT_EQ(nullptr, payload.buffer);
-        EXPECT_EQ(0u, payload.length);
+        EXPECT_EQ(nullptr, payload.first.buffer);
+        EXPECT_EQ(0u, payload.total());
     }
 }
 
-TEST(Connection, SendNotifyReleasesOnlyNotifyAndReturnsNone)
+TEST(Connection, SendNotifyOnlyReleasesTheNotifyStageAndReturnsNone)
+{
+    Bench bench(smallLimits());
+    net::Connection& connection = bench.open();
+    bench.opened(connection);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push!"));
+    net::IoAction write = bench.pick(connection);
+    ASSERT_EQ(net::IoPurpose::NOTIFY, write.purpose);
+    EXPECT_EQ(0u, write.as.write.length);
+    EXPECT_EQ(5u, write.as.write.notify_length);
+    net::IoAction after = bench.complete(connection, completion::sent(write, 5));
+    EXPECT_EQ(net::IoActionKind::NONE, after.kind);
+    EXPECT_EQ(0u, bench.recorder.count(Call::ON_WRITTEN));
+    EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
+}
+
+TEST(Connection, SendOfAGatheredWriteReleasesBothStagesAndCallsOnWrittenWithTheSendLength)
 {
     Bench bench(smallLimits());
     net::Connection& connection = bench.open();
@@ -711,14 +794,11 @@ TEST(Connection, SendNotifyReleasesOnlyNotifyAndReturnsNone)
     bench.opened(connection);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "push!"));
     net::IoAction write = bench.pick(connection);
-    ASSERT_EQ(net::IoPurpose::NOTIFY, write.purpose);
-    net::IoAction after = bench.complete(connection, completion::sent(write, 5));
-    EXPECT_EQ(net::IoActionKind::NONE, after.kind);
-    EXPECT_EQ(0u, bench.recorder.count(Call::ON_WRITTEN));
-    net::IoAction next = bench.pick(connection);
-    ASSERT_EQ(net::IoActionKind::WRITE, next.kind);
-    EXPECT_EQ(net::IoPurpose::USER, next.purpose);
-    EXPECT_EQ("user", payloadOf(connection, next));
+    ASSERT_EQ(net::IoPurpose::USER, write.purpose);
+    bench.complete(connection, completion::sent(write, 9));
+    ASSERT_EQ(1u, bench.recorder.count(Call::ON_WRITTEN));
+    EXPECT_EQ(4u, bench.recorder.last(Call::ON_WRITTEN).length);
+    EXPECT_EQ(net::IoActionKind::NONE, bench.pick(connection).kind);
 }
 
 TEST(Connection, SendUserReleasesOnlySendAndCallsOnWrittenWithPlainLength)
@@ -756,7 +836,7 @@ TEST(Connection, NotifyStagedWhileNotifyWriteIsInFlightGoesOutAsTheNextWrite)
     net::IoAction second = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, second.kind);
     EXPECT_EQ(net::IoPurpose::NOTIFY, second.purpose);
-    EXPECT_EQ(2u, second.as.write.length);
+    EXPECT_EQ(2u, second.as.write.notify_length);
     EXPECT_EQ("de", payloadOf(connection, second));
 }
 
@@ -1232,7 +1312,7 @@ TEST(Connection, NotifyStagesPlaintextIntoTheNotifyStage)
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "hello"));
     net::IoAction write = bench.pick(connection);
     ASSERT_EQ(net::IoActionKind::WRITE, write.kind);
-    EXPECT_EQ(5u, write.as.write.length);
+    EXPECT_EQ(5u, write.as.write.notify_length);
     EXPECT_EQ("hello", payloadOf(connection, write));
 }
 
@@ -1258,7 +1338,7 @@ TEST(Connection, NotifyBeyondPushCapacityReturnsBufferFullAndWritesNothing)
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bench.notify(connection, "12345678"));
     EXPECT_EQ(KIOTTY_NET_CODE_BUFFER_FULL, bench.notify(connection, "9"));
     net::IoAction write = bench.pick(connection);
-    EXPECT_EQ(8u, write.as.write.length);
+    EXPECT_EQ(8u, write.as.write.notify_length);
     EXPECT_EQ("12345678", payloadOf(connection, write));
 }
 
@@ -1293,7 +1373,7 @@ TEST(Connection, NotifyFromAnotherThreadAThousandTimesWhilePickAndReleaseRunKeep
             continue;
         }
         received += payloadOf(connection, write);
-        bench.complete(connection, completion::sent(write, write.as.write.length));
+        bench.complete(connection, completion::sent(write, write.as.write.notify_length));
     }
     pusher.join();
     EXPECT_EQ(expected, received);

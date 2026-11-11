@@ -11,12 +11,13 @@ TEST(MemoryLimits, FollowTheBuildConfiguration)
     EXPECT_EQ(tls, KIOTTY_NET_USE_TLS != 0);
 }
 
-TEST(TlsLayout, CipherSendBytesHoldsTheLargestPlainMessageWithRecordOverhead)
+TEST(TlsLayout, CipherSendBytesHoldsSendThenNotifyWithRecordOverhead)
 {
     size_t plain = 16384;
     EXPECT_EQ(kiotty::net::implementation::cipherSendBytes(plain), plain + 2 * 64 + 512);
     EXPECT_EQ(kiotty::net::implementation::cipherSendBytes(100), 100u + 64 + 512);
-    size_t largest = kiotty::net::implementation::largerOf(MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY);
+    size_t largest = kiotty::net::implementation::gatheredPlainBytes(MemoryLimits::SEND_CAPACITY, MemoryLimits::PUSH_CAPACITY);
+    EXPECT_EQ(largest, MemoryLimits::SEND_CAPACITY + MemoryLimits::PUSH_CAPACITY + 64);
     size_t expected = MemoryLimits::TLS ? kiotty::net::implementation::alignStage(kiotty::net::implementation::cipherSendBytes(largest)) : 0;
     kiotty::net::implementation::Stage receive;
     kiotty::net::implementation::Stage send;

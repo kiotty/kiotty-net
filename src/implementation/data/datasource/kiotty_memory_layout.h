@@ -16,9 +16,9 @@ namespace kiotty::net::implementation
         return (bytes + STAGE_ALIGNMENT - 1) / STAGE_ALIGNMENT * STAGE_ALIGNMENT;
     }
 
-    constexpr size_t largerOf(size_t left, size_t right)
+    constexpr size_t gatheredPlainBytes(size_t send, size_t notify)
     {
-        return left > right ? left : right;
+        return send + notify + TLS_RECORD_OVERHEAD_BYTES;
     }
 
     constexpr size_t cipherSendBytes(size_t plain)

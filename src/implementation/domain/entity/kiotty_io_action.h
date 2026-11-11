@@ -47,6 +47,7 @@ namespace kiotty::net::implementation
             struct
             {
                 size_t length;
+                size_t notify_length;
             } write;
             struct
             {
@@ -64,6 +65,7 @@ namespace kiotty::net::implementation
                                   KiottyNetSpan delimiter,
                                   size_t max);
         static IoAction write(IoPurpose purpose, uint32_t timeout_milliseconds, size_t length);
+        static IoAction gather(size_t length, size_t notify_length);
         static IoAction startWork();
         static IoAction close(KiottyNetCode reason);
         static IoAction accept();

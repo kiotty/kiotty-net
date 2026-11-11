@@ -126,7 +126,7 @@ namespace kiotty::net::implementation
             for (;;)
             {
                 const ssize_t received =
-                    ::recv(event.fd, event.payload.buffer, event.payload.length, 0);
+                    ::recv(event.fd, event.payload.first.buffer, event.payload.first.length, 0);
                 if (received > 0)
                 {
                     event.done = static_cast<size_t>(received);

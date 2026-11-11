@@ -52,6 +52,7 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
     EXPECT_EQ(4096u, configuration.send_capacity);
     EXPECT_EQ(4096u, configuration.push_capacity);
     EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
+    EXPECT_EQ(30000u, configuration.send_timeout_milliseconds);
 }
 
 TEST(Configuration, ClientDefaultsAreTheRequirementValues)
@@ -62,6 +63,7 @@ TEST(Configuration, ClientDefaultsAreTheRequirementValues)
     EXPECT_EQ(1u, configuration.max_trial);
     EXPECT_EQ(1000u, configuration.trial_interval_milliseconds);
     EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
+    EXPECT_EQ(30000u, configuration.send_timeout_milliseconds);
     EXPECT_EQ("127.0.0.1", stringOf(net::hostnameOf(configuration)));
 }
 
@@ -120,6 +122,30 @@ TEST(Configuration, ConfigureWithoutInitializeIsInvalidArgument)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, KIOTTY_NET_NO_DELAY_OFF));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientRetry(client, 1, 0));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientConnectTimeout(client, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerSendTimeout(server, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientSendTimeout(client, 1));
+}
+
+TEST(Configuration, SendTimeoutAcceptsZeroAsInfiniteAndAnyOtherValue)
+{
+    KiottyNetServerConfiguration server = tcpServer();
+    KiottyNetClientConfiguration client = tcpClient();
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerSendTimeout(&server, 0));
+    EXPECT_EQ(0u, server.send_timeout_milliseconds);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientSendTimeout(&client, 60000));
+    EXPECT_EQ(60000u, client.send_timeout_milliseconds);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureServerSendTimeout(nullptr, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureClientSendTimeout(nullptr, 1));
+}
+
+TEST(Configuration, BuildersSetTheSendTimeout)
+{
+    KiottyNetServerConfiguration server{};
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_ServerConfigurationBuilder::tcp(server, "127.0.0.1", PORT).sendTimeout(1500).build());
+    EXPECT_EQ(1500u, server.send_timeout_milliseconds);
+    KiottyNetClientConfiguration client{};
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_ClientConfigurationBuilder::tcp(client, "127.0.0.1", PORT).sendTimeout(0).build());
+    EXPECT_EQ(0u, client.send_timeout_milliseconds);
 }
 
 TEST(Configuration, UnknownNoDelayIsInvalidArgument)

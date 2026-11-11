@@ -1,12 +1,14 @@
 #include "data/repository/connection/kiotty_send_flow.h"
 
+#include "core/kiotty_clock.h"
 #include "data/repository/connection/kiotty_sender.h"
 
 namespace kiotty::net::implementation
 {
     namespace
     {
-        bool hasCipherWaiting(TlsEngine& tls);
+        bool    hasCipherWaiting(TlsEngine& tls);
+        IoPiece pieceOf(StageBase& stage, size_t length);
     }
 
     SendFlow::SendFlow(const ConnectionParts& parts)
@@ -16,6 +18,8 @@ namespace kiotty::net::implementation
         , _write_event(parts.write_event)
         , _work(parts.work)
         , _phase(parts.phase)
+        , _deadline(0)
+        , _timeout(0)
     {
     }
 
@@ -27,7 +31,12 @@ namespace kiotty::net::implementation
         {
             return IoAction::none();
         }
-        return select();
+        const IoAction write = select();
+        if (write.kind == IoActionKind::WRITE)
+        {
+            startDeadline();
+        }
+        return write;
     }
 
     IoPayload SendFlow::payload(const IoAction& write)
@@ -36,34 +45,37 @@ namespace kiotty::net::implementation
         if (secure)
         {
             StageBase::Consumer cipher = _tls.stages().send.consumer();
-            return IoPayload{ cipher.peek(), cipher.readable() };
+            return IoPayload::single(cipher.peek(), cipher.readable());
         }
-        StageBase& plain = write.purpose == IoPurpose::NOTIFY ? _notify : _send;
-        return IoPayload{ plain.consumer().peek(), write.as.write.length };
+        const IoPiece sent = pieceOf(_send, write.as.write.length);
+        const IoPiece notified = pieceOf(_notify, write.as.write.notify_length);
+        return IoPayload::pair(sent, notified);
     }
 
     void SendFlow::release(const IoCompletion& sent, std::mutex& notification)
     {
+        clearDeadline();
         const bool secure = _tls.status().is_active;
         if (secure)
         {
             _tls.stages().send.consumer().commit(sent.length);
         }
-        const size_t plain = sent.action.as.write.length;
-        switch (sent.action.purpose)
+        const bool is_plain = sent.action.purpose == IoPurpose::USER
+                              || sent.action.purpose == IoPurpose::NOTIFY;
+        if (!is_plain)
         {
-        case IoPurpose::HANDSHAKE:
-        case IoPurpose::CONTROL:
-            return;
-        case IoPurpose::NOTIFY:
-        {
-            const std::lock_guard<std::mutex> lock(notification);
-            Sender::release(_notify, plain);
             return;
         }
-        case IoPurpose::USER:
-            Sender::release(_send, plain);
-            return;
+        const size_t notified = sent.action.as.write.notify_length;
+        if (notified > 0)
+        {
+            const std::lock_guard<std::mutex> lock(notification);
+            Sender::release(_notify, notified);
+        }
+        const size_t length = sent.action.as.write.length;
+        if (length > 0)
+        {
+            Sender::release(_send, length);
         }
     }
 
@@ -72,9 +84,25 @@ namespace kiotty::net::implementation
         return _notify.provider().writable();
     }
 
-    KiottyNetCode SendFlow::stageNotification(KiottyNetSpan data)
+    KiottyNetCode SendFlow::stageNotification(Span<const KiottyNetSpan> pieces)
     {
-        return Sender::stage(_notify, data);
+        return Sender::stage(_notify, pieces);
+    }
+
+    void SendFlow::limit(uint32_t timeout_milliseconds)
+    {
+        _timeout = timeout_milliseconds;
+        _deadline.store(0);
+    }
+
+    void SendFlow::clearDeadline()
+    {
+        _deadline.store(0);
+    }
+
+    uint64_t SendFlow::deadline() const
+    {
+        return _deadline.load();
     }
 
     IoAction SendFlow::select()
@@ -91,32 +119,26 @@ namespace kiotty::net::implementation
         {
             return IoAction::none();
         }
-        const IoAction pushed = selectStage(_notify, IoPurpose::NOTIFY);
-        if (pushed.kind == IoActionKind::WRITE)
-        {
-            return pushed;
-        }
-        return selectStage(_send, IoPurpose::USER);
-    }
-
-    IoAction SendFlow::selectStage(StageBase& stage, IoPurpose purpose)
-    {
-        StageBase::Consumer waiting = stage.consumer();
-        const size_t plain = waiting.readable();
-        if (plain == 0)
+        const size_t length = _send.consumer().readable();
+        const size_t notify_length = _notify.consumer().readable();
+        if (length == 0 && notify_length == 0)
         {
             return IoAction::none();
         }
-        return encoded(IoAction::write(purpose, 0, plain), Span<char>{ waiting.peek(), plain });
+        return encoded(IoAction::gather(length, notify_length));
     }
 
-    IoAction SendFlow::encoded(IoAction write, Span<char> plain)
+    IoAction SendFlow::encoded(IoAction write)
     {
         const bool secure = _tls.status().is_active;
-        if (secure)
+        if (!secure)
         {
-            _tls.encode(KiottyNetSpan{ plain.data, plain.length });
+            return write;
         }
+        const IoPiece sent = pieceOf(_send, write.as.write.length);
+        const IoPiece notified = pieceOf(_notify, write.as.write.notify_length);
+        _tls.encode(KiottyNetSpan{ static_cast<const char*>(sent.buffer), sent.length });
+        _tls.encode(KiottyNetSpan{ static_cast<const char*>(notified.buffer), notified.length });
         return write;
     }
 
@@ -125,6 +147,16 @@ namespace kiotty::net::implementation
         const bool alive = isAlive(_phase.load());
         const bool working = _work.state() != WorkContext::State::IDLE;
         return !alive || working || _write_event.pending;
+    }
+
+    void SendFlow::startDeadline()
+    {
+        if (_timeout == 0)
+        {
+            _deadline.store(0);
+            return;
+        }
+        _deadline.store(monotonicMilliseconds() + _timeout);
     }
 
     namespace
@@ -137,6 +169,15 @@ namespace kiotty::net::implementation
                 return false;
             }
             return tls.stages().send.consumer().readable() > 0;
+        }
+
+        IoPiece pieceOf(StageBase& stage, size_t length)
+        {
+            if (length == 0)
+            {
+                return IoPiece{ nullptr, 0 };
+            }
+            return IoPiece{ stage.consumer().peek(), length };
         }
     }
 }

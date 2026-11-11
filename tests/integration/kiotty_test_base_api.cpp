@@ -15,12 +15,15 @@ namespace
 {
     const char*    LOOPBACK_HOST = "127.0.0.1";
     const size_t   MESSAGE_BYTES = 4;
+    const size_t   FLOOD_BYTES = 4096;
+    const uint32_t SEND_TIMEOUT_MS = 300;
 
     enum class Role : uint8_t
     {
         ECHO,
         PING,
-        WORK
+        WORK,
+        FLOOD
     };
 
     struct App
@@ -32,6 +35,7 @@ namespace
             , disconnected(0)
             , work_started(0)
             , busy_code(KIOTTY_NET_CODE_SUCCESS)
+            , reason(KIOTTY_NET_CODE_SUCCESS)
             , handle_owner(nullptr)
             , handle_id(0)
             , stream_owner(nullptr)
@@ -47,6 +51,7 @@ namespace
         std::atomic<int>                disconnected;
         std::atomic<int>                work_started;
         std::atomic<KiottyNetCode>      busy_code;
+        std::atomic<KiottyNetCode>      reason;
         std::atomic<KiottyNetEndpoint*> handle_owner;
         std::atomic<int64_t>            handle_id;
         std::atomic<KiottyNetEndpoint*> stream_owner;
@@ -97,6 +102,9 @@ namespace
             return KiottyNet_thenWrite(spanOf(app.outgoing), 0);
         case Role::WORK:
             return KiottyNet_thenWork();
+        case Role::FLOOD:
+            app.outgoing.assign(FLOOD_BYTES, 'f');
+            return KiottyNet_thenWrite(spanOf(app.outgoing), 0);
         }
         return KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR);
     }
@@ -117,9 +125,13 @@ namespace
 
     KiottyNetConnectionAction onWritten(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, size_t length)
     {
-        (void)context;
         (void)connection;
         (void)length;
+        App& app = appOf(context);
+        if (app.role == Role::FLOOD)
+        {
+            return KiottyNet_thenWrite(spanOf(app.outgoing), 0);
+        }
         return KiottyNet_thenRead(MESSAGE_BYTES, 0);
     }
 
@@ -145,7 +157,7 @@ namespace
     {
         (void)context;
         (void)connection;
-        (void)reason;
+        appOf(app_context).reason.store(reason);
         appOf(app_context).disconnected.fetch_add(1);
     }
 
@@ -213,11 +225,12 @@ namespace
             KiottyNet_releaseContext(context);
         }
 
-        KiottyNetServerHandle createServer(uint16_t port)
+        KiottyNetServerHandle createServer(uint16_t port, uint32_t send_timeout_milliseconds = 0)
         {
             KiottyNetServerConfiguration configuration;
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port));
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&configuration, 4));
+            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerSendTimeout(&configuration, send_timeout_milliseconds));
             KiottyNetServerResult created = KiottyNet_createServer(context, &configuration, nullptr);
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             return created.handle;
@@ -394,6 +407,22 @@ TEST_F(BaseApiTest, ServerAndEventClientRoundTripThroughTheCApi)
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, client_code.load());
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     KiottyNet_destroyEventClient(context, client);
+    KiottyNet_destroyServer(context, server);
+}
+
+TEST_F(BaseApiTest, APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheSendTimeout)
+{
+    const uint16_t port = kiotty_test::unusedPort();
+    KiottyNetServerHandle server = createServer(port, SEND_TIMEOUT_MS);
+    ASSERT_NE(nullptr, server);
+    App server_app(Role::FLOOD);
+    RunningServer running(server, server_app);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
+    kiotty_test::LoopbackPeer peer;
+    ASSERT_TRUE(peer.connectTcp(port));
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() { return server_app.disconnected.load() > 0; }, WAIT_MS * 10));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_NOT_READING, server_app.reason.load());
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     KiottyNet_destroyServer(context, server);
 }
 

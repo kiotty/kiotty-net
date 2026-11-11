@@ -56,7 +56,8 @@ namespace kiotty::net::implementation
         _context = configuration.context;
         _deadline.store(0);
         _machine_state = 0;
-        const TlsCapacity capacity{ limits.receive, largerOf(limits.send, limits.notify) };
+        _send_flow.limit(static_cast<uint32_t>(limits.send_timeout_milliseconds));
+        const TlsCapacity capacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         return open(configuration.profile, configuration.hostname, capacity);
     }
 
@@ -67,6 +68,7 @@ namespace kiotty::net::implementation
         _work.reset();
         _plain.clear();
         _deadline.store(0);
+        _send_flow.limit(0);
         _context = nullptr;
         _info = KiottyNetConnectionInfo{};
         _machine_state = 0;
@@ -151,9 +153,9 @@ namespace kiotty::net::implementation
         case IoActionKind::START_WORK:
         case IoActionKind::CLOSE:
         case IoActionKind::ACCEPT:
-            return IoPayload{ nullptr, 0 };
+            return IoPayload::empty();
         }
-        return IoPayload{ nullptr, 0 };
+        return IoPayload::empty();
     }
 
     SocketCode Connection::attach(EventListener& listener)
@@ -205,6 +207,9 @@ namespace kiotty::net::implementation
             return onSent(completion, handler, notification);
         case IoKind::TIMEOUT:
             return onTimeout(handler);
+        case IoKind::SEND_TIMEOUT:
+            _send_flow.clearDeadline();
+            return IoAction::close(KIOTTY_NET_CODE_PEER_NOT_READING);
         case IoKind::WORK_READY:
             return onWorkReady(handler);
         case IoKind::WORK_DONE:
@@ -357,6 +362,7 @@ namespace kiotty::net::implementation
     void Connection::enterClosing(KiottyNetCode reason, const Handler& handler)
     {
         _deadline.store(0);
+        _send_flow.clearDeadline();
         _phase.store(Phase::CLOSING);
         _work.abandon();
         const Caller caller = callerFor(handler);

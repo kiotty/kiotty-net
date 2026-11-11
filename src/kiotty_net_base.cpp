@@ -209,6 +209,13 @@ KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* con
     return net::configureServerNoDelay(*configuration, no_delay);
 }
 
+KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration* configuration,
+                                                   uint32_t timeout_milliseconds)
+{
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureServerSendTimeout(*configuration, timeout_milliseconds);
+}
+
 KiottyNetCode KiottyNet_initializeTcpClientConfiguration(
     KiottyNetClientConfiguration* configuration,
     const char* host,
@@ -260,6 +267,13 @@ KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* con
 {
     if (configuration == nullptr) { return INVALID; }
     return net::configureClientNoDelay(*configuration, no_delay);
+}
+
+KiottyNetCode KiottyNet_configureClientSendTimeout(KiottyNetClientConfiguration* configuration,
+                                                   uint32_t timeout_milliseconds)
+{
+    if (configuration == nullptr) { return INVALID; }
+    return net::configureClientSendTimeout(*configuration, timeout_milliseconds);
 }
 
 KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds)

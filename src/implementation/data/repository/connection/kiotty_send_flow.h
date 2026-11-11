@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 namespace kiotty::net::implementation
@@ -29,13 +30,16 @@ namespace kiotty::net::implementation
         IoPayload     payload(const IoAction& write);
         void          release(const IoCompletion& sent, std::mutex& notification);
         size_t        notificationWritable();
-        KiottyNetCode stageNotification(KiottyNetSpan data);
+        KiottyNetCode stageNotification(Span<const KiottyNetSpan> pieces);
+        void          limit(uint32_t timeout_milliseconds);
+        void          clearDeadline();
+        uint64_t      deadline() const;
 
     private:
         IoAction select();
-        IoAction selectStage(StageBase& stage, IoPurpose purpose);
-        IoAction encoded(IoAction write, Span<char> plain);
+        IoAction encoded(IoAction write);
         bool     isBlocked() const;
+        void     startDeadline();
 
         StageBase&                _send;
         StageBase&                _notify;
@@ -43,5 +47,7 @@ namespace kiotty::net::implementation
         const IoEvent&            _write_event;
         const WorkContext&        _work;
         const std::atomic<Phase>& _phase;
+        std::atomic<uint64_t>     _deadline;
+        uint32_t                  _timeout;
     };
 }

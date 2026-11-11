@@ -159,3 +159,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-10 HTTP 설계 v0 를 고쳤다 (`c0b8933`): 스트림은 Work 스트림 하나, status 와 content type 은 enum, 송신은 한 WRITE 에 send Stage 다음 notify Stage (gather), 송신 timeout 과 `KIOTTY_NET_CODE_PEER_NOT_READING`. 코드로는 base 사이클 B1 이 먼저이고 H1 ~ H6, W1 ~ W5 가 뒤다. design_http_v0.html 10절의 정할 것에 답을 받으면 B1 을 시작한다.
 
 2026-11-11 C ABI 마샬링 수칙 5.7 (`development_rule.md`) 을 더하고 공개 헤더에 적용했다 (`91279fd`): `KiottyNetBool` (`int32_t`) 이 C `bool` 을 대신하고, `KiottyNetConnectionAction` / `KiottyNetConnectionEvent` 의 union `as` 를 순차 필드로 풀었다. H1, W1 의 새 struct 도 5.7 을 따른다.
+
+2026-11-11 base 사이클 B1 (`docs/progress/261111_progress_base_b1.md`): 한 WRITE 에 send Stage 다음 notify Stage (IoPayload 조각 둘, backend 넷의 gather 송신, TLS 의 encode 순서), notify / broadcast 의 여러 조각 복사, `send_timeout_milliseconds` (기본 30000) 와 `KIOTTY_NET_CODE_PEER_NOT_READING`. requirement 4절의 송신 순서를 코드에 맞췄다. 다음은 H1.

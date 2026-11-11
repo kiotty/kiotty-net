@@ -108,6 +108,7 @@ namespace kiotty::net::implementation
     {
         ConnectionStatus snapshot{};
         snapshot.deadline = _deadline.load();
+        snapshot.send_deadline = _send_flow.deadline();
         snapshot.phase = _phase.load();
         snapshot.pending = _work_flow.pending();
         return snapshot;
