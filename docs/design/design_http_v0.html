@@ -101,7 +101,7 @@
   <tr><td><code>createHttpServer</code></td><td>handle</td><td><span class="tag new">추가</span> <code>{ code, handle }</code></td></tr>
   <tr><td>push 스트림 (아무 thread 의 push)</td><td>—</td><td><span class="tag drop">제거</span> 첫 판에 있던 <code>pushHttpChunk / endHttpStream / onStreamClosed</code> 는 넣지 않는다 (1절 결정 4)</td></tr>
   <tr><td>sendfile / TransmitFile</td><td>"가능하면"</td><td><span class="tag drop">제거</span> 파일은 응답 버퍼 조각으로 보낸다 (1절 결정 6)</td></tr>
-  <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> websocket.h 의 <code>KiottyNet_addWebSocketUpgrade</code>, <code>KiottyNet_broadcastWebSocket</code> (<code>design_websocket_v0.html</code> 3.2). WebSocketServer 는 없고 서버 쪽 WebSocket 은 HttpServer 의 Upgrade 경로뿐이다. websocket.h 가 http.h 를 include 한다</td></tr>
+  <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> websocket.h 의 <code>KiottyNet_addWebSocket(server, "/chat", handler, app_context)</code>, <code>KiottyNet_broadcastWebSocket(server, "/chat", ...)</code> (<code>design_websocket_v0.html</code> 3.2). WebSocketServer 는 없고 서버 쪽 WebSocket 은 HttpServer 의 Upgrade 경로뿐이다. websocket.h 가 http.h 를 include 한다</td></tr>
   <tr><td>base</td><td></td><td><span class="tag new">추가</span> 2절. 한 WRITE 에 send Stage 와 notify Stage 를 같이 싣는다. 송신 timeout 과 <code>KIOTTY_NET_CODE_PEER_NOT_READING</code></td></tr>
 </table>
 
@@ -142,6 +142,7 @@
   <tr><td>14</td><td>C++ 의 타입별 줄임 메서드 (<code>json()</code>, <code>text()</code>) 는 두지 않는다 (2026-11-11)</td><td><code>body(type, data)</code> 하나로 충분하다</td></tr>
   <tr><td>15</td><td>HttpServer 도 <code>onDisconnected</code> 와 <code>onError</code> 를 둔다. <code>KiottyNetHttpServerHandler</code> 를 <code>runHttpServer(server, handler, app_context)</code> 로 받는다 (4.9) (2026-11-11)</td><td>라우트 콜백만으로는 연결 단계의 문제 (send timeout, 연결 수 초과, TLS 실패, 잘못된 요청) 가 앱에 닿지 않는다. 의료 장비의 감사 로그와 장애 분석에 필요하다. base 의 Handler 와 같은 모양이고 run 이 handler 를 받는 base 의 규칙과 맞는다</td></tr>
   <tr><td>16</td><td>HEAD 는 라이브러리가 처리한다. GET 라우트를 실행하고 body 를 떼며, <code>onRequest</code> 에서 스트림을 정한 라우트는 Work 를 열지 않고 헤더만 보내고 다음 요청으로 간다 (4.9) (2026-11-11)</td><td>worker 를 쓰지 않고 HEAD 를 끝낸다. 앱이 직접 처리해도 되지만 하지 않아도 틀리지 않게 한다</td></tr>
+  <tr><td>17</td><td><code>KiottyNetHttpLimits</code> 에 WebSocket 타이머 셋 (ping 간격, pong timeout, close timeout) 과 <code>configureHttpWebSocketTimers</code> 를 더한다 (2026-11-11)</td><td>WebSocket 전용 설정 struct 를 없앴다 (websocket 설계 결정 11). WebSocketClient 도 이 limits 를 받는다</td></tr>
 </table>
 
 <h2 id="s2">2. base 에 먼저 필요한 것</h2>
@@ -256,8 +257,15 @@ typedef struct KiottyNetHttpLimits {
     size_t   response_bytes;                      /* 64 KiB. 상태줄 + 헤더 + 복사된 body. 스트림이면 chunk 를 여기서 조립한다 */
     uint32_t header_timeout_milliseconds;         /* 10000 */
     uint32_t keep_alive_timeout_milliseconds;     /* 15000 */
+    uint32_t websocket_ping_interval_milliseconds;     /* 추가. 30000. WebSocket 경로가 있을 때만 쓴다. 0 이면 ping 을 보내지 않는다 */
+    uint32_t websocket_pong_timeout_milliseconds;      /* 추가. 10000 */
+    uint32_t websocket_close_timeout_milliseconds;     /* 추가. 5000 */
 } KiottyNetHttpLimits;
-/* initialize 하나, configure 다섯 : 그대로 */</code></pre>
+/* initialize 하나, configure 다섯 : 그대로 */
+KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits, uint32_t ping_interval_milliseconds, uint32_t pong_timeout_milliseconds, uint32_t close_timeout_milliseconds);   /* 추가 */
+/* C++ builder : KiottyNet_HttpLimitsBuilder::webSocketTimers(ping, pong, close) 추가 */</code></pre>
+
+<p>WebSocket 전용 설정 struct 는 없다 (<code>design_websocket_v0.html</code> 결정 11). WebSocket 메시지 상한은 <code>max_body_bytes</code>, 핸드셰이크 timeout 은 <code>header_timeout</code> 이고, 남는 타이머 셋만 여기에 둔다. 필드는 숫자일 뿐이라 http.h 는 websocket.h 를 모르는 채로 남는다.</p>
 
 <h3>4.2 status <span class="tag new">추가</span></h3>
 
@@ -387,7 +395,7 @@ typedef struct KiottyNetHttpRequest {
     const KiottyNetHttpHeader* headers;
     size_t                     header_count;
     KiottyNetSpan              body;              /* Content-Length 또는 chunked 를 합친 것 */
-    int                        keep_alive;
+    KiottyNetBool              keep_alive;        /* int 에서 바꿈 */
 } KiottyNetHttpRequest;
 
 KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */</code></pre>
@@ -776,7 +784,7 @@ int main()
 <table>
   <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
   <tr><td>B1 base 송신</td><td>2.1 (IoPayload 조각 둘, <code>SendFlow::select</code> 가 send 다음 notify, release 가 두 길이, backend 넷의 gather 송신, TLS 의 encode 순서, NotificationDesk 의 여러 조각 복사) 과 2.2 (설정 필드, configure 둘, <code>PEER_NOT_READING</code>, Connection 의 송신 deadline, IoLoop 의 대기 시간). requirement 4절의 송신 순서와 Work 중 송신. 구현 가이드 1.6</td><td>매트릭스 초록. 새 테스트: notify 가 계속 들어와도 write lane 이 나간다 (굶지 않음), 한 WRITE 에 둘이 실리고 순서가 send → notify, TLS 에서도 같은 순서, 읽지 않는 상대가 <code>send_timeout</code> 뒤 <code>PEER_NOT_READING</code> 으로 끊김. benchmark <code>EchoRoundtrip</code>, <code>NotifyLatency</code> 전후 비교</td></tr>
-  <tr><td>H1 공개 API 판 v2</td><td>4절의 http.h (C 와 C++). enum 둘, <code>setHttpCustomContentType</code>, body setter 의 type, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>, <code>KiottyNetHttpServerResult</code>, server handle typedef. user_guide_http 를 이 판으로. <code>src/kiotty_net_http.cpp</code> 는 아직 비어 있다</td><td>네 헤더 syntax check. <code>Headers.*</code> 에 http 의 struct 와 enum</td></tr>
+  <tr><td>H1 공개 API 판 v2</td><td>4절의 http.h (C 와 C++). limits 의 WebSocket 타이머 셋, <code>keep_alive</code> 를 <code>KiottyNetBool</code> 로, enum 둘, <code>setHttpCustomContentType</code>, body setter 의 type, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>, <code>KiottyNetHttpServerResult</code>, server handle typedef. user_guide_http 를 이 판으로. <code>src/kiotty_net_http.cpp</code> 는 아직 비어 있다</td><td>네 헤더 syntax check. <code>Headers.*</code> 에 http 의 struct 와 enum</td></tr>
   <tr><td>H2 파서</td><td><code>domain/usecases/http/</code>: request line, header line, chunk size, <code>Content-Length</code>, <code>Connection</code>, keep-alive, path 매칭 (정확 / <code>/*</code> / 디렉토리 접두), content type 표 (enum ↔ 문자열, 확장자 → enum), CUSTOM 이름 검사. core 의 parse 셋 위. 수칙 2.10 의 다섯 입력</td><td>unit 전부 초록. 할당 0</td></tr>
   <tr><td>H3 완성 응답</td><td>HttpSession, 라우트 표, HTTP_MACHINE (구현 가이드 4.3), setter, 자동 응답 (404 / 405 / 501 / 413 / 414 / 431 / OPTIONS / HEAD), keep-alive, <code>runHttpServer</code>, HttpServer 를 Context 풀에. 3.1 만</td><td>integration: 메서드별 라우트, keep-alive 로 요청 둘, 413 / 431, HEAD (완성 응답의 Content-Length), 서버 handler 의 onDisconnected reason (SUCCESS, TIMEOUT, PROTOCOL_ERROR) 과 onError (TABLE_FULL), content type enum 과 CUSTOM, <code>Content-Type</code> 헤더 거부, UTF-8 아닌 JSON body 거부. 공개 C API 만</td></tr>
   <tr><td>H4 Work 와 Work 스트림</td><td><code>startHttpWork</code>, <code>onWorkStarted</code>, <code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>. 3.2</td><td>integration: HEAD 가 스트림 라우트에 오면 onWorkStarted 없이 헤더만 오고 같은 연결로 다음 요청, worker 가 정한 스트림에 HEAD 면 첫 write 가 CLOSED, Work 뒤 JSON 응답, 스트림으로 이벤트 셋 뒤 keep-alive 로 다음 요청, 큰 chunk (<code>send_capacity</code> 의 여러 배), 상대가 끊었을 때 write 의 <code>PEER_CLOSED</code>, 서버 close 중 write 의 <code>CLOSED</code>, Work 없는 스트림 body 의 500. benchmark: chunk 1 KiB × 1000 의 latency</td></tr>
