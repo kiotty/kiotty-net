@@ -79,6 +79,8 @@
   <li><a href="#s14">파라미터 군과 확인받을 것</a></li>
   <li><a href="#s15">구현 순서와 테스트 순서</a></li>
   <li><a href="#s16">케이스 : StateMachine (core text, Handler, StatefulHandler, C API)</a></li>
+  <li><a href="#s17">케이스 : base 송신 (B1)</a></li>
+  <li><a href="#s18">케이스 : 주소와 TLS 는 run / connect 때 (B2)</a></li>
 </ol>
 
 <h2 id="s1">1. 세 질문과 테스트의 층</h2>
@@ -858,6 +860,26 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>EventListener</td><td>GatheredWriteLargerThanSocketBufferCrossesThePieceBoundaryInOrder</td><td><span class="tag edge">엣지</span></td><td>부분 송신이 두 조각의 경계를 넘어도 순서와 길이가 맞다</td></tr>
   <tr><td>Configuration</td><td>SendTimeoutAcceptsZeroAsInfiniteAndAnyOtherValue, BuildersSetTheSendTimeout</td><td><span class="tag ok">정상</span></td><td>기본 30000 (서버와 클라이언트의 Defaults 테스트), configure 둘, builder 둘</td></tr>
   <tr><td>BaseApi</td><td>APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheSendTimeout</td><td><span class="tag edge">엣지</span></td><td>공개 C API 만. 읽지 않는 상대에게 계속 write 하는 서버가 <code>send_timeout</code> (300 ms) 뒤 <code>onDisconnected(PEER_NOT_READING)</code></td></tr>
+</table>
+
+<h2 id="s18">18. 케이스 : 주소와 TLS 는 run / connect 때 (B2)</h2>
+<p><code>docs/design/design_http_v0.html</code> 2.3, 1절 결정 18. create 는 자원만 받고, 주소와 TLS 설정은 run / connect 가 받는다. <code>Destination*</code> 은 공개 C API 만 쓴다 (TLS 빌드 여부를 보는 데만 내부 <code>tlsSupported()</code>).</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Address</td><td>TcpAddressCarriesTransportHostAndPort, PipeAddressHasNoHostnameForVerification</td><td><span class="tag ok">정상</span></td><td><code>initializeTcpAddress</code> / <code>initializePipeAddress</code> 의 값, <code>hostnameOf(address)</code> (Pipe 면 빈 이름)</td></tr>
+  <tr><td>Address</td><td>InitializeRejectsMissingHostZeroPortAndTooLongHost, InitializeRejectsHostAndPipeNameThatAreNotUtf8WithInvalidEncoding</td><td><span class="tag misuse">오용</span></td><td>옛 <code>initializeTcp / PipeServerConfiguration</code> 의 검사가 주소 함수로 옮겨 왔다</td></tr>
+  <tr><td>Address</td><td>ValidityRejectsUnknownTransportZeroTcpPortEmptyAndUnterminatedHost</td><td><span class="tag edge">엣지</span></td><td>run / connect 가 쓰는 <code>isAddressValid</code>. 사용자가 struct 를 직접 채운 경우</td></tr>
+  <tr><td>Configuration</td><td>InitializeWithNullIsInvalidArgument, ServerDefaultsAreTheRequirementValues</td><td><span class="tag ok">정상</span></td><td>인자 없는 <code>initializeServer / ClientConfiguration</code>, 기본값은 그대로</td></tr>
+  <tr><td>Destination</td><td>OneStreamClientMovesBetweenAPlainServerAndATlsServer</td><td><span class="tag ok">정상</span></td><td>StreamClient 하나가 평문 → TLS → 평문 서버로 차례로 connect 하고 매번 echo. 각 서버가 받은 바이트가 맞다</td></tr>
+  <tr><td>Destination</td><td>EachConnectUsesOnlyTheTlsConfigurationItWasGiven</td><td><span class="tag edge">엣지</span></td><td>같은 클라이언트가 trust store <code>ca.pem</code> 으로 성공, <code>other_ca.pem</code> 으로 <code>TLS_VERIFY_FAILED</code> (그 뒤 read 는 CLOSED), 다시 <code>ca.pem</code> 으로 성공. connect 마다 SSL_CTX 를 새로 만든다</td></tr>
+  <tr><td>Destination</td><td>AServerRunsAgainOnAnotherPortWithTlsAfterClose</td><td><span class="tag ok">정상</span></td><td>서버 하나가 평문으로 run, close, 다른 port 와 TLS 로 다시 run. 옛 port 는 닫혀 있다</td></tr>
+  <tr><td>Destination</td><td>OneEventClientRunsPlainThenTls</td><td><span class="tag ok">정상</span></td><td>EventClient 하나가 평문 서버, 그 다음 TLS 서버로 run</td></tr>
+  <tr><td>Destination</td><td>ABadAddressOrAnUninitializedTlsConfigurationFailsBeforeAnySocketOpens</td><td><span class="tag misuse">오용</span></td><td>port 0, 모르는 transport, NUL 없는 host, mark 없는 TLS 설정이 <code>INVALID_ARGUMENT</code>. await 는 TIMEOUT (run 에 들어가지 않았다), 그 port 는 열리지 않았고 콜백은 없다</td></tr>
+  <tr><td>Destination</td><td>TlsIsNotSupportedWhenBuiltWithoutTls</td><td><span class="tag edge">엣지</span></td><td>TLS 를 빼고 빌드하면 run / connect 의 tls 가 <code>TLS_NOT_SUPPORTED</code> 이고 await 도 같은 값</td></tr>
+  <tr><td>DestinationMemory</td><td>ServerMemorySizeCountsTheTlsStagesOnlyInATlsBuild</td><td><span class="tag ok">정상</span></td><td>TLS 빌드의 연결당 크기가 평문 Stage + cipher Stage 보다 크고, 평문 빌드는 cipher Stage 를 세지 않는다</td></tr>
+  <tr><td>BaseApi</td><td>NullArgumentsAreRejectedWithoutTouchingAnything, RunWithoutAHandlerAndDestroyWithoutAContextAreRejected</td><td><span class="tag misuse">오용</span></td><td>주소 NULL 의 run / connect, 주소 함수의 NULL</td></tr>
+  <tr><td>Stateful</td><td>RunStatefulRejectsNullAndDuplicateRules</td><td><span class="tag misuse">오용</span></td><td>runStateful 둘의 주소 NULL</td></tr>
+  <tr><td>Context</td><td>CreateRejectsConfigurationsThatWereNotInitialized</td><td><span class="tag misuse">오용</span></td><td>create 는 설정 struct 만 본다. TLS 설정의 mark 검사는 Destination 의 run / connect 로 옮겼다</td></tr>
 </table>
 
 </body>

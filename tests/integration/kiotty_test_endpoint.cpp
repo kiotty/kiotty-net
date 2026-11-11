@@ -25,14 +25,25 @@ using kiotty_test::LoopbackPeer;
 
 namespace
 {
-    KiottyNetCode runOn(KiottyNetServer& server, const KiottyNetConnectionHandler& callbacks, KiottyNetAppContext app_context)
+    const char* LOOPBACK_HOST = "127.0.0.1";
+
+    KiottyNetAddress loopbackAddress(uint16_t port)
     {
-        return KiottyNet_runServer(&server, &callbacks, app_context);
+        KiottyNetAddress address{};
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
+        return address;
     }
 
-    KiottyNetCode runOn(KiottyNetEventClient& client, const KiottyNetConnectionHandler& callbacks, KiottyNetAppContext app_context)
+    KiottyNetCode runOn(KiottyNetServer& server, uint16_t port, const KiottyNetConnectionHandler& callbacks, KiottyNetAppContext app_context)
     {
-        return KiottyNet_runEventClient(&client, &callbacks, app_context);
+        const KiottyNetAddress address = loopbackAddress(port);
+        return KiottyNet_runServer(&server, &address, nullptr, &callbacks, app_context);
+    }
+
+    KiottyNetCode runOn(KiottyNetEventClient& client, uint16_t port, const KiottyNetConnectionHandler& callbacks, KiottyNetAppContext app_context)
+    {
+        const KiottyNetAddress address = loopbackAddress(port);
+        return KiottyNet_runEventClient(&client, &address, nullptr, &callbacks, app_context);
     }
 
     const uint32_t WAIT_MS = 5000;
@@ -41,7 +52,6 @@ namespace
     const size_t   MESSAGE_BYTES = 4;
     const int      CHURN_THREADS = 4;
     const int      CHURN_PER_THREAD = 250;
-    const char*    LOOPBACK_HOST = "127.0.0.1";
 
     enum class Role : uint8_t
     {
@@ -175,17 +185,17 @@ namespace
 
     const KiottyNetConnectionHandler CALLBACKS = { &onConnected, &onReady, &onRead, &onWritten, &onTimeout, &onWorkStarted, &onDisconnected, &onError };
 
-    KiottyNetServerConfiguration serverConfiguration(uint16_t port)
+    KiottyNetServerConfiguration serverConfiguration()
     {
         KiottyNetServerConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&configuration));
         return configuration;
     }
 
-    KiottyNetClientConfiguration clientConfiguration(uint16_t port)
+    KiottyNetClientConfiguration clientConfiguration()
     {
         KiottyNetClientConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, port));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeClientConfiguration(&configuration));
         return configuration;
     }
 
@@ -210,14 +220,15 @@ namespace
     class RunningServer
     {
     public:
-        RunningServer(KiottyNetServer& server, Probe& probe)
+        RunningServer(KiottyNetServer& server, uint16_t port, Probe& probe, const KiottyNetTlsServerConfiguration* tls = nullptr)
             : _server(server)
             , _code(KIOTTY_NET_CODE_SUCCESS)
             , _returned(false)
             , _thread()
         {
-            _thread = std::thread([this, &probe]() {
-                _code.store(runOn(_server, CALLBACKS, &probe));
+            const KiottyNetAddress address = loopbackAddress(port);
+            _thread = std::thread([this, address, tls, &probe]() {
+                _code.store(KiottyNet_runServer(&_server, &address, tls, &CALLBACKS, &probe));
                 _returned.store(true);
             });
         }
@@ -275,10 +286,10 @@ namespace
             }
         }
 
-        KiottyNetServer& createServer(uint16_t port, const KiottyNetTlsServerConfiguration* tls = nullptr)
+        KiottyNetServer& createServer()
         {
-            KiottyNetServerConfiguration configuration = serverConfiguration(port);
-            net::ServerResult created = context->createServer(configuration, tls);
+            KiottyNetServerConfiguration configuration = serverConfiguration();
+            net::ServerResult created = context->createServer(configuration);
             EXPECT_TRUE(created);
             return created.value();
         }
@@ -323,17 +334,23 @@ namespace
         return text;
     }
 
-    void exchangeOverStream(net::Context& context, KiottyNetServer& server, uint16_t port, const KiottyNetTlsClientConfiguration* tls)
+    struct StreamTls
+    {
+        const KiottyNetTlsServerConfiguration* server;
+        const KiottyNetTlsClientConfiguration* client;
+    };
+
+    void exchangeOverStream(net::Context& context, KiottyNetServer& server, uint16_t port, StreamTls tls)
     {
         Probe probe(Role::WORK);
-        RunningServer running(server, probe);
+        RunningServer running(server, port, probe, tls.server);
         ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
 
-        KiottyNetClientConfiguration configuration = clientConfiguration(port);
-        net::StreamClientResult created = context.createStreamClient(configuration, tls);
+        KiottyNetClientConfiguration configuration = clientConfiguration();
+        net::StreamClientResult created = context.createStreamClient(configuration);
         ASSERT_TRUE(created);
         KiottyNetStreamClient& client = created.value();
-        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.connect());
+        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.connect(loopbackAddress(port), tls.client));
         ASSERT_TRUE(waitForStream(probe));
         net::Endpoint& owner = *probe.stream_owner.load();
         const int64_t id = probe.stream_id.load();
@@ -358,19 +375,19 @@ namespace
 TEST_F(EndpointTest, ServerAwaitTimesOutBeforeRunThenReportsRunningAndClosed)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, server.await(10));
     Probe probe(Role::ECHO);
     {
-        RunningServer running(server, probe);
+        RunningServer running(server, port, probe);
         EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
-        EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, runOn(server, CALLBACKS, &probe));
+        EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, runOn(server, port, CALLBACKS, &probe));
         EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     }
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, server.await(WAIT_MS));
     server.close();
     {
-        RunningServer again(server, probe);
+        RunningServer again(server, port, probe);
         EXPECT_TRUE(kiotty_test::waitUntil([&]() { return server.await(1) == KIOTTY_NET_CODE_SUCCESS; }, WAIT_MS));
         EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, again.stop());
     }
@@ -382,9 +399,9 @@ TEST_F(EndpointTest, ServerRunReturnsTheBindFailure)
     const uint16_t port = kiotty_test::unusedPort();
     LoopbackPeer holder;
     ASSERT_TRUE(holder.listenTcp(port));
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     Probe probe(Role::ECHO);
-    const KiottyNetCode code = runOn(server, CALLBACKS, &probe);
+    const KiottyNetCode code = runOn(server, port, CALLBACKS, &probe);
     EXPECT_NE(KIOTTY_NET_CODE_SUCCESS, code);
     EXPECT_NE(KIOTTY_NET_CODE_CLOSED, code);
     EXPECT_EQ(code, server.await(WAIT_MS));
@@ -394,13 +411,13 @@ TEST_F(EndpointTest, ServerRunReturnsTheBindFailure)
 TEST_F(EndpointTest, ServerAndEventClientLoopbackRoundTrip)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     Probe server_probe(Role::ECHO);
-    RunningServer running(server, server_probe);
+    RunningServer running(server, port, server_probe);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
 
-    KiottyNetClientConfiguration configuration = clientConfiguration(port);
-    net::EventClientResult created = context->createEventClient(configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    net::EventClientResult created = context->createEventClient(configuration);
     ASSERT_TRUE(created);
     KiottyNetEventClient& client = created.value();
     EXPECT_EQ(0, client.connection().id);
@@ -408,7 +425,7 @@ TEST_F(EndpointTest, ServerAndEventClientLoopbackRoundTrip)
 
     Probe client_probe(Role::PING);
     std::atomic<KiottyNetCode> client_code(KIOTTY_NET_CODE_SUCCESS);
-    std::thread io([&]() { client_code.store(runOn(client, CALLBACKS, &client_probe)); });
+    std::thread io([&]() { client_code.store(runOn(client, port, CALLBACKS, &client_probe)); });
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client.await(WAIT_MS));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return client_probe.read.load() > 0; }, WAIT_MS));
     EXPECT_EQ("ping", client_probe.received);
@@ -433,11 +450,11 @@ TEST_F(EndpointTest, ServerAndEventClientLoopbackRoundTrip)
 TEST_F(EndpointTest, EventClientRunReturnsTheConnectFailure)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetClientConfiguration configuration = clientConfiguration(port);
-    net::EventClientResult created = context->createEventClient(configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    net::EventClientResult created = context->createEventClient(configuration);
     ASSERT_TRUE(created);
     Probe probe(Role::PING);
-    const KiottyNetCode code = runOn(created.value(), CALLBACKS, &probe);
+    const KiottyNetCode code = runOn(created.value(), port, CALLBACKS, &probe);
     EXPECT_NE(KIOTTY_NET_CODE_SUCCESS, code);
     EXPECT_EQ(0, probe.connected.load());
     EXPECT_EQ(code, created.value().await(WAIT_MS));
@@ -447,9 +464,9 @@ TEST_F(EndpointTest, EventClientRunReturnsTheConnectFailure)
 TEST_F(EndpointTest, ServerCloseWaitsForWorkerCloseStream)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     Probe probe(Role::WORK);
-    RunningServer running(server, probe);
+    RunningServer running(server, port, probe);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
 
     LoopbackPeer peer;
@@ -470,8 +487,8 @@ TEST_F(EndpointTest, ServerCloseWaitsForWorkerCloseStream)
 TEST_F(EndpointTest, StreamClientSharesConnectionStreamCode)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
-    exchangeOverStream(*context, server, port, nullptr);
+    KiottyNetServer& server = createServer();
+    exchangeOverStream(*context, server, port, StreamTls{ nullptr, nullptr });
     context->destroy(server);
 }
 
@@ -484,15 +501,15 @@ TEST_F(EndpointTest, StreamClientSharesConnectionStreamCodeOverTls)
     const uint16_t port = kiotty_test::unusedPort();
     KiottyNetTlsServerConfiguration server_tls = serverTls();
     KiottyNetTlsClientConfiguration client_tls = clientTls();
-    KiottyNetServer& server = createServer(port, &server_tls);
-    exchangeOverStream(*context, server, port, &client_tls);
+    KiottyNetServer& server = createServer();
+    exchangeOverStream(*context, server, port, StreamTls{ &server_tls, &client_tls });
     context->destroy(server);
 }
 
 TEST_F(EndpointTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConnect)
 {
-    KiottyNetClientConfiguration configuration = clientConfiguration(kiotty_test::unusedPort());
-    net::StreamClientResult created = context->createStreamClient(configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    net::StreamClientResult created = context->createStreamClient(configuration);
     ASSERT_TRUE(created);
     KiottyNetStreamClient& client = created.value();
     char byte = 0;
@@ -510,9 +527,9 @@ TEST_F(EndpointTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConne
 TEST_F(EndpointTest, OnDisconnectedIsCalledExactlyOncePerAcceptedConnectionOverAThousandConnections)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     Probe probe(Role::DRAIN);
-    RunningServer running(server, probe);
+    RunningServer running(server, port, probe);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
 
     std::atomic<int> refused(0);
@@ -551,10 +568,10 @@ namespace
 {
     struct Reentry
     {
-        Reentry(net::Context& owner_context, uint16_t port, bool destroy_on_connect)
+        Reentry(net::Context& owner_context, bool destroy_on_connect)
             : context(owner_context)
             , server(nullptr)
-            , client(clientConfiguration(port))
+            , client(clientConfiguration())
             , is_self_destroying(destroy_on_connect)
             , connected(0)
             , disconnected(0)
@@ -616,7 +633,7 @@ namespace
         (void)reason;
         Reentry& reentry = reentryOf(app_context);
         reentry.disconnected.fetch_add(1);
-        net::EventClientResult created = reentry.context.createEventClient(reentry.client, nullptr);
+        net::EventClientResult created = reentry.context.createEventClient(reentry.client);
         if (created)
         {
             reentry.created.fetch_add(1);
@@ -631,10 +648,10 @@ TEST_F(EndpointTest, RetiredServerStartsFreshOnTheNextCreate)
 {
     // generations of a reused slot are checked in kiotty_test_lazy_reusable_pool
     const uint16_t first_port = kiotty_test::unusedPort();
-    KiottyNetServer& first = createServer(first_port);
+    KiottyNetServer& first = createServer();
     {
         Probe probe(Role::ECHO);
-        RunningServer running(first, probe);
+        RunningServer running(first, first_port, probe);
         ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, first.await(WAIT_MS));
         LoopbackPeer peer;
         ASSERT_TRUE(peer.connectTcp(first_port));
@@ -644,11 +661,11 @@ TEST_F(EndpointTest, RetiredServerStartsFreshOnTheNextCreate)
     context->destroy(first);
 
     const uint16_t second_port = kiotty_test::unusedPort();
-    KiottyNetServer& second = createServer(second_port);
+    KiottyNetServer& second = createServer();
     EXPECT_EQ(&first, &second);
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, second.await(QUIET_MS));
     Probe probe(Role::ECHO);
-    RunningServer running(second, probe);
+    RunningServer running(second, second_port, probe);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, second.await(WAIT_MS));
     LoopbackPeer stale;
     EXPECT_FALSE(stale.connectTcp(first_port));
@@ -664,9 +681,9 @@ TEST_F(EndpointTest, RetiredServerStartsFreshOnTheNextCreate)
 TEST_F(EndpointTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
+    KiottyNetServer& server = createServer();
     Probe probe(Role::WORK);
-    RunningServer running(server, probe);
+    RunningServer running(server, port, probe);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
     LoopbackPeer peer;
     ASSERT_TRUE(peer.connectTcp(port));
@@ -683,8 +700,8 @@ TEST_F(EndpointTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream
     std::this_thread::sleep_for(std::chrono::milliseconds(QUIET_MS));
     EXPECT_FALSE(destroyed.load());
 
-    KiottyNetClientConfiguration configuration = clientConfiguration(port);
-    net::EventClientResult created = context->createEventClient(configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    net::EventClientResult created = context->createEventClient(configuration);
     EXPECT_TRUE(created);
     if (created)
     {
@@ -699,10 +716,10 @@ TEST_F(EndpointTest, DestroyDoesNotBlockAWorkerThatCallsContextBeforeCloseStream
 TEST_F(EndpointTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
-    Reentry reentry(*context, port, false);
+    KiottyNetServer& server = createServer();
+    Reentry reentry(*context, false);
     reentry.server = &server;
-    std::thread io([&]() { (void)runOn(server, REENTRY_CALLBACKS, &reentry); });
+    std::thread io([&]() { (void)runOn(server, port, REENTRY_CALLBACKS, &reentry); });
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
     LoopbackPeer peer;
     EXPECT_TRUE(peer.connectTcp(port));
@@ -716,10 +733,10 @@ TEST_F(EndpointTest, DestroyDoesNotBlockALoopCallbackThatCallsContext)
 TEST_F(EndpointTest, ServerDestroyedFromItsOwnCallbackIsReclaimedByTheNextCreate)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServer& server = createServer(port);
-    Reentry reentry(*context, port, true);
+    KiottyNetServer& server = createServer();
+    Reentry reentry(*context, true);
     reentry.server = &server;
-    std::thread io([&]() { (void)runOn(server, REENTRY_CALLBACKS, &reentry); });
+    std::thread io([&]() { (void)runOn(server, port, REENTRY_CALLBACKS, &reentry); });
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, server.await(WAIT_MS));
     LoopbackPeer peer;
     const bool is_connected = peer.connectTcp(port);
@@ -733,7 +750,7 @@ TEST_F(EndpointTest, ServerDestroyedFromItsOwnCallbackIsReclaimedByTheNextCreate
     io.join();
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, server.await(WAIT_MS));
 
-    net::ServerResult next = context->createServer(serverConfiguration(kiotty_test::unusedPort()), nullptr);
+    net::ServerResult next = context->createServer(serverConfiguration());
     ASSERT_TRUE(next);
     EXPECT_EQ(&server, &next.value());
     context->destroy(next.value());

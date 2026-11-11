@@ -1,6 +1,5 @@
 #pragma once
 
-#include "context/kiotty_client_configuration.h"
 #include "context/kiotty_endpoint.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
@@ -21,7 +20,7 @@ namespace kiotty::net::implementation
     {
     public:
         using code_type = KiottyNetCode;
-        using configuration_type = ClientConfiguration;
+        using configuration_type = KiottyNetClientConfiguration;
 
         static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
         static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -35,9 +34,11 @@ namespace kiotty::net::implementation
         StreamClient(StreamClient&&) = delete;
         StreamClient& operator=(StreamClient&&) = delete;
 
-        KiottyNetCode   initialize(PoolHandle id, ClientConfiguration configuration);
+        KiottyNetCode   initialize(PoolHandle id,
+                                   const KiottyNetClientConfiguration& configuration);
         void            reset() noexcept;
-        KiottyNetCode   connect();
+        KiottyNetCode   connect(const KiottyNetAddress& address,
+                                const KiottyNetTlsClientConfiguration* tls);
         void            disconnect();
         KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
@@ -60,7 +61,7 @@ namespace kiotty::net::implementation
 
     private:
         KiottyNetCode    openProfile(const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode    secure();
+        KiottyNetCode    secure(const KiottyNetAddress& address);
         ConnectionStream stream();
 
         Stage                        _receive;

@@ -75,7 +75,7 @@ tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 - C++ 래퍼는 C++ ABI 문제를 피하려고 헤더 안에 inline 으로 정의한다.
 - 설정 struct 의 문자열은 포인터가 아니라 최대 길이가 정해진 `char[]` 다. 함수의 `const char*` 인자는 return 전에 라이브러리 안으로 복사한다.
 - 설정 struct 는 사용자가 잡고, 값은 `KiottyNet_initializeXxx` 한 번과 `KiottyNet_configureXxx` 여러 번으로 넣는다. initialize 는 모든 필드를 기본값으로 채우고 기본값이 없는 필수 값은 인자로 받는다. 그래서 validate 함수는 없다. 각 함수는 넣는 값을 검사해 `KiottyNetCode` 를 돌려주고, 잘못된 값이면 struct 를 바꾸지 않는다. C++ `KiottyNet_XxxConfigBuilder` 는 외부 struct 를 참조로 받아 이 함수들만 부르고 처음 실패한 코드를 `build()` 로 돌려준다.
-- TLS 설정은 Server / Client 설정과 분리해서 create 함수에 따로 넘긴다. NULL 이면 평문이다.
+- 주소와 TLS 설정은 create 가 아니라 run / connect 가 받는다 (`design_http_v0.html` 2.3, 결정 18). create 는 자원만 받고 TLS Stage 는 늘 최대치로 잡는다. TLS 인자가 NULL 이면 평문이다.
 
 # 3. 간결하고 읽기 쉬운 코드
 

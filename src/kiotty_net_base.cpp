@@ -6,6 +6,7 @@
 #include "context/kiotty_tls_configuration.h"
 #include "data/repository/connection/kiotty_callback_handler.h"
 #include "core/kiotty_text.h"
+#include "data/datasource/kiotty_memory_layout.h"
 #include "data/repository/connection/kiotty_connection.h"
 
 namespace net = kiotty::net::implementation;
@@ -45,13 +46,22 @@ namespace
         return result;
     }
 
+    size_t cipherStagesOf(size_t receive, size_t send, size_t push)
+    {
+        if (!net::MemoryLimits::TLS) { return 0; }
+        const size_t gathered = net::gatheredPlainBytes(send, push);
+        const size_t cipher_send = net::alignStage(net::cipherSendBytes(gathered));
+        return receive + cipher_send;
+    }
+
     template <typename Configuration>
     size_t stagesOf(const Configuration& configuration)
     {
         const size_t receive = configuration.receive_capacity;
         const size_t send = configuration.send_capacity;
         const size_t push = configuration.push_capacity;
-        return receive + send + push;
+        const size_t cipher = cipherStagesOf(receive, send, push);
+        return receive + send + push + cipher;
     }
 
     bool isUsable(const void* buffer, size_t length)
@@ -164,25 +174,28 @@ KiottyNetCode KiottyNet_configureTlsClientIdentity(KiottyNetTlsClientConfigurati
     return net::configureTlsClientIdentity(*configuration, identity.value);
 }
 
-KiottyNetCode KiottyNet_initializeTcpServerConfiguration(
-    KiottyNetServerConfiguration* configuration,
-    const char* host,
-    uint16_t port)
+KiottyNetCode KiottyNet_initializeTcpAddress(KiottyNetAddress* address,
+                                            const char* host,
+                                            uint16_t port)
 {
-    if (configuration == nullptr) { return INVALID; }
+    if (address == nullptr) { return INVALID; }
     const net::TextResult text = net::parseText(host, MAX_HOST_TEXT);
     if (!text) { return text.code; }
-    return net::initializeTcpServerConfiguration(*configuration, text.value, port);
+    return net::initializeTcpAddress(*address, text.value, port);
 }
 
-KiottyNetCode KiottyNet_initializePipeServerConfiguration(
-    KiottyNetServerConfiguration* configuration,
-    const char* pipe_name)
+KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const char* pipe_name)
 {
-    if (configuration == nullptr) { return INVALID; }
+    if (address == nullptr) { return INVALID; }
     const net::TextResult text = net::parseText(pipe_name, MAX_HOST_TEXT);
     if (!text) { return text.code; }
-    return net::initializePipeServerConfiguration(*configuration, text.value);
+    return net::initializePipeAddress(*address, text.value);
+}
+
+KiottyNetCode KiottyNet_initializeServerConfiguration(KiottyNetServerConfiguration* configuration)
+{
+    if (configuration == nullptr) { return INVALID; }
+    return net::initializeServerConfiguration(*configuration);
 }
 
 KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration,
@@ -216,25 +229,10 @@ KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration*
     return net::configureServerSendTimeout(*configuration, timeout_milliseconds);
 }
 
-KiottyNetCode KiottyNet_initializeTcpClientConfiguration(
-    KiottyNetClientConfiguration* configuration,
-    const char* host,
-    uint16_t port)
+KiottyNetCode KiottyNet_initializeClientConfiguration(KiottyNetClientConfiguration* configuration)
 {
     if (configuration == nullptr) { return INVALID; }
-    const net::TextResult text = net::parseText(host, MAX_HOST_TEXT);
-    if (!text) { return text.code; }
-    return net::initializeTcpClientConfiguration(*configuration, text.value, port);
-}
-
-KiottyNetCode KiottyNet_initializePipeClientConfiguration(
-    KiottyNetClientConfiguration* configuration,
-    const char* pipe_name)
-{
-    if (configuration == nullptr) { return INVALID; }
-    const net::TextResult text = net::parseText(pipe_name, MAX_HOST_TEXT);
-    if (!text) { return text.code; }
-    return net::initializePipeClientConfiguration(*configuration, text.value);
+    return net::initializeClientConfiguration(*configuration);
 }
 
 KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* configuration,
@@ -409,12 +407,11 @@ size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* configurat
 
 KiottyNetStreamClientResult KiottyNet_createStreamClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* configuration,
-    const KiottyNetTlsClientConfiguration* tls)
+    const KiottyNetClientConfiguration* configuration)
 {
     KiottyNetStreamClientResult result = { INVALID, nullptr };
     if (context == nullptr || configuration == nullptr) { return result; }
-    const net::StreamClientResult created = context->createStreamClient(*configuration, tls);
+    const net::StreamClientResult created = context->createStreamClient(*configuration);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;
@@ -426,10 +423,13 @@ void KiottyNet_destroyStreamClient(KiottyNetContext context, KiottyNetStreamClie
     context->destroy(*client);
 }
 
-KiottyNetCode KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client)
+KiottyNetCode KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client,
+                                            const KiottyNetAddress* address,
+                                            const KiottyNetTlsClientConfiguration* tls)
 {
-    if (client == nullptr) { return INVALID; }
-    return client->connect();
+    if (client == nullptr || address == nullptr) { return INVALID; }
+    const KiottyNetAddress copied = *address;
+    return client->connect(copied, tls);
 }
 
 void KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client)
@@ -458,12 +458,11 @@ KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
 
 KiottyNetEventClientResult KiottyNet_createEventClient(
     KiottyNetContext context,
-    const KiottyNetClientConfiguration* configuration,
-    const KiottyNetTlsClientConfiguration* tls)
+    const KiottyNetClientConfiguration* configuration)
 {
     KiottyNetEventClientResult result = { INVALID, nullptr };
     if (context == nullptr || configuration == nullptr) { return result; }
-    const net::EventClientResult created = context->createEventClient(*configuration, tls);
+    const net::EventClientResult created = context->createEventClient(*configuration);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;
@@ -476,12 +475,15 @@ void KiottyNet_destroyEventClient(KiottyNetContext context, KiottyNetEventClient
 }
 
 KiottyNetCode KiottyNet_runEventClient(KiottyNetEventClientHandle client,
+                                       const KiottyNetAddress* address,
+                                       const KiottyNetTlsClientConfiguration* tls,
                                        const KiottyNetConnectionHandler* handler,
                                        KiottyNetAppContext app_context)
 {
-    if (client == nullptr || handler == nullptr) { return INVALID; }
+    if (client == nullptr || address == nullptr || handler == nullptr) { return INVALID; }
+    const KiottyNetAddress copied = *address;
     const net::CallbackHandler callbacks(*handler, app_context, *client);
-    return client->run(callbacks);
+    return client->run(callbacks, copied, tls);
 }
 
 void KiottyNet_closeEventClient(KiottyNetEventClientHandle client)
@@ -510,12 +512,11 @@ KiottyNetCode KiottyNet_notifyEventClient(KiottyNetEventClientHandle client, Kio
 }
 
 KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context,
-                                             const KiottyNetServerConfiguration* configuration,
-                                             const KiottyNetTlsServerConfiguration* tls)
+                                             const KiottyNetServerConfiguration* configuration)
 {
     KiottyNetServerResult result = { INVALID, nullptr };
     if (context == nullptr || configuration == nullptr) { return result; }
-    const net::ServerResult created = context->createServer(*configuration, tls);
+    const net::ServerResult created = context->createServer(*configuration);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;
@@ -528,12 +529,15 @@ void KiottyNet_destroyServer(KiottyNetContext context, KiottyNetServerHandle ser
 }
 
 KiottyNetCode KiottyNet_runServer(KiottyNetServerHandle server,
+                                  const KiottyNetAddress* address,
+                                  const KiottyNetTlsServerConfiguration* tls,
                                   const KiottyNetConnectionHandler* handler,
                                   KiottyNetAppContext app_context)
 {
-    if (server == nullptr || handler == nullptr) { return INVALID; }
+    if (server == nullptr || address == nullptr || handler == nullptr) { return INVALID; }
+    const KiottyNetAddress copied = *address;
     const net::CallbackHandler callbacks(*handler, app_context, *server);
-    return server->run(callbacks);
+    return server->run(callbacks, copied, tls);
 }
 
 void KiottyNet_closeServer(KiottyNetServerHandle server)

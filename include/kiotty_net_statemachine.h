@@ -94,9 +94,13 @@ typedef struct KiottyNetStatefulAppContext
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulServer(
     KiottyNetServerHandle server,
+    const KiottyNetAddress* address,
+    const KiottyNetTlsServerConfiguration* tls,
     const KiottyNetStatefulAppContext* app_context);
 KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulEventClient(
     KiottyNetEventClientHandle client,
+    const KiottyNetAddress* address,
+    const KiottyNetTlsClientConfiguration* tls,
     const KiottyNetStatefulAppContext* app_context);
 
 #ifdef __cplusplus

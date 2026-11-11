@@ -175,6 +175,16 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 - **notify 의 여러 조각.** `NotificationDesk::notify(id, Span<const KiottyNetSpan>)` 와 `broadcast(Span<const KiottyNetSpan>)` 는 한 lock 안에서 조각들을 이어 복사하고, 다 들어가지 않으면 하나도 넣지 않는다 (`BUFFER_FULL`). WebSocket 의 frame 머리 + payload 가 이것을 쓴다. 공개 API 는 그대로다.
 - **송신 timeout.** `SendFlow` 가 송신 deadline 을 가진다. pick 이 WRITE 를 고르면 `now + send_timeout` 을 적고 (`limit` 으로 받은 값. 0 이면 적지 않는다), release 와 CLOSING 진입이 지운다. `ConnectionStatus::send_deadline` 으로 보이며, IoLoop 의 `stepSlot` 이 지나간 것을 `IoKind::SEND_TIMEOUT` 으로 Connection 에 주고 Connection 은 `close(PEER_NOT_READING)` 을 돌려준다. CLOSE 는 detach 로 걸린 WRITE 를 취소한다. IoLoop 의 대기 시간은 read deadline 과 송신 deadline 중 가까운 쪽이다.
 
+### 1.7 주소와 TLS 는 run / connect 때 (B2)
+
+`design_http_v0.html` 2.3 과 1절 결정 18 이 바탕이다. create 는 자원만, run / connect 는 주소와 TLS 를 받는다.
+
+- **설정과 주소.** `KiottyNetServerConfiguration` / `KiottyNetClientConfiguration` 에 `address` 가 없다. `initializeServerConfiguration` / `initializeClientConfiguration` 은 인자 없이 기본값을 채우고, 주소는 `initializeTcpAddress` / `initializePipeAddress` 가 지금까지의 검사 (빈 이름, 길이, UTF-8, TCP 의 port 0) 그대로 만든다. run / connect 는 받은 주소를 `isAddressValid` 로 다시 본다 (transport, NUL 로 끝나는 비지 않은 host, TCP 의 port). 번역 층은 주소를 run / connect 의 stack 에 복사해 넘긴다.
+- **Owner 의 initialize.** `Server` / `EventClient` / `StreamClient` 의 `configuration_type` 은 공개 설정 struct 그대로다 (`ServerConfiguration`, `ClientConfiguration` 묶음은 지웠다). initialize 는 TLS 프로파일을 열지 않는다. TLS Stage 는 `MemoryLimits::TLS` 이면 언제나 잡는다 (Server / EventClient 는 `cipherOf(limits)`, StreamClient 는 `reserveTlsStages`). 공식은 그대로다.
+- **run.** 순서는 handler 검사 → 주소 검사 → TLS 설정의 mark → `RunGate::enter` → `openProfile(tls)` → 서버는 `listen(address)`, EventClient 는 `connectWithRetry(configuration, address, closing)`. `openProfile` 은 먼저 `TlsProfile::close` 로 지난 SSL_CTX 를 버리고, tls 가 있으면 `openServer` / `openClient` 로 새로 만든다. 그래서 평문 run 은 프로파일이 비어 있고, Connection 은 지금처럼 `profile.valid()` 로 TLS 여부를 가른다. 프로파일 실패는 `leave(code)` 로 run 의 반환값과 await 가 같은 값을 본다.
+- **connect.** `StreamClient::connect(address, tls)` 는 `disconnect` (TLS 엔진, 소켓, Stage 정리) → 주소 / mark 검사 → `openProfile` → `connectWithRetry` → `secure(address)`. SNI 와 hostname 검증의 이름은 `hostnameOf(address)` (Pipe 면 빈 이름) 이다.
+- **memory size.** `serverMemorySize` / `clientMemorySize` 는 TLS 빌드에서 연결마다 cipher Stage (receive + `alignStage(cipherSendBytes(gatheredPlainBytes(send, push)))`) 를 더한다.
+
 ## 2. StateMachine
 
 requirement_v0.md 8절의 구현이다. 공개 API 는 `KiottyNet_runStatefulServer` / `KiottyNet_runStatefulEventClient` 둘뿐이고 나머지는 모두 라이브러리 안이다. Runner 객체도 사용자 pool 도 없다. 사용자가 보는 것은 `KiottyNetStatefulAppContext` 하나다. 코드의 자리와 이유는 `docs/design/design_statemachine_v0.md` 3 ~ 6절이고, 이 절은 그 요약이다.
@@ -205,11 +215,12 @@ public:
 | report | `onError` | `onError` (NULL 이면 부르지 않는다) |
 
 ```cpp
-KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetStatefulAppContext* app_context)
+KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, const KiottyNetStatefulAppContext* app_context)
 {
-    if (server == nullptr || app_context == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    if (server == nullptr || address == nullptr || app_context == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    const KiottyNetAddress copied = *address;
     const StatefulHandler handler(*app_context, *server);
-    return server->run(handler);                    // run 의 첫 줄이 handler.validate(). 실패하면 listen 도 하지 않고 그 code
+    return server->run(handler, copied, tls);       // run 의 첫 줄이 handler.validate(). 실패하면 listen 도 하지 않고 그 code
 }
 ```
 
@@ -453,7 +464,9 @@ int runEchoServer(uint16_t port)
     KiottyNetStatefulAppContext           stateful = { &sessions, &SERVER_MACHINE, &SessionPool<ServerSession, 32>::acquire, &SessionPool<ServerSession, 32>::release, nullptr };   // onError 는 NULL 이어도 된다
 
     KiottyNetServerConfiguration configuration;
-    if (KiottyNet_ServerConfigurationBuilder::tcp(configuration, "0.0.0.0", port).maxClients(32).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetAddress             address;
+    if (KiottyNet_ServerConfigurationBuilder(configuration).maxClients(32).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -465,7 +478,7 @@ int runEchoServer(uint16_t port)
         return 1;
     }
 
-    std::thread io([&]() { KiottyNet_runStatefulServer(server.handle(), &stateful); });   // stateful 과 sessions 는 io 가 끝날 때까지 살아 있다
+    std::thread io([&]() { KiottyNet_runStatefulServer(server.handle(), &address, nullptr, &stateful); });   // stateful 과 sessions 는 io 가 끝날 때까지 살아 있다. TLS 면 nullptr 자리에 TLS 설정
     if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         io.join();
@@ -572,7 +585,9 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
     KiottyNetStatefulAppContext stateful = { &session, &CLIENT_MACHINE, &singleSession, nullptr, nullptr };   // release 는 할 일이 없어서 NULL, onError 도 NULL
 
     KiottyNetClientConfiguration configuration;
-    if (KiottyNet_ClientConfigurationBuilder::tcp(configuration, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetAddress             address;
+    if (KiottyNet_ClientConfigurationBuilder(configuration).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -584,7 +599,7 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
         return 1;
     }
 
-    KiottyNet_runStatefulEventClient(client.handle(), &stateful);               // 연결이 닫히면 return 한다. 이 thread 가 IO Thread 다
+    KiottyNet_runStatefulEventClient(client.handle(), &address, nullptr, &stateful);   // 연결이 닫히면 return 한다. 이 thread 가 IO Thread 다
     return session.matched ? 0 : 1;
 }
 ```
@@ -621,14 +636,16 @@ int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
     KiottyNetSpan request = { frame, HEADER_LENGTH + message.length };
 
     KiottyNetClientConfiguration configuration;
-    if (KiottyNet_ClientConfigurationBuilder::tcp(configuration, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetAddress             address;
+    if (KiottyNet_ClientConfigurationBuilder(configuration).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
 
     KiottyNet_Context      context;
     KiottyNet_StreamClient client(context.handle(), configuration);
-    if (!context || !client || client.connect() != KIOTTY_NET_CODE_SUCCESS)
+    if (!context || !client || client.connect(address) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -769,11 +786,13 @@ static const KiottyNetStatefulAppContext SERVER_APP = { NULL, &SERVER_MACHINE, a
 int run_echo_server(uint16_t port)
 {
     KiottyNetServerConfiguration configuration;
+    KiottyNetAddress             address;
     KiottyNetContextResult       context;
     KiottyNetServerResult        server;
     KiottyNetCode                code;
 
-    if (KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
+    if (KiottyNet_initializeServerConfiguration(&configuration) != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -783,13 +802,13 @@ int run_echo_server(uint16_t port)
     {
         return 1;
     }
-    server = KiottyNet_createServer(context.handle, &configuration, NULL);
+    server = KiottyNet_createServer(context.handle, &configuration);
     if (server.code != KIOTTY_NET_CODE_SUCCESS)
     {
         KiottyNet_releaseContext(context.handle);
         return 1;
     }
-    code = KiottyNet_runStatefulServer(server.handle, &SERVER_APP);            /* 이 thread 가 IO Thread 다. 다른 thread 의 KiottyNet_closeServer 로 끝난다 */
+    code = KiottyNet_runStatefulServer(server.handle, &address, NULL, &SERVER_APP);   /* 이 thread 가 IO Thread 다. 다른 thread 의 KiottyNet_closeServer 로 끝난다 */
     KiottyNet_destroyServer(context.handle, server.handle);
     KiottyNet_releaseContext(context.handle);
     return code == KIOTTY_NET_CODE_CLOSED ? 0 : 1;
@@ -837,7 +856,7 @@ struct HttpServer {
 };
 ```
 
-- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration, tls).handle` 을 만들고, 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
+- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration).handle` 을 만들고 (주소와 TLS 는 run 이 받는다, B2), 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
 - `sessionBytes(limits) = sizeof(HttpSession) + max_header_bytes + max_headers × sizeof(KiottyNetHttpHeader) + max_body_bytes + response_bytes`. 곱셈과 덧셈은 오버플로를 먼저 검사한다.
 - `KiottyNet_destroyHttpServer` 는 base Server 를 destroy 하고 블록을 돌려준다. run 이 return 한 뒤에만 불린다는 것은 사용자 규칙이다 (base 와 같다).
 
@@ -1190,12 +1209,12 @@ static KiottyNetTransition onSent(KiottyNetConnectionContext session, KiottyNetC
 ### 4.8 run
 
 ```cpp
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server)
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls)
 {
     if (!server) return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     server->_running = true;
     KiottyNetStatefulAppContext stateful = { server, &HTTP_MACHINE, &acquireSession, &releaseSession };   // run 동안만 살아 있으면 된다 (2.1)
-    KiottyNetCode code = KiottyNet_runStatefulServer(server->_server, &stateful);
+    KiottyNetCode code = KiottyNet_runStatefulServer(server->_server, address, tls, &stateful);
     server->_running = false;
     return code;
 }

@@ -24,7 +24,7 @@
 HttpServer 는 소유 handle 이다. `KiottyNet_createHttpServer` 가 만들고 `KiottyNet_destroyHttpServer` 가 없앤다. 만들 때 세 가지를 넘긴다.
 
 1. `KiottyNetContext` : `KiottyNet_initializeContext()` 가 돌려주는 `KiottyNetContextResult` 의 `handle`. 라이브러리 전역 컨텍스트다. 실패하면 `code` 가 `KIOTTY_NET_CODE_SUCCESS` 가 아니다. 소유 handle 은 모두 같은 context 를 받고, destroy 때도 같은 context 를 넘긴다.
-2. `KiottyNetServerConfiguration` : 주소와 `max_clients`, 버퍼 크기. `KiottyNet_initializeTcpServerConfiguration(&configuration, host, port)` 또는 `KiottyNet_initializePipeServerConfiguration(&configuration, name)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 따로 만들어 넘기고, 평문이면 `NULL`.
+2. `KiottyNetServerConfiguration` : `max_clients`, 버퍼 크기. `KiottyNet_initializeServerConfiguration(&configuration)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. 주소와 TLS 는 여기에 없고 `KiottyNet_runHttpServer` 가 받는다. 주소는 `KiottyNet_initializeTcpAddress(&address, host, port)` 또는 `KiottyNet_initializePipeAddress(&address, name)` 로 만든다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 run 에 넘기고, 평문이면 `NULL`.
 3. `KiottyNetHttpLimits` : HTTP 층의 고정 크기 버퍼와 timeout. 아래 표.
 
 `KiottyNet_initializeHttpLimits(&limits)` 가 모든 필드를 기본값으로 채우고, `KiottyNet_configureHttp*` 가 하나씩 바꾼다. 다른 설정 struct 와 같은 규칙이다. 함수가 값을 검사하고 `KiottyNetCode` 를 돌려주며, 잘못된 값이면 struct 를 바꾸지 않는다.
@@ -154,7 +154,7 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 
 | 함수 | 하는 일 |
 |---|---|
-| `KiottyNet_runHttpServer(s)` | listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드 |
+| `KiottyNet_runHttpServer(s, address, tls)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드 |
 | `KiottyNet_closeHttpServer(s)` | loop 를 멈추라고 알린다. 기다리지 않는다. Work 중인 연결도 바로 닫힌다 |
 | `KiottyNet_awaitHttpServer(s, timeout_milliseconds)` | loop 가 돌기 시작할 때까지 기다린다. 시작했으면 `KIOTTY_NET_CODE_SUCCESS`, run 이 이미 끝났으면 run 의 반환값, 시간 안에 못 봤으면 `KIOTTY_NET_CODE_TIMEOUT` |
 | `KiottyNet_destroyHttpServer(context, s)` | run 이 return 한 뒤에 부른다 |
@@ -225,15 +225,17 @@ int main(void)
     KiottyNetContext context = initialized.handle;
 
     KiottyNetServerConfiguration configuration;
-    KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", 8080);
+    KiottyNet_initializeServerConfiguration(&configuration);
     KiottyNet_configureServerMaxClients(&configuration, 16);
+    KiottyNetAddress address;
+    KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
 
     KiottyNetHttpLimits limits;
     KiottyNet_initializeHttpLimits(&limits);
     KiottyNet_configureHttpBodyCapacity(&limits, 16 * 1024);
 
     App app = { create_pool(4) };
-    KiottyNetHttpServerHandle server = KiottyNet_createHttpServer(context, &configuration, NULL, &limits);
+    KiottyNetHttpServerHandle server = KiottyNet_createHttpServer(context, &configuration, &limits);
 
     KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health",         KiottyNet_makeHttpRoute(&app, onHealth, NULL));
     KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/devices/*", KiottyNet_makeHttpRoute(&app, onDevice, NULL));
@@ -241,7 +243,7 @@ int main(void)
     KiottyNet_serveHttpMemory(server, "/app.wasm", wasm_span(), "application/wasm");
     KiottyNet_serveHttpDirectory(server, "/", "./www/");
 
-    KiottyNet_runHttpServer(server);
+    KiottyNet_runHttpServer(server, &address, NULL);
 
     KiottyNet_destroyHttpServer(context, server);
     KiottyNet_releaseContext(context);
@@ -249,7 +251,7 @@ int main(void)
 }
 ```
 
-TLS 는 `KiottyNetTlsServerConfiguration tls; KiottyNet_initializeTlsServerConfiguration(&tls, "server.crt", "server.key", NULL);` 를 만들어 create 의 세 번째 인자로 넘기면 된다.
+TLS 는 `KiottyNetTlsServerConfiguration tls; KiottyNet_initializeTlsServerConfiguration(&tls, "server.crt", "server.key", NULL);` 를 만들어 run 의 세 번째 인자로 넘기면 된다. close 뒤 같은 server 를 다른 주소, 다른 TLS 설정으로 다시 run 해도 된다.
 
 ### 1.9 C++ 예제
 
@@ -266,7 +268,9 @@ int main()
     KiottyNet_Context context;
 
     KiottyNetServerConfiguration configuration;
-    KiottyNet_ServerConfigurationBuilder::tcp(configuration, "0.0.0.0", 8080).maxClients(16).build();
+    KiottyNet_ServerConfigurationBuilder(configuration).maxClients(16).build();
+    KiottyNetAddress address;
+    KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
 
     KiottyNetHttpLimits limits;
     KiottyNet_HttpLimitsBuilder(limits).bodyCapacity(16 * 1024).build();
@@ -310,7 +314,7 @@ int main()
     server.serveMemory("/app.wasm", wasmSpan(), "application/wasm");
     server.serveDirectory("/", "./www/");
 
-    std::thread io([&] { server.run(); });
+    std::thread io([&] { server.run(address); });                               // TLS 면 server.run(address, tls)
     if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         server.close();

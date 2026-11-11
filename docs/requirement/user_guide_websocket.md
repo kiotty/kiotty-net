@@ -215,7 +215,9 @@ int runChatServer(uint16_t port)
     ChatApp app;
 
     KiottyNetServerConfiguration configuration;
-    if (KiottyNet_ServerConfigurationBuilder::tcp(configuration, "0.0.0.0", port).maxClients(16).bufferCapacity(4096, 4096, 65536).build() != KIOTTY_NET_CODE_SUCCESS)
+    KiottyNetAddress             address;
+    if (KiottyNet_ServerConfigurationBuilder(configuration).maxClients(16).bufferCapacity(4096, 4096, 65536).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -226,13 +228,13 @@ int runChatServer(uint16_t port)
     }
 
     KiottyNet_Context         context;
-    KiottyNet_WebSocketServer server(context.handle(), configuration, websocket);           // TLS 면 (context.handle(), configuration, tls, websocket)
+    KiottyNet_WebSocketServer server(context.handle(), configuration, websocket);           // 주소와 TLS 는 run 이 받는다
     if (!context || !server)
     {
         return 1;
     }
 
-    std::thread io([&]() { server.run(CHAT_HANDLER, &app); });                      // 이 thread 가 IO Thread. app 과 CHAT_HANDLER 는 run 이 끝날 때까지 살아 있다
+    std::thread io([&]() { server.run(address, CHAT_HANDLER, &app); });             // 이 thread 가 IO Thread. app 과 CHAT_HANDLER 는 run 이 끝날 때까지 살아 있다. TLS 면 run(address, tls, CHAT_HANDLER, &app)
     if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         io.join();
@@ -267,18 +269,20 @@ int run_echo_server(uint16_t port)
     KiottyNetContextResult          initialized;
     KiottyNetContext                context;
     KiottyNetServerConfiguration    configuration;
+    KiottyNetAddress                address;
     KiottyNetWebSocketConfiguration websocket;
     KiottyNetWebSocketServerHandle  server;
     KiottyNetCode                   code;
 
-    if (KiottyNet_initializeTcpServerConfiguration(&configuration, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS) { return 1; }
+    if (KiottyNet_initializeServerConfiguration(&configuration) != KIOTTY_NET_CODE_SUCCESS)               { return 1; }
+    if (KiottyNet_initializeTcpAddress(&address, "0.0.0.0", port) != KIOTTY_NET_CODE_SUCCESS)           { return 1; }
     if (KiottyNet_initializeWebSocketConfiguration(&websocket, "/echo") != KIOTTY_NET_CODE_SUCCESS)      { return 1; }
     initialized = KiottyNet_initializeContext();
     if (initialized.code != KIOTTY_NET_CODE_SUCCESS) { return 1; }
     context = initialized.handle;
-    server = KiottyNet_createWebSocketServer(context, &configuration, NULL, &websocket);
+    server = KiottyNet_createWebSocketServer(context, &configuration, &websocket);
     if (server == NULL) { KiottyNet_releaseContext(context); return 1; }
-    code = KiottyNet_runWebSocketServer(server, &ECHO_HANDLER, NULL);                /* 이 thread 가 IO Thread. 다른 thread 의 KiottyNet_closeWebSocketServer 로 끝난다 */
+    code = KiottyNet_runWebSocketServer(server, &address, NULL, &ECHO_HANDLER, NULL);   /* 이 thread 가 IO Thread. 다른 thread 의 KiottyNet_closeWebSocketServer 로 끝난다 */
     KiottyNet_destroyWebSocketServer(context, server);
     KiottyNet_releaseContext(context);
     return code == KIOTTY_NET_CODE_CLOSED ? 0 : 1;
@@ -301,9 +305,11 @@ static const KiottyNetWebSocketHandler CLIENT_HANDLER = { nullptr, &onOpen, &onM
 int runClient(const char* host, uint16_t port)
 {
     KiottyNetClientConfiguration    configuration;
+    KiottyNetAddress                address;
     KiottyNetTlsClientConfiguration tls;
     KiottyNetWebSocketConfiguration websocket;
-    if (KiottyNet_ClientConfigurationBuilder::tcp(configuration, host, port).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
+    if (KiottyNet_ClientConfigurationBuilder(configuration).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS                               // host 가 Host 헤더와 SNI
         || KiottyNet_TlsClientConfigurationBuilder(tls).build() != KIOTTY_NET_CODE_SUCCESS                                  // 기본값 : OS 저장소로 서버 + hostname 검증
         || KiottyNet_WebSocketConfigurationBuilder(websocket, "/chat").protocols("chat, superchat").build() != KIOTTY_NET_CODE_SUCCESS)
     {
@@ -312,13 +318,13 @@ int runClient(const char* host, uint16_t port)
 
     ClientSession             session;
     KiottyNet_Context         context;
-    KiottyNet_WebSocketClient client(context.handle(), configuration, tls, websocket);     // wss. 평문이면 tls 를 뺀다
+    KiottyNet_WebSocketClient client(context.handle(), configuration, websocket);
     if (!context || !client)
     {
         return 1;
     }
 
-    std::thread io([&]() { client.run(CLIENT_HANDLER, &session); });                // 연결 (재시도) + Upgrade + loop
+    std::thread io([&]() { client.run(address, tls, CLIENT_HANDLER, &session); });  // wss. 평문 (ws) 이면 run(address, CLIENT_HANDLER, &session). 연결 (재시도) + Upgrade + loop
     if (client.await(5000) != KIOTTY_NET_CODE_SUCCESS)                                        // 101 을 받아 onOpen 이 나가면 SUCCESS
     {
         io.join();

@@ -28,32 +28,48 @@ namespace kiotty::net::implementation
         AddressResult                addressOf(KiottyNetTransport transport,
                                                Span<const char> name,
                                                uint16_t port);
-        KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address);
-        KiottyNetClientConfiguration defaultClient(const KiottyNetAddress& address);
-        Capacities                   defaultCapacities();
+        KiottyNetServerConfiguration defaultServer();
+        KiottyNetClientConfiguration defaultClient();
+        bool                         isTransportKnown(KiottyNetTransport transport);
+        Capacities                  defaultCapacities();
         bool                         areCapacitiesValid(Capacities capacities);
         bool                         isWithin(size_t value, size_t maximum);
         bool                         isNoDelayKnown(KiottyNetNoDelay no_delay);
         size_t                       smallerOf(size_t left, size_t right);
     }
 
-    KiottyNetCode initializeTcpServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                   Span<const char> host,
-                                                   uint16_t port)
+    KiottyNetCode initializeTcpAddress(KiottyNetAddress& address,
+                                       Span<const char> host,
+                                       uint16_t port)
     {
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
-        if (!address) { return address.code; }
-        configuration = defaultServer(address.value);
+        const AddressResult made = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
+        if (!made) { return made.code; }
+        address = made.value;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode initializePipeServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                    Span<const char> pipe_name)
+    KiottyNetCode initializePipeAddress(KiottyNetAddress& address, Span<const char> pipe_name)
     {
-        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
-        if (!address) { return address.code; }
-        configuration = defaultServer(address.value);
+        const AddressResult made = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
+        if (!made) { return made.code; }
+        address = made.value;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    bool isAddressValid(const KiottyNetAddress& address)
+    {
+        if (!isTransportKnown(address.transport)) { return false; }
+        const bool is_tcp = address.transport == KIOTTY_NET_TRANSPORT_TCP;
+        if (is_tcp && address.port == 0) { return false; }
+        const Span<const char> host = textOf(address.host);
+        const bool is_terminated = host.length < sizeof(address.host);
+        return is_terminated && !host.empty();
+    }
+
+    KiottyNetCode initializeServerConfiguration(KiottyNetServerConfiguration& configuration)
+    {
+        configuration = defaultServer();
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -98,23 +114,9 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                   Span<const char> host,
-                                                   uint16_t port)
+    KiottyNetCode initializeClientConfiguration(KiottyNetClientConfiguration& configuration)
     {
-        if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
-        if (!address) { return address.code; }
-        configuration = defaultClient(address.value);
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode initializePipeClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                    Span<const char> pipe_name)
-    {
-        const AddressResult address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
-        if (!address) { return address.code; }
-        configuration = defaultClient(address.value);
+        configuration = defaultClient();
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -178,11 +180,11 @@ namespace kiotty::net::implementation
         return configuration.initialization_mark == INITIALIZATION_MARK;
     }
 
-    Span<const char> hostnameOf(const KiottyNetClientConfiguration& configuration)
+    Span<const char> hostnameOf(const KiottyNetAddress& address)
     {
-        const bool is_tcp = configuration.address.transport == KIOTTY_NET_TRANSPORT_TCP;
-        if (!is_tcp) { return Span<const char>{ configuration.address.host, 0 }; }
-        return textOf(configuration.address.host);
+        const bool is_tcp = address.transport == KIOTTY_NET_TRANSPORT_TCP;
+        if (!is_tcp) { return Span<const char>{ address.host, 0 }; }
+        return textOf(address.host);
     }
 
     bool writeText(Span<char> field, Span<const char> text)
@@ -226,12 +228,22 @@ namespace kiotty::net::implementation
             return AddressResult::success(address);
         }
 
-        KiottyNetServerConfiguration defaultServer(const KiottyNetAddress& address)
+        bool isTransportKnown(KiottyNetTransport transport)
+        {
+            switch (transport)
+            {
+            case KIOTTY_NET_TRANSPORT_TCP:
+            case KIOTTY_NET_TRANSPORT_PIPE:
+                return true;
+            }
+            return false;
+        }
+
+        KiottyNetServerConfiguration defaultServer()
         {
             const Capacities capacities = defaultCapacities();
             KiottyNetServerConfiguration configuration{};
             configuration.initialization_mark = INITIALIZATION_MARK;
-            configuration.address = address;
             configuration.max_clients = DEFAULT_MAX_CLIENTS;
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
@@ -241,12 +253,11 @@ namespace kiotty::net::implementation
             return configuration;
         }
 
-        KiottyNetClientConfiguration defaultClient(const KiottyNetAddress& address)
+        KiottyNetClientConfiguration defaultClient()
         {
             const Capacities capacities = defaultCapacities();
             KiottyNetClientConfiguration configuration{};
             configuration.initialization_mark = INITIALIZATION_MARK;
-            configuration.address = address;
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;

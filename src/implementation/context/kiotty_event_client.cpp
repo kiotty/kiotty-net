@@ -2,6 +2,7 @@
 
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_tls_configuration.h"
+#include "data/datasource/kiotty_memory_limits.h"
 #include "data/infra/socket/kiotty_connect_with_retry.h"
 #include "domain/entity/kiotty_handler.h"
 #include "domain/entity/kiotty_socket_code.h"
@@ -15,8 +16,7 @@ namespace kiotty::net::implementation
     namespace
     {
         ConnectionLimits limitsOf(const KiottyNetClientConfiguration& configuration);
-        TlsCapacity      cipherOf(ConnectionLimits limits,
-                                  const KiottyNetTlsClientConfiguration* tls);
+        TlsCapacity      cipherOf(ConnectionLimits limits);
     }
 
     EventClient::EventClient()
@@ -36,17 +36,14 @@ namespace kiotty::net::implementation
 
     EventClient::~EventClient() = default;
 
-    KiottyNetCode EventClient::initialize(PoolHandle id, ClientConfiguration configuration)
+    KiottyNetCode EventClient::initialize(PoolHandle id, const KiottyNetClientConfiguration& client)
     {
         (void)id;
-        const KiottyNetClientConfiguration& client = configuration.client;
         if (!isInitialized(client)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetCode secured = openProfile(configuration.tls);
-        if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
         const SocketCode opened = _listener.open(LISTENER_CAPACITY);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(client);
-        _host.initialize(limits, CONNECTIONS, cipherOf(limits, configuration.tls));
+        _host.initialize(limits, CONNECTIONS, cipherOf(limits));
         _configuration = client;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
@@ -64,19 +61,25 @@ namespace kiotty::net::implementation
         _is_abandoned.store(false);
     }
 
-    KiottyNetCode EventClient::run(const Handler& handler)
+    KiottyNetCode EventClient::run(const Handler& handler,
+                                   const KiottyNetAddress& address,
+                                   const KiottyNetTlsClientConfiguration* tls)
     {
         const KiottyNetCode checked = handler.validate();
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
+        if (!isAddressValid(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (tls != nullptr && !isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const bool entered = _gate.enter();
         if (!entered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _is_closing.store(false);
         _loop.reset();
-        ConnectedResult connected = connectWithRetry(_configuration, _is_closing);
+        const KiottyNetCode secured = openProfile(tls);
+        if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
+        ConnectedResult connected = connectWithRetry(_configuration, address, _is_closing);
         if (!connected) { return leave(connected.code); }
         const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
         _gate.start();
-        _loop.admit(parts, std::move(connected.value), hostnameOf(_configuration));
+        _loop.admit(parts, std::move(connected.value), hostnameOf(address));
         (void)_loop.run(parts, StopPolicy::WHEN_EMPTY);
         const bool is_closed = _is_closing.load();
         return leave(is_closed ? KIOTTY_NET_CODE_CLOSED : KIOTTY_NET_CODE_PEER_CLOSED);
@@ -149,8 +152,8 @@ namespace kiotty::net::implementation
 
     KiottyNetCode EventClient::openProfile(const KiottyNetTlsClientConfiguration* tls)
     {
+        _profile.close();
         if (tls == nullptr) { return KIOTTY_NET_CODE_SUCCESS; }
-        if (!isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         return _profile.openClient(*tls);
     }
 
@@ -175,9 +178,9 @@ namespace kiotty::net::implementation
                                      configuration.send_timeout_milliseconds };
         }
 
-        TlsCapacity cipherOf(ConnectionLimits limits, const KiottyNetTlsClientConfiguration* tls)
+        TlsCapacity cipherOf(ConnectionLimits limits)
         {
-            if (tls == nullptr) { return TlsCapacity{ 0, 0 }; }
+            if (!MemoryLimits::TLS) { return TlsCapacity{ 0, 0 }; }
             return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         }
     }

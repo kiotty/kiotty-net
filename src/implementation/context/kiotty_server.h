@@ -21,17 +21,11 @@
 
 namespace kiotty::net::implementation
 {
-    struct ServerConfiguration
-    {
-        KiottyNetServerConfiguration           server;
-        const KiottyNetTlsServerConfiguration* tls;
-    };
-
     class Server : public Endpoint
     {
     public:
         using code_type = KiottyNetCode;
-        using configuration_type = ServerConfiguration;
+        using configuration_type = KiottyNetServerConfiguration;
 
         static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
         static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -45,9 +39,11 @@ namespace kiotty::net::implementation
         Server(Server&&) = delete;
         Server& operator=(Server&&) = delete;
 
-        KiottyNetCode initialize(PoolHandle id, ServerConfiguration configuration);
+        KiottyNetCode initialize(PoolHandle id, const KiottyNetServerConfiguration& configuration);
         void          reset() noexcept;
-        KiottyNetCode run(const Handler& handler);
+        KiottyNetCode run(const Handler& handler,
+                          const KiottyNetAddress& address,
+                          const KiottyNetTlsServerConfiguration* tls);
         void          close();
         KiottyNetCode await(uint64_t timeout_milliseconds);
         KiottyNetCode broadcast(KiottyNetSpan data);
@@ -73,7 +69,7 @@ namespace kiotty::net::implementation
         static constexpr int LISTEN_BACKLOG = 128;
 
         KiottyNetCode    openProfile(const KiottyNetTlsServerConfiguration* tls);
-        KiottyNetCode    listen();
+        KiottyNetCode    listen(const KiottyNetAddress& address);
         KiottyNetCode    leave(KiottyNetCode code);
         ConnectionAccess access();
 

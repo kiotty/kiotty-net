@@ -11,11 +11,13 @@ namespace kiotty::net::implementation
 {
     inline constexpr uint32_t INITIALIZATION_MARK = 0x4B4E4554u;
 
-    KiottyNetCode initializeTcpServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                   Span<const char> host,
-                                                   uint16_t port);
-    KiottyNetCode initializePipeServerConfiguration(KiottyNetServerConfiguration& configuration,
-                                                    Span<const char> pipe_name);
+    KiottyNetCode initializeTcpAddress(KiottyNetAddress& address,
+                                       Span<const char> host,
+                                       uint16_t port);
+    KiottyNetCode initializePipeAddress(KiottyNetAddress& address, Span<const char> pipe_name);
+    bool          isAddressValid(const KiottyNetAddress& address);
+
+    KiottyNetCode initializeServerConfiguration(KiottyNetServerConfiguration& configuration);
     KiottyNetCode configureServerMaxClients(KiottyNetServerConfiguration& configuration,
                                             size_t max_clients);
     KiottyNetCode configureServerBufferCapacity(KiottyNetServerConfiguration& configuration,
@@ -27,11 +29,7 @@ namespace kiotty::net::implementation
     KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
                                              uint32_t timeout_milliseconds);
 
-    KiottyNetCode initializeTcpClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                   Span<const char> host,
-                                                   uint16_t port);
-    KiottyNetCode initializePipeClientConfiguration(KiottyNetClientConfiguration& configuration,
-                                                    Span<const char> pipe_name);
+    KiottyNetCode initializeClientConfiguration(KiottyNetClientConfiguration& configuration);
     KiottyNetCode configureClientBufferCapacity(KiottyNetClientConfiguration& configuration,
                                                 size_t receive_capacity,
                                                 size_t send_capacity,
@@ -49,7 +47,7 @@ namespace kiotty::net::implementation
     NoDelay          noDelayOf(KiottyNetNoDelay no_delay);
     bool             isInitialized(const KiottyNetServerConfiguration& configuration);
     bool             isInitialized(const KiottyNetClientConfiguration& configuration);
-    Span<const char> hostnameOf(const KiottyNetClientConfiguration& configuration);
+    Span<const char> hostnameOf(const KiottyNetAddress& address);
 
     bool writeText(Span<char> field, Span<const char> text);
 }

@@ -17,12 +17,14 @@ namespace kiotty::net::implementation
 
         bool               waitInterval(uint32_t interval_milliseconds,
                                const std::atomic<bool>& stop);
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration);
+        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
+                                   const KiottyNetAddress& address);
         NoDelay            noDelayOf(const KiottyNetClientConfiguration& configuration);
     }
 
     ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-        const std::atomic<bool>& stop)
+                                     const KiottyNetAddress& address,
+                                     const std::atomic<bool>& stop)
     {
         const uint32_t trials = configuration.max_trial == 0 ? 1 : configuration.max_trial;
         const uint32_t interval_milliseconds = configuration.trial_interval_milliseconds;
@@ -32,7 +34,7 @@ namespace kiotty::net::implementation
             const bool waited = trial == 0 || waitInterval(interval_milliseconds, stop);
             if (!waited) { return ConnectedResult::failure(KIOTTY_NET_CODE_CLOSED); }
             if (stop.load()) { return ConnectedResult::failure(KIOTTY_NET_CODE_CLOSED); }
-            ActiveSocketResult attempt = tryOnce(configuration);
+            ActiveSocketResult attempt = tryOnce(configuration, address);
             if (attempt) { return ConnectedResult::success(std::move(attempt.value)); }
             last = attempt.code;
         }
@@ -57,12 +59,12 @@ namespace kiotty::net::implementation
             }
         }
 
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration)
+        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
+                                   const KiottyNetAddress& address)
         {
-            ActiveSocketResult opened = ActiveSocket::open(configuration.address.transport);
+            ActiveSocketResult opened = ActiveSocket::open(address.transport);
             if (!opened) { return opened; }
             ActiveSocket& socket = opened.value;
-            const KiottyNetAddress& address = configuration.address;
             const uint32_t timeout_milliseconds = configuration.connect_timeout_milliseconds;
             const SocketCode connected = socket.connect(address, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }

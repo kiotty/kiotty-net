@@ -199,16 +199,29 @@ namespace
         KiottyNet_when(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED).then(statefulIgnored));
     constexpr KiottyNetStateMachine ECHO_MACHINE = KiottyNet_makeStateMachine(ECHO_RULES, EchoState::Reading);
 
-    KiottyNetCode runBenchServer(KiottyNetServerHandle server, App& app, KiottyNetStatefulAppContext& stateful)
+    struct BenchTarget
     {
-        if (app.role != Role::STATEFUL_ECHO) { return KiottyNet_runServer(server, &HANDLER, &app); }
+        KiottyNetAddress                       address;
+        const KiottyNetTlsServerConfiguration* tls;
+    };
+
+    KiottyNetCode runBenchServer(KiottyNetServerHandle server, const BenchTarget& target, App& app, KiottyNetStatefulAppContext& stateful)
+    {
+        if (app.role != Role::STATEFUL_ECHO) { return KiottyNet_runServer(server, &target.address, target.tls, &HANDLER, &app); }
         stateful = KiottyNetStatefulAppContext{ &app, &ECHO_MACHINE, statefulCreate, statefulRelease, nullptr };
-        return KiottyNet_runStatefulServer(server, &stateful);
+        return KiottyNet_runStatefulServer(server, &target.address, target.tls, &stateful);
     }
 
     std::string certPath(const char* name)
     {
         return std::string(KIOTTY_BENCH_CERT_DIR) + "/" + name;
+    }
+
+    KiottyNetAddress loopbackAddress(uint16_t port)
+    {
+        KiottyNetAddress address;
+        (void)KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port);
+        return address;
     }
 
     class BenchServer
@@ -219,23 +232,26 @@ namespace
             , port(kiotty_test::unusedPort())
             , _context(KiottyNet_initializeContext().handle)
             , _server(nullptr)
+            , _secure()
+            , _target{ loopbackAddress(port), nullptr }
+            , _started(KIOTTY_NET_CODE_TIMEOUT)
             , _stateful()
             , _thread()
         {
             KiottyNetServerConfiguration configuration;
-            (void)KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port);
+            (void)KiottyNet_initializeServerConfiguration(&configuration);
             (void)KiottyNet_configureServerMaxClients(&configuration, max_clients);
             app.chunk = receive_capacity;
             const KiottyNetCode sized = KiottyNet_configureServerBufferCapacity(&configuration, receive_capacity, CHUNK_BYTES, CHUNK_BYTES);
             if (sized != KIOTTY_NET_CODE_SUCCESS) { return; }
-            KiottyNetTlsServerConfiguration secure;
             const std::string cert = certPath("server.pem");
             const std::string key = certPath("server.key");
-            (void)KiottyNet_initializeTlsServerConfiguration(&secure, cert.c_str(), key.c_str(), nullptr);
-            _server = KiottyNet_createServer(_context, &configuration, tls ? &secure : nullptr).handle;
+            (void)KiottyNet_initializeTlsServerConfiguration(&_secure, cert.c_str(), key.c_str(), nullptr);
+            _target.tls = tls ? &_secure : nullptr;
+            _server = KiottyNet_createServer(_context, &configuration).handle;
             if (_server == nullptr) { return; }
-            _thread = std::thread([this]() { (void)runBenchServer(_server, app, _stateful); });
-            (void)KiottyNet_awaitServer(_server, WAIT_MS);
+            _thread = std::thread([this]() { (void)runBenchServer(_server, _target, app, _stateful); });
+            _started = KiottyNet_awaitServer(_server, WAIT_MS);
         }
 
         ~BenchServer()
@@ -254,7 +270,7 @@ namespace
 
         bool valid() const
         {
-            return _server != nullptr;
+            return _server != nullptr && _started == KIOTTY_NET_CODE_SUCCESS;
         }
 
         KiottyNetServerHandle server() const
@@ -276,9 +292,12 @@ namespace
         uint16_t port;
 
     private:
-        KiottyNetContext            _context;
-        KiottyNetServerHandle       _server;
-        KiottyNetStatefulAppContext _stateful;
+        KiottyNetContext                _context;
+        KiottyNetServerHandle           _server;
+        KiottyNetTlsServerConfiguration _secure;
+        BenchTarget                     _target;
+        KiottyNetCode                   _started;
+        KiottyNetStatefulAppContext     _stateful;
         std::thread                 _thread;
     };
 
@@ -299,15 +318,21 @@ namespace
         return spinUntil([&]() { return counter.load() >= target; });
     }
 
-    KiottyNetStreamClientHandle createStreamClient(BenchServer& bench, bool tls)
+    KiottyNetStreamClientHandle createStreamClient(BenchServer& bench)
     {
         KiottyNetClientConfiguration configuration;
-        (void)KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, bench.port);
+        (void)KiottyNet_initializeClientConfiguration(&configuration);
+        return KiottyNet_createStreamClient(bench.context(), &configuration).handle;
+    }
+
+    KiottyNetCode connectStreamClient(KiottyNetStreamClientHandle client, uint16_t port, bool tls)
+    {
+        const KiottyNetAddress address = loopbackAddress(port);
         KiottyNetTlsClientConfiguration secure;
         const std::string trust = certPath("ca.pem");
         (void)KiottyNet_initializeTlsClientConfiguration(&secure);
         (void)KiottyNet_configureTlsClientTrustStore(&secure, trust.c_str());
-        return KiottyNet_createStreamClient(bench.context(), &configuration, tls ? &secure : nullptr).handle;
+        return KiottyNet_connectStreamClient(client, &address, tls ? &secure : nullptr);
     }
 
     bool sendAndReceive(kiotty_test::LoopbackPeer& peer, const char* message, char* reply)
@@ -472,8 +497,8 @@ static void StreamEcho(benchmark::State& state)
     const bool tls = state.range(0) != 0;
     BenchServer bench(Role::ECHO, tls);
     if (!bench.valid()) { state.SkipWithError("server not created (TLS off?)"); return; }
-    KiottyNetStreamClientHandle client = createStreamClient(bench, tls);
-    if (client == nullptr || KiottyNet_connectStreamClient(client) != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("connect failed"); return; }
+    KiottyNetStreamClientHandle client = createStreamClient(bench);
+    if (client == nullptr || connectStreamClient(client, bench.port, tls) != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("connect failed"); return; }
     char message[MESSAGE_BYTES] = {};
     char reply[MESSAGE_BYTES] = {};
     const KiottyNetSpan data = { message, sizeof(message) };
@@ -498,11 +523,11 @@ static void TlsHandshakeRate(benchmark::State& state)
 {
     BenchServer bench(Role::ECHO, true);
     if (!bench.valid()) { state.SkipWithError("server not created (TLS off?)"); return; }
-    KiottyNetStreamClientHandle client = createStreamClient(bench, true);
+    KiottyNetStreamClientHandle client = createStreamClient(bench);
     if (client == nullptr) { state.SkipWithError("client not created"); return; }
     for (auto _ : state)
     {
-        if (KiottyNet_connectStreamClient(client) != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("handshake failed"); break; }
+        if (connectStreamClient(client, bench.port, true) != KIOTTY_NET_CODE_SUCCESS) { state.SkipWithError("handshake failed"); break; }
         KiottyNet_disconnectStreamClient(client);
     }
     KiottyNet_destroyStreamClient(bench.context(), client);
@@ -558,10 +583,10 @@ namespace
         KiottyNetContext handle;
     };
 
-    KiottyNetClientConfiguration clientConfiguration(uint16_t port, size_t receive_capacity, bool& sized)
+    KiottyNetClientConfiguration clientConfiguration(size_t receive_capacity, bool& sized)
     {
         KiottyNetClientConfiguration configuration;
-        (void)KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, port);
+        (void)KiottyNet_initializeClientConfiguration(&configuration);
         const KiottyNetCode code = KiottyNet_configureClientBufferCapacity(&configuration, receive_capacity, CHUNK_BYTES, CHUNK_BYTES);
         sized = code == KIOTTY_NET_CODE_SUCCESS;
         return configuration;
@@ -574,15 +599,16 @@ namespace
             : app(role)
             , _context(context)
             , _client(nullptr)
+            , _address(loopbackAddress(port))
             , _thread()
         {
             bool sized = false;
-            const KiottyNetClientConfiguration configuration = clientConfiguration(port, receive_capacity, sized);
+            const KiottyNetClientConfiguration configuration = clientConfiguration(receive_capacity, sized);
             if (!sized) { return; }
             app.chunk = receive_capacity;
-            _client = KiottyNet_createEventClient(_context, &configuration, nullptr).handle;
+            _client = KiottyNet_createEventClient(_context, &configuration).handle;
             if (_client == nullptr) { return; }
-            _thread = std::thread([this]() { (void)KiottyNet_runEventClient(_client, &HANDLER, &app); });
+            _thread = std::thread([this]() { (void)KiottyNet_runEventClient(_client, &_address, nullptr, &HANDLER, &app); });
         }
 
         ~BenchEventClient()
@@ -611,6 +637,7 @@ namespace
     private:
         KiottyNetContext           _context;
         KiottyNetEventClientHandle _client;
+        KiottyNetAddress           _address;
         std::thread                _thread;
     };
 
@@ -622,9 +649,13 @@ namespace
             , _client(nullptr)
         {
             bool sized = false;
-            const KiottyNetClientConfiguration configuration = clientConfiguration(port, receive_capacity, sized);
+            const KiottyNetClientConfiguration configuration = clientConfiguration(receive_capacity, sized);
             if (!sized) { return; }
-            _client = KiottyNet_createStreamClient(_context, &configuration, nullptr).handle;
+            _client = KiottyNet_createStreamClient(_context, &configuration).handle;
+            if (_client == nullptr) { return; }
+            if (connectStreamClient(_client, port, false) == KIOTTY_NET_CODE_SUCCESS) { return; }
+            KiottyNet_destroyStreamClient(_context, _client);
+            _client = nullptr;
         }
 
         ~BenchStreamClient()
@@ -706,8 +737,8 @@ static void StreamClientReadHeavy(benchmark::State& state)
     if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
     const size_t capacity = static_cast<size_t>(state.range(0));
     BenchStreamClient client(context.handle, port, capacity);
-    if (client.get() == nullptr) { state.SkipWithError("receive capacity above the compile time maximum"); return; }
-    if (KiottyNet_connectStreamClient(client.get()) != KIOTTY_NET_CODE_SUCCESS || !peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
+    if (client.get() == nullptr) { state.SkipWithError("receive capacity above the compile time maximum or connect failed"); return; }
+    if (!peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
     std::vector<char> payload(HEAVY_BYTES, 'r');
     std::vector<char> buffer(capacity);
     for (auto _ : state)
@@ -734,7 +765,7 @@ static void StreamClientWriteHeavy(benchmark::State& state)
     const uint16_t port = kiotty_test::unusedPort();
     if (!peer.listenTcp(port)) { state.SkipWithError("listen failed"); return; }
     BenchStreamClient client(context.handle, port, CHUNK_BYTES);
-    if (client.get() == nullptr || KiottyNet_connectStreamClient(client.get()) != KIOTTY_NET_CODE_SUCCESS || !peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
+    if (client.get() == nullptr || !peer.accept(WAIT_MS)) { state.SkipWithError("connect failed"); return; }
     std::vector<char> payload(HEAVY_BYTES, 'w');
     const KiottyNetSpan data = { payload.data(), payload.size() };
     for (auto _ : state)

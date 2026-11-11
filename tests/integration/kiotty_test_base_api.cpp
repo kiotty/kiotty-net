@@ -171,13 +171,21 @@ namespace
 
     const KiottyNetConnectionHandler HANDLER = { &onConnected, &onReady, &onRead, &onWritten, &onTimeout, &onWorkStarted, &onDisconnected, &onError };
 
+    KiottyNetAddress loopbackAddress(uint16_t port)
+    {
+        KiottyNetAddress address;
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
+        return address;
+    }
+
     class RunningServer
     {
     public:
-        RunningServer(KiottyNetServerHandle server, App& app)
+        RunningServer(KiottyNetServerHandle server, uint16_t port, App& app)
             : _server(server)
+            , _address(loopbackAddress(port))
             , _code(KIOTTY_NET_CODE_SUCCESS)
-            , _thread([this, &app]() { _code.store(KiottyNet_runServer(_server, &HANDLER, &app)); })
+            , _thread([this, &app]() { _code.store(KiottyNet_runServer(_server, &_address, nullptr, &HANDLER, &app)); })
         {
         }
 
@@ -201,6 +209,7 @@ namespace
 
     private:
         KiottyNetServerHandle      _server;
+        KiottyNetAddress           _address;
         std::atomic<KiottyNetCode> _code;
         std::thread                _thread;
     };
@@ -225,21 +234,21 @@ namespace
             KiottyNet_releaseContext(context);
         }
 
-        KiottyNetServerHandle createServer(uint16_t port, uint32_t send_timeout_milliseconds = 0)
+        KiottyNetServerHandle createServer(uint32_t send_timeout_milliseconds = 0)
         {
             KiottyNetServerConfiguration configuration;
-            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, LOOPBACK_HOST, port));
+            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&configuration));
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&configuration, 4));
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerSendTimeout(&configuration, send_timeout_milliseconds));
-            KiottyNetServerResult created = KiottyNet_createServer(context, &configuration, nullptr);
+            KiottyNetServerResult created = KiottyNet_createServer(context, &configuration);
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             return created.handle;
         }
 
-        KiottyNetClientConfiguration clientConfiguration(uint16_t port)
+        KiottyNetClientConfiguration clientConfiguration()
         {
             KiottyNetClientConfiguration configuration;
-            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&configuration, LOOPBACK_HOST, port));
+            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeClientConfiguration(&configuration));
             return configuration;
         }
 
@@ -258,29 +267,32 @@ TEST_F(BaseApiTest, NullArgumentsAreRejectedWithoutTouchingAnything)
 {
     const KiottyNetCode invalid = KIOTTY_NET_CODE_INVALID_ARGUMENT;
     KiottyNetServerConfiguration server_configuration;
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&server_configuration, LOOPBACK_HOST, kiotty_test::unusedPort()));
-    KiottyNetClientConfiguration client_configuration = clientConfiguration(9);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&server_configuration));
+    KiottyNetClientConfiguration client_configuration = clientConfiguration();
+    const KiottyNetAddress address = loopbackAddress(kiotty_test::unusedPort());
 
-    EXPECT_EQ(invalid, KiottyNet_initializeTcpServerConfiguration(nullptr, LOOPBACK_HOST, 0));
+    EXPECT_EQ(invalid, KiottyNet_initializeServerConfiguration(nullptr));
     EXPECT_EQ(invalid, KiottyNet_configureServerMaxClients(nullptr, 1));
-    EXPECT_EQ(invalid, KiottyNet_initializeTcpClientConfiguration(nullptr, LOOPBACK_HOST, 0));
+    EXPECT_EQ(invalid, KiottyNet_initializeClientConfiguration(nullptr));
+    EXPECT_EQ(invalid, KiottyNet_initializeTcpAddress(nullptr, LOOPBACK_HOST, 1));
+    EXPECT_EQ(invalid, KiottyNet_initializePipeAddress(nullptr, "pipe"));
     EXPECT_EQ(invalid, KiottyNet_initializeTlsServerConfiguration(nullptr, "a", "b", nullptr));
     EXPECT_EQ(invalid, KiottyNet_initializeTlsClientConfiguration(nullptr));
 
-    EXPECT_EQ(invalid, KiottyNet_createServer(nullptr, &server_configuration, nullptr).code);
-    EXPECT_EQ(invalid, KiottyNet_createServer(context, nullptr, nullptr).code);
-    EXPECT_EQ(invalid, KiottyNet_createEventClient(nullptr, &client_configuration, nullptr).code);
-    EXPECT_EQ(invalid, KiottyNet_createStreamClient(context, nullptr, nullptr).code);
-    EXPECT_EQ(nullptr, KiottyNet_createServer(context, nullptr, nullptr).handle);
+    EXPECT_EQ(invalid, KiottyNet_createServer(nullptr, &server_configuration).code);
+    EXPECT_EQ(invalid, KiottyNet_createServer(context, nullptr).code);
+    EXPECT_EQ(invalid, KiottyNet_createEventClient(nullptr, &client_configuration).code);
+    EXPECT_EQ(invalid, KiottyNet_createStreamClient(context, nullptr).code);
+    EXPECT_EQ(nullptr, KiottyNet_createServer(context, nullptr).handle);
 
-    EXPECT_EQ(invalid, KiottyNet_runServer(nullptr, &HANDLER, nullptr));
+    EXPECT_EQ(invalid, KiottyNet_runServer(nullptr, &address, nullptr, &HANDLER, nullptr));
     EXPECT_EQ(invalid, KiottyNet_awaitServer(nullptr, 0));
     EXPECT_EQ(invalid, KiottyNet_broadcastServer(nullptr, spanOf("x")));
-    EXPECT_EQ(invalid, KiottyNet_runEventClient(nullptr, &HANDLER, nullptr));
+    EXPECT_EQ(invalid, KiottyNet_runEventClient(nullptr, &address, nullptr, &HANDLER, nullptr));
     EXPECT_EQ(invalid, KiottyNet_awaitEventClient(nullptr, 0));
     EXPECT_EQ(invalid, KiottyNet_notifyEventClient(nullptr, spanOf("x")));
     EXPECT_EQ(nullptr, KiottyNet_getEventClientConnection(nullptr).owner);
-    EXPECT_EQ(invalid, KiottyNet_connectStreamClient(nullptr));
+    EXPECT_EQ(invalid, KiottyNet_connectStreamClient(nullptr, &address, nullptr));
     EXPECT_EQ(invalid, KiottyNet_readStreamClient(nullptr, nullptr, 0, 0).code);
     EXPECT_EQ(invalid, KiottyNet_writeStreamClient(nullptr, spanOf("x"), 0).code);
 
@@ -324,9 +336,11 @@ namespace
 
 TEST_F(BaseApiTest, RunWithoutAHandlerAndDestroyWithoutAContextAreRejected)
 {
-    KiottyNetServerHandle server = createServer(kiotty_test::unusedPort());
+    KiottyNetServerHandle server = createServer();
     ASSERT_NE(nullptr, server);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runServer(server, nullptr, nullptr));
+    const KiottyNetAddress address = loopbackAddress(kiotty_test::unusedPort());
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runServer(server, &address, nullptr, nullptr, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runServer(server, nullptr, nullptr, &HANDLER, nullptr));
     KiottyNet_destroyServer(nullptr, server);
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitServer(server, 1));
     KiottyNet_destroyServer(context, server);
@@ -335,10 +349,10 @@ TEST_F(BaseApiTest, RunWithoutAHandlerAndDestroyWithoutAContextAreRejected)
 TEST_F(BaseApiTest, NotifyAnswersEveryKindOfHandle)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServerHandle server = createServer(port);
+    KiottyNetServerHandle server = createServer();
     ASSERT_NE(nullptr, server);
     App app(Role::ECHO);
-    RunningServer running(server, app);
+    RunningServer running(server, port, app);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
 
     KiottyNetConnectionHandle first = { nullptr, 0 };
@@ -378,21 +392,22 @@ TEST_F(BaseApiTest, NotifyAnswersEveryKindOfHandle)
 TEST_F(BaseApiTest, ServerAndEventClientRoundTripThroughTheCApi)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServerHandle server = createServer(port);
+    KiottyNetServerHandle server = createServer();
     ASSERT_NE(nullptr, server);
     App server_app(Role::ECHO);
-    RunningServer running(server, server_app);
+    RunningServer running(server, port, server_app);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
 
-    KiottyNetClientConfiguration configuration = clientConfiguration(port);
-    KiottyNetEventClientResult created = KiottyNet_createEventClient(context, &configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    KiottyNetEventClientResult created = KiottyNet_createEventClient(context, &configuration);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
     KiottyNetEventClientHandle client = created.handle;
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitEventClient(client, 1));
 
     App client_app(Role::PING);
     std::atomic<KiottyNetCode> client_code(KIOTTY_NET_CODE_SUCCESS);
-    std::thread io([&]() { client_code.store(KiottyNet_runEventClient(client, &HANDLER, &client_app)); });
+    const KiottyNetAddress address = loopbackAddress(port);
+    std::thread io([&]() { client_code.store(KiottyNet_runEventClient(client, &address, nullptr, &HANDLER, &client_app)); });
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitEventClient(client, WAIT_MS));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return client_app.read.load() > 0; }, WAIT_MS));
     EXPECT_EQ("ping", client_app.received);
@@ -413,10 +428,10 @@ TEST_F(BaseApiTest, ServerAndEventClientRoundTripThroughTheCApi)
 TEST_F(BaseApiTest, APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheSendTimeout)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServerHandle server = createServer(port, SEND_TIMEOUT_MS);
+    KiottyNetServerHandle server = createServer(SEND_TIMEOUT_MS);
     ASSERT_NE(nullptr, server);
     App server_app(Role::FLOOD);
-    RunningServer running(server, server_app);
+    RunningServer running(server, port, server_app);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
     kiotty_test::LoopbackPeer peer;
     ASSERT_TRUE(peer.connectTcp(port));
@@ -429,17 +444,18 @@ TEST_F(BaseApiTest, APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheS
 TEST_F(BaseApiTest, StreamClientTalksToAWorkerAndTheIoThreadGetsBusy)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServerHandle server = createServer(port);
+    KiottyNetServerHandle server = createServer();
     ASSERT_NE(nullptr, server);
     App app(Role::WORK);
-    RunningServer running(server, app);
+    RunningServer running(server, port, app);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
 
-    KiottyNetClientConfiguration configuration = clientConfiguration(port);
-    KiottyNetStreamClientResult created = KiottyNet_createStreamClient(context, &configuration, nullptr);
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    KiottyNetStreamClientResult created = KiottyNet_createStreamClient(context, &configuration);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
     KiottyNetStreamClientHandle client = created.handle;
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_connectStreamClient(client));
+    const KiottyNetAddress address = loopbackAddress(port);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_connectStreamClient(client, &address, nullptr));
     ASSERT_TRUE(kiotty_test::waitUntil([&]() { return app.work_started.load() == 1; }, WAIT_MS));
     EXPECT_EQ(KIOTTY_NET_CODE_BUSY, app.busy_code.load());
 
@@ -470,7 +486,7 @@ TEST_F(BaseApiTest, StreamClientTalksToAWorkerAndTheIoThreadGetsBusy)
 TEST_F(BaseApiTest, MemorySizesCoverTheObjects)
 {
     KiottyNetServerConfiguration small;
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&small, LOOPBACK_HOST, 1));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&small));
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&small, 1));
     KiottyNetServerConfiguration large = small;
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&large, 1024));
@@ -483,7 +499,7 @@ TEST_F(BaseApiTest, MemorySizesCoverTheObjects)
     KiottyNetServerConfiguration uninitialized = {};
     EXPECT_EQ(0u, KiottyNet_serverMemorySize(&uninitialized));
     KiottyNetClientConfiguration client;
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&client, LOOPBACK_HOST, 1));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeClientConfiguration(&client));
     EXPECT_GT(KiottyNet_clientMemorySize(&client), client.receive_capacity + client.send_capacity);
     EXPECT_EQ(0u, KiottyNet_clientMemorySize(nullptr));
 }

@@ -15,19 +15,17 @@ namespace net = kiotty::net::implementation;
 
 namespace
 {
-    const uint16_t CLOSED_PORT = 9;
-
     KiottyNetServerConfiguration serverConfiguration()
     {
         KiottyNetServerConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpServerConfiguration(&configuration, "127.0.0.1", kiotty_test::unusedPort()));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&configuration));
         return configuration;
     }
 
     KiottyNetClientConfiguration clientConfiguration()
     {
         KiottyNetClientConfiguration configuration{};
-        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpClientConfiguration(&configuration, "127.0.0.1", CLOSED_PORT));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeClientConfiguration(&configuration));
         return configuration;
     }
 
@@ -66,9 +64,9 @@ namespace
         }
         KiottyNetServerConfiguration server = serverConfiguration();
         KiottyNetClientConfiguration client = clientConfiguration();
-        net::ServerResult created_server = opened.value().createServer(server, nullptr);
-        net::EventClientResult created_event = opened.value().createEventClient(client, nullptr);
-        net::StreamClientResult created_stream = opened.value().createStreamClient(client, nullptr);
+        net::ServerResult created_server = opened.value().createServer(server);
+        net::EventClientResult created_event = opened.value().createEventClient(client);
+        net::StreamClientResult created_stream = opened.value().createStreamClient(client);
         if (!created_server || !created_event || !created_stream)
         {
             std::exit(2);
@@ -91,12 +89,12 @@ TEST_F(ContextTest, ReleaseOnceEndsBoth)
     ASSERT_TRUE(again);
     context->release();
     KiottyNetServerConfiguration server = serverConfiguration();
-    net::ServerResult refused = again.value().createServer(server, nullptr);
+    net::ServerResult refused = again.value().createServer(server);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, refused.code);
     net::ContextResult reopened = net::Context::open();
     ASSERT_TRUE(reopened);
     EXPECT_EQ(context, &reopened.value());
-    net::ServerResult created = reopened.value().createServer(server, nullptr);
+    net::ServerResult created = reopened.value().createServer(server);
     ASSERT_TRUE(created);
     reopened.value().destroy(created.value());
 }
@@ -106,27 +104,27 @@ TEST_F(ContextTest, RetiredEndpointIsReusedByTheNextCreateOfTheSameType)
     KiottyNetServerConfiguration server = serverConfiguration();
     KiottyNetClientConfiguration client = clientConfiguration();
 
-    net::ServerResult first_server = context->createServer(server, nullptr);
+    net::ServerResult first_server = context->createServer(server);
     ASSERT_TRUE(first_server);
     KiottyNetServer* first_server_address = &first_server.value();
     context->destroy(first_server.value());
-    net::ServerResult second_server = context->createServer(server, nullptr);
+    net::ServerResult second_server = context->createServer(server);
     ASSERT_TRUE(second_server);
     EXPECT_EQ(first_server_address, &second_server.value());
 
-    net::EventClientResult first_event = context->createEventClient(client, nullptr);
+    net::EventClientResult first_event = context->createEventClient(client);
     ASSERT_TRUE(first_event);
     KiottyNetEventClient* first_event_address = &first_event.value();
     context->destroy(first_event.value());
-    net::EventClientResult second_event = context->createEventClient(client, nullptr);
+    net::EventClientResult second_event = context->createEventClient(client);
     ASSERT_TRUE(second_event);
     EXPECT_EQ(first_event_address, &second_event.value());
 
-    net::StreamClientResult first_stream = context->createStreamClient(client, nullptr);
+    net::StreamClientResult first_stream = context->createStreamClient(client);
     ASSERT_TRUE(first_stream);
     KiottyNetStreamClient* first_stream_address = &first_stream.value();
     context->destroy(first_stream.value());
-    net::StreamClientResult second_stream = context->createStreamClient(client, nullptr);
+    net::StreamClientResult second_stream = context->createStreamClient(client);
     ASSERT_TRUE(second_stream);
     EXPECT_EQ(first_stream_address, &second_stream.value());
 }
@@ -139,12 +137,12 @@ TEST_F(ContextTest, CreateServerHasNoCountLimitAndReusesARetiredServer)
     std::vector<KiottyNetServer*> servers;
     for (size_t i = 0; i < servers_beyond_the_old_limit; ++i)
     {
-        net::ServerResult created = context->createServer(server, nullptr);
+        net::ServerResult created = context->createServer(server);
         ASSERT_TRUE(created);
         servers.push_back(&created.value());
     }
     context->destroy(*servers[3]);
-    net::ServerResult reused = context->createServer(server, nullptr);
+    net::ServerResult reused = context->createServer(server);
     ASSERT_TRUE(reused);
     EXPECT_EQ(servers[3], &reused.value());
 }
@@ -153,14 +151,14 @@ TEST_F(ContextTest, AServerReusedWithMoreClientsThanBeforeAcceptsTheNewCount)
 {
     KiottyNetServerConfiguration small = serverConfiguration();
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(small, 2));
-    net::ServerResult first = context->createServer(small, nullptr);
+    net::ServerResult first = context->createServer(small);
     ASSERT_TRUE(first);
     KiottyNetServer* address = &first.value();
     context->destroy(first.value());
 
     KiottyNetServerConfiguration large = serverConfiguration();
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerMaxClients(large, 64));
-    net::ServerResult second = context->createServer(large, nullptr);
+    net::ServerResult second = context->createServer(large);
     ASSERT_TRUE(second);
     EXPECT_EQ(address, &second.value());
 }
@@ -169,17 +167,9 @@ TEST_F(ContextTest, CreateRejectsConfigurationsThatWereNotInitialized)
 {
     KiottyNetServerConfiguration server{};
     KiottyNetClientConfiguration client{};
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createServer(server, nullptr).code);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createEventClient(client, nullptr).code);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createStreamClient(client, nullptr).code);
-
-    KiottyNetServerConfiguration valid_server = serverConfiguration();
-    KiottyNetClientConfiguration valid_client = clientConfiguration();
-    KiottyNetTlsServerConfiguration server_tls{};
-    KiottyNetTlsClientConfiguration client_tls{};
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createServer(valid_server, &server_tls).code);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createEventClient(valid_client, &client_tls).code);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createStreamClient(valid_client, &client_tls).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createServer(server).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createEventClient(client).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, context->createStreamClient(client).code);
 }
 
 TEST(ContextDeathTest, ProcessExitWithoutReleaseContextDoesNotCrash)

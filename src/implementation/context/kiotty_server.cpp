@@ -2,6 +2,7 @@
 
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_tls_configuration.h"
+#include "data/datasource/kiotty_memory_limits.h"
 #include "domain/entity/kiotty_handler.h"
 #include "domain/entity/kiotty_socket_code.h"
 #include "domain/usecases/io_loop/kiotty_loop_parts.h"
@@ -13,8 +14,7 @@ namespace kiotty::net::implementation
     {
         ConnectionLimits limitsOf(const KiottyNetServerConfiguration& configuration);
         size_t           listenerCapacityOf(size_t max_clients);
-        TlsCapacity      cipherOf(ConnectionLimits limits,
-                                  const KiottyNetTlsServerConfiguration* tls);
+        TlsCapacity      cipherOf(ConnectionLimits limits);
     }
 
     Server::Server()
@@ -33,19 +33,16 @@ namespace kiotty::net::implementation
 
     Server::~Server() = default;
 
-    KiottyNetCode Server::initialize(PoolHandle id, ServerConfiguration configuration)
+    KiottyNetCode Server::initialize(PoolHandle id, const KiottyNetServerConfiguration& server)
     {
         (void)id;
-        const KiottyNetServerConfiguration& server = configuration.server;
         if (!isInitialized(server)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetCode secured = openProfile(configuration.tls);
-        if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
         const bool is_sized = _connections.resize(server.max_clients);
         if (!is_sized) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const SocketCode opened = _listener.open(listenerCapacityOf(server.max_clients));
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(server);
-        _host.initialize(limits, server.max_clients, cipherOf(limits, configuration.tls));
+        _host.initialize(limits, server.max_clients, cipherOf(limits));
         _configuration = server;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
@@ -62,15 +59,21 @@ namespace kiotty::net::implementation
         _is_abandoned.store(false);
     }
 
-    KiottyNetCode Server::run(const Handler& handler)
+    KiottyNetCode Server::run(const Handler& handler,
+                              const KiottyNetAddress& address,
+                              const KiottyNetTlsServerConfiguration* tls)
     {
         const KiottyNetCode checked = handler.validate();
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
+        if (!isAddressValid(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (tls != nullptr && !isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const bool entered = _gate.enter();
         if (!entered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _loop.reset();
+        const KiottyNetCode secured = openProfile(tls);
+        if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
         const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
-        const KiottyNetCode opened = listen();
+        const KiottyNetCode opened = listen(address);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return leave(opened); }
         _gate.start();
         (void)_loop.run(parts, StopPolicy::WHEN_STOPPED);
@@ -145,15 +148,15 @@ namespace kiotty::net::implementation
 
     KiottyNetCode Server::openProfile(const KiottyNetTlsServerConfiguration* tls)
     {
+        _profile.close();
         if (tls == nullptr) { return KIOTTY_NET_CODE_SUCCESS; }
-        if (!isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         return _profile.openServer(*tls);
     }
 
-    KiottyNetCode Server::listen()
+    KiottyNetCode Server::listen(const KiottyNetAddress& address)
     {
         const NoDelay no_delay = noDelayOf(_configuration.no_delay);
-        const SocketCode opened = _acceptor.open(_configuration.address, LISTEN_BACKLOG, no_delay);
+        const SocketCode opened = _acceptor.open(address, LISTEN_BACKLOG, no_delay);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const SocketCode attached = _acceptor.attach(_listener);
         if (attached == SocketCode::SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
@@ -187,9 +190,9 @@ namespace kiotty::net::implementation
             return 2 * max_clients + 2;
         }
 
-        TlsCapacity cipherOf(ConnectionLimits limits, const KiottyNetTlsServerConfiguration* tls)
+        TlsCapacity cipherOf(ConnectionLimits limits)
         {
-            if (tls == nullptr) { return TlsCapacity{ 0, 0 }; }
+            if (!MemoryLimits::TLS) { return TlsCapacity{ 0, 0 }; }
             return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         }
     }

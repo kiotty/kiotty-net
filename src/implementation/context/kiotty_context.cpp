@@ -59,8 +59,7 @@ namespace kiotty::net::implementation
         finishRelease();
     }
 
-    ServerResult Context::createServer(const KiottyNetServerConfiguration& configuration,
-                                       const KiottyNetTlsServerConfiguration* tls)
+    ServerResult Context::createServer(const KiottyNetServerConfiguration& configuration)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         if (_phase != ContextPhase::OPEN)
@@ -68,23 +67,21 @@ namespace kiotty::net::implementation
             return ServerResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         sweep(_servers);
-        return _servers.acquire(ServerConfiguration{ configuration, tls });
+        return _servers.acquire(configuration);
     }
 
     StreamClientResult Context::createStreamClient(
-        const KiottyNetClientConfiguration& configuration,
-        const KiottyNetTlsClientConfiguration* tls)
+        const KiottyNetClientConfiguration& configuration)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         if (_phase != ContextPhase::OPEN)
         {
             return StreamClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
-        return _stream_clients.acquire(ClientConfiguration{ configuration, tls });
+        return _stream_clients.acquire(configuration);
     }
 
-    EventClientResult Context::createEventClient(const KiottyNetClientConfiguration& configuration,
-                                                 const KiottyNetTlsClientConfiguration* tls)
+    EventClientResult Context::createEventClient(const KiottyNetClientConfiguration& configuration)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         if (_phase != ContextPhase::OPEN)
@@ -92,7 +89,7 @@ namespace kiotty::net::implementation
             return EventClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
         }
         sweep(_event_clients);
-        return _event_clients.acquire(ClientConfiguration{ configuration, tls });
+        return _event_clients.acquire(configuration);
     }
 
     void Context::destroy(KiottyNetServer& server)

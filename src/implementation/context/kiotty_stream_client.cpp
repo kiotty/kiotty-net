@@ -26,20 +26,15 @@ namespace kiotty::net::implementation
 
     StreamClient::~StreamClient() = default;
 
-    KiottyNetCode StreamClient::initialize(PoolHandle id, ClientConfiguration configuration)
+    KiottyNetCode StreamClient::initialize(PoolHandle id,
+                                           const KiottyNetClientConfiguration& client)
     {
         (void)id;
-        const KiottyNetClientConfiguration& client = configuration.client;
         if (!isInitialized(client)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetCode secured = openProfile(configuration.tls);
-        if (secured != KIOTTY_NET_CODE_SUCCESS) { return secured; }
         _receive.reserve(client.receive_capacity);
         _send.reserve(client.send_capacity);
-        if (configuration.tls != nullptr)
-        {
-            const TlsCapacity cipher{ client.receive_capacity, client.send_capacity };
-            reserveTlsStages(_tls.stages(), cipher);
-        }
+        const TlsCapacity cipher{ client.receive_capacity, client.send_capacity };
+        reserveTlsStages(_tls.stages(), cipher);
         _receive.limit(client.receive_capacity);
         _send.limit(client.send_capacity);
         _configuration = client;
@@ -54,13 +49,18 @@ namespace kiotty::net::implementation
         _profile.close();
     }
 
-    KiottyNetCode StreamClient::connect()
+    KiottyNetCode StreamClient::connect(const KiottyNetAddress& address,
+                                        const KiottyNetTlsClientConfiguration* tls)
     {
         disconnect();
-        ConnectedResult connected = connectWithRetry(_configuration, _is_stopping);
+        if (!isAddressValid(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (tls != nullptr && !isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const KiottyNetCode profiled = openProfile(tls);
+        if (profiled != KIOTTY_NET_CODE_SUCCESS) { return profiled; }
+        ConnectedResult connected = connectWithRetry(_configuration, address, _is_stopping);
         if (!connected) { return connected.code; }
         _socket = std::move(connected.value);
-        const KiottyNetCode secured = secure();
+        const KiottyNetCode secured = secure(address);
         if (secured == KIOTTY_NET_CODE_SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
         disconnect();
         return secured;
@@ -146,17 +146,17 @@ namespace kiotty::net::implementation
 
     KiottyNetCode StreamClient::openProfile(const KiottyNetTlsClientConfiguration* tls)
     {
+        _profile.close();
         if (tls == nullptr) { return KIOTTY_NET_CODE_SUCCESS; }
-        if (!isInitialized(*tls)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         return _profile.openClient(*tls);
     }
 
-    KiottyNetCode StreamClient::secure()
+    KiottyNetCode StreamClient::secure(const KiottyNetAddress& address)
     {
         if (!_profile.valid()) { return KIOTTY_NET_CODE_SUCCESS; }
         const TlsCapacity capacity{ _configuration.receive_capacity,
                                     _configuration.send_capacity };
-        const KiottyNetCode opened = _tls.open(_profile, hostnameOf(_configuration), capacity);
+        const KiottyNetCode opened = _tls.open(_profile, hostnameOf(address), capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
         return stream().handshake(_configuration.connect_timeout_milliseconds);
     }

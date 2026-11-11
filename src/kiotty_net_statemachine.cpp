@@ -14,17 +14,29 @@ KiottyNetTransition KiottyNet_moveToNextState(int32_t next, KiottyNetConnectionA
 }
 
 KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server,
+                                          const KiottyNetAddress* address,
+                                          const KiottyNetTlsServerConfiguration* tls,
                                           const KiottyNetStatefulAppContext* app_context)
 {
-    if (server == nullptr || app_context == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    if (server == nullptr || address == nullptr || app_context == nullptr)
+    {
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    }
+    const KiottyNetAddress copied = *address;
     const net::StatefulHandler handler(*app_context, *server);
-    return server->run(handler);
+    return server->run(handler, copied, tls);
 }
 
 KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client,
+                                               const KiottyNetAddress* address,
+                                               const KiottyNetTlsClientConfiguration* tls,
                                                const KiottyNetStatefulAppContext* app_context)
 {
-    if (client == nullptr || app_context == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    if (client == nullptr || address == nullptr || app_context == nullptr)
+    {
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    }
+    const KiottyNetAddress copied = *address;
     const net::StatefulHandler handler(*app_context, *client);
-    return client->run(handler);
+    return client->run(handler, copied, tls);
 }

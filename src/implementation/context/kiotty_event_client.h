@@ -1,6 +1,5 @@
 #pragma once
 
-#include "context/kiotty_client_configuration.h"
 #include "context/kiotty_connection_access.h"
 #include "context/kiotty_endpoint.h"
 #include "context/kiotty_run_gate.h"
@@ -26,7 +25,7 @@ namespace kiotty::net::implementation
     {
     public:
         using code_type = KiottyNetCode;
-        using configuration_type = ClientConfiguration;
+        using configuration_type = KiottyNetClientConfiguration;
 
         static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
         static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -40,9 +39,12 @@ namespace kiotty::net::implementation
         EventClient(EventClient&&) = delete;
         EventClient& operator=(EventClient&&) = delete;
 
-        KiottyNetCode             initialize(PoolHandle id, ClientConfiguration configuration);
+        KiottyNetCode             initialize(PoolHandle id,
+                                             const KiottyNetClientConfiguration& configuration);
         void                      reset() noexcept;
-        KiottyNetCode             run(const Handler& handler);
+        KiottyNetCode             run(const Handler& handler,
+                                      const KiottyNetAddress& address,
+                                      const KiottyNetTlsClientConfiguration* tls);
         void                      close();
         KiottyNetCode             await(uint64_t timeout_milliseconds);
         KiottyNetConnectionHandle connection();

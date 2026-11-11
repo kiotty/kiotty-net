@@ -20,13 +20,20 @@ namespace
 {
     typedef kiotty::net::implementation::Result<ActiveSocket, KiottyNetCode> Connected;
 
-    KiottyNetClientConfiguration configOf(KiottyNetTransport transport, const std::string& host, uint16_t port, uint32_t max_trial, uint32_t interval_milliseconds)
+    KiottyNetAddress addressOf(KiottyNetTransport transport, const std::string& host, uint16_t port)
+    {
+        KiottyNetAddress address;
+        std::memset(&address, 0, sizeof(address));
+        address.transport = transport;
+        kiotty_test::copyHost(address.host, sizeof(address.host), host);
+        address.port = port;
+        return address;
+    }
+
+    KiottyNetClientConfiguration configOf(uint32_t max_trial, uint32_t interval_milliseconds)
     {
         KiottyNetClientConfiguration configuration;
         std::memset(&configuration, 0, sizeof(configuration));
-        configuration.address.transport = transport;
-        kiotty_test::copyHost(configuration.address.host, sizeof(configuration.address.host), host);
-        configuration.address.port = port;
         configuration.connect_timeout_milliseconds = 5000;
         configuration.max_trial = max_trial;
         configuration.trial_interval_milliseconds = interval_milliseconds;
@@ -39,9 +46,10 @@ TEST(ConnectWithRetry, SucceedsOnFirstTrialWhenServerIsUp)
 {
     LoopbackPeer peer;
     ASSERT_TRUE(peer.listenTcp(0));
-    KiottyNetClientConfiguration configuration = configOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", peer.port(), 1, 0);
+    KiottyNetAddress address = addressOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", peer.port());
+    KiottyNetClientConfiguration configuration = configOf(1, 0);
     std::atomic<bool> stop(false);
-    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, stop);
+    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, address, stop);
     ASSERT_TRUE(connected);
     EXPECT_TRUE(connected.value.valid());
     EXPECT_TRUE(kiotty_test::noDelayOf(connected.value.handle()));
@@ -50,10 +58,11 @@ TEST(ConnectWithRetry, SucceedsOnFirstTrialWhenServerIsUp)
 TEST(ConnectWithRetry, RetriesUpToMaxTrialWithIntervalThenReturnsLastCode)
 {
     std::string path = kiotty_test::uniqueSocketPath();
-    KiottyNetClientConfiguration configuration = configOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0, 3, 50);
+    KiottyNetAddress address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0);
+    KiottyNetClientConfiguration configuration = configOf(3, 50);
     std::atomic<bool> stop(false);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, stop);
+    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, address, stop);
     uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
     EXPECT_EQ(connected.code, KIOTTY_NET_CODE_SOCKET_ERROR);
     EXPECT_GE(elapsed, 100u);
@@ -62,14 +71,15 @@ TEST(ConnectWithRetry, RetriesUpToMaxTrialWithIntervalThenReturnsLastCode)
 TEST(ConnectWithRetry, SucceedsOnLaterTrialWhenServerStartsDuringInterval)
 {
     uint16_t port = kiotty_test::unusedPort();
-    KiottyNetClientConfiguration configuration = configOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", port, 10, 200);
+    KiottyNetAddress address = addressOf(KIOTTY_NET_TRANSPORT_TCP, "127.0.0.1", port);
+    KiottyNetClientConfiguration configuration = configOf(10, 200);
     LoopbackPeer peer;
     std::thread server([&]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         peer.listenTcp(port);
     });
     std::atomic<bool> stop(false);
-    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, stop);
+    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, address, stop);
     server.join();
     ASSERT_TRUE(connected);
     EXPECT_TRUE(connected.value.valid());
@@ -78,7 +88,8 @@ TEST(ConnectWithRetry, SucceedsOnLaterTrialWhenServerStartsDuringInterval)
 TEST(ConnectWithRetry, StopFlagDuringIntervalAbortsWithClosedWithinOneInterval)
 {
     std::string path = kiotty_test::uniqueSocketPath();
-    KiottyNetClientConfiguration configuration = configOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0, 3, 1000);
+    KiottyNetAddress address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0);
+    KiottyNetClientConfiguration configuration = configOf(3, 1000);
     std::atomic<bool> stop(false);
     std::chrono::steady_clock::time_point stopped_at;
     std::thread stopper([&]() {
@@ -86,7 +97,7 @@ TEST(ConnectWithRetry, StopFlagDuringIntervalAbortsWithClosedWithinOneInterval)
         stopped_at = std::chrono::steady_clock::now();
         stop.store(true);
     });
-    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, stop);
+    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, address, stop);
     std::chrono::steady_clock::time_point returned_at = std::chrono::steady_clock::now();
     stopper.join();
     std::chrono::steady_clock::duration after_stop = returned_at - stopped_at;
@@ -97,10 +108,11 @@ TEST(ConnectWithRetry, StopFlagDuringIntervalAbortsWithClosedWithinOneInterval)
 TEST(ConnectWithRetry, MaxTrialZeroIsTreatedAsOneTrial)
 {
     std::string path = kiotty_test::uniqueSocketPath();
-    KiottyNetClientConfiguration configuration = configOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0, 0, 1000);
+    KiottyNetAddress address = addressOf(KIOTTY_NET_TRANSPORT_PIPE, path, 0);
+    KiottyNetClientConfiguration configuration = configOf(0, 1000);
     std::atomic<bool> stop(false);
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, stop);
+    Connected connected = kiotty::net::implementation::connectWithRetry(configuration, address, stop);
     EXPECT_EQ(connected.code, KIOTTY_NET_CODE_SOCKET_ERROR);
     EXPECT_LT(kiotty_test::elapsedMilliseconds(started), 900u);
 }

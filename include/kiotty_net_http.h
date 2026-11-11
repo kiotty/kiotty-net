@@ -143,7 +143,6 @@ KIOTTY_NET_API KiottyNetHttpRoute KiottyNet_makeHttpRoute(
 KIOTTY_NET_API KiottyNetHttpServerHandle KiottyNet_createHttpServer(
     KiottyNetContext context,
     const KiottyNetServerConfiguration* configuration,
-    const KiottyNetTlsServerConfiguration* tls,
     const KiottyNetHttpLimits* limits);
 KIOTTY_NET_API void                      KiottyNet_destroyHttpServer(
     KiottyNetContext context,
@@ -169,7 +168,10 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_serveHttpMemory(
     const char* url_path,
     KiottyNetSpan data,
     const char* content_type);
-KIOTTY_NET_API KiottyNetCode             KiottyNet_runHttpServer(KiottyNetHttpServerHandle server);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_runHttpServer(
+    KiottyNetHttpServerHandle server,
+    const KiottyNetAddress* address,
+    const KiottyNetTlsServerConfiguration* tls);
 KIOTTY_NET_API void KiottyNet_closeHttpServer(
     KiottyNetHttpServerHandle server);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_awaitHttpServer(
@@ -337,11 +339,6 @@ public:
         KiottyNetContext context,
         const KiottyNetServerConfiguration& configuration,
         const KiottyNetHttpLimits& limits);
-    KiottyNet_HttpServer(
-        KiottyNetContext context,
-        const KiottyNetServerConfiguration& configuration,
-        const KiottyNetTlsServerConfiguration& tls,
-        const KiottyNetHttpLimits& limits);
 
     explicit operator bool() const;
     KiottyNetHttpServerHandle handle() const;
@@ -387,7 +384,8 @@ public:
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
     KiottyNetCode serveMemory(const char* url_path, KiottyNetSpan data, const char* content_type);
 
-    KiottyNetCode run();
+    KiottyNetCode run(const KiottyNetAddress& address);
+    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
 
@@ -549,16 +547,7 @@ inline KiottyNet_HttpServer::KiottyNet_HttpServer(
     KiottyNetContext context,
     const KiottyNetServerConfiguration& configuration,
     const KiottyNetHttpLimits& limits)
-    : _handle(context, KiottyNet_createHttpServer(context, &configuration, nullptr, &limits))
-{
-}
-
-inline KiottyNet_HttpServer::KiottyNet_HttpServer(
-    KiottyNetContext context,
-    const KiottyNetServerConfiguration& configuration,
-    const KiottyNetTlsServerConfiguration& tls,
-    const KiottyNetHttpLimits& limits)
-    : _handle(context, KiottyNet_createHttpServer(context, &configuration, &tls, &limits))
+    : _handle(context, KiottyNet_createHttpServer(context, &configuration, &limits))
 {
 }
 
@@ -705,9 +694,16 @@ inline KiottyNetCode KiottyNet_HttpServer::serveMemory(
     return KiottyNet_serveHttpMemory(_handle.get(), url_path, data, content_type);
 }
 
-inline KiottyNetCode KiottyNet_HttpServer::run()
+inline KiottyNetCode KiottyNet_HttpServer::run(const KiottyNetAddress& address)
 {
-    return KiottyNet_runHttpServer(_handle.get());
+    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr);
+}
+
+inline KiottyNetCode KiottyNet_HttpServer::run(
+    const KiottyNetAddress& address,
+    const KiottyNetTlsServerConfiguration& tls)
+{
+    return KiottyNet_runHttpServer(_handle.get(), &address, &tls);
 }
 
 inline void KiottyNet_HttpServer::close()

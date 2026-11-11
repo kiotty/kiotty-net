@@ -36,12 +36,9 @@ namespace kiotty::net::implementation
         Context& operator=(Context&&) = delete;
 
         void               release();
-        ServerResult       createServer(const KiottyNetServerConfiguration& configuration,
-                                        const KiottyNetTlsServerConfiguration* tls);
-        StreamClientResult createStreamClient(const KiottyNetClientConfiguration& configuration,
-                                              const KiottyNetTlsClientConfiguration* tls);
-        EventClientResult  createEventClient(const KiottyNetClientConfiguration& configuration,
-                                             const KiottyNetTlsClientConfiguration* tls);
+        ServerResult       createServer(const KiottyNetServerConfiguration& configuration);
+        StreamClientResult createStreamClient(const KiottyNetClientConfiguration& configuration);
+        EventClientResult  createEventClient(const KiottyNetClientConfiguration& configuration);
         void               destroy(KiottyNetServer& server);
         void               destroy(KiottyNetStreamClient& client);
         void               destroy(KiottyNetEventClient& client);
