@@ -57,7 +57,7 @@
 <body>
 
 <h1>kiotty_net_http.h 설계 v0</h1>
-<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 전부 반영: content type 목록 확장, 서버 handler, HEAD). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
+<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 전부 반영: content type 목록 확장, 서버 handler, HEAD. 같은 날 base 2.3: 주소와 TLS 를 create 가 아니라 run / connect 때). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
 
 <p>우선순위: 공개 헤더의 모양은 사용자가 정한 것을 따른다 (수칙 0.2, DV13). <code>requirement_v0.md</code> 9절, <code>user_guide_http.md</code> 와 다르면 이 문서가 새것이다 (9절이 차이). 이 문서의 코드 블록 안 주석은 설명용이고 소스에는 주석을 두지 않는다 (수칙 4.9).</p>
 
@@ -67,7 +67,7 @@
 <ol class="toc" start="0">
   <li><a href="#s0">한눈에</a></li>
   <li><a href="#s1">결정 기록 (2026-11-10)</a></li>
-  <li><a href="#s2">base 에 먼저 필요한 것 : 한 WRITE 에 두 Stage, 송신 timeout</a></li>
+  <li><a href="#s2">base 에 먼저 필요한 것 : 한 WRITE 에 두 Stage, 송신 timeout, 주소와 TLS 는 run / connect 때</a></li>
   <li><a href="#s3">응답의 두 모양</a></li>
   <li><a href="#s4">공개 API (C)</a></li>
   <li><a href="#s5">C++ wrapper</a></li>
@@ -85,7 +85,7 @@
   <li><b>HTTP 는 Session 하나와 표 하나다.</b> <code>design_statemachine_v0.md</code> 11절 그대로. 라이브러리의 표가 Connection 을 밟고 사용자 콜백은 transition action 안에서 불린다. 사용자는 표를 보지 않는다.</li>
   <li><b>오타가 날 자리를 이름으로 막는다.</b> status 는 <code>KiottyNetHttpStatus</code>, content type 은 <code>KiottyNetHttpContentType</code>. 목록 밖의 content type 은 <code>CUSTOM</code> 과 문자열 함수 하나로만 들어온다. content type 은 body 를 정할 때만 적는다.</li>
   <li><b>JSON 은 라이브러리 밖이다.</b> HTTP 층은 body 를 바이트로 다룬다. MCP 를 만드는 앱이 JSON 라이브러리를 가져다 쓴다. 라이브러리가 body 에 하는 검사는 텍스트 계열 content type 의 UTF-8 하나다.</li>
-  <li><b>메모리는 create 때 끝난다.</b> 라우트 표와 Session 배열 (<code>max_clients</code> 개) 을 <code>createHttpServer</code> 가 잡는다. run 중 할당 0 (수칙 1.1, DV1).</li>
+  <li><b>메모리는 create 때 끝난다.</b> 라우트 표와 Session 배열 (<code>max_clients</code> 개) 을 <code>createHttpServer</code> 가 잡는다. run 중 할당 0 (수칙 1.1, DV1). 주소와 TLS 는 run 이 받는다 (2.3). OpenSSL 의 SSL_CTX / SSL 은 OpenSSL 이 자기 할당자로 잡는다 (2026-11-05 결정 그대로).</li>
 </ol>
 
 <h2 id="s0">0. 한눈에</h2>
@@ -102,7 +102,7 @@
   <tr><td>push 스트림 (아무 thread 의 push)</td><td>—</td><td><span class="tag drop">제거</span> 첫 판에 있던 <code>pushHttpChunk / endHttpStream / onStreamClosed</code> 는 넣지 않는다 (1절 결정 4)</td></tr>
   <tr><td>sendfile / TransmitFile</td><td>"가능하면"</td><td><span class="tag drop">제거</span> 파일은 응답 버퍼 조각으로 보낸다 (1절 결정 6)</td></tr>
   <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> websocket.h 의 <code>KiottyNet_addWebSocket(server, "/chat", handler, app_context)</code>, <code>KiottyNet_broadcastWebSocket(server, "/chat", ...)</code> (<code>design_websocket_v0.html</code> 3.2). WebSocketServer 는 없고 서버 쪽 WebSocket 은 HttpServer 의 Upgrade 경로뿐이다. websocket.h 가 http.h 를 include 한다</td></tr>
-  <tr><td>base</td><td></td><td><span class="tag new">추가</span> 2절. 한 WRITE 에 send Stage 와 notify Stage 를 같이 싣는다. 송신 timeout 과 <code>KIOTTY_NET_CODE_PEER_NOT_READING</code></td></tr>
+  <tr><td>base</td><td></td><td><span class="tag new">추가</span> 2절. 한 WRITE 에 send Stage 와 notify Stage 를 같이 싣는다. 송신 timeout 과 <code>KIOTTY_NET_CODE_PEER_NOT_READING</code>. 주소와 TLS 설정은 create 가 아니라 run / connect 가 받는다 (2.3)</td></tr>
 </table>
 
 <p>MCP Streamable HTTP 가 서버에 요구하는 것과의 대응이다. JSON, JSON-RPC 디스패치, 세션 표, Origin 검사, 인가는 앱의 몫이다.</p>
@@ -143,11 +143,12 @@
   <tr><td>15</td><td>HttpServer 도 <code>onDisconnected</code> 와 <code>onError</code> 를 둔다. <code>KiottyNetHttpServerHandler</code> 를 <code>runHttpServer(server, handler, app_context)</code> 로 받는다 (4.9) (2026-11-11)</td><td>라우트 콜백만으로는 연결 단계의 문제 (send timeout, 연결 수 초과, TLS 실패, 잘못된 요청) 가 앱에 닿지 않는다. 의료 장비의 감사 로그와 장애 분석에 필요하다. base 의 Handler 와 같은 모양이고 run 이 handler 를 받는 base 의 규칙과 맞는다</td></tr>
   <tr><td>16</td><td>HEAD 는 라이브러리가 처리한다. GET 라우트를 실행하고 body 를 떼며, <code>onRequest</code> 에서 스트림을 정한 라우트는 Work 를 열지 않고 헤더만 보내고 다음 요청으로 간다 (4.9) (2026-11-11)</td><td>worker 를 쓰지 않고 HEAD 를 끝낸다. 앱이 직접 처리해도 되지만 하지 않아도 틀리지 않게 한다</td></tr>
   <tr><td>17</td><td><code>KiottyNetHttpLimits</code> 에 WebSocket 타이머 셋 (ping 간격, pong timeout, close timeout) 과 <code>configureHttpWebSocketTimers</code> 를 더한다 (2026-11-11)</td><td>WebSocket 전용 설정 struct 를 없앴다 (websocket 설계 결정 11). WebSocketClient 도 이 limits 를 받는다</td></tr>
+  <tr><td>18</td><td><b>주소와 TLS 설정은 create 가 아니라 run / connect 가 받는다.</b> 서버와 클라이언트 모두. create 는 자원 (연결 수, 버퍼, timeout, 재시도) 만 받는다. run / connect 의 TLS 인자가 NULL 이면 평문이다. TLS 설정 struct 와 그 initialize / configure 는 지금 것 그대로 쓴다. endpoint 는 TLS 를 쓰든 안 쓰든 TLS Stage 를 최대치로 잡아 둔다. SSL_CTX 는 run / connect 마다 새로 만든다 (2.3) (2026-11-11)</td><td>DICOM 라이브러리가 자기 Context 를 만들 때 Server / Client 를 전부 만들고, Association 은 그 자원 위에서 연다. 접속할 원격 AE 의 주소, TLS 사용 여부, trust store, 인증서, 버전, cipher 는 실행 중에 정해지고 바뀐다. 같은 주소에서 http:// 와 https:// 를 바꾸는 것과 같은 느낌이고, Node.js 도 port 를 listen 때 정한다. endpoint 마다의 TLS 설정 함수 (init + builder) 는 핸들 종류마다 함수가 늘어 버렸고, 미리 만드는 TlsProfile 핸들은 설정이 바뀔 때마다 새 자원이 필요해 버렸다. SSL_CTX 를 재사용하지 않는 것은 run / connect 가 자주 불리는 함수가 아니고, 같은 경로의 인증서 파일이 바뀐 것 (인증서 갱신) 을 놓치지 않기 위해서다</td></tr>
 </table>
 
 <h2 id="s2">2. base 에 먼저 필요한 것</h2>
 
-<p>둘 다 HTTP 와 무관하게 base 의 성질이고, WebSocket (send, pong, broadcast) 이 바로 쓴다. HTTP 의 H1 앞에 base 사이클 B1 로 한다. 공개 API 의 변경은 2.2 의 설정 필드 하나, configure 함수 둘, 코드 하나다.</p>
+<p>셋 다 HTTP 와 무관하게 base 의 성질이다. 2.1 과 2.2 는 WebSocket (send, pong, broadcast) 이 바로 쓰고, HTTP 의 H1 앞에 base 사이클 B1 로 했다 (공개 API 의 변경은 2.2 의 설정 필드 하나, configure 함수 둘, 코드 하나). 2.3 은 B2 로 H1 앞에 한다.</p>
 
 <h3>2.1 한 WRITE 에 send Stage 와 notify Stage 를 같이</h3>
 
@@ -192,6 +193,62 @@ typedef enum KiottyNetCode {
   <li><b>기본값.</b> 30000 (1절 결정 12). 끊긴 클라이언트는 자기가 가진 session 정보 (MCP 의 <code>Mcp-Session-Id</code>, 게임의 session 토큰) 로 다시 연결해 이어 간다. 0 은 무한이라는 규칙 (statemachine 설계의 결정) 을 지킨다.</li>
   <li><b>대상 밖.</b> Work 중 worker 의 동기 write (<code>writeConnectionStream</code>, <code>writeHttpWorkChunk</code>) 는 호출마다 자기 timeout 이 있고 <code>TIMEOUT</code> 을 돌려준다. worker 가 thread 를 오래 붙잡는 것은 사용자의 handler 과실로 보고 라이브러리가 재지 않는다.</li>
   <li>push Stage 가 차서 <code>notify</code> 가 <code>BUFFER_FULL</code> 을 돌려주는 동안에도 그 연결의 WRITE 는 걸려 있으므로, 읽지 않는 상대는 결국 이 timeout 으로 끊긴다.</li>
+</ul>
+
+<h3>2.3 주소와 TLS 는 run / connect 때 (1절 결정 18)</h3>
+
+<table>
+  <tr><th>시점</th><th>받는 것</th><th>잡는 것</th></tr>
+  <tr><td>create</td><td>설정 struct (연결 수, 버퍼 셋, no delay, 송신 timeout. 클라이언트는 connect timeout, 재시도). <b>주소와 TLS 는 받지 않는다</b></td><td>Connection 슬롯, Stage 셋, <b>TLS Stage (최대치, TLS 를 쓰든 안 쓰든)</b>, 이벤트 리스너와 완료 배열</td></tr>
+  <tr><td>run / connect</td><td>주소 (<code>KiottyNetAddress</code>), TLS 설정 (NULL 이면 평문), (run 이면) handler 와 <code>app_context</code></td><td>소켓 (bind / listen / connect). TLS 면 SSL_CTX 를 새로 만들고 (OpenSSL 의 할당), 연결마다 SSL. kiotty-net 의 할당은 없다</td></tr>
+</table>
+
+<pre><code>typedef struct KiottyNetServerConfiguration {
+    uint32_t         initialization_mark;
+    /* KiottyNetAddress address;  제거 */
+    size_t           max_clients;
+    size_t           receive_capacity;
+    size_t           send_capacity;
+    size_t           push_capacity;
+    KiottyNetNoDelay no_delay;
+    uint32_t         send_timeout_milliseconds;
+} KiottyNetServerConfiguration;                    /* KiottyNetClientConfiguration 도 address 를 뺀다 */
+
+/* 바뀜. initializeTcp / Pipe 둘이 하나로, 주소 인자가 없다 */
+KiottyNetCode KiottyNet_initializeServerConfiguration(KiottyNetServerConfiguration* configuration);
+KiottyNetCode KiottyNet_initializeClientConfiguration(KiottyNetClientConfiguration* configuration);
+
+/* 추가. 주소는 지금의 KiottyNetAddress struct 를 그대로 쓴다. 검사는 지금 initializeTcp / Pipe 의 것 그대로 */
+KiottyNetCode KiottyNet_initializeTcpAddress(KiottyNetAddress* address, const char* host, uint16_t port);
+KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const char* pipe_name);
+
+/* 바뀜. create 의 tls 인자가 빠지고 run / connect 가 주소와 tls 를 받는다 */
+KiottyNetServerResult       KiottyNet_createServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration);
+KiottyNetCode               KiottyNet_runServer(KiottyNetServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);
+KiottyNetStreamClientResult KiottyNet_createStreamClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration);
+KiottyNetCode               KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls);
+KiottyNetEventClientResult  KiottyNet_createEventClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration);
+KiottyNetCode               KiottyNet_runEventClient(KiottyNetEventClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls, const KiottyNetConnectionHandler* handler, KiottyNetAppContext app_context);
+
+/* statemachine.h 도 같다 */
+KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, const KiottyNetStatefulAppContext* app_context);
+KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls, const KiottyNetStatefulAppContext* app_context);
+
+/* C++ : builder 는 생성자 하나 (KiottyNet_ServerConfigurationBuilder(configuration)), tcp / pipe 정적 함수는 없다.
+         KiottyNet_Server::run(address, handler, app_context) 와 run(address, tls, handler, app_context),
+         KiottyNet_StreamClient::connect(address) 와 connect(address, tls),
+         KiottyNet_EventClient::run(address, handler, app_context) 와 run(address, tls, handler, app_context).
+         TLS 를 받던 생성자 둘째 판은 없앤다 */</code></pre>
+
+<ul>
+  <li><b>DICOM 의 쓰임.</b> DICOM Context 를 만들 때 <code>createServer</code> / <code>createEventClient</code> / <code>createStreamClient</code> 로 자원을 전부 잡는다. Association 을 열 때 원격 AE 의 주소와 그때의 TLS 설정으로 <code>connectStreamClient</code> 나 <code>runEventClient</code> 를 부른다. 같은 클라이언트로 다음 Association 에서 다른 AE, 다른 TLS 설정에 붙는다. 서버도 close 뒤 다른 주소 / TLS 로 다시 run 할 수 있다.</li>
+  <li><b>TLS 설정 struct 의 수명.</b> run / connect 는 받은 struct 로 SSL_CTX 를 만든 뒤 struct 를 더 보지 않는다 (SSL_CTX 가 경로의 파일을 읽어 들인다). connect 는 return 뒤, run 은 <code>await</code> 가 <code>SUCCESS</code> (RUNNING) 를 본 뒤 호출자가 struct 를 지우거나 바꿔도 된다. 서버의 run 은 SSL_CTX 를 만든 뒤 listen 하므로 인증서 오류는 bind 전에 run 의 반환값으로 온다.</li>
+  <li><b>SSL_CTX 의 수명.</b> run / connect 마다 새로 만들고, 다음 run / connect 나 destroy 가 버린다. 같은 설정이어도 재사용하지 않는다 (1절 결정 18). 평문으로 run / connect 하면 이전 것을 버린다.</li>
+  <li><b>SNI 와 hostname 검증.</b> run / connect 가 받은 주소의 <code>host</code> 를 쓴다 (지금은 설정의 <code>address.host</code>). Pipe 면 쓰지 않는다.</li>
+  <li><b>TLS Stage.</b> 지금은 tls 인자가 있을 때만 cipher Stage 를 잡는다. B2 뒤에는 TLS 를 넣어 빌드했으면 언제나 잡는다. 크기는 지금 공식 그대로 (receive, <code>gatheredPlainBytes(send, notify)</code> 의 암호문 상한). TLS 를 빼고 빌드하면 잡지 않고, run / connect 에 tls 를 주면 <code>TLS_NOT_SUPPORTED</code>. <code>serverMemorySize</code> / <code>clientMemorySize</code> 는 TLS 빌드에서 이 Stage 를 늘 더한다.</li>
+  <li><b>주소 검사.</b> run / connect 가 받은 주소를 다시 본다: transport 가 TCP / PIPE 중 하나, host 가 비지 않고 배열 안에서 끝남 (NUL), TCP 면 port 가 0 이 아님. 어긋나면 <code>INVALID_ARGUMENT</code> 이고 소켓을 열지 않는다. TLS 설정은 지금처럼 <code>initialization_mark</code> 를 본다.</li>
+  <li><b>실패의 순서.</b> run: 인자 검사 (handler, 주소, TLS 설정의 mark) → 이미 도는 중이면 <code>INVALID_ARGUMENT</code> → TLS 면 SSL_CTX (<code>TLS_*</code>) → bind / listen (클라이언트는 연결과 재시도) → 핸드셰이크. connect 도 같은 순서다.</li>
+  <li><b>HTTP / WebSocket.</b> <code>createHttpServer(context, configuration, limits)</code>, <code>runHttpServer(server, address, tls, handler, app_context)</code>. WebSocketClient 도 create 가 tls 를 받지 않고 run 이 주소와 tls 를 받는다 (<code>design_websocket_v0.html</code> 결정 13). 둘 다 아직 구현 전이라 B2 는 헤더 선언과 wrapper 만 고친다.</li>
 </ul>
 
 <h2 id="s3">3. 응답의 두 모양</h2>
@@ -472,7 +529,7 @@ KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context, Kiot
 
 <pre><code>typedef struct KiottyNetHttpServerResult { KiottyNetCode code; KiottyNetHttpServerHandle handle; } KiottyNetHttpServerResult;   /* 추가 */
 
-KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpLimits* limits);
+KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetHttpLimits* limits);   /* tls 인자 제거 (2.3) */
 void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
 KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);
@@ -484,12 +541,12 @@ typedef struct KiottyNetHttpServerHandler {                                     
     void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
 } KiottyNetHttpServerHandler;
 
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetHttpServerHandler* handler, KiottyNetAppContext app_context);   /* 인자 추가. handler 는 NULL 이어도 된다 */
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpServerHandler* handler, KiottyNetAppContext app_context);   /* 인자 추가. tls 는 NULL 이면 평문 (2.3), handler 는 NULL 이어도 된다 */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);</code></pre>
 
 <ul>
-  <li><code>createHttpServer</code> 의 실패 이유가 보인다: <code>INVALID_ARGUMENT</code> (설정 미초기화, <code>response_bytes</code> 가 상태줄 + 라이브러리 헤더 자리보다 작음), <code>TLS_*</code>, <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>.</li>
+  <li><code>createHttpServer</code> 의 실패 이유가 보인다: <code>INVALID_ARGUMENT</code> (설정 미초기화, <code>response_bytes</code> 가 상태줄 + 라이브러리 헤더 자리보다 작음), <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>. <code>TLS_*</code> 는 <code>runHttpServer</code> 가 돌려준다 (2.3).</li>
   <li>라우트 함수의 코드는 user_guide 1.10 그대로다. 같은 path 에 다른 method 를 등록하는 것은 중복이 아니다.</li>
   <li><code>serveHttpMemory</code> 의 type 은 <code>BY_EXTENSION</code>, <code>EVENT_STREAM</code> 이 아니어야 한다. <code>CUSTOM</code> 도 받지 않는다 (1절 결정 13, <code>INVALID_ARGUMENT</code>). 텍스트 계열이면 등록 때 UTF-8 을 한 번 본다.</li>
   <li><b>서버 handler.</b> 둘 다 IO thread 에서 불린다. base 의 <code>onDisconnected</code> / <code>onError</code> 와 같은 뜻이고 <code>app_context</code> 는 run 의 것이다 (라우트의 <code>app_context</code> 와 따로다).
@@ -540,7 +597,8 @@ public:
     KiottyNetCode             code() const;                     // 추가
     KiottyNetHttpServerHandle handle() const;
     ...                                                         // route / get / ... / notFound 의 두 overload, serve* (serveMemory 는 type 이 enum), close / await
-    KiottyNetCode             run(const KiottyNetHttpServerHandler&amp; handler, KiottyNetAppContext app_context);   // 인자 추가. 인자 없는 run() 은 handler 없이
+    KiottyNetCode             run(const KiottyNetAddress&amp; address, const KiottyNetHttpServerHandler&amp; handler, KiottyNetAppContext app_context);   // 인자 추가. run(address) 는 handler 없이
+    KiottyNetCode             run(const KiottyNetAddress&amp; address, const KiottyNetTlsServerConfiguration&amp; tls, const KiottyNetHttpServerHandler&amp; handler, KiottyNetAppContext app_context);   // 추가 (2.3). TLS 를 받던 생성자는 없앤다
 };</code></pre>
 
 <p>C++ 의 <code>file()</code> 은 인자 순서를 C 와 다르게 (path 가 먼저) 두고 type 에 기본값을 준다. 기본값이 있는 인자는 뒤에 와야 해서다. C 는 다른 body setter 와 같이 type 이 먼저다.</p>
@@ -691,7 +749,9 @@ int main()
 {
     KiottyNet_Context            context;
     KiottyNetServerConfiguration configuration;
-    KiottyNet_ServerConfigurationBuilder::tcp(configuration, "127.0.0.1", 8080).maxClients(16).sendTimeout(30000).build();
+    KiottyNet_ServerConfigurationBuilder(configuration).maxClients(16).sendTimeout(30000).build();
+    KiottyNetAddress address;
+    KiottyNet_initializeTcpAddress(&amp;address, "127.0.0.1", 8080);                 // 주소는 run 때 (2.3)
     KiottyNetHttpLimits limits;
     KiottyNet_HttpLimitsBuilder(limits).bodyCapacity(256 * 1024).build();
 
@@ -705,7 +765,7 @@ int main()
     KiottyNetHttpServerHandler events{};
     events.onDisconnected = onDisconnected;                                     // 감사 로그 : 주소, 끝난 이유 (PEER_NOT_READING 등)
     events.onError        = onError;                                            // 연결 수 초과, TLS 실패
-    std::thread io([&amp;] { server.run(events, &amp;app); });
+    std::thread io([&amp;] { server.run(address, events, &amp;app); });              // TLS 면 server.run(address, tls, events, &amp;app)
     ...
     server.close();
     io.join();
@@ -769,7 +829,8 @@ int main()
   <tr><td>WebSocket Upgrade</td><td>http.h, <code>HttpServer::upgrade</code></td><td>websocket.h 로 미룸</td><td>websocket.h (http.h 를 include). <code>HttpServer::upgrade</code> 와 WebSocketServer 는 없다</td></tr>
   <tr><td>정적 파일 송신</td><td>sendfile / TransmitFile "가능하면"</td><td>chunk</td><td>응답 버퍼 조각. sendfile 없음</td></tr>
   <tr><td>base 송신</td><td>requirement 4절 "write lane 먼저"</td><td>코드는 "notify 먼저, 한 맥락"</td><td>한 WRITE 에 send 다음 notify (2.1), send timeout (2.2)</td></tr>
-  <tr><td><code>runHttpServer</code></td><td><code>run(handler, app_context)</code> (7절 표)</td><td><code>(server)</code></td><td><code>(server, handler, app_context)</code>. handler 는 <code>onDisconnected</code>, <code>onError</code></td></tr>
+  <tr><td><code>runHttpServer</code></td><td><code>run(handler, app_context)</code> (7절 표)</td><td><code>(server)</code></td><td><code>(server, address, tls, handler, app_context)</code>. handler 는 <code>onDisconnected</code>, <code>onError</code>. 주소와 tls 는 2.3</td></tr>
+  <tr><td>주소와 tls</td><td>create 가 받음</td><td>create 가 받음</td><td>run 이 받는다 (2.3, 1절 결정 18)</td></tr>
   <tr><td>HttpClient</td><td>11절 초안</td><td>없음</td><td>다음 판 (1절 결정 10)</td></tr>
 </table>
 
@@ -784,6 +845,7 @@ int main()
 <table>
   <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
   <tr><td>B1 base 송신</td><td>2.1 (IoPayload 조각 둘, <code>SendFlow::select</code> 가 send 다음 notify, release 가 두 길이, backend 넷의 gather 송신, TLS 의 encode 순서, NotificationDesk 의 여러 조각 복사) 과 2.2 (설정 필드, configure 둘, <code>PEER_NOT_READING</code>, Connection 의 송신 deadline, IoLoop 의 대기 시간). requirement 4절의 송신 순서와 Work 중 송신. 구현 가이드 1.6</td><td>매트릭스 초록. 새 테스트: notify 가 계속 들어와도 write lane 이 나간다 (굶지 않음), 한 WRITE 에 둘이 실리고 순서가 send → notify, TLS 에서도 같은 순서, 읽지 않는 상대가 <code>send_timeout</code> 뒤 <code>PEER_NOT_READING</code> 으로 끊김. benchmark <code>EchoRoundtrip</code>, <code>NotifyLatency</code> 전후 비교</td></tr>
+  <tr><td>B2 base 주소와 TLS</td><td>2.3. 공개 헤더 넷 (base, statemachine 의 run 둘, http 와 websocket 의 create / run 선언과 wrapper), 설정 struct 에서 <code>address</code> 제거, <code>initializeServer / ClientConfiguration</code>, <code>initializeTcp / PipeAddress</code>, C++ builder 와 wrapper. Server / StreamClient / EventClient 가 run / connect 때 주소 검사와 SSL_CTX, TLS Stage 를 늘 잡음, SNI 가 run 의 주소. requirement 4절, 구현 가이드, user guide, <code>.claude/agents/cpp-developer.md</code> 의 "TLS 는 create 에" 한 줄</td><td>매트릭스 초록. 새 테스트: 한 클라이언트가 평문 서버 → TLS 서버 → 평문 서버로 차례로 connect, 한 클라이언트가 서로 다른 trust store 의 두 서버에, 한 서버가 close 뒤 다른 port 와 TLS 로 다시 run, 잘못된 주소 / TLS 설정이 소켓을 열기 전에 실패, TLS 빌드에서 memory size 가 TLS Stage 를 포함</td></tr>
   <tr><td>H1 공개 API 판 v2</td><td>4절의 http.h (C 와 C++). limits 의 WebSocket 타이머 셋, <code>keep_alive</code> 를 <code>KiottyNetBool</code> 로, enum 둘, <code>setHttpCustomContentType</code>, body setter 의 type, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>, <code>KiottyNetHttpServerResult</code>, server handle typedef. user_guide_http 를 이 판으로. <code>src/kiotty_net_http.cpp</code> 는 아직 비어 있다</td><td>네 헤더 syntax check. <code>Headers.*</code> 에 http 의 struct 와 enum</td></tr>
   <tr><td>H2 파서</td><td><code>domain/usecases/http/</code>: request line, header line, chunk size, <code>Content-Length</code>, <code>Connection</code>, keep-alive, path 매칭 (정확 / <code>/*</code> / 디렉토리 접두), content type 표 (enum ↔ 문자열, 확장자 → enum), CUSTOM 이름 검사. core 의 parse 셋 위. 수칙 2.10 의 다섯 입력</td><td>unit 전부 초록. 할당 0</td></tr>
   <tr><td>H3 완성 응답</td><td>HttpSession, 라우트 표, HTTP_MACHINE (구현 가이드 4.3), setter, 자동 응답 (404 / 405 / 501 / 413 / 414 / 431 / OPTIONS / HEAD), keep-alive, <code>runHttpServer</code>, HttpServer 를 Context 풀에. 3.1 만</td><td>integration: 메서드별 라우트, keep-alive 로 요청 둘, 413 / 431, HEAD (완성 응답의 Content-Length), 서버 handler 의 onDisconnected reason (SUCCESS, TIMEOUT, PROTOCOL_ERROR) 과 onError (TABLE_FULL), content type enum 과 CUSTOM, <code>Content-Type</code> 헤더 거부, UTF-8 아닌 JSON body 거부. 공개 C API 만</td></tr>
@@ -792,7 +854,7 @@ int main()
   <tr><td>H6 문서와 MCP 예제</td><td>requirement 9절을 이 판으로, 구현 가이드 4절에 스트림과 content type, 테스트 계획 17절, <code>tests/integration</code> 에 6절의 MCP 서버 골격을 테스트로 (JSON 없이 문자열), progress</td><td>MCP 예제 테스트 초록</td></tr>
 </table>
 
-<p>WebSocket (<code>design_websocket_v0.html</code> 의 W1 ~ W5) 은 B1 과 H3 뒤에 시작할 수 있다.</p>
+<p>WebSocket (<code>design_websocket_v0.html</code> 의 W1 ~ W5) 은 B1, B2 와 H3 뒤에 시작할 수 있다.</p>
 
 </body>
 </html>
