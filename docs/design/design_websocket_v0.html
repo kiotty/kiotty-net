@@ -90,7 +90,7 @@
   <tr><td>include</td><td><code>kiotty_net_statemachine.h</code></td><td><span class="tag new">추가</span> <code>kiotty_net_http.h</code> (그 안에 base.h)</td></tr>
   <tr><td>서버</td><td><code>KiottyNet_WebSocketServer</code> (create / destroy / run / close / await / broadcast)</td><td><span class="tag drop">제거</span> HttpServer + <code>KiottyNet_addWebSocket(server, "/chat", handler, app_context)</code>. broadcast 는 <code>KiottyNet_broadcastWebSocket(server, "/chat", opcode, data)</code></td></tr>
   <tr><td>클라이언트</td><td><code>KiottyNet_WebSocketClient</code></td><td><span class="tag keep">유지</span>. create 만 <code>{ code, handle }</code></td></tr>
-  <tr><td>설정 <code>KiottyNetWebSocketConfiguration</code>, builder</td><td>path, protocols, max_message_bytes, 타이머 넷</td><td><span class="tag drop">제거</span> path 는 <code>addWebSocket</code> 의 인자, protocols 는 <code>onUpgrade</code> 의 <code>selectWebSocketProtocol</code>, 메시지 상한은 <code>max_body_bytes</code>, 핸드셰이크 timeout 은 <code>header_timeout</code>, ping / pong / close 타이머 셋은 <code>KiottyNetHttpLimits</code> 로</td></tr>
+  <tr><td>설정 <code>KiottyNetWebSocketConfiguration</code>, builder</td><td>path, protocols, max_message_bytes, 타이머 넷</td><td><span class="tag drop">제거</span> path 는 <code>addWebSocket</code> 의 인자, protocols 는 <code>onUpgrade</code> 의 <code>selectWebSocketProtocol</code>, 메시지 상한은 <code>max_body_bytes</code>, 핸드셰이크 timeout 은 <code>header_timeout</code>, ping / pong / close 타이머 셋은 <code>KiottyNetHttpLimits</code> 로. protocols 는 서버의 <code>onUpgrade</code> 에서만 고른다 (결정 12)</td></tr>
   <tr><td>콜백 <code>KiottyNetWebSocketHandler</code> 넷</td><td><code>onUpgrade / onOpen / onMessage / onClose</code></td><td><span class="tag keep">유지</span></td></tr>
   <tr><td>소켓 하나의 handle</td><td><code>typedef int64_t KiottyNetWebSocketHandle</code></td><td><span class="tag new">추가</span> <code>{ KiottyNetWebSocketEndpoint* owner; int64_t id; }</code>. 무효는 <code>{ NULL, 0 }</code></td></tr>
   <tr><td>소켓 함수 다섯</td><td></td><td><span class="tag keep">유지</span>. handle 의 타입만 바뀐다</td></tr>
@@ -112,6 +112,7 @@
   <tr><td>9</td><td>다른 thread 의 close 에서 상대가 답하지 않으면 최대 <code>ping_interval</code> 뒤에 끊기는 것을 받아들인다. user_guide 에 적는다 (2026-11-11)</td><td>보통 상대는 바로 답한다. 훅 하나를 더하는 값어치가 없다</td></tr>
   <tr><td>10</td><td><b>등록은 <code>KiottyNet_addWebSocket(server, path, handler, app_context)</code>, broadcast 는 <code>KiottyNet_broadcastWebSocket(server, path, opcode, data)</code></b>. 같은 path 문자열이 등록과 broadcast 를 잇는다 (2026-11-11)</td><td>경로가 곧 endpoint 다 (RFC 6455 1.3, 2절). 등록에 쓴 이름으로 그 endpoint 의 소켓 전부에 보낸다</td></tr>
   <tr><td>11</td><td><b>WebSocket 전용 설정 struct (<code>KiottyNetWebSocketConfiguration</code>, builder, initialize / configure 여섯) 를 없앤다.</b> 메시지 상한 = <code>max_body_bytes</code>, 핸드셰이크 timeout = <code>header_timeout</code>, subprotocol = <code>onUpgrade</code> 의 <code>selectWebSocketProtocol</code>, 타이머 셋 (ping 간격, pong timeout, close timeout) = <code>KiottyNetHttpLimits</code> 의 필드. WebSocketClient 도 <code>KiottyNetHttpLimits</code> 를 받는다 (2026-11-11)</td><td>필드 대부분이 HttpServer 에 이미 있는 값과 같다 (메시지는 body 의 <code>Stage</code> 를 쓰고, Upgrade 요청은 HTTP 헤더다). 남는 셋만 limits 에 더하면 설정이 한 벌이다. 대가는 경로마다 다른 메시지 상한 / 타이머를 둘 수 없다는 것이다. 필요해지면 그때 경로 단위 인자를 더한다</td></tr>
+  <tr><td>12</td><td><b>subprotocol 은 서버만.</b> WebSocketClient 는 보내지 않는다 (create 의 <code>protocols</code> 인자 없음). 서버는 <code>onUpgrade</code> 에서 <code>KiottyNet_selectWebSocketProtocol</code> 로 고를 수 있다 (3.2) (2026-11-11)</td><td>일반 앱 (웹 UI, 게임, 채팅) 은 경로와 메시지 안의 형식으로 충분해 쓰지 않는다. 다만 MQTT, OCPP, GraphQL, STOMP 같은 외부 표준 클라이언트는 subprotocol 을 보내고 서버가 고르지 않으면 연결이 실패하므로, 그들을 받을 수 있게 서버 쪽 선택은 남긴다. 새 API 가 아니라 지금 헤더의 함수 하나다</td></tr>
 </table>
 
 <h2 id="s2">2. 배경 : WebSocket 은 HTTP 연결에서 시작한다</h2>
@@ -185,7 +186,15 @@ KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits
   <li><b>등록.</b> run 전에 라우트처럼 부른다. 한 HttpServer 에 WebSocket 경로를 여럿 둘 수 있고 (<code>/chat</code>, <code>/telemetry</code>) 경로마다 handler 와 <code>app_context</code> 가 따로다. 설정 (메시지 상한, 타이머) 은 서버 하나에 한 벌이다 (결정 11).</li>
   <li><b>코드.</b> run 뒤 <code>BUSY</code>, 표가 차면 <code>TABLE_FULL</code> (<code>max_routes</code> 에 들어간다), 같은 path 가 이미 (라우트든 WebSocket 이든) 있으면 <code>DUPLICATE_RULE</code>, path 가 NULL / <code>/</code> 로 시작하지 않음 / 상한 초과, handler 의 <code>onOpen</code> 또는 <code>onMessage</code> 가 NULL 이면 <code>INVALID_ARGUMENT</code>.</li>
   <li><b>메시지 상한.</b> 메시지는 HTTP body 의 <code>Stage</code> 에 모이므로 상한이 <code>max_body_bytes</code> 다. 넘는 메시지는 1009 로 닫는다.</li>
-  <li><b>subprotocol.</b> 고르는 일은 <code>onUpgrade</code> 안의 <code>KiottyNet_selectWebSocketProtocol</code> 이다 (지금 헤더에 있는 함수). <code>onUpgrade</code> 가 NULL 이거나 고르지 않으면 101 에 <code>Sec-WebSocket-Protocol</code> 이 없다.</li>
+  <li><b>subprotocol (서버만, 결정 12).</b> subprotocol 은 같은 경로 안에서 "메시지를 어떤 약속으로 주고받을지" 를 고르는 이름이다 (<code>Sec-WebSocket-Protocol</code>). 일반 앱은 쓰지 않지만 표준 프로토콜을 WebSocket 에 얹는 클라이언트는 반드시 보낸다: MQTT (<code>mqtt</code>), OCPP 충전기 (<code>ocpp1.6</code>, <code>ocpp2.0.1</code>), GraphQL 구독 (<code>graphql-transport-ws</code>), STOMP (<code>v12.stomp</code>), SIP (<code>sip</code>). 이런 클라이언트가 후보를 보냈는데 서버가 하나도 고르지 않으면 브라우저와 대부분의 라이브러리가 연결을 실패로 처리한다. 그래서 서버는 고를 수 있어야 한다.
+    <ul>
+      <li>클라이언트가 보낸 후보는 <code>onUpgrade</code> 의 <code>upgrade.protocols</code> (쉼표로 이은 원문) 로 본다.</li>
+      <li>고르는 일은 <code>onUpgrade</code> 안에서 <code>KiottyNet_selectWebSocketProtocol(websocket, "mqtt")</code> 한 번이다 (지금 헤더에 있는 함수, C++ <code>KiottyNet_WebSocket::selectProtocol</code>). 후보에 없는 값이면 <code>INVALID_ARGUMENT</code>, <code>onUpgrade</code> 밖이면 <code>BUSY</code>, 두 번째 호출은 앞의 것을 바꾼다.</li>
+      <li>고른 값은 101 의 <code>Sec-WebSocket-Protocol</code> 로 나가고, 연결 뒤에는 <code>KiottyNet_getWebSocketInfo</code> 의 <code>protocol</code> 로 본다.</li>
+      <li>쓰지 않는 앱은 아무것도 하지 않는다. <code>onUpgrade</code> 가 NULL 이거나 고르지 않으면 101 에 그 헤더가 없다.</li>
+      <li>설정의 <code>protocols</code> 로 자동 선택하던 것 (지금 헤더) 은 설정 struct 와 함께 없앤다. 고르는 곳은 <code>onUpgrade</code> 하나다.</li>
+    </ul>
+  </li>
   <li><b>WebSocket 경로의 요청.</b> GET 만 받는다. 다른 메서드는 405. Upgrade 헤더가 없는 GET 은 426 (<code>Upgrade: websocket</code> 헤더와 함께) 으로 거절하고 <code>onUpgrade</code> 는 부르지 않는다. 헤더 상한은 <code>max_header_bytes</code>, 시간 상한은 <code>header_timeout</code> 이다.</li>
   <li><b>broadcast.</b> 지금 헤더의 <code>broadcastWebSocketServer</code> 가 옮겨 온 것이다. 등록에 쓴 path 와 글자 그대로 비교한다. 소켓마다 push lane 에 복사하고, 자리가 없는 소켓은 건너뛴다 (지금 규칙 그대로). 아무 thread 에서나. 등록되지 않은 path 는 <code>INVALID_ARGUMENT</code>.</li>
   <li><b>서버의 close.</b> HttpServer 의 close 는 WebSocket 연결도 close handshake 없이 끊는다 (<code>onClose(CLOSED, 1001)</code>). 연결이 끝나면 HttpServer 의 <code>onDisconnected</code> 도 불린다 (WebSocket 이었던 연결도 연결이다).</li>
@@ -201,10 +210,9 @@ KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(
     const KiottyNetClientConfiguration* configuration,                       /* address.host 가 Host 헤더와 SNI (결정 6) */
     const KiottyNetTlsClientConfiguration* tls,
     const KiottyNetHttpLimits* limits,                                       /* NULL 이면 기본값. max_body_bytes = 메시지 상한, header 상한 / timeout = 101 응답, 타이머 셋 */
-    const char* path,                                                        /* "/chat" */
-    const char* protocols);                                                  /* "chat.v2, chat.v1" 처럼 원하는 순서. NULL 이면 보내지 않는다 */</code></pre>
+    const char* path);                                                       /* "/chat" */</code></pre>
 
-<p>base 판 v1, http 판 v2 와 같이 <code>{ code, handle }</code> 을 돌려준다. 인자가 여섯이다 (공개 헤더는 사용자가 정한 모양, DV13). destroy / run / close / await / getWebSocketClientSocket / sendWebSocketClient 는 그대로다. 서버가 고른 subprotocol 은 <code>KiottyNet_getWebSocketInfo</code> 의 <code>protocol</code> 로 본다.</p>
+<p>base 판 v1, http 판 v2 와 같이 <code>{ code, handle }</code> 을 돌려준다. 인자가 다섯이다 (공개 헤더는 사용자가 정한 모양, DV13). destroy / run / close / await / getWebSocketClientSocket / sendWebSocketClient 는 그대로다. 클라이언트는 subprotocol 을 보내지 않는다 (결정 12). Upgrade 요청에 <code>Sec-WebSocket-Protocol</code> 이 없고, 서버가 101 에 그 헤더를 담아 오면 RFC 6455 4.1 대로 <code>PROTOCOL_ERROR</code> 로 끝난다 (요청하지 않은 값). 필요해지면 그때 인자를 더한다.</p>
 
 <h3>3.4 빠지는 것 <span class="tag drop">제거</span></h3>
 
@@ -249,7 +257,7 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server, con
 typedef struct KiottyNetWebSocketClient* KiottyNetWebSocketClientHandle;
 typedef struct KiottyNetWebSocketClientResult { KiottyNetCode code; KiottyNetWebSocketClientHandle handle; } KiottyNetWebSocketClientResult;
 
-KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls, const KiottyNetHttpLimits* limits, const char* path, const char* protocols);
+KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls, const KiottyNetHttpLimits* limits, const char* path);
 /* ... destroy / run / close / await / getWebSocketClientSocket / sendWebSocketClient : 유지 ... */
 
 #ifdef __cplusplus
@@ -355,7 +363,7 @@ WebSocketClient 의 연결 하나
   <tr><td>서버</td><td>WebSocketServer + (미룬) HttpServer 의 Upgrade</td><td>HttpServer 의 Upgrade 하나</td><td>결정 1</td></tr>
   <tr><td>broadcast</td><td><code>broadcastWebSocketServer(server, opcode, data)</code></td><td><code>broadcastWebSocket(http_server, "/chat", opcode, data)</code></td><td>서버가 HttpServer 다. 경로가 여럿일 수 있다 (결정 10)</td></tr>
   <tr><td>설정</td><td><code>KiottyNetWebSocketConfiguration</code> + builder</td><td>없음. <code>KiottyNetHttpLimits</code> 한 벌 (+ 타이머 셋)</td><td>결정 11</td></tr>
-  <tr><td>클라이언트 create</td><td><code>(context, configuration, tls, websocket)</code></td><td><code>(context, configuration, tls, limits, path, protocols)</code></td><td>결정 11</td></tr>
+  <tr><td>클라이언트 create</td><td><code>(context, configuration, tls, websocket)</code></td><td><code>(context, configuration, tls, limits, path)</code></td><td>결정 11, 12</td></tr>
   <tr><td><code>KiottyNetWebSocketHandle</code></td><td><code>int64_t</code>, 0 이 무효</td><td><code>{ owner, id }</code>, <code>{ NULL, 0 }</code> 이 무효</td><td>소유자를 handle 이 든다. base / HTTP 와 같은 모양</td></tr>
   <tr><td>include</td><td><code>kiotty_net_statemachine.h</code></td><td><code>kiotty_net_http.h</code></td><td>결정 2</td></tr>
   <tr><td>create</td><td>handle</td><td><code>{ code, handle }</code> (클라이언트만 남는다)</td><td>base 판 v1 과 같다</td></tr>
@@ -368,7 +376,7 @@ WebSocketClient 의 연결 하나
 
 <h2 id="s9">9. 정할 것</h2>
 
-<p>모두 정했다 (2026-11-11, 결정 1 ~ 11).</p>
+<p>모두 정했다 (2026-11-11, 결정 1 ~ 12).</p>
 
 <h2 id="s10">10. 사이클</h2>
 
