@@ -95,6 +95,15 @@ Windows MSVC Release (`build/msvc-bench`) 에서는 Server 를 쓰는 benchmark 
 - Windows Release 의 Server benchmark 가 멈추는 것 (위). B1 전부터 있던 일이라 이 사이클에서 고치지 않았다.
 - StreamClient 는 `send_timeout_milliseconds` 를 쓰지 않는다 (동기 write 가 호출마다 timeout 을 받는다). requirement 의 주석에 적었다.
 
+## CI
+
+`306e972` 을 push 했고 CI 14 job 이 모두 초록이다 (run 42965825792). macOS (kqueue), libkqueue, ubuntu 의 io_uring (`EventListener_Ring` 이 SKIP 이 아니라 Passed) 에서 gather 테스트가 돌았다.
+
 ## 다음
 
 H1 (http.h 공개 API 판 v2). `keep_alive` 를 `KiottyNetBool` 로, `KiottyNetHttpLimits` 에 WebSocket 타이머 셋.
+
+세션 끝 (2026-11-11) 의 상태: B1 완료. 남은 일은 두 갈래이고 사용자가 고른다.
+
+1. Windows MSVC Release 의 Server benchmark 가 멈추는 원인 찾기 (B1 전부터. `build/msvc-bench`, EchoRoundtrip / WriteHeavy / BroadcastFanOut 이 90 초 안에 끝나지 않음, EventClientWriteHeavy 는 돈다. Debug 의 integration 테스트와 WSL Release 는 정상).
+2. H1 (`design_http_v0.html` 11절).
