@@ -57,7 +57,7 @@
 <body>
 
 <h1>kiotty_net_http.h 설계 v0</h1>
-<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 1, 2, 3, 6 반영, content type 목록 확장). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
+<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 전부 반영: content type 목록 확장, 서버 handler, HEAD). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
 
 <p>우선순위: 공개 헤더의 모양은 사용자가 정한 것을 따른다 (수칙 0.2, DV13). <code>requirement_v0.md</code> 9절, <code>user_guide_http.md</code> 와 다르면 이 문서가 새것이다 (9절이 차이). 이 문서의 코드 블록 안 주석은 설명용이고 소스에는 주석을 두지 않는다 (수칙 4.9).</p>
 
@@ -140,6 +140,8 @@
   <tr><td>12</td><td><code>send_timeout_milliseconds</code> 기본값 30000 (2026-11-11)</td><td>끊긴 쪽은 session 정보로 다시 연결해 이어 가면 된다. 무한 (0) 은 읽지 않는 상대가 Session 을 붙잡는다</td></tr>
   <tr><td>13</td><td><code>serveHttpMemory</code> 는 <code>CUSTOM</code> 을 받지 않는다. 대신 enum 목록을 넓힌다 (DICOM, FHIR, protobuf, msgpack, cbor, 글꼴, 소리 / 영상, 묶음 등). <code>CUSTOM</code> 은 파라미터 (<code>; boundary=...</code>) 를 받는다 (2026-11-11)</td><td>내부 프로젝트 (웹 UI, 게임, DICOM, MCP) 에서 쓸 것을 미리 넣고, 더 필요하면 그때 enum 에 붙인다</td></tr>
   <tr><td>14</td><td>C++ 의 타입별 줄임 메서드 (<code>json()</code>, <code>text()</code>) 는 두지 않는다 (2026-11-11)</td><td><code>body(type, data)</code> 하나로 충분하다</td></tr>
+  <tr><td>15</td><td>HttpServer 도 <code>onDisconnected</code> 와 <code>onError</code> 를 둔다. <code>KiottyNetHttpServerHandler</code> 를 <code>runHttpServer(server, handler, app_context)</code> 로 받는다 (4.9) (2026-11-11)</td><td>라우트 콜백만으로는 연결 단계의 문제 (send timeout, 연결 수 초과, TLS 실패, 잘못된 요청) 가 앱에 닿지 않는다. 의료 장비의 감사 로그와 장애 분석에 필요하다. base 의 Handler 와 같은 모양이고 run 이 handler 를 받는 base 의 규칙과 맞는다</td></tr>
+  <tr><td>16</td><td>HEAD 는 라이브러리가 처리한다. GET 라우트를 실행하고 body 를 떼며, <code>onRequest</code> 에서 스트림을 정한 라우트는 Work 를 열지 않고 헤더만 보내고 다음 요청으로 간다 (4.9) (2026-11-11)</td><td>worker 를 쓰지 않고 HEAD 를 끝낸다. 앱이 직접 처리해도 되지만 하지 않아도 틀리지 않게 한다</td></tr>
 </table>
 
 <h2 id="s2">2. base 에 먼저 필요한 것</h2>
@@ -469,7 +471,12 @@ KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, Kiotty
 KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);       /* content type 은 확장자 */
 KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);              /* content type 은 확장자 */
 KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);   /* 인자 순서와 타입 변경 */
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server);
+typedef struct KiottyNetHttpServerHandler {                                                       /* 추가. 연결 단위 알림. 둘 다 NULL 이어도 된다 */
+    void (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionHandle connection, KiottyNetConnectionInfo info, KiottyNetCode reason);
+    void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
+} KiottyNetHttpServerHandler;
+
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetHttpServerHandler* handler, KiottyNetAppContext app_context);   /* 인자 추가. handler 는 NULL 이어도 된다 */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);</code></pre>
 
@@ -477,6 +484,20 @@ KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64
   <li><code>createHttpServer</code> 의 실패 이유가 보인다: <code>INVALID_ARGUMENT</code> (설정 미초기화, <code>response_bytes</code> 가 상태줄 + 라이브러리 헤더 자리보다 작음), <code>TLS_*</code>, <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>.</li>
   <li>라우트 함수의 코드는 user_guide 1.10 그대로다. 같은 path 에 다른 method 를 등록하는 것은 중복이 아니다.</li>
   <li><code>serveHttpMemory</code> 의 type 은 <code>BY_EXTENSION</code>, <code>EVENT_STREAM</code> 이 아니어야 한다. <code>CUSTOM</code> 도 받지 않는다 (1절 결정 13, <code>INVALID_ARGUMENT</code>). 텍스트 계열이면 등록 때 UTF-8 을 한 번 본다.</li>
+  <li><b>서버 handler.</b> 둘 다 IO thread 에서 불린다. base 의 <code>onDisconnected</code> / <code>onError</code> 와 같은 뜻이고 <code>app_context</code> 는 run 의 것이다 (라우트의 <code>app_context</code> 와 따로다).
+    <ul>
+      <li><code>onDisconnected</code> 는 연결마다 한 번, 끝나는 이유와 함께 온다: <code>SUCCESS</code> (keep-alive 아님, 다 보냄), <code>TIMEOUT</code> (header / keep-alive timeout), <code>PEER_CLOSED</code>, <code>PEER_NOT_READING</code> (send timeout), <code>PROTOCOL_ERROR</code> (400 / 413 / 414 / 431 / 501 뒤), <code>CLOSED</code> (서버 close). <code>connection</code> 은 <code>request-&gt;connection</code> 과 같은 값이라 앱이 요청과 이을 수 있다. 이 콜백 안에서 그 handle 은 이미 무효이므로 주소는 <code>info</code> 로 본다.</li>
+      <li><code>onError</code> 는 연결이 생기기 전이나 연결과 따로 생기는 문제다: <code>TABLE_FULL</code> (연결 수 초과), <code>TLS_*</code> (handshake 실패), accept 실패. base 의 <code>onError</code> 가 받는 것을 그대로 넘긴다. 잘못된 요청은 <code>onDisconnected</code> 의 reason 으로 오고 <code>onError</code> 로 두 번 오지 않는다.</li>
+      <li>요청 단위의 성공은 알리지 않는다 (라우트가 안다). <code>onConnected</code> (받을지 거절할지) 는 두지 않았다. IP 허용 목록이 필요해지면 그때 더한다.</li>
+    </ul>
+  </li>
+  <li><b>HEAD.</b> 라이브러리가 GET 라우트 (와 정적 경로) 로 처리하고 body 바이트만 보내지 않는다. <code>onRequest</code> 는 <code>request-&gt;method</code> 로 HEAD 인 것을 알 수 있지만 따로 처리하지 않아도 된다.
+    <ul>
+      <li>완성 응답: <code>Content-Length</code> 는 GET 일 때의 길이를 적고 body 를 떼고 보낸다.</li>
+      <li><code>onRequest</code> 에서 <code>setHttpBodyStream</code> 을 하고 <code>startHttpWork</code> 를 부른 스트림 라우트: HEAD 면 <b>Work 를 열지 않는다</b>. <code>startHttpWork</code> 는 <code>SUCCESS</code> 이고 <code>onWorkStarted</code> 는 불리지 않으며, 그때까지 놓인 status, 헤더, <code>Content-Type</code>, <code>Transfer-Encoding: chunked</code> 만 보내고 keep-alive 로 다음 요청을 읽는다. 그래서 스트림 라우트는 status 와 body 종류를 <code>onRequest</code> 에서 정하는 것을 권한다 (6절 예제).</li>
+      <li>그 밖의 Work (body 종류를 worker 가 정하는 것): Work 를 그대로 연다. worker 가 완성 응답으로 끝내면 body 를 떼고 보낸다. worker 가 스트림을 열면 첫 <code>writeHttpWorkChunk</code> 가 헤더만 보내고 <code>CLOSED</code> 를 돌려준다 (응답이 끝났다). worker 의 루프는 실패한 write 에서 이미 빠져나오므로 따로 처리할 것이 없다.</li>
+    </ul>
+  </li>
   <li>정적 서빙은 GET / HEAD 만 받는다. 다른 메서드는 405 + <code>Allow: GET, HEAD, OPTIONS</code>. 디렉토리 밑의 <code>..</code> 는 403, 없는 파일은 404 (user_guide 1.6 그대로).</li>
 </ul>
 
@@ -510,7 +531,8 @@ public:
     explicit operator bool() const;
     KiottyNetCode             code() const;                     // 추가
     KiottyNetHttpServerHandle handle() const;
-    ...                                                         // route / get / ... / notFound 의 두 overload, serve* (serveMemory 는 type 이 enum), run / close / await
+    ...                                                         // route / get / ... / notFound 의 두 overload, serve* (serveMemory 는 type 이 enum), close / await
+    KiottyNetCode             run(const KiottyNetHttpServerHandler&amp; handler, KiottyNetAppContext app_context);   // 인자 추가. 인자 없는 run() 은 handler 없이
 };</code></pre>
 
 <p>C++ 의 <code>file()</code> 은 인자 순서를 C 와 다르게 (path 가 먼저) 두고 type 에 기본값을 준다. 기본값이 있는 인자는 뒤에 와야 해서다. C 는 다른 body setter 와 같이 type 이 먼저다.</p>
@@ -591,40 +613,44 @@ static void onPostWork(KiottyNetAppContext app_context, const KiottyNetHttpReque
     });
 }
 
-static void onGet(KiottyNetAppContext, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r)
+static void onGet(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r)
 {
+    McpApp*                app = static_cast&lt;McpApp*&gt;(app_context);
     KiottyNet_HttpResponse response(r);
     if (!acceptsEventStream(KiottyNet_findHttpHeader(request, "Accept")))
     {
         response.status(KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED);
         return;
     }
+    if (!app-&gt;sessions.has(KiottyNet_findHttpHeader(request, "Mcp-Session-Id")))
+    {
+        response.status(KIOTTY_NET_HTTP_STATUS_NOT_FOUND);
+        return;
+    }
+    response.header("Cache-Control", "no-cache");
+    response.bodyStream(KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);                // 스트림의 헤더는 여기서 정한다. HEAD 면 이것만 나가고 Work 는 열리지 않는다
     response.startWork();
 }
 
-static void onGetWork(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle r, KiottyNetHttpWorkHandle w)
+static void onGetWork(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle, KiottyNetHttpWorkHandle w)
 {
     McpApp*            app = static_cast&lt;McpApp*&gt;(app_context);
     std::string        session = textOf(KiottyNet_findHttpHeader(request, "Mcp-Session-Id"));
     std::string        last_event_id = textOf(KiottyNet_findHttpHeader(request, "Last-Event-ID"));
     KiottyNet_HttpWork work(w);
-    app-&gt;pool.post([app, session, last_event_id, r, work = std::move(work)]() mutable
+    app-&gt;pool.post([app, session, last_event_id, work = std::move(work)]() mutable
     {
-        KiottyNet_HttpResponse response(r);
-        EventQueue*            queue = app-&gt;sessions.attachStream(session);       // 세션당 스트림 하나. 없거나 이미 있으면 nullptr
+        EventQueue* queue = app-&gt;sessions.attachStream(session);                // 세션당 스트림 하나. 이미 있으면 nullptr
         if (queue == nullptr)
         {
-            response.status(KIOTTY_NET_HTTP_STATUS_NOT_FOUND);
-            work.finishWithResponse();
+            work.finishWithClose();                                             // 헤더를 아직 안 보냈지만 status 는 이미 200 이라 닫는다
             return;
         }
-        response.header("Cache-Control", "no-cache");
-        response.bodyStream(KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);
-        queue-&gt;replayAfter(last_event_id);                                        // 재개는 앱
+        queue-&gt;replayAfter(last_event_id);                                    // 재개는 앱
         while (true)
         {
             std::string event;
-            bool        has_event = queue-&gt;waitFor(event, 15000);                 // 15 초마다 ping
+            bool        has_event = queue-&gt;waitFor(event, 15000);             // 15 초마다 ping
             if (!has_event)
             {
                 event = ": ping\n\n";
@@ -632,11 +658,11 @@ static void onGetWork(KiottyNetAppContext app_context, const KiottyNetHttpReques
             KiottyNetResult sent = work.write(span(event), 5000);
             if (sent.code != KIOTTY_NET_CODE_SUCCESS)
             {
-                break;                                                             // 상대가 끊음, 서버 close, timeout
+                break;                                                         // 상대가 끊음, 서버 close, timeout
             }
             if (queue-&gt;closed())
             {
-                work.finishWithResponse();                                         // DELETE 로 세션이 끝남. 끝 chunk
+                work.finishWithResponse();                                     // DELETE 로 세션이 끝남. 끝 chunk
                 app-&gt;sessions.detachStream(session);
                 return;
             }
@@ -668,7 +694,10 @@ int main()
     server.del ("/mcp", KiottyNet_makeHttpRoute(&amp;app, onDelete, nullptr));
     server.serveDirectory("/", "./www/");                                       // 장비의 웹 UI. 라우트 뒤에 등록
 
-    std::thread io([&amp;] { server.run(); });
+    KiottyNetHttpServerHandler events{};
+    events.onDisconnected = onDisconnected;                                     // 감사 로그 : 주소, 끝난 이유 (PEER_NOT_READING 등)
+    events.onError        = onError;                                            // 연결 수 초과, TLS 실패
+    std::thread io([&amp;] { server.run(events, &amp;app); });
     ...
     server.close();
     io.join();
@@ -699,7 +728,7 @@ int main()
   <tr><td><code>writeHttpWorkChunk</code></td><td><code>INVALID_ARGUMENT</code></td><td>body 가 스트림이 아니다, data 가 비었다</td></tr>
   <tr><td></td><td><code>TIMEOUT</code>, <code>PEER_CLOSED</code>, <code>CLOSED</code></td><td>Stream 의 코드 그대로. 그 뒤는 <code>finishHttpWorkWithClose</code> 뿐</td></tr>
   <tr><td>handle 을 받는 전부</td><td><code>PEER_CLOSED</code></td><td>닫힌 handle</td></tr>
-  <tr><td>연결의 끝 (Work 아닌 송신)</td><td><code>PEER_NOT_READING</code></td><td>base 의 send timeout. HTTP 에는 콜백이 없어 보이지 않고 연결만 닫힌다 (10절의 정할 것 4)</td></tr>
+  <tr><td>연결의 끝 (Work 아닌 송신)</td><td><code>PEER_NOT_READING</code></td><td>base 의 send timeout. 서버 handler 의 <code>onDisconnected</code> reason 으로 온다 (1절 결정 15)</td></tr>
 </table>
 
 <h2 id="s8">8. 안에서 : base 의 어느 모양인가</h2>
@@ -714,7 +743,7 @@ int main()
   <tr><td>Work 스트림의 write</td><td><code>KiottyNet_writeConnectionStream(stream, data, timeout)</code></td><td>(첫 호출이면 헤더 블록) + 머리 + data + 꼬리. <code>send_capacity</code> 안이면 응답 버퍼에서 조립해 한 번, 넘으면 머리 / data / 꼬리를 차례로. Work 중에는 drain 이 막혀 끼어드는 것이 없다 (1절 결정 7). timeout 은 <code>Deadline</code> 하나로 세 write 에 걸친다</td></tr>
   <tr><td>Work 스트림의 끝</td><td><code>closeConnectionStream(stream, thenWrite(...))</code></td><td><code>finishHttpWorkWithResponse</code> = <code>closeConnectionStream(stream, thenWrite("0\r\n\r\n"))</code>. WRITTEN 이 <code>Sending</code> 행으로 오고 보낼 조각이 더 없으므로 keep-alive 를 가른다 (구현 가이드 4.7 의 <code>onSent</code> 그대로)</td></tr>
   <tr><td>Work 없는 스트림 body</td><td></td><td><code>afterHandle</code> 이 body 가 STREAM 이고 Work 가 아니면 응답을 500 으로 바꾸고 <code>keep_alive = 0</code></td></tr>
-  <tr><td>HEAD</td><td></td><td>GET 라우트를 실행하고 body 를 떼어 헤더만. 스트림이면 Work 를 시작하지 않고 헤더 (<code>Transfer-Encoding: chunked</code>) 만 보낸다. 10절의 정할 것 5</td></tr>
+  <tr><td>HEAD</td><td></td><td>GET 라우트를 실행하고 body 를 떼어 헤더만. <code>onRequest</code> 가 스트림 body 를 정하고 <code>startHttpWork</code> 를 부르면 Work 를 열지 않고 헤더만 보낸 뒤 keep-alive (4.9, 1절 결정 16). Session 에 "HEAD 요청" 비트 하나</td></tr>
   <tr><td>정적 파일</td><td></td><td>구현 가이드 4.7 의 조각 송신 (응답 버퍼의 헤더 자리를 파일 읽기 staging 으로). sendfile 은 쓰지 않는다</td></tr>
 </table>
 
@@ -732,17 +761,13 @@ int main()
   <tr><td>WebSocket Upgrade</td><td>http.h, <code>HttpServer::upgrade</code></td><td>websocket.h 로 미룸</td><td>websocket.h. <code>HttpServer::upgrade</code> 는 없다</td></tr>
   <tr><td>정적 파일 송신</td><td>sendfile / TransmitFile "가능하면"</td><td>chunk</td><td>응답 버퍼 조각. sendfile 없음</td></tr>
   <tr><td>base 송신</td><td>requirement 4절 "write lane 먼저"</td><td>코드는 "notify 먼저, 한 맥락"</td><td>한 WRITE 에 send 다음 notify (2.1), send timeout (2.2)</td></tr>
+  <tr><td><code>runHttpServer</code></td><td><code>run(handler, app_context)</code> (7절 표)</td><td><code>(server)</code></td><td><code>(server, handler, app_context)</code>. handler 는 <code>onDisconnected</code>, <code>onError</code></td></tr>
   <tr><td>HttpClient</td><td>11절 초안</td><td>없음</td><td>다음 판 (1절 결정 10)</td></tr>
 </table>
 
 <h2 id="s10">10. 정할 것</h2>
 
-<p>2026-11-11 에 1, 2, 3, 6 은 정했다 (1절 결정 11 ~ 14). 남은 둘은 <code>docs/learning/http-request-cycle.html</code> 에 배경을 풀어 썼다.</p>
-
-<ol>
-  <li value="4"><b>HTTP 층에서 연결의 끝 사유를 알릴지.</b> HttpServer 에는 연결 단위 콜백이 없다 (라우트뿐). 그래서 완성 응답을 보내다 <code>PEER_NOT_READING</code> 으로 끊긴 연결, 연결 수 초과 (<code>TABLE_FULL</code>), 잘못된 요청 (400 / 413 / 431), TLS 핸드셰이크 실패가 앱의 로그에 남지 않는다. 서버 단위 <code>onError(app_context, info, code, message)</code> 하나를 <code>createHttpServer</code> 나 run 에 둘지 정해 달라 (base, StateMachine 의 <code>onError</code> 와 같은 시그니처). 추천: 둔다.</li>
-  <li value="5"><b>HEAD 가 스트림 GET 라우트에 오는 것.</b> HEAD 는 "GET 과 같은 헤더를 주되 body 는 빼라" 이다. GET 라우트가 Work 스트림이면 헤더를 정하는 것이 worker 라서, 라이브러리가 GET 으로 실행하면 끝나지 않는 스트림을 열고 body 를 버리게 된다. 고를 길: (a) 라이브러리는 HEAD 를 GET 라우트로 부르기만 하고 <code>onRequest</code> 가 <code>request-&gt;method</code> 를 보고 직접 답한다, (b) Work 를 시작한 HEAD 는 라이브러리가 헤더만 보내고 Work 를 열지 않는다. 추천: (a).</li>
-</ol>
+<p>모두 정했다 (2026-11-11, 1절 결정 11 ~ 16). 배경은 <code>docs/learning/http-request-cycle.html</code>.</p>
 
 <h2 id="s11">11. 사이클</h2>
 
@@ -753,8 +778,8 @@ int main()
   <tr><td>B1 base 송신</td><td>2.1 (IoPayload 조각 둘, <code>SendFlow::select</code> 가 send 다음 notify, release 가 두 길이, backend 넷의 gather 송신, TLS 의 encode 순서, NotificationDesk 의 여러 조각 복사) 과 2.2 (설정 필드, configure 둘, <code>PEER_NOT_READING</code>, Connection 의 송신 deadline, IoLoop 의 대기 시간). requirement 4절의 송신 순서와 Work 중 송신. 구현 가이드 1.6</td><td>매트릭스 초록. 새 테스트: notify 가 계속 들어와도 write lane 이 나간다 (굶지 않음), 한 WRITE 에 둘이 실리고 순서가 send → notify, TLS 에서도 같은 순서, 읽지 않는 상대가 <code>send_timeout</code> 뒤 <code>PEER_NOT_READING</code> 으로 끊김. benchmark <code>EchoRoundtrip</code>, <code>NotifyLatency</code> 전후 비교</td></tr>
   <tr><td>H1 공개 API 판 v2</td><td>4절의 http.h (C 와 C++). enum 둘, <code>setHttpCustomContentType</code>, body setter 의 type, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>, <code>KiottyNetHttpServerResult</code>, 가드된 server handle typedef. user_guide_http 를 이 판으로. <code>src/kiotty_net_http.cpp</code> 는 아직 비어 있다</td><td>네 헤더 syntax check. <code>Headers.*</code> 에 http 의 struct 와 enum</td></tr>
   <tr><td>H2 파서</td><td><code>domain/usecases/http/</code>: request line, header line, chunk size, <code>Content-Length</code>, <code>Connection</code>, keep-alive, path 매칭 (정확 / <code>/*</code> / 디렉토리 접두), content type 표 (enum ↔ 문자열, 확장자 → enum), CUSTOM 이름 검사. core 의 parse 셋 위. 수칙 2.10 의 다섯 입력</td><td>unit 전부 초록. 할당 0</td></tr>
-  <tr><td>H3 완성 응답</td><td>HttpSession, 라우트 표, HTTP_MACHINE (구현 가이드 4.3), setter, 자동 응답 (404 / 405 / 501 / 413 / 414 / 431 / OPTIONS / HEAD), keep-alive, <code>runHttpServer</code>, HttpServer 를 Context 풀에. 3.1 만</td><td>integration: 메서드별 라우트, keep-alive 로 요청 둘, 413 / 431, HEAD, content type enum 과 CUSTOM, <code>Content-Type</code> 헤더 거부, UTF-8 아닌 JSON body 거부. 공개 C API 만</td></tr>
-  <tr><td>H4 Work 와 Work 스트림</td><td><code>startHttpWork</code>, <code>onWorkStarted</code>, <code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>. 3.2</td><td>integration: Work 뒤 JSON 응답, 스트림으로 이벤트 셋 뒤 keep-alive 로 다음 요청, 큰 chunk (<code>send_capacity</code> 의 여러 배), 상대가 끊었을 때 write 의 <code>PEER_CLOSED</code>, 서버 close 중 write 의 <code>CLOSED</code>, Work 없는 스트림 body 의 500. benchmark: chunk 1 KiB × 1000 의 latency</td></tr>
+  <tr><td>H3 완성 응답</td><td>HttpSession, 라우트 표, HTTP_MACHINE (구현 가이드 4.3), setter, 자동 응답 (404 / 405 / 501 / 413 / 414 / 431 / OPTIONS / HEAD), keep-alive, <code>runHttpServer</code>, HttpServer 를 Context 풀에. 3.1 만</td><td>integration: 메서드별 라우트, keep-alive 로 요청 둘, 413 / 431, HEAD (완성 응답의 Content-Length), 서버 handler 의 onDisconnected reason (SUCCESS, TIMEOUT, PROTOCOL_ERROR) 과 onError (TABLE_FULL), content type enum 과 CUSTOM, <code>Content-Type</code> 헤더 거부, UTF-8 아닌 JSON body 거부. 공개 C API 만</td></tr>
+  <tr><td>H4 Work 와 Work 스트림</td><td><code>startHttpWork</code>, <code>onWorkStarted</code>, <code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>setHttpBodyStream</code>, <code>writeHttpWorkChunk</code>. 3.2</td><td>integration: HEAD 가 스트림 라우트에 오면 onWorkStarted 없이 헤더만 오고 같은 연결로 다음 요청, worker 가 정한 스트림에 HEAD 면 첫 write 가 CLOSED, Work 뒤 JSON 응답, 스트림으로 이벤트 셋 뒤 keep-alive 로 다음 요청, 큰 chunk (<code>send_capacity</code> 의 여러 배), 상대가 끊었을 때 write 의 <code>PEER_CLOSED</code>, 서버 close 중 write 의 <code>CLOSED</code>, Work 없는 스트림 body 의 500. benchmark: chunk 1 KiB × 1000 의 latency</td></tr>
   <tr><td>H5 정적 서빙</td><td><code>serveHttpDirectory / File / Memory</code>, <code>setHttpFile</code>, <code>BY_EXTENSION</code>, <code>..</code> 거부, 조각 송신</td><td>integration: 디렉토리 밑 파일, 없는 파일 404, <code>..</code> 403, 메모리 바이너리, 큰 파일, 확장자별 content type</td></tr>
   <tr><td>H6 문서와 MCP 예제</td><td>requirement 9절을 이 판으로, 구현 가이드 4절에 스트림과 content type, 테스트 계획 17절, <code>tests/integration</code> 에 6절의 MCP 서버 골격을 테스트로 (JSON 없이 문자열), progress</td><td>MCP 예제 테스트 초록</td></tr>
 </table>

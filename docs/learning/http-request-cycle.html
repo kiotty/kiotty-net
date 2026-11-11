@@ -33,7 +33,7 @@ th{background:var(--th)}
 <main>
 
 <h1>HTTP 요청 하나의 일생 : kiotty-net HttpServer</h1>
-<p class="sub">2026-11-11. <code>docs/design/design_http_v0.html</code> (HTTP 설계 v0) 의 "정할 것" 4, 5 가 무슨 뜻인지 알려면 요청 하나가 들어와서 나갈 때까지의 전체 흐름이 필요하다. 1 ~ 6절이 그 흐름이고, 7절과 8절이 정할 것 4, 5 의 풀이다. 아직 코드는 없다. 설계 v0 와 구현 가이드 4절의 모양으로 적었다.</p>
+<p class="sub">2026-11-11 (같은 날 정할 것 4, 5 결정 반영). <code>docs/design/design_http_v0.html</code> (HTTP 설계 v0) 의 "정할 것" 4, 5 가 무슨 뜻인지 알려면 요청 하나가 들어와서 나갈 때까지의 전체 흐름이 필요하다. 1 ~ 6절이 그 흐름이고, 7절과 8절이 정할 것 4, 5 의 풀이다. 아직 코드는 없다. 설계 v0 와 구현 가이드 4절의 모양으로 적었다.</p>
 
 <h2>1. 등장인물</h2>
 
@@ -147,6 +147,8 @@ IO thread   keep-alive 면 [ReadingRequestLine]</code></pre>
 
 <h2>7. 정할 것 4 풀이 : "모름" 칸을 어떻게 할까</h2>
 
+<div class="box tip"><b>결정 (2026-11-11).</b> HttpServer 도 <code>onDisconnected</code> 와 <code>onError</code> 를 둔다. <code>KiottyNetHttpServerHandler</code> 를 <code>runHttpServer(server, handler, app_context)</code> 로 받는다 (설계 4.9, 결정 15). 6절 표의 "모름" 은 전부 <code>onDisconnected</code> 의 reason 이나 <code>onError</code> 로 온다. 아래는 정하기 전의 풀이다.</div>
+
 <p>base 층과 StateMachine 층에는 연결 단위 콜백이 있다. 연결이 끝나면 <code>onDisconnected(..., reason)</code> 이 불리고, 오류는 <code>onError(app_context, info, code, message)</code> 로 온다. 그런데 <b>HttpServer 의 공개 API 에는 라우트 콜백 (<code>onRequest</code>, <code>onWorkStarted</code>) 만 있다.</b> 라이브러리 안에서는 위 표의 사유를 전부 알지만, 앱에 건네줄 구멍이 없다. 그래서 6절 표의 "모름" 은 조용히 사라진다.</p>
 
 <div class="box warn"><b>왜 문제가 되나.</b> 의료 장비에서는 "누가 언제 접속했고 왜 끊겼나" 가 감사 로그 (audit log) 와 장애 분석에 필요하다. 예: 원격 뷰어가 큰 DICOM 파일을 받다가 30 초 동안 읽지 않아 끊겼는데 장비 로그에는 아무것도 없다. TLS 인증서가 만료되어 모든 클라이언트가 handshake 에서 떨어지는데 앱은 "요청이 안 온다" 고만 본다.</div>
@@ -158,6 +160,8 @@ IO thread   keep-alive 면 [ReadingRequestLine]</code></pre>
 </ul>
 
 <h2>8. 정할 것 5 풀이 : HEAD</h2>
+
+<div class="box tip"><b>결정 (2026-11-11).</b> 라이브러리가 처리한다 (설계 4.9, 결정 16). <code>onRequest</code> 에서 스트림 body 를 정하고 <code>startHttpWork</code> 를 부른 라우트는 HEAD 면 Work 를 열지 않고 헤더만 보낸 뒤 다음 요청으로 간다. body 종류를 worker 가 정하는 라우트는 Work 를 열고, 스트림이면 첫 write 가 헤더만 보내고 <code>CLOSED</code> 를 돌려준다. 앱이 <code>request-&gt;method</code> 를 보고 직접 처리해도 된다. 아래는 정하기 전의 풀이다.</div>
 
 <h3>8.1 HEAD 가 뭔가</h3>
 <p>HTTP 메서드의 하나다. 뜻은 "GET 을 보냈을 때 받을 <b>헤더만</b> 달라. body 는 빼라" 이다. 파일을 받지 않고 크기 (<code>Content-Length</code>), 종류 (<code>Content-Type</code>), 있는지 (200 / 404) 만 보고 싶을 때 쓴다.</p>
@@ -205,8 +209,8 @@ IO thread   keep-alive 면 [ReadingRequestLine]</code></pre>
 <h2>10. 한 줄 요약</h2>
 <ul>
 <li>요청은 라이브러리가 끝까지 읽고, 앱은 <code>onRequest</code> 에서 답하거나 (A) worker 에 넘긴다 (B, C). worker 는 쓰기만 한다.</li>
-<li>모양 C 의 문제는 worker 의 write 반환값이 다 알려 준다. 모양 A / B 와 연결 단계의 문제는 앱에 갈 길이 없다 → 정할 것 4.</li>
-<li>HEAD 는 모양 A 에서는 라이브러리가 body 만 떼면 끝이지만, 모양 C 에서는 헤더를 worker 가 정해 꼬인다 → 정할 것 5.</li>
+<li>모양 C 의 문제는 worker 의 write 반환값이 다 알려 준다. 모양 A / B 와 연결 단계의 문제는 서버 handler 의 <code>onDisconnected</code> / <code>onError</code> 로 온다 (결정 15).</li>
+<li>HEAD 는 모양 A 에서는 라이브러리가 body 만 떼면 끝이다. 모양 C 는 스트림의 헤더를 <code>onRequest</code> 에서 정해 두면 라이브러리가 Work 없이 헤더만 보낸다 (결정 16).</li>
 </ul>
 
 </main>
