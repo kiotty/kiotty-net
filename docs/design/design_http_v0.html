@@ -57,7 +57,7 @@
 <body>
 
 <h1>kiotty_net_http.h 설계 v0</h1>
-<p class="sub">2026-11-10 (같은 날 두 번 고침). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
+<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 1, 2, 3, 6 반영, content type 목록 확장). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
 
 <p>우선순위: 공개 헤더의 모양은 사용자가 정한 것을 따른다 (수칙 0.2, DV13). <code>requirement_v0.md</code> 9절, <code>user_guide_http.md</code> 와 다르면 이 문서가 새것이다 (9절이 차이). 이 문서의 코드 블록 안 주석은 설명용이고 소스에는 주석을 두지 않는다 (수칙 4.9).</p>
 
@@ -136,6 +136,10 @@
   <tr><td>8</td><td><b>base 의 송신 순서는 (c) "한 WRITE 에 send 다음 notify, 둘 다".</b> 2.1</td><td>지금 코드 (설계 v4 9.6: 한 WRITE 에 한 맥락, notify 먼저) 는 notify 가 계속 들어오면 응답이 굶는다. 처음 의도 (<code>design_base_v7_feedback.html</code> 2절: 같이 싣는다) 로 돌아간다</td></tr>
   <tr><td>9</td><td><b>base 에 송신 timeout 을 둔다.</b> 상대가 읽지 않아 WRITE 가 끝나지 않으면 서버가 끊고 <code>onDisconnected</code> 의 reason 으로 알린다. 2.2</td><td>읽지 않는 클라이언트가 Session 과 push Stage 를 붙잡는다. worker 가 thread 를 오래 붙잡는 것은 사용자의 handler 과실이라 계산하지 않는다</td></tr>
   <tr><td>10</td><td>HttpClient 는 이 판에 넣지 않는다. MCP 클라이언트는 연결을 둘 이상 연다 (GET 스트림 하나, 요청 하나 이상) 는 전제로 다음 판에서 "body 를 받은 만큼 꺼내는 read" 하나를 정한다</td><td>SSE 응답은 끝나지 않는 body 하나라 통째로 돌려주는 API 로는 받을 수 없다</td></tr>
+  <tr><td>11</td><td>GET 스트림 하나가 worker 하나를 쓰는 것을 받아들인다 (2026-11-11)</td><td>MCP 의 GET 스트림은 클라이언트 (session) 마다 따로다. 같은 알림을 여러 클라이언트에 보낼 때도 앱이 session 마다의 큐에 넣고 각 worker 가 자기 스트림에 쓴다. 한 스트림을 여럿에게 나눠 보내는 일 (fan-out) 은 MCP 에 없다. 많은 브라우저에 실시간으로 뿌리는 일은 WebSocket 의 broadcast 가 맡는다</td></tr>
+  <tr><td>12</td><td><code>send_timeout_milliseconds</code> 기본값 30000 (2026-11-11)</td><td>끊긴 쪽은 session 정보로 다시 연결해 이어 가면 된다. 무한 (0) 은 읽지 않는 상대가 Session 을 붙잡는다</td></tr>
+  <tr><td>13</td><td><code>serveHttpMemory</code> 는 <code>CUSTOM</code> 을 받지 않는다. 대신 enum 목록을 넓힌다 (DICOM, FHIR, protobuf, msgpack, cbor, 글꼴, 소리 / 영상, 묶음 등). <code>CUSTOM</code> 은 파라미터 (<code>; boundary=...</code>) 를 받는다 (2026-11-11)</td><td>내부 프로젝트 (웹 UI, 게임, DICOM, MCP) 에서 쓸 것을 미리 넣고, 더 필요하면 그때 enum 에 붙인다</td></tr>
+  <tr><td>14</td><td>C++ 의 타입별 줄임 메서드 (<code>json()</code>, <code>text()</code>) 는 두지 않는다 (2026-11-11)</td><td><code>body(type, data)</code> 하나로 충분하다</td></tr>
 </table>
 
 <h2 id="s2">2. base 에 먼저 필요한 것</h2>
@@ -182,7 +186,7 @@ typedef enum KiottyNetCode {
 <ul>
   <li><b>판정.</b> Connection 이 WRITE 를 걸 때 시각을 적고 완료 때 지운다. 상대의 수신 창이 0 이고 OS 송신 버퍼가 차면 WRITE 가 끝나지 않는다 (IOCP 는 완료가 오지 않고, epoll / kqueue 는 listener 가 EPOLLOUT 을 기다린다). 그 시간이 <code>send_timeout</code> 을 넘으면 걸린 WRITE 를 취소하고 <code>close(PEER_NOT_READING)</code>. IoLoop 의 대기 시간은 read deadline 과 이 송신 deadline 중 가까운 쪽이다.</li>
   <li><b>알림.</b> 콜백 API 는 <code>onDisconnected(..., KIOTTY_NET_CODE_PEER_NOT_READING)</code>, StateMachine 은 CLOSED 이벤트의 <code>reason</code>. HTTP 와 WebSocket 은 그 reason 을 그대로 쓴다 (WebSocket 은 <code>onClose</code> 의 <code>code</code>, status 1006).</li>
-  <li><b>기본값.</b> 30000 을 추천한다 (10절의 정할 것 2). 0 은 무한이라는 규칙 (statemachine 설계의 결정) 을 지킨다.</li>
+  <li><b>기본값.</b> 30000 (1절 결정 12). 끊긴 클라이언트는 자기가 가진 session 정보 (MCP 의 <code>Mcp-Session-Id</code>, 게임의 session 토큰) 로 다시 연결해 이어 간다. 0 은 무한이라는 규칙 (statemachine 설계의 결정) 을 지킨다.</li>
   <li><b>대상 밖.</b> Work 중 worker 의 동기 write (<code>writeConnectionStream</code>, <code>writeHttpWorkChunk</code>) 는 호출마다 자기 timeout 이 있고 <code>TIMEOUT</code> 을 돌려준다. worker 가 thread 를 오래 붙잡는 것은 사용자의 handler 과실로 보고 라이브러리가 재지 않는다.</li>
   <li>push Stage 가 차서 <code>notify</code> 가 <code>BUFFER_FULL</code> 을 돌려주는 동안에도 그 연결의 WRITE 는 걸려 있으므로, 읽지 않는 상대는 결국 이 timeout 으로 끊긴다.</li>
 </ul>
@@ -290,35 +294,80 @@ KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int3
 <h3>4.3 content type <span class="tag new">추가</span></h3>
 
 <pre><code>typedef enum KiottyNetHttpContentType {
-    KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,      /* application/octet-stream */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN,        /* text/plain; charset=utf-8                 UTF-8 검사 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_HTML,         /* text/html; charset=utf-8                  UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSS,          /* text/css; charset=utf-8                   UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSV,          /* text/csv; charset=utf-8                   UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_JAVASCRIPT,        /* text/javascript; charset=utf-8            UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_JSON,              /* application/json                          UTF-8 (JSON 문법은 보지 않는다) */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_XML,               /* application/xml                           UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM,      /* text/event-stream                         UTF-8. setHttpBodyStream 만 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,      /* application/octet-stream                  .bin */
+
+    /* 텍스트. 모두 "; charset=utf-8" 을 붙이고 UTF-8 을 검사한다 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN,        /* text/plain                                .txt   base64 / base32 로 바꾼 데이터도 이것 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_HTML,         /* text/html                                 .html .htm */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSS,          /* text/css                                  .css */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSV,          /* text/csv                                  .csv */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_MARKDOWN,     /* text/markdown                             .md */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JAVASCRIPT,        /* text/javascript                           .js .mjs */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM,      /* text/event-stream                         setHttpBodyStream 만 */
+
+    /* 구조화 데이터 (텍스트). UTF-8 만 검사하고 문법은 보지 않는다 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JSON,              /* application/json                          .json .map */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROBLEM_JSON,      /* application/problem+json                  RFC 9457 오류 본문 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_NDJSON,            /* application/x-ndjson                      .ndjson  줄마다 JSON 하나 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MANIFEST_JSON,     /* application/manifest+json                 .webmanifest */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_XML,               /* application/xml                           .xml */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_YAML,              /* application/yaml                          .yaml .yml */
     KIOTTY_NET_HTTP_CONTENT_TYPE_FORM_URLENCODED,   /* application/x-www-form-urlencoded */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_PNG,               /* image/png */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_JPEG,              /* image/jpeg */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_GIF,               /* image/gif */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_SVG,               /* image/svg+xml                             UTF-8 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_ICON,              /* image/x-icon */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBP,              /* image/webp */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF2,             /* font/woff2 */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_WASM,              /* application/wasm */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_PDF,               /* application/pdf */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION,      /* 파일 (setHttpFile, 정적 경로) 에만. 확장자로 위의 하나를 고르고, 모르는 확장자는 OCTET_STREAM */
-    KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM,            /* 목록 밖. setHttpCustomContentType 의 문자열 */
+
+    /* 의료 (DICOM, FHIR) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM,             /* application/dicom                         .dcm   DICOM Part 10 파일. 바이너리 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_JSON,        /* application/dicom+json                    DICOMweb 메타데이터. UTF-8 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_XML,         /* application/dicom+xml                     DICOMweb 메타데이터. UTF-8 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_JSON,         /* application/fhir+json                     UTF-8 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_XML,          /* application/fhir+xml                      UTF-8 */
+
+    /* 바이너리 직렬화 (게임, 장비 간 통신) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROTOBUF,          /* application/x-protobuf                    .pb */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MSGPACK,           /* application/msgpack                       .msgpack */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CBOR,              /* application/cbor                          .cbor */
+
+    /* 이미지 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PNG,               /* image/png                                 .png */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JPEG,              /* image/jpeg                                .jpg .jpeg */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GIF,               /* image/gif                                 .gif */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBP,              /* image/webp                                .webp */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_AVIF,              /* image/avif                                .avif */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BMP,               /* image/bmp                                 .bmp */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_SVG,               /* image/svg+xml                             .svg   UTF-8 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ICON,              /* image/x-icon                              .ico */
+
+    /* 글꼴 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF,              /* font/woff                                 .woff */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF2,             /* font/woff2                                .woff2 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TTF,               /* font/ttf                                  .ttf */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OTF,               /* font/otf                                  .otf */
+
+    /* 소리, 영상 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP3,               /* audio/mpeg                                .mp3 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WAV,               /* audio/wav                                 .wav */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OGG,               /* audio/ogg                                 .ogg */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP4,               /* video/mp4                                 .mp4 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBM,              /* video/webm                                .webm */
+
+    /* 문서, 묶음 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PDF,               /* application/pdf                           .pdf */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ZIP,               /* application/zip                           .zip */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GZIP,              /* application/gzip                          .gz */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TAR,               /* application/x-tar                         .tar */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WASM,              /* application/wasm                          .wasm */
+
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION,      /* 파일 (setHttpFile, 정적 경로) 에만. 위 주석의 확장자로 고르고, 모르는 확장자는 OCTET_STREAM */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM,            /* 목록 밖, 또는 파라미터가 필요한 것 (multipart 의 boundary). setHttpCustomContentType 의 문자열 */
     KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT
 } KiottyNetHttpContentType;
 
 KiottyNetCode KiottyNet_setHttpCustomContentType(KiottyNetHttpResponseHandle response, const char* content_type);</code></pre>
 
 <ul>
+  <li><b>목록은 쓰는 곳 넷에서 뽑았다.</b> 장비 웹 UI (텍스트, 이미지, 글꼴, 소리 / 영상, wasm, manifest), 게임 (protobuf, msgpack, cbor, json), DICOM / 의료 (dicom, dicom+json, dicom+xml, fhir), MCP (json, event-stream, problem+json). base64 나 base32 로 바꾼 파일은 ASCII 텍스트라 <code>TEXT_PLAIN</code> 이다 (base32 전용 MIME 은 없다).</li>
+  <li><b>DICOMweb 의 <code>multipart/related</code>.</b> WADO-RS 응답과 STOW-RS 요청은 <code>multipart/related; type="application/dicom"; boundary=...</code> 이다. boundary 가 응답마다 달라 enum 하나로 적을 수 없으므로 <code>CUSTOM</code> 이고, 각 part 를 만드는 일 (boundary 줄, part 헤더) 은 앱이 한다. 요청 쪽 multipart 의 해석도 앱이다 (<code>findHttpHeader</code> 로 Content-Type 을 읽는다).</li>
   <li><b>목록 안이면 enum 하나로 끝난다.</b> 라이브러리가 표에서 문자열을 꺼내 <code>Content-Type</code> 을 쓴다. 오타가 없다.</li>
-  <li><b>목록 밖이면 두 줄이다.</b> <code>setHttpCustomContentType(response, "application/x-protobuf")</code> 로 이름을 먼저 정하고, body setter 에 <code>KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM</code> 을 넘긴다. 이름이 정해지지 않은 채 <code>CUSTOM</code> 이 오면 body setter 가 <code>INVALID_ARGUMENT</code>. 이름은 <code>parseText</code> 를 지나고 (UTF-8, <code>KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH</code> 미만), <code>token/token</code> 모양과 CR / LF 가 없는지 본다 (헤더 주입 방지). 그 응답 하나에만 유효하다.</li>
+  <li><b>목록 밖이면 두 줄이다.</b> <code>setHttpCustomContentType(response, "multipart/related; type=\"application/dicom\"; boundary=b1")</code> 로 이름을 먼저 정하고, body setter 에 <code>KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM</code> 을 넘긴다. 이름이 정해지지 않은 채 <code>CUSTOM</code> 이 오면 body setter 가 <code>INVALID_ARGUMENT</code>. 이름은 <code>parseText</code> 를 지나고 (UTF-8, <code>KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH</code> 미만), <code>token/token</code> 모양 뒤에 <code>; 이름=값</code> 파라미터가 0 개 이상 오는지와 CR / LF 가 없는지 본다 (헤더 주입 방지). 그 응답 하나에만 유효하다.</li>
   <li><b>content type 은 body 에서만 적는다.</b> <code>setHttpHeader(response, "Content-Type", ...)</code> 는 <code>INVALID_ARGUMENT</code> (이름 비교는 대소문자 무시).</li>
   <li><b>텍스트 계열은 UTF-8 을 본다.</b> 주석에 "UTF-8" 이 있는 값이다. body setter (복사, 참조) 는 setter 를 부를 때, 스트림은 chunk 마다. UTF-8 이 아니면 <code>INVALID_ENCODING</code> 이고 body 는 바뀌지 않는다. 파일과 <code>BY_EXTENSION</code> 은 보지 않는다 (요청 때 파일 전체를 읽어야 한다). <code>CUSTOM</code> 도 보지 않는다.</li>
   <li><b>status 만 놓고 body 가 없으면</b> <code>Content-Type</code> 은 없다 (202, 204 등).</li>
@@ -427,7 +476,7 @@ KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64
 <ul>
   <li><code>createHttpServer</code> 의 실패 이유가 보인다: <code>INVALID_ARGUMENT</code> (설정 미초기화, <code>response_bytes</code> 가 상태줄 + 라이브러리 헤더 자리보다 작음), <code>TLS_*</code>, <code>TABLE_FULL</code>, <code>OUT_OF_MEMORY</code>.</li>
   <li>라우트 함수의 코드는 user_guide 1.10 그대로다. 같은 path 에 다른 method 를 등록하는 것은 중복이 아니다.</li>
-  <li><code>serveHttpMemory</code> 의 type 은 <code>BY_EXTENSION</code>, <code>EVENT_STREAM</code> 이 아니어야 한다. <code>CUSTOM</code> 은 10절의 정할 것 3. 텍스트 계열이면 등록 때 UTF-8 을 한 번 본다.</li>
+  <li><code>serveHttpMemory</code> 의 type 은 <code>BY_EXTENSION</code>, <code>EVENT_STREAM</code> 이 아니어야 한다. <code>CUSTOM</code> 도 받지 않는다 (1절 결정 13, <code>INVALID_ARGUMENT</code>). 텍스트 계열이면 등록 때 UTF-8 을 한 번 본다.</li>
   <li>정적 서빙은 GET / HEAD 만 받는다. 다른 메서드는 405 + <code>Allow: GET, HEAD, OPTIONS</code>. 디렉토리 밑의 <code>..</code> 는 403, 없는 파일은 404 (user_guide 1.6 그대로).</li>
 </ul>
 
@@ -688,13 +737,11 @@ int main()
 
 <h2 id="s10">10. 정할 것</h2>
 
+<p>2026-11-11 에 1, 2, 3, 6 은 정했다 (1절 결정 11 ~ 14). 남은 둘은 <code>docs/learning/http-request-cycle.html</code> 에 배경을 풀어 썼다.</p>
+
 <ol>
-  <li><b>GET 스트림이 worker 하나를 쓰는 것.</b> 스트림 하나에 thread 하나다. 장비 하나에 MCP 클라이언트 몇 개라는 전제로 이 판은 받아들인다. 수가 많아지면 첫 판의 push 스트림 (아무 thread 가 notify 로 chunk 를 넣는다) 을 그때 더한다. 2.1 의 송신 순서가 정리되면 그때의 순서 문제도 없다.</li>
-  <li><b><code>send_timeout_milliseconds</code> 의 기본값.</b> 30000 을 추천한다. 0 (무한) 을 기본으로 하면 지금과 같지만 읽지 않는 상대가 기본 설정에서 Session 을 영원히 붙잡는다.</li>
-  <li><b><code>serveHttpMemory</code> 에 <code>CUSTOM</code> 을 허용할지.</b> 응답 단위의 이름 함수 (<code>setHttpCustomContentType</code>) 는 등록 때 쓸 수 없다. 허용하려면 <code>serveHttpMemoryCustom(server, url_path, content_type_text, data)</code> 같은 함수가 하나 더 필요하다. 목록 (wasm, svg, woff2, pdf 등) 으로 장비 웹 UI 는 충분하다고 보고 허용하지 않는 쪽을 추천한다.</li>
-  <li><b>HTTP 층에서 <code>PEER_NOT_READING</code> 을 알릴지.</b> HttpServer 에는 연결 단위 콜백이 없다 (라우트뿐). 지금은 연결이 조용히 닫힌다. 앱이 알아야 하면 서버 단위 <code>onError(app_context, info, code, message)</code> 하나를 <code>createHttpServer</code> 나 run 에 둔다 (base 와 StateMachine 의 <code>onError</code> 와 같은 시그니처). 둘지 정해 달라.</li>
-  <li><b>HEAD 가 스트림 GET 라우트에 오는 것.</b> 헤더만 보내려면 Work 를 시작하지 않아야 하는데, 헤더는 worker 가 정한다. 간단히 "스트림 라우트에 온 HEAD 는 405" 로 하거나, <code>onRequest</code> 가 <code>request-&gt;method</code> 를 보고 직접 답하게 둔다. 후자를 추천한다 (라이브러리는 HEAD 를 GET 라우트로 부르기만 한다).</li>
-  <li><b>C++ 의 타입별 메서드.</b> <code>response.json(data)</code>, <code>response.text(data)</code> 같은 줄임은 두지 않았다 (<code>body(KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, data)</code> 로 충분하고 메서드 수가 는다). 원하면 더한다.</li>
+  <li value="4"><b>HTTP 층에서 연결의 끝 사유를 알릴지.</b> HttpServer 에는 연결 단위 콜백이 없다 (라우트뿐). 그래서 완성 응답을 보내다 <code>PEER_NOT_READING</code> 으로 끊긴 연결, 연결 수 초과 (<code>TABLE_FULL</code>), 잘못된 요청 (400 / 413 / 431), TLS 핸드셰이크 실패가 앱의 로그에 남지 않는다. 서버 단위 <code>onError(app_context, info, code, message)</code> 하나를 <code>createHttpServer</code> 나 run 에 둘지 정해 달라 (base, StateMachine 의 <code>onError</code> 와 같은 시그니처). 추천: 둔다.</li>
+  <li value="5"><b>HEAD 가 스트림 GET 라우트에 오는 것.</b> HEAD 는 "GET 과 같은 헤더를 주되 body 는 빼라" 이다. GET 라우트가 Work 스트림이면 헤더를 정하는 것이 worker 라서, 라이브러리가 GET 으로 실행하면 끝나지 않는 스트림을 열고 body 를 버리게 된다. 고를 길: (a) 라이브러리는 HEAD 를 GET 라우트로 부르기만 하고 <code>onRequest</code> 가 <code>request-&gt;method</code> 를 보고 직접 답한다, (b) Work 를 시작한 HEAD 는 라이브러리가 헤더만 보내고 Work 를 열지 않는다. 추천: (a).</li>
 </ol>
 
 <h2 id="s11">11. 사이클</h2>
