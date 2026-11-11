@@ -28,6 +28,7 @@
 
 - 공개 헤더는 라이브러리 사용자와의 계약이다. 파일 구성, 함수 이름, 인자의 모양과 개수, 줄 수는 requirement 와 user guide, 사용자의 결정이 정한다.
 - 수칙 4 (가독성) 의 수치 한계와 이름 규칙, 4.6 의 bool 인자 금지는 공개 헤더에 걸지 않는다. `tools/check_rules.py` 도 `include/` 를 보지 않는다.
+- 5.7 (C ABI 마샬링) 은 공개 헤더의 C interface 에 건다.
 - 사용자가 지정한 모양이 수칙과 다르면 그 차이를 `docs/deviations.md` 에 적는다. 고치는 것은 사용자가 정할 때만이다.
 - `src/` 의 번역 층 (`kiotty_net_*.cpp`) 과 그 안쪽은 이 수칙을 따른다. 공개 헤더의 `const char*`, bool 인자는 번역 층에서 내부 타입 (`Span`, `enum class`) 으로 바뀐다.
 
@@ -489,6 +490,12 @@ Result<size_t, ErrorCode> write(SocketDescriptor socket, Span<const char> input)
 
 ### 5.5 에러 코드를 문장으로 바꾸는 일은 presentation 에서만 한다.
 
+### 5.7 C ABI 를 건너는 메모리는 C# 마샬링이 그대로 옮길 수 있는 모양으로 둔다.
+
+- 대상은 C interface 의 리턴 struct, 출력 인자, 콜백 인자와 콜백 리턴, 그리고 그 안에 든 struct 다. `#ifdef __cplusplus` 안의 C++ wrapper 는 대상이 아니다.
+- union 을 쓰지 않는다. 필드를 순서대로(Sequential) 나열한다. C# 은 union 을 `LayoutKind.Explicit` 과 `FieldOffset` 으로만 옮길 수 있고, 포인터나 `size_t` 가 든 멤버는 32 비트와 64 비트에서 offset 이 달라진다. 예외: 순차 배치로 바꿀 수 없는 경우는 `docs/deviations.md` 에 적는다.
+- `bool` 을 쓰지 않는다. `int32_t` (0 또는 1) 나 `uint8_t` 로 대신한다. C# 의 기본 bool 마샬링은 4 바이트라서 C 의 1 바이트 `bool` 과 크기가 다르다. struct 필드면 뒤 필드의 offset 이 어긋나고, 리턴값이면 레지스터 상위 바이트가 남아 false 가 true 로 읽힐 수 있다.
+
 ---
 
 ## 6. 설계
@@ -652,7 +659,7 @@ void SomeViewModel::setLabel(StringView parameter)
 
 ## 9. 리뷰 체크리스트
 
-PR 마다 아래 열다섯 가지에 모두 "예" 여야 한다.
+PR 마다 아래 열여섯 가지에 모두 "예" 여야 한다.
 
 1. 초기화 함수 밖에 힙 할당이 없다.
 2. 모든 Handle 접근이 generation 을 검증한다.
@@ -669,3 +676,4 @@ PR 마다 아래 열다섯 가지에 모두 "예" 여야 한다.
 13. 새 method 는 동사로 시작하고, 멤버 접근 method 는 필요한 이유가 PR 에 적혀 있다. `core/` 는 예외다.
 14. `core/` 파일이 도메인 용어나 `KiottySpec*` 레코드 타입을 담지 않는다.
 15. 새 에러 enum 이 없고, 모든 에러는 `include/kiotty_spec.h` 의 값을 쓴다.
+16. C ABI 를 건너는 struct, 리턴값, 콜백에 union 과 `bool` 이 없다 (5.7).

@@ -243,8 +243,8 @@ class KiottyNet_WebSocketClient {                             // explicit operat
 
 [ReadingRequestLine] → [ReadingHeaderLine]... → afterHeaders : match 가 UPGRADE 항목
     GET 이 아니면 405. Upgrade / Connection / Sec-WebSocket-Key / Version 13 이 없으면 426
-    onUpgrade(app_context, websocket handle, { path, query, host, origin, protocols }) → false 면 403 (완성 응답, keep_alive 0)
-    true 면 응답 버퍼에 101 + Sec-WebSocket-Accept + (고른) Sec-WebSocket-Protocol → { WebSocketOpening, thenWrite(101) }       ← generation 을 올린다
+    onUpgrade(app_context, websocket handle, { path, query, host, origin, protocols }) → 0 (KiottyNetBool) 이면 403 (완성 응답, keep_alive 0)
+    1 이면 응답 버퍼에 101 + Sec-WebSocket-Accept + (고른) Sec-WebSocket-Protocol → { WebSocketOpening, thenWrite(101) }       ← generation 을 올린다
 [WebSocketOpening] WRITTEN → onOpen(app_context, websocket) → websocket_context 를 Session 에 → { WebSocketReadingHeader, thenRead(2, ping_interval) }
 [WebSocketReadingHeader] READ(2) → FIN / opcode / mask 비트 / 길이 7 비트 → 126 / 127 이면 [ReadingExtendedLength], mask 면 [ReadingMask], 아니면 [ReadingPayload]
 [WebSocketReadingPayload] READ(min(남은 길이, receive_capacity)) → unmask 하며 Stage 에 붙인다 → 남으면 같은 상태, 다 받으면 :

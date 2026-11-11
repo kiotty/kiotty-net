@@ -35,24 +35,24 @@ namespace kiotty::net::implementation
     {
         AdoptResult adoptRead(const KiottyNetConnectionAction& returned)
         {
-            const bool is_empty = returned.as.read.exact == 0;
+            const bool is_empty = returned.exact == 0;
             if (is_empty) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             return AdoptResult::success(IoAction::from(returned));
         }
 
         AdoptResult adoptReadUntil(const KiottyNetConnectionAction& returned)
         {
-            const KiottyNetSpan delimiter = returned.as.read_until.delimiter;
-            const bool valid = isValidDelimiter(delimiter, returned.as.read_until.max);
+            const KiottyNetSpan delimiter = returned.delimiter;
+            const bool valid = isValidDelimiter(delimiter, returned.max);
             if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
             return AdoptResult::success(IoAction::from(returned));
         }
 
         AdoptResult adoptWrite(const KiottyNetConnectionAction& returned, StageBase& send)
         {
-            const bool valid = isValidWrite(returned.as.write.data);
+            const bool valid = isValidWrite(returned.data);
             if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-            const KiottyNetCode staged = Sender::stage(send, returned.as.write.data);
+            const KiottyNetCode staged = Sender::stage(send, returned.data);
             if (staged != KIOTTY_NET_CODE_SUCCESS) { return AdoptResult::failure(staged); }
             return AdoptResult::success(IoAction::hold(returned.timeout_milliseconds));
         }

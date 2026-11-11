@@ -15,7 +15,7 @@ TEST(Action, ThenReadCarriesExactAndTimeout)
 {
     KiottyNetConnectionAction action = net::thenRead(16, 100);
     EXPECT_EQ(KIOTTY_NET_ACTION_TYPE_READ, action.type);
-    EXPECT_EQ(16u, action.as.read.exact);
+    EXPECT_EQ(16u, action.exact);
     EXPECT_EQ(100u, action.timeout_milliseconds);
 }
 
@@ -25,9 +25,9 @@ TEST(Action, ThenReadUntilCarriesDelimiterMaxAndTimeout)
     KiottyNetSpan span = { delimiter, 2 };
     KiottyNetConnectionAction action = net::thenReadUntil(span, 1024, 300);
     EXPECT_EQ(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, action.type);
-    EXPECT_EQ(delimiter, action.as.read_until.delimiter.data);
-    EXPECT_EQ(2u, action.as.read_until.delimiter.length);
-    EXPECT_EQ(1024u, action.as.read_until.max);
+    EXPECT_EQ(delimiter, action.delimiter.data);
+    EXPECT_EQ(2u, action.delimiter.length);
+    EXPECT_EQ(1024u, action.max);
     EXPECT_EQ(300u, action.timeout_milliseconds);
 }
 
@@ -37,8 +37,8 @@ TEST(Action, ThenWriteCarriesDataAndTimeout)
     KiottyNetSpan span = { text, 4 };
     KiottyNetConnectionAction action = net::thenWrite(span, 50);
     EXPECT_EQ(KIOTTY_NET_ACTION_TYPE_WRITE, action.type);
-    EXPECT_EQ(text, action.as.write.data.data);
-    EXPECT_EQ(4u, action.as.write.data.length);
+    EXPECT_EQ(text, action.data.data);
+    EXPECT_EQ(4u, action.data.length);
     EXPECT_EQ(50u, action.timeout_milliseconds);
 }
 
@@ -53,7 +53,7 @@ TEST(Action, ThenCloseCarriesTheReason)
 {
     KiottyNetConnectionAction action = net::thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR);
     EXPECT_EQ(KIOTTY_NET_ACTION_TYPE_CLOSE, action.type);
-    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, action.as.close.reason);
+    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, action.reason);
     EXPECT_EQ(0u, action.timeout_milliseconds);
 }
 

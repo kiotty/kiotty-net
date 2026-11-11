@@ -47,13 +47,13 @@ static KiottyNetTransition onConnected(KiottyNetConnectionContext session, Kiott
 static KiottyNetTransition onHeader(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
 {
     CSession* s = (CSession*)session;
-    uint32_t length = decodeLength(event.as.read.data);
+    uint32_t length = decodeLength(event.data);
     (void)connection;
     if (length == 0 || length > C_MAX_BODY)
     {
         return KiottyNet_moveToNextState(C_FAILED, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
-    memcpy(s->frame, event.as.read.data.data, C_HEADER_BYTES);
+    memcpy(s->frame, event.data.data, C_HEADER_BYTES);
     s->frame_length = C_HEADER_BYTES + length;
     return KiottyNet_moveToNextState(C_READING_BODY, KiottyNet_thenRead(length, 5000));
 }
@@ -63,7 +63,7 @@ static KiottyNetTransition onBody(KiottyNetConnectionContext session, KiottyNetC
     CSession* s = (CSession*)session;
     KiottyNetSpan frame;
     (void)connection;
-    memcpy(s->frame + C_HEADER_BYTES, event.as.read.data.data, event.as.read.data.length);
+    memcpy(s->frame + C_HEADER_BYTES, event.data.data, event.data.length);
     frame.data = s->frame;
     frame.length = s->frame_length;
     return KiottyNet_moveToNextState(C_WRITING, KiottyNet_thenWrite(frame, 5000));

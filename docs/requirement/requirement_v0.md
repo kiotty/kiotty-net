@@ -110,6 +110,8 @@ naming 규약 (C, C++ 공통)
 공통 타입
 
 ```c
+typedef int32_t KiottyNetBool;        /* C ABI 의 참/거짓. 0 이 거짓, 1 이 참. C 의 bool 은 쓰지 않는다 (수칙 5.7, C# 마샬링) */
+
 typedef struct KiottyNetSpan {        /* 읽기 전용 바이트 범위. 텍스트와 바이너리 모두 이것으로 받는다. 소유하지 않는다 */
     const char* data;
     size_t      length;
@@ -591,13 +593,12 @@ typedef enum KiottyNetActionType {
 typedef struct KiottyNetConnectionAction {      /* 값. 콜백과 closeConnectionStream 이 돌려주는 다음 IO 요청 하나 */
     KiottyNetActionType type;
     uint32_t            timeout_milliseconds;             /* 0 이면 없음 */
-    union {
-        struct { size_t exact; }                        read;
-        struct { KiottyNetSpan delimiter; size_t max; } read_until;
-        struct { KiottyNetSpan data; }                  write;
-        struct { KiottyNetCode reason; }                close;
-    } as;
-} KiottyNetConnectionAction;
+    size_t              exact;                            /* READ */
+    KiottyNetSpan       delimiter;                        /* READ_UNTIL */
+    size_t              max;                              /* READ_UNTIL */
+    KiottyNetSpan       data;                             /* WRITE */
+    KiottyNetCode       reason;                           /* CLOSE */
+} KiottyNetConnectionAction;                              /* union 없이 순서대로 둔다 (수칙 5.7). type 이 아닌 필드는 0 */
 
 KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds);
 KiottyNetConnectionAction KiottyNet_thenRead(size_t exact, uint32_t timeout_milliseconds);
@@ -607,7 +608,7 @@ KiottyNetConnectionAction KiottyNet_thenWork(void);
 KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reason);
 
 typedef struct KiottyNetConnectionDecision {
-    bool                       accepted;
+    KiottyNetBool              accepted;
     KiottyNetConnectionContext connection_context;
 } KiottyNetConnectionDecision;
 
@@ -636,7 +637,7 @@ KiottyNetCode KiottyNet_notifyConnection(KiottyNetConnectionHandle c, KiottyNetS
 KiottyNetResult KiottyNet_readConnectionStream     (KiottyNetConnectionStream stream, void* buffer, size_t length, uint32_t timeout_milliseconds);
 KiottyNetResult KiottyNet_writeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetSpan data, uint32_t timeout_milliseconds);
 KiottyNetCode   KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream stream, const char* path, uint64_t offset, uint64_t length, uint32_t timeout_milliseconds);
-bool            KiottyNet_isConnectionStreamOpen   (KiottyNetConnectionStream stream);
+KiottyNetBool   KiottyNet_isConnectionStreamOpen   (KiottyNetConnectionStream stream);
 KiottyNetCode   KiottyNet_closeConnectionStream    (KiottyNetConnectionStream stream, KiottyNetConnectionAction then);   /* 한 번. thenWork 는 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 ```
 
@@ -857,7 +858,7 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 - `CLOSED` 는 마지막 Event 다. 그 action 의 Transition 은 무시된다. 그 뒤에 release 가 불린다. `CLOSED` 행이 없어도 release 는 하고, `UNHANDLED_EVENT` 는 알리지 않는다 (이미 닫힌 연결이다).
 - 표에 (state, event) 행이 없으면 `onError(KIOTTY_NET_CODE_UNHANDLED_EVENT)` 뒤 `thenClose`. 조용히 무시하지 않는다. 정확 일치 행이 ANY 행보다 우선한다.
 - `.to(...)` 는 action 이 갈 수 있는 다음 상태 목록이다. 목록 밖으로 가면 `onError(KIOTTY_NET_CODE_ILLEGAL_TRANSITION)` 뒤 `thenClose`. release 빌드에서도 검사한다 (사용자 결정 2026-11-09). `.to()` 가 없는 행 (`next.count` 0) 은 검사하지 않는다.
-- `event.as.read.data` 는 수신 Stage 를 가리키며 action 이 return 하면 무효다. 보관하려면 Session 으로 복사한다.
+- `event.data` 는 수신 Stage 를 가리키며 action 이 return 하면 무효다. 보관하려면 Session 으로 복사한다.
 - 표는 컴파일 타임 상수다. C++ 의 `KiottyNet_rules()` 는 (state, event) 로 정렬하고 중복 행을 컴파일 에러로 만든다. C 의 표는 `static const` 배열이며 run 이 시작할 때 중복을 검사해 `KIOTTY_NET_CODE_DUPLICATE_RULE` 을 돌려준다. machine 이나 표가 NULL 이면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
 
 공용 타입
@@ -870,13 +871,11 @@ typedef enum KiottyNetConnectionEventType { KIOTTY_NET_CONNECTION_EVENT_TYPE_CON
 
 typedef struct KiottyNetConnectionEvent {
     KiottyNetConnectionEventType type;
-    union {
-        struct { KiottyNetSpan data; }       read;           /* return 하면 무효 */
-        struct { size_t length; }            written;
-        struct { KiottyNetConnectionStream stream; } work_started;
-        struct { KiottyNetCode reason; }     closed;
-    } as;
-} KiottyNetConnectionEvent;
+    KiottyNetSpan                data;           /* READ. return 하면 무효 */
+    size_t                       length;         /* WRITTEN */
+    KiottyNetConnectionStream    stream;         /* WORK_STARTED */
+    KiottyNetCode                reason;         /* CLOSED */
+} KiottyNetConnectionEvent;                      /* union 없이 순서대로 둔다 (수칙 5.7). type 이 아닌 필드는 0 */
 
 typedef struct KiottyNetTransition {
     int32_t                   next;           /* 다음 상태 */
@@ -1213,7 +1212,7 @@ typedef int64_t KiottyNetWebSocketHandle;   /* pool handle. Connection 위의 pe
 
 typedef struct KiottyNetWebSocketHandler {
     void* user_context;
-    int  (*onUpgrade)(void* user_context, const KiottyNetHttpRequest* request, KiottyNetWebSocketHandle ws);   /* 0 이면 403 으로 거절하고 HTTP 로 남는다. NULL 이면 모두 허용. 여기서만 KiottyNet_setWebSocketProtocol */
+    KiottyNetBool (*onUpgrade)(void* user_context, const KiottyNetHttpRequest* request, KiottyNetWebSocketHandle ws);   /* 0 이면 403 으로 거절하고 HTTP 로 남는다. NULL 이면 모두 허용. 여기서만 KiottyNet_setWebSocketProtocol */
     void (*onOpen)   (void* user_context, KiottyNetWebSocketHandle ws);                                        /* 101 송신 완료 */
     void (*onMessage)(void* user_context, KiottyNetWebSocketHandle ws, const KiottyNetWebSocketMessage* message);
     void (*onResumed)(void* user_context, KiottyNetWebSocketHandle ws, void* payload);                         /* KiottyNet_resumeWebSocket(ws, payload). push 는 여기서 send */

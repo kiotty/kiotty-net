@@ -315,7 +315,7 @@ namespace kiotty::net::implementation
         switch (returned.type)
         {
         case KIOTTY_NET_ACTION_TYPE_CLOSE:
-            return IoAction::close(returned.as.close.reason);
+            return IoAction::close(returned.reason);
         case KIOTTY_NET_ACTION_TYPE_HOLD:
         case KIOTTY_NET_ACTION_TYPE_READ:
         case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:

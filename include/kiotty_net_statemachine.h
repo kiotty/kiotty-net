@@ -23,25 +23,10 @@ typedef enum KiottyNetConnectionEventType
 typedef struct KiottyNetConnectionEvent
 {
     KiottyNetConnectionEventType type;
-    union
-    {
-        struct
-        {
-            KiottyNetSpan data;
-        } read;
-        struct
-        {
-            size_t length;
-        } written;
-        struct
-        {
-            KiottyNetConnectionStream stream;
-        } work_started;
-        struct
-        {
-            KiottyNetCode reason;
-        } closed;
-    } as;
+    KiottyNetSpan                data;
+    size_t                       length;
+    KiottyNetConnectionStream    stream;
+    KiottyNetCode                reason;
 } KiottyNetConnectionEvent;
 
 typedef struct KiottyNetTransition

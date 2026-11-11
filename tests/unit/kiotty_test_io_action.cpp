@@ -40,7 +40,7 @@ TEST(IoAction, FromMapsEveryPublicActionTypeWithPurposeUser)
     EXPECT_EQ(held.timeout_milliseconds, 11u);
 
     KiottyNetConnectionAction read = publicAction(KIOTTY_NET_ACTION_TYPE_READ, 22);
-    read.as.read.exact = 512;
+    read.exact = 512;
     IoAction reading = IoAction::from(read);
     EXPECT_EQ(reading.kind, IoActionKind::READ);
     EXPECT_EQ(reading.purpose, IoPurpose::USER);
@@ -48,8 +48,8 @@ TEST(IoAction, FromMapsEveryPublicActionTypeWithPurposeUser)
     EXPECT_EQ(reading.as.read.exact, 512u);
 
     KiottyNetConnectionAction read_until = publicAction(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, 33);
-    read_until.as.read_until.delimiter = spanOf("\r\n", 2);
-    read_until.as.read_until.max = 1024;
+    read_until.delimiter = spanOf("\r\n", 2);
+    read_until.max = 1024;
     IoAction scanning = IoAction::from(read_until);
     EXPECT_EQ(scanning.kind, IoActionKind::READ_UNTIL);
     EXPECT_EQ(scanning.purpose, IoPurpose::USER);
@@ -57,7 +57,7 @@ TEST(IoAction, FromMapsEveryPublicActionTypeWithPurposeUser)
     EXPECT_EQ(scanning.as.read_until.max, 1024u);
 
     KiottyNetConnectionAction write = publicAction(KIOTTY_NET_ACTION_TYPE_WRITE, 44);
-    write.as.write.data = spanOf("hello", 5);
+    write.data = spanOf("hello", 5);
     IoAction writing = IoAction::from(write);
     EXPECT_EQ(writing.kind, IoActionKind::WRITE);
     EXPECT_EQ(writing.purpose, IoPurpose::USER);
@@ -71,7 +71,7 @@ TEST(IoAction, FromMapsEveryPublicActionTypeWithPurposeUser)
     EXPECT_EQ(working.timeout_milliseconds, 0u);
 
     KiottyNetConnectionAction close = publicAction(KIOTTY_NET_ACTION_TYPE_CLOSE, 66);
-    close.as.close.reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
+    close.reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
     IoAction closing = IoAction::from(close);
     EXPECT_EQ(closing.kind, IoActionKind::CLOSE);
     EXPECT_EQ(closing.purpose, IoPurpose::USER);
@@ -83,7 +83,7 @@ TEST(IoAction, FromWriteCarriesNoPointerToUserData)
 {
     char user_data[] = "payload";
     KiottyNetConnectionAction write = publicAction(KIOTTY_NET_ACTION_TYPE_WRITE, 0);
-    write.as.write.data = spanOf(user_data, sizeof(user_data));
+    write.data = spanOf(user_data, sizeof(user_data));
     IoAction writing = IoAction::from(write);
     const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&writing.as);
     for (size_t i = 0; i + sizeof(char*) <= sizeof(writing.as); ++i)
@@ -100,18 +100,18 @@ TEST(IoAction, FromReadUntilCopiesDelimiterOfOneToFourBytesAndZeroScanned)
     for (size_t length = 1; length <= IoAction::MAX_DELIMITER_LENGTH; ++length)
     {
         KiottyNetConnectionAction read_until = publicAction(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, 0);
-        read_until.as.read_until.delimiter = spanOf(delimiter, length);
-        read_until.as.read_until.max = 64;
+        read_until.delimiter = spanOf(delimiter, length);
+        read_until.max = 64;
         IoAction scanning = IoAction::from(read_until);
         EXPECT_EQ(scanning.as.read_until.length, length);
         EXPECT_EQ(std::memcmp(scanning.as.read_until.delimiter, delimiter, length), 0) << length;
         EXPECT_EQ(scanning.as.read_until.scanned, 0u);
     }
     KiottyNetConnectionAction too_long = publicAction(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, 0);
-    too_long.as.read_until.delimiter = spanOf("12345", 5);
+    too_long.delimiter = spanOf("12345", 5);
     EXPECT_EQ(IoAction::from(too_long).as.read_until.length, 0u);
     KiottyNetConnectionAction empty = publicAction(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, 0);
-    empty.as.read_until.delimiter = spanOf(nullptr, 2);
+    empty.delimiter = spanOf(nullptr, 2);
     EXPECT_EQ(IoAction::from(empty).as.read_until.length, 0u);
 }
 

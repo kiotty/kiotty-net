@@ -16,7 +16,7 @@ namespace kiotty::net::implementation
     {
         KiottyNetConnectionAction action =
             actionOf(KIOTTY_NET_ACTION_TYPE_READ, timeout_milliseconds);
-        action.as.read.exact = exact;
+        action.exact = exact;
         return action;
     }
 
@@ -26,8 +26,8 @@ namespace kiotty::net::implementation
     {
         KiottyNetConnectionAction action =
             actionOf(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, timeout_milliseconds);
-        action.as.read_until.delimiter = delimiter;
-        action.as.read_until.max = max;
+        action.delimiter = delimiter;
+        action.max = max;
         return action;
     }
 
@@ -35,7 +35,7 @@ namespace kiotty::net::implementation
     {
         KiottyNetConnectionAction action =
             actionOf(KIOTTY_NET_ACTION_TYPE_WRITE, timeout_milliseconds);
-        action.as.write.data = data;
+        action.data = data;
         return action;
     }
 
@@ -47,7 +47,7 @@ namespace kiotty::net::implementation
     KiottyNetConnectionAction thenClose(KiottyNetCode reason)
     {
         KiottyNetConnectionAction action = actionOf(KIOTTY_NET_ACTION_TYPE_CLOSE, 0);
-        action.as.close.reason = reason;
+        action.reason = reason;
         return action;
     }
 

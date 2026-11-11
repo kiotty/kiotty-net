@@ -379,7 +379,7 @@ KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);</co
 <pre><code>KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work, KiottyNetSpan data, uint32_t timeout_milliseconds);   /* 추가 */
 KiottyNetCode   KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);
 KiottyNetCode   KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);
-bool            KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);</code></pre>
+KiottyNetBool   KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);</code></pre>
 
 <table>
   <tr><th>함수</th><th>하는 일</th><th>코드</th></tr>

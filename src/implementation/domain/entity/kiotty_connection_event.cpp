@@ -15,21 +15,21 @@ namespace kiotty::net::implementation
     KiottyNetConnectionEvent readEvent(KiottyNetSpan data)
     {
         KiottyNetConnectionEvent event = eventOf(KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
-        event.as.read.data = data;
+        event.data = data;
         return event;
     }
 
     KiottyNetConnectionEvent writtenEvent(size_t length)
     {
         KiottyNetConnectionEvent event = eventOf(KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN);
-        event.as.written.length = length;
+        event.length = length;
         return event;
     }
 
     KiottyNetConnectionEvent workStartedEvent(KiottyNetConnectionStream stream)
     {
         KiottyNetConnectionEvent event = eventOf(KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED);
-        event.as.work_started.stream = stream;
+        event.stream = stream;
         return event;
     }
 
@@ -41,7 +41,7 @@ namespace kiotty::net::implementation
     KiottyNetConnectionEvent closedEvent(KiottyNetCode reason)
     {
         KiottyNetConnectionEvent event = eventOf(KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED);
-        event.as.closed.reason = reason;
+        event.reason = reason;
         return event;
     }
 

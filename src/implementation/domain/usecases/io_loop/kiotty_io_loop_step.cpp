@@ -118,7 +118,7 @@ namespace kiotty::net::implementation
             return;
         }
         const KiottyNetConnectionDecision decision = parts.handler.admit(info);
-        if (!decision.accepted)
+        if (decision.accepted == 0)
         {
             return;
         }

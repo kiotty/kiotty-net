@@ -87,9 +87,9 @@ StatefulHandler 가 `domain/usecases/` 에 있는 이유: 표 (사용자 값) �
 | `KiottyNetStatefulAppContext` | `app_context, machine, createConnectionContext, releaseConnectionContext` | + `onError(app_context, info, code, message)` (NULL 허용) | base 의 `onError` 가 알리던 것 (TLS 실패, 거부된 action, accept 실패) 과 이 층의 `UNHANDLED_EVENT / ILLEGAL_TRANSITION`, Session 이 없어 거절한 연결이 갈 곳이 없다. 14절 1 |
 | `kiotty::net::Rule` 의 두 번째 생성자 | 인자 8 개 (`state, event, action, next_count, n0 ~ n3`) | `Rule(state, event, action, KiottyNetNextStates next)`. `KiottyNetNextStates { int32_t at[KIOTTY_NET_MAX_NEXT]; uint32_t count; }` 는 `KiottyNetRule` 의 `next / next_count` 를 대신하는 값 | 수칙 4.1 인자 4 개. C 의 `KIOTTY_NET_RULE` 매크로는 같은 struct 를 채운다 |
 | `KIOTTY_NET_RULE` 매크로 | 복합 리터럴 `(int32_t[]){ __VA_ARGS__ }` | `#if !defined(__cplusplus)` 안으로 | 복합 리터럴은 C99 다. C++ 은 `KiottyNet_rules` 를 쓴다 |
-| `KiottyNetConnectionEvent.as.work_started.stream` | `KiottyNetConnectionStream` | 그대로 | `WORK_STARTED` 의 action 이 `thenWork()` 를 돌려주면 stream 을 worker 에게 넘겼다는 뜻 (3.4) |
+| `KiottyNetConnectionEvent.stream` | `KiottyNetConnectionStream` | 그대로 | `WORK_STARTED` 의 action 이 `thenWork()` 를 돌려주면 stream 을 worker 에게 넘겼다는 뜻 (3.4) |
 
-이 밖의 뜻은 requirement 8절의 규칙 그대로다. 표에 (state, event) 가 없으면 `close(KIOTTY_NET_CODE_UNHANDLED_EVENT)`, 정확 일치 행이 ANY 행보다 먼저, `.to()` 밖으로 가면 `ILLEGAL_TRANSITION`, `CLOSED` 의 Transition 은 무시, `event.as.read.data` 는 return 하면 무효, C 표의 중복은 run 이 `DUPLICATE_RULE`.
+이 밖의 뜻은 requirement 8절의 규칙 그대로다. 표에 (state, event) 가 없으면 `close(KIOTTY_NET_CODE_UNHANDLED_EVENT)`, 정확 일치 행이 ANY 행보다 먼저, `.to()` 밖으로 가면 `ILLEGAL_TRANSITION`, `CLOSED` 의 Transition 은 무시, `event.data` 는 return 하면 무효, C 표의 중복은 run 이 `DUPLICATE_RULE`.
 
 ## 3. Handler : 콜백을 부르는 자리 하나
 
@@ -157,11 +157,11 @@ private:
 | event.type | 부르는 콜백 | 돌려주는 것 |
 |---|---|---|
 | CONNECTED | `onReady(caller.context, caller.handle())` | 그 return |
-| READ | `onRead(context, handle, event.as.read.data)` | 그 return |
-| WRITTEN | `onWritten(context, handle, event.as.written.length)` | 그 return |
+| READ | `onRead(context, handle, event.data)` | 그 return |
+| WRITTEN | `onWritten(context, handle, event.length)` | 그 return |
 | TIMEOUT | `onTimeout(context, handle)` | 그 return |
-| WORK_STARTED | `onWorkStarted(context, event.as.work_started.stream)` | `KiottyNet_thenWork()`. stream 은 사용자가 가져갔다 |
-| CLOSED | `onDisconnected(app_context, context, handle, event.as.closed.reason)` | `KiottyNet_thenHold(0)`. 버려진다 |
+| WORK_STARTED | `onWorkStarted(context, event.stream)` | `KiottyNet_thenWork()`. stream 은 사용자가 가져갔다 |
+| CLOSED | `onDisconnected(app_context, context, handle, event.reason)` | `KiottyNet_thenHold(0)`. 버려진다 |
 
 ### 3.4 Connection 이 바뀌는 자리
 
@@ -530,7 +530,7 @@ DV13 이 미룬 것의 제안이다. 공개 헤더는 사용자가 지정한 모
 | `KiottyNet_configureServerNoDelay(config, bool)`, `...ClientNoDelay` | `(configuration, KiottyNetNoDelay no_delay)`. `enum { KIOTTY_NET_NO_DELAY_OFF, _ON }`. struct 의 `bool no_delay` → `KiottyNetNoDelay no_delay`. 내부의 `enum class NoDelay` 와 맞는다 |
 | C++ builder 의 `versions(bool, bool)`, `verification(bool, bool)`, `noDelay(bool)` | 같은 enum / 비트 합 |
 
-bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttpWorkConnected`, `onUpgrade` 의 return), struct 의 bool 필드 (`KiottyNetConnectionDecision.accepted`) 는 수칙 4.6 의 대상 (bool 인자) 이 아니다. 그대로 둔다.
+bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttpWorkConnected`, `onUpgrade` 의 return), struct 의 bool 필드 (`KiottyNetConnectionDecision.accepted`) 는 수칙 4.6 의 대상 (bool 인자) 이 아니다. 그대로 둔다. (2026-11-11 갱신: 수칙 5.7 에 따라 이 넷은 `KiottyNetBool` (`int32_t`) 로 바뀌었고, `KiottyNetConnectionAction` / `KiottyNetConnectionEvent` 의 union `as` 는 순차 필드로 풀렸다.)
 
 ### 12.2 약어 (수칙 4.5)
 

@@ -366,12 +366,12 @@ static KiottyNetTransition serverOnConnected(KiottyNetConnectionContext, KiottyN
 static KiottyNetTransition serverOnHeader(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     ServerSession& s      = serverSession(connection_context);
-    uint32_t       length = decodeLength(e.as.read.data);
+    uint32_t       length = decodeLength(e.data);
     if (length == 0 || length > MAX_BODY)
     {
         return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
-    std::memcpy(s.frame, e.as.read.data.data, HEADER_LENGTH);                 // data 는 return 하면 무효라 복사
+    std::memcpy(s.frame, e.data.data, HEADER_LENGTH);                 // data 는 return 하면 무효라 복사
     s.frame_length = HEADER_LENGTH + length;
     return ServerNext::moveToNextState(ServerState::ReadingBody, KiottyNet_thenRead(length, 0));
 }
@@ -379,7 +379,7 @@ static KiottyNetTransition serverOnHeader(KiottyNetConnectionContext connection_
 static KiottyNetTransition serverOnBody(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     ServerSession& s = serverSession(connection_context);
-    std::memcpy(s.frame + HEADER_LENGTH, e.as.read.data.data, e.as.read.data.length);
+    std::memcpy(s.frame + HEADER_LENGTH, e.data.data, e.data.length);
     KiottyNetSpan frame = { s.frame, s.frame_length };
     return ServerNext::moveToNextState(ServerState::Writing, KiottyNet_thenWrite(frame, 0));   // write lane 으로 복사되므로 s.frame 은 바로 다시 써도 된다
 }
@@ -515,7 +515,7 @@ static KiottyNetTransition clientOnWritten(KiottyNetConnectionContext, KiottyNet
 static KiottyNetTransition clientOnHeader(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     ClientSession& s      = clientSession(connection_context);
-    uint32_t       length = decodeLength(e.as.read.data);
+    uint32_t       length = decodeLength(e.data);
     if (length != s.frame_length - HEADER_LENGTH)
     {
         return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
@@ -527,7 +527,7 @@ static KiottyNetTransition clientOnHeader(KiottyNetConnectionContext connection_
 static KiottyNetTransition clientOnBody(KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     ClientSession& s = clientSession(connection_context);
-    s.matched = std::memcmp(s.frame + HEADER_LENGTH, e.as.read.data.data, s.expected_body) == 0;
+    s.matched = std::memcmp(s.frame + HEADER_LENGTH, e.data.data, s.expected_body) == 0;
     return ClientNext::moveToNextState(ClientState::Closed, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS));   // 할 일이 끝났다. CLOSED(KIOTTY_NET_CODE_SUCCESS) 가 마지막으로 온다
 }
 
@@ -674,13 +674,13 @@ static KiottyNetTransition server_on_connected(KiottyNetConnectionContext sessio
 static KiottyNetTransition server_on_header(KiottyNetConnectionContext session, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
 {
     ServerSession* s      = (ServerSession*)session;
-    uint32_t       length = decode_length(event.as.read.data);
+    uint32_t       length = decode_length(event.data);
     (void)connection;
     if (length == 0 || length > MAX_BODY)
     {
         return KiottyNet_moveToNextState(SERVER_ERROR_OCCURRED, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
     }
-    memcpy(s->frame, event.as.read.data.data, HEADER_LENGTH);
+    memcpy(s->frame, event.data.data, HEADER_LENGTH);
     s->frame_length = HEADER_LENGTH + length;
     return KiottyNet_moveToNextState(SERVER_READING_BODY, KiottyNet_thenRead(length, 0));
 }
@@ -690,7 +690,7 @@ static KiottyNetTransition server_on_body(KiottyNetConnectionContext session, Ki
     ServerSession* s = (ServerSession*)session;
     KiottyNetSpan  frame;
     (void)connection;
-    memcpy(s->frame + HEADER_LENGTH, event.as.read.data.data, event.as.read.data.length);
+    memcpy(s->frame + HEADER_LENGTH, event.data.data, event.data.length);
     frame.data   = s->frame;
     frame.length = s->frame_length;
     return KiottyNet_moveToNextState(SERVER_WRITING, KiottyNet_thenWrite(frame, 0));
@@ -935,7 +935,7 @@ static void beginRequest(HttpSession* s)
 static KiottyNetTransition onHeaderLine(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     HttpSession*  s    = static_cast<HttpSession*>(session);
-    KiottyNetSpan line = e.as.read.data;                                         // CRLF 포함. return 하면 무효라 먼저 복사한다
+    KiottyNetSpan line = e.data;                                         // CRLF 포함. return 하면 무효라 먼저 복사한다
     if (line.length == 2) return afterHeaders(s);                                // 빈 줄 = 헤더 끝
     if (s->_header_length + line.length > s->_server->_limits.max_header_bytes) return reject(s, 431);
     if (s->_request.header_count >= s->_server->_limits.max_headers)             return reject(s, 431);
@@ -1101,7 +1101,7 @@ KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle handle)
 static KiottyNetTransition onWorkStarted(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     HttpSession* s = static_cast<HttpSession*>(session);
-    s->_stream = e.as.work_started.stream;
+    s->_stream = e.stream;
     const KiottyNetHttpRoute* r = s->_matched_route;
     r->onWorkStarted(r->app_context, &s->_request, responseHandle(s), workHandle(s));   // 사용자가 handle 둘을 worker 로 넘긴다
     return Next::moveToNextState(HttpState::Working, KiottyNet_thenWork());      // stream 은 worker 의 것 (2.4). 닫는 것은 worker 의 몫
@@ -1129,7 +1129,7 @@ KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle handle, 
     return KiottyNet_closeConnectionStream(s->_stream, KiottyNet_thenClose(reason));
 }
 
-bool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle handle)
+KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle handle)
 {
     HttpSession* s = sessionOf(handle);
     return s && s->_phase == HttpSession::WORKING && KiottyNet_isConnectionStreamOpen(s->_stream);
@@ -1168,7 +1168,7 @@ static KiottyNetSpan nextChunk(HttpSession* s)               // _sent 부터 최
 static KiottyNetTransition onSent(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
 {
     HttpSession* s = static_cast<HttpSession*>(session);
-    s->_sent += e.as.written.length;
+    s->_sent += e.length;
     KiottyNetSpan next = nextChunk(s);
     if (next.length) return Next::moveToNextState(HttpState::Sending, KiottyNet_thenWrite(next, 0));
     closeFile(s);

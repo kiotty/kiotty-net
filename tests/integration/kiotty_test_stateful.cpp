@@ -118,12 +118,12 @@ namespace
     KiottyNetTransition serverOnHeader(KiottyNetConnectionContext context, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
         ServerSession& s = serverSession(context);
-        const uint32_t length = decodeLength(event.as.read.data);
+        const uint32_t length = decodeLength(event.data);
         if (length == 0 || length > MAX_BODY)
         {
             return ServerNext::moveToNextState(ServerState::ErrorOccurred, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
         }
-        std::memcpy(s.frame, event.as.read.data.data, HEADER_BYTES);
+        std::memcpy(s.frame, event.data.data, HEADER_BYTES);
         s.frame_length = HEADER_BYTES + length;
         return ServerNext::moveToNextState(ServerState::ReadingBody, KiottyNet_thenRead(length, WAIT_MS));
     }
@@ -131,7 +131,7 @@ namespace
     KiottyNetTransition serverOnBody(KiottyNetConnectionContext context, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
         ServerSession& s = serverSession(context);
-        std::memcpy(s.frame + HEADER_BYTES, event.as.read.data.data, event.as.read.data.length);
+        std::memcpy(s.frame + HEADER_BYTES, event.data.data, event.data.length);
         const KiottyNetSpan frame = { s.frame, s.frame_length };
         return ServerNext::moveToNextState(ServerState::Writing, KiottyNet_thenWrite(frame, WAIT_MS));
     }
@@ -165,7 +165,7 @@ namespace
     KiottyNetTransition serverOnWorkStarted(KiottyNetConnectionContext context, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
         ServerSession& s = serverSession(context);
-        s.stream = event.as.work_started.stream;
+        s.stream = event.stream;
         g_server->handed.store(&s.stream);
         return ServerNext::moveToNextState(ServerState::Working, KiottyNet_thenWork());
     }
@@ -266,7 +266,7 @@ namespace
     KiottyNetTransition clientOnHeader(KiottyNetConnectionContext context, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
         ClientSession& s = clientSession(context);
-        const uint32_t length = decodeLength(event.as.read.data);
+        const uint32_t length = decodeLength(event.data);
         if (length != s.frame_length - HEADER_BYTES)
         {
             return ClientNext::moveToNextState(ClientState::ErrorOccurred, KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR));
@@ -277,7 +277,7 @@ namespace
     KiottyNetTransition clientOnBody(KiottyNetConnectionContext context, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
         ClientSession& s = clientSession(context);
-        s.matched = std::memcmp(s.frame + HEADER_BYTES, event.as.read.data.data, event.as.read.data.length) == 0;
+        s.matched = std::memcmp(s.frame + HEADER_BYTES, event.data.data, event.data.length) == 0;
         return ClientNext::moveToNextState(ClientState::Closed, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS));
     }
 

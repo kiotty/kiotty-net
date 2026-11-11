@@ -348,10 +348,11 @@ KiottyNetCode KiottyNet_writeConnectionStreamFile(KiottyNetConnectionStream stre
     return stream.owner->writeStreamFile(stream.id, text.value, range, timeout_milliseconds);
 }
 
-bool KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream)
+KiottyNetBool KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream)
 {
-    if (stream.owner == nullptr) { return false; }
-    return stream.owner->isStreamOpen(stream.id);
+    if (stream.owner == nullptr) { return 0; }
+    const bool is_open = stream.owner->isStreamOpen(stream.id);
+    return is_open ? 1 : 0;
 }
 
 KiottyNetCode KiottyNet_closeConnectionStream(KiottyNetConnectionStream stream,

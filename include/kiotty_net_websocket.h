@@ -96,7 +96,7 @@ typedef struct KiottyNetWebSocketInfo
 
 typedef struct KiottyNetWebSocketHandler
 {
-    bool (*onUpgrade)(
+    KiottyNetBool (*onUpgrade)(
         KiottyNetAppContext app_context,
         KiottyNetWebSocketHandle websocket,
         KiottyNetWebSocketUpgrade upgrade);

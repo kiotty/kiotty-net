@@ -49,7 +49,7 @@ namespace
 
     KiottyNetTransition onRead(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent event)
     {
-        current->read.assign(event.as.read.data.data, event.as.read.data.length);
+        current->read.assign(event.data.data, event.data.length);
         return Next::moveToNextState(State::WRITING, KiottyNet_thenHold(0));
     }
 

@@ -116,14 +116,14 @@ namespace kiotty::net::implementation
         {
             KiottyNetConnectionAction action{};
             action.type = KIOTTY_NET_ACTION_TYPE_CLOSE;
-            action.as.close.reason = reason;
+            action.reason = reason;
             return action;
         }
 
         KiottyNetConnectionDecision acceptedDecision(KiottyNetConnectionContext context)
         {
             KiottyNetConnectionDecision decision{};
-            decision.accepted = true;
+            decision.accepted = 1;
             decision.connection_context = context;
             return decision;
         }
@@ -131,7 +131,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionDecision ignoredDecision()
         {
             KiottyNetConnectionDecision decision{};
-            decision.accepted = false;
+            decision.accepted = 0;
             return decision;
         }
     }

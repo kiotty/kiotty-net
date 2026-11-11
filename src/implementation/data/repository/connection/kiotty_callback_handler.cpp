@@ -44,9 +44,9 @@ namespace kiotty::net::implementation
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED:
             return _callbacks.onReady(context, caller.handle());
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_READ:
-            return _callbacks.onRead(context, caller.handle(), event.as.read.data);
+            return _callbacks.onRead(context, caller.handle(), event.data);
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN:
-            return _callbacks.onWritten(context, caller.handle(), event.as.written.length);
+            return _callbacks.onWritten(context, caller.handle(), event.length);
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT:
             return _callbacks.onTimeout(context, caller.handle());
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED:
@@ -67,14 +67,14 @@ namespace kiotty::net::implementation
     KiottyNetConnectionAction CallbackHandler::startWork(const KiottyNetConnectionEvent& event,
                                                          const Caller& caller) const
     {
-        _callbacks.onWorkStarted(caller.context, event.as.work_started.stream);
+        _callbacks.onWorkStarted(caller.context, event.stream);
         return actionOf(KIOTTY_NET_ACTION_TYPE_START_WORK);
     }
 
     KiottyNetConnectionAction CallbackHandler::disconnect(const KiottyNetConnectionEvent& event,
                                                           const Caller& caller) const
     {
-        const KiottyNetCode reason = event.as.closed.reason;
+        const KiottyNetCode reason = event.reason;
         _callbacks.onDisconnected(_app_context, caller.context, caller.handle(), reason);
         return actionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
     }

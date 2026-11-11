@@ -167,7 +167,7 @@ namespace
 
     KiottyNetTransition statefulRead(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetConnectionEvent event)
     {
-        return EchoNext::moveToNextState(EchoState::Writing, onRead(context, connection, event.as.read.data));
+        return EchoNext::moveToNextState(EchoState::Writing, onRead(context, connection, event.data));
     }
 
     KiottyNetTransition statefulWritten(KiottyNetConnectionContext, KiottyNetConnectionHandle, KiottyNetConnectionEvent)

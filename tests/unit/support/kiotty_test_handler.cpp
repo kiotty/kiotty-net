@@ -41,7 +41,7 @@ namespace kiotty_test
     KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_milliseconds)
     {
         KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_READ, timeout_milliseconds);
-        result.as.read.exact = exact;
+        result.exact = exact;
         return result;
     }
 
@@ -53,22 +53,22 @@ namespace kiotty_test
     KiottyNetConnectionAction thenClose(KiottyNetCode reason)
     {
         KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_CLOSE, 0);
-        result.as.close.reason = reason;
+        result.reason = reason;
         return result;
     }
 
     KiottyNetConnectionAction thenWriteSpan(KiottyNetSpan data, uint32_t timeout_milliseconds)
     {
         KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_WRITE, timeout_milliseconds);
-        result.as.write.data = data;
+        result.data = data;
         return result;
     }
 
     KiottyNetConnectionAction thenReadUntilSpan(KiottyNetSpan delimiter, size_t max, uint32_t timeout_milliseconds)
     {
         KiottyNetConnectionAction result = action(KIOTTY_NET_ACTION_TYPE_READ_UNTIL, timeout_milliseconds);
-        result.as.read_until.delimiter = delimiter;
-        result.as.read_until.max = max;
+        result.delimiter = delimiter;
+        result.max = max;
         return result;
     }
 

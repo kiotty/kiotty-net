@@ -1,7 +1,6 @@
 #ifndef KIOTTY_NET_BASE_H
 #define KIOTTY_NET_BASE_H
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -24,6 +23,8 @@ extern "C" {
 #define KIOTTY_NET_MAX_HOST_LENGTH     256
 #define KIOTTY_NET_MAX_PATH_LENGTH     260
 #define KIOTTY_NET_MAX_PASSWORD_LENGTH 128
+
+typedef int32_t KiottyNetBool;
 
 typedef enum KiottyNetCode
 {
@@ -297,26 +298,11 @@ typedef struct KiottyNetConnectionAction
 {
     KiottyNetActionType type;
     uint32_t            timeout_milliseconds;
-    union
-    {
-        struct
-        {
-            size_t exact;
-        } read;
-        struct
-        {
-            KiottyNetSpan delimiter;
-            size_t        max;
-        } read_until;
-        struct
-        {
-            KiottyNetSpan data;
-        } write;
-        struct
-        {
-            KiottyNetCode reason;
-        } close;
-    } as;
+    size_t              exact;
+    KiottyNetSpan       delimiter;
+    size_t              max;
+    KiottyNetSpan       data;
+    KiottyNetCode       reason;
 } KiottyNetConnectionAction;
 
 KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds);
@@ -335,7 +321,7 @@ KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reaso
 
 typedef struct KiottyNetConnectionDecision
 {
-    bool                       accepted;
+    KiottyNetBool              accepted;
     KiottyNetConnectionContext connection_context;
 } KiottyNetConnectionDecision;
 
@@ -398,7 +384,7 @@ KIOTTY_NET_API KiottyNetCode   KiottyNet_writeConnectionStreamFile(
     uint64_t offset,
     uint64_t length,
     uint32_t timeout_milliseconds);
-KIOTTY_NET_API bool            KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream);
+KIOTTY_NET_API KiottyNetBool   KiottyNet_isConnectionStreamOpen(KiottyNetConnectionStream stream);
 KIOTTY_NET_API KiottyNetCode   KiottyNet_closeConnectionStream(
     KiottyNetConnectionStream stream,
     KiottyNetConnectionAction then);
@@ -1218,7 +1204,7 @@ inline KiottyNetCode KiottyNet_ConnectionStream::writeFile(
 
 inline bool KiottyNet_ConnectionStream::open() const
 {
-    return KiottyNet_isConnectionStreamOpen(_stream);
+    return KiottyNet_isConnectionStreamOpen(_stream) != 0;
 }
 
 inline KiottyNetCode KiottyNet_ConnectionStream::close(KiottyNetConnectionAction then)

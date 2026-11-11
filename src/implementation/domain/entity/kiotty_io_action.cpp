@@ -71,17 +71,17 @@ namespace kiotty::net::implementation
         case KIOTTY_NET_ACTION_TYPE_HOLD:
             return hold(action.timeout_milliseconds);
         case KIOTTY_NET_ACTION_TYPE_READ:
-            return read(IoPurpose::USER, action.timeout_milliseconds, action.as.read.exact);
+            return read(IoPurpose::USER, action.timeout_milliseconds, action.exact);
         case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
             return readUntil(action.timeout_milliseconds,
-                             action.as.read_until.delimiter,
-                             action.as.read_until.max);
+                             action.delimiter,
+                             action.max);
         case KIOTTY_NET_ACTION_TYPE_WRITE:
-            return write(IoPurpose::USER, action.timeout_milliseconds, action.as.write.data.length);
+            return write(IoPurpose::USER, action.timeout_milliseconds, action.data.length);
         case KIOTTY_NET_ACTION_TYPE_START_WORK:
             return startWork();
         case KIOTTY_NET_ACTION_TYPE_CLOSE:
-            return close(action.as.close.reason);
+            return close(action.reason);
         }
         return none();
     }

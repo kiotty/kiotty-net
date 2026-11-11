@@ -116,7 +116,7 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpW
 KIOTTY_NET_API KiottyNetCode KiottyNet_finishHttpWorkWithClose(
     KiottyNetHttpWorkHandle work,
     KiottyNetCode reason);
-KIOTTY_NET_API bool          KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
+KIOTTY_NET_API KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
 
 typedef void (*KiottyNetHttpRequestAction)(
     KiottyNetAppContext app_context,
@@ -525,7 +525,7 @@ inline KiottyNet_HttpWork::~KiottyNet_HttpWork()
 
 inline bool KiottyNet_HttpWork::connected() const
 {
-    return KiottyNet_isHttpWorkConnected(_work);
+    return KiottyNet_isHttpWorkConnected(_work) != 0;
 }
 
 inline KiottyNetCode KiottyNet_HttpWork::finishWithResponse()
