@@ -65,6 +65,9 @@ namespace kiotty::net::implementation
         constexpr uint64_t    DECIMAL_BASE = 10;
         constexpr int32_t     LAST_WEEKDAY = 6;
         constexpr int32_t     LAST_MONTH = 12;
+        constexpr size_t      HEX_DIGITS = 16;
+        constexpr size_t      HEX_BASE = 16;
+        constexpr char        HEX_LETTERS[] = "0123456789abcdef";
 
         using DigitText = FixedString<DECIMAL_DIGITS + 1>;
 
@@ -121,6 +124,23 @@ namespace kiotty::net::implementation
             if (is_allowed) { (void)text.append(literalOf(METHOD_NAMES[method])); }
         }
         return text;
+    }
+
+    ChunkHead chunkHeadOf(size_t length)
+    {
+        char digits[HEX_DIGITS] = {};
+        size_t start = HEX_DIGITS;
+        size_t rest = length;
+        do
+        {
+            start -= 1;
+            digits[start] = HEX_LETTERS[rest % HEX_BASE];
+            rest /= HEX_BASE;
+        } while (rest > 0);
+        ChunkHead head;
+        (void)head.assign(Span<const char>{ digits + start, HEX_DIGITS - start });
+        (void)head.append(literalOf("\r\n"));
+        return head;
     }
 
     namespace

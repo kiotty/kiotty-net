@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace kiotty::net::implementation
@@ -23,6 +24,7 @@ namespace kiotty::net::implementation
         KiottyNetCode initialize(HttpSite& site, size_t count, const KiottyNetHttpLimits& limits);
         SessionResult acquire(const KiottyNetConnectionInfo& info);
         void          release(HttpSession& session);
+        bool          handBack(HttpSession& session);
         SessionResult find(int64_t id);
 
     private:
@@ -33,6 +35,7 @@ namespace kiotty::net::implementation
         std::vector<HttpSession>         _sessions;
         std::vector<int32_t>             _free;
         std::vector<int32_t>             _generations;
+        std::mutex                       _mutex;
     };
 
     int32_t nextSessionGeneration(int32_t generation);

@@ -20,46 +20,95 @@ namespace kiotty::net::implementation
         constexpr int32_t STATUS_NOT_MODIFIED = 304;
         constexpr size_t  LINE_END_BYTES = 2;
         constexpr size_t  SEPARATOR_BYTES = 2;
+        constexpr char    LAST_CHUNK[] = "0\r\n\r\n";
 
         constexpr const char* RESERVED_NAMES[] = {
             "Content-Length", "Transfer-Encoding", "Connection", "Date", "Content-Type",
         };
 
+        ResponseLayout   emptyLayout(Span<char> buffer);
         Span<const char> literalOf(const char* text);
         bool             isReservedName(Span<const char> name);
         bool             isFieldValue(Span<const char> value);
         bool             isBodiless(int32_t status);
+        bool             isNamedType(KiottyNetHttpContentType type, BodyStorage storage);
         void             writeField(Span<char> target,
                                     Span<const char> name,
                                     Span<const char> value);
+        void             appendFraming(PrefixText& prefix, const ResponseLayout& layout);
+        Span<const char> sealedBodyOf(const ResponseLayout& layout, bool is_bodiless);
+        size_t           smallerOf(size_t left, size_t right);
+    }
+
+    ResponseFrame::ResponseFrame(const ResponseLayout& layout)
+        : _layout(layout)
+    {
+    }
+
+    Span<const char> ResponseFrame::chunkAt(size_t offset, size_t max_length) const
+    {
+        const size_t header_length = _layout.header_end - _layout.header_start;
+        const bool is_header = offset < header_length;
+        const size_t start = is_header ? _layout.header_start + offset : 0;
+        const size_t header_rest = is_header ? header_length - offset : 0;
+        const Span<const char> header{ _layout.buffer.data + start, header_rest };
+        const Span<const char> body{ _layout.body.data, _layout.sendable_body };
+        const Span<const char> rest = is_header ? header : body.skip(offset - header_length);
+        return Span<const char>{ rest.data, smallerOf(rest.length, max_length) };
+    }
+
+    KiottyNetCode ResponseFrame::checkChunk(Span<const char> data) const
+    {
+        const bool has_data = data.data != nullptr && data.length > 0;
+        if (!isStream() || !has_data) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const bool is_text = textKindOf(_layout.type) != TextKind::BINARY;
+        if (is_text && !isUtf8(data)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    bool ResponseFrame::isStream() const
+    {
+        return _layout.has_body && _layout.storage == BodyStorage::STREAM;
+    }
+
+    bool ResponseFrame::hasSendableBody() const
+    {
+        return _layout.sendable_body > 0;
+    }
+
+    Span<const char> ResponseFrame::frameChunk(Span<const char> data,
+                                               size_t kept,
+                                               size_t limit) const
+    {
+        const Span<const char> none{ nullptr, 0 };
+        const Span<char> area = _layout.buffer.skip(_layout.header_start);
+        const size_t room = smallerOf(area.length, limit);
+        const ChunkHead head = chunkHeadOf(data.length);
+        const size_t framing = kept + head.length() + LINE_END_BYTES;
+        const bool has_room = framing <= room && data.length <= room - framing;
+        if (!has_room) { return none; }
+        const Span<char> head_target = area.skip(kept);
+        (void)head_target.copyFrom(head.span());
+        const Span<char> data_target = head_target.skip(head.length());
+        (void)data_target.copyFrom(data);
+        const Span<char> tail_target = data_target.skip(data.length);
+        (void)tail_target.copyFrom(literalOf("\r\n"));
+        return Span<const char>{ area.data, framing + data.length };
     }
 
     HttpResponseStore::HttpResponseStore(Span<char> buffer)
-        : _buffer(buffer)
-        , _body{ nullptr, 0 }
+        : _layout(emptyLayout(buffer))
         , _custom()
-        , _header_start(RESPONSE_PREFIX_BYTES)
-        , _header_end(RESPONSE_PREFIX_BYTES)
-        , _body_start(buffer.length)
-        , _sendable_body(0)
         , _status(0)
-        , _type(KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM)
-        , _has_body(false)
         , _is_touched(false)
     {
     }
 
     void HttpResponseStore::begin()
     {
-        _body = Span<const char>{ nullptr, 0 };
+        _layout = emptyLayout(_layout.buffer);
         _custom.clear();
-        _header_start = RESPONSE_PREFIX_BYTES;
-        _header_end = RESPONSE_PREFIX_BYTES;
-        _body_start = _buffer.length;
-        _sendable_body = 0;
         _status = 0;
-        _type = KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM;
-        _has_body = false;
         _is_touched = false;
     }
 
@@ -80,9 +129,9 @@ namespace kiotty::net::implementation
         if (!isUtf8(value)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
         const size_t needed = name.length + value.length + SEPARATOR_BYTES + LINE_END_BYTES;
         if (needed > headerRoom()) { return KIOTTY_NET_CODE_BUFFER_FULL; }
-        const Span<char> target{ _buffer.data + _header_end, needed };
+        const Span<char> target{ _layout.buffer.data + _layout.header_end, needed };
         writeField(target, name, value);
-        _header_end += needed;
+        _layout.header_end += needed;
         _is_touched = true;
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -102,20 +151,23 @@ namespace kiotty::net::implementation
     {
         const bool is_missing = data.data == nullptr && data.length > 0;
         if (is_missing) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const KiottyNetCode checked = checkBodyType(type);
+        const KiottyNetCode checked = checkBodyType(type, storage);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
-        const Span<const char> body{ data.data, data.length };
+        const bool is_stream = storage == BodyStorage::STREAM;
+        const Span<const char> body{ data.data, is_stream ? 0 : data.length };
         const bool is_text = textKindOf(type) != TextKind::BINARY;
         if (is_text && !isUtf8(body)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
         const bool is_copy = storage == BodyStorage::COPY;
-        const size_t room = _buffer.length - _header_end - LINE_END_BYTES;
+        const size_t room = _layout.buffer.length - _layout.header_end - LINE_END_BYTES;
         if (is_copy && body.length > room) { return KIOTTY_NET_CODE_BUFFER_FULL; }
-        _body_start = is_copy ? _buffer.length - body.length : _buffer.length;
-        const Span<char> target{ _buffer.data + _body_start, body.length };
+        const size_t end = _layout.buffer.length;
+        _layout.body_start = is_copy ? end - body.length : end;
+        const Span<char> target{ _layout.buffer.data + _layout.body_start, body.length };
         if (is_copy) { (void)target.copyFrom(body); }
-        _body = is_copy ? Span<const char>{ target.data, target.length } : body;
-        _type = type;
-        _has_body = true;
+        _layout.body = is_copy ? Span<const char>{ target.data, target.length } : body;
+        _layout.type = type;
+        _layout.storage = storage;
+        _layout.has_body = true;
         _is_touched = true;
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -125,42 +177,33 @@ namespace kiotty::net::implementation
         const int32_t status = finalStatus();
         const bool is_bodiless = isBodiless(status);
         const bool is_head = seal.method == KIOTTY_NET_HTTP_METHOD_HEAD;
+        _layout.body = sealedBodyOf(_layout, is_bodiless);
         PrefixText prefix;
         (void)appendStatusLine(prefix, status);
         (void)appendDateField(prefix, currentUtcTime());
-        if (!is_bodiless) { (void)appendLengthField(prefix, _body.length); }
-        const bool has_type = _has_body && !is_bodiless;
+        if (!is_bodiless) { appendFraming(prefix, _layout); }
+        const bool has_type = _layout.has_body && !is_bodiless;
         if (has_type) { (void)appendField(prefix, literalOf("Content-Type"), contentTypeText()); }
         const bool is_closing = seal.persistence == Persistence::CLOSE;
         if (is_closing) { (void)appendField(prefix, literalOf("Connection"), literalOf("close")); }
-        _header_start = RESPONSE_PREFIX_BYTES - prefix.length();
-        const Span<char> head{ _buffer.data + _header_start, prefix.length() };
+        _layout.header_start = RESPONSE_PREFIX_BYTES - prefix.length();
+        const Span<char> head{ _layout.buffer.data + _layout.header_start, prefix.length() };
         (void)head.copyFrom(prefix.span());
-        const Span<char> end{ _buffer.data + _header_end, LINE_END_BYTES };
+        const Span<char> end{ _layout.buffer.data + _layout.header_end, LINE_END_BYTES };
         (void)end.copyFrom(literalOf("\r\n"));
-        _header_end += LINE_END_BYTES;
-        _sendable_body = is_head || is_bodiless ? 0 : _body.length;
+        _layout.header_end += LINE_END_BYTES;
+        _layout.sendable_body = is_head || is_bodiless ? 0 : _layout.body.length;
     }
 
-    Span<const char> HttpResponseStore::chunkAt(size_t offset, size_t max_length) const
+    ResponseFrame HttpResponseStore::frame() const
     {
-        const size_t header_length = _header_end - _header_start;
-        const bool is_header = offset < header_length;
-        const size_t start = is_header ? _header_start + offset : 0;
-        const size_t header_rest = is_header ? header_length - offset : 0;
-        const Span<const char> header{ _buffer.data + start, header_rest };
-        const Span<const char> body{ _body.data, _sendable_body };
-        const Span<const char> rest = is_header ? header : body.skip(offset - header_length);
-        const size_t length = rest.length < max_length ? rest.length : max_length;
-        return Span<const char>{ rest.data, length };
+        return ResponseFrame(_layout);
     }
 
-    KiottyNetCode HttpResponseStore::checkBodyType(KiottyNetHttpContentType type) const
+    KiottyNetCode HttpResponseStore::checkBodyType(KiottyNetHttpContentType type,
+                                                   BodyStorage storage) const
     {
-        const bool is_named = type >= KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM
-                              && type < KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION
-                              && type != KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM;
-        if (is_named) { return KIOTTY_NET_CODE_SUCCESS; }
+        if (isNamedType(type, storage)) { return KIOTTY_NET_CODE_SUCCESS; }
         const bool is_custom = type == KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM && !_custom.empty();
         if (is_custom) { return KIOTTY_NET_CODE_SUCCESS; }
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -168,13 +211,13 @@ namespace kiotty::net::implementation
 
     size_t HttpResponseStore::headerRoom() const
     {
-        return _body_start - _header_end - LINE_END_BYTES;
+        return _layout.body_start - _layout.header_end - LINE_END_BYTES;
     }
 
     Span<const char> HttpResponseStore::contentTypeText() const
     {
-        if (_type == KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM) { return _custom.span(); }
-        return contentTypeTextOf(_type);
+        if (_layout.type == KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM) { return _custom.span(); }
+        return contentTypeTextOf(_layout.type);
     }
 
     int32_t HttpResponseStore::finalStatus() const
@@ -186,6 +229,21 @@ namespace kiotty::net::implementation
 
     namespace
     {
+        ResponseLayout emptyLayout(Span<char> buffer)
+        {
+            return ResponseLayout{
+                buffer,
+                Span<const char>{ nullptr, 0 },
+                RESPONSE_PREFIX_BYTES,
+                RESPONSE_PREFIX_BYTES,
+                buffer.length,
+                0,
+                KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,
+                BodyStorage::COPY,
+                false,
+            };
+        }
+
         Span<const char> literalOf(const char* text)
         {
             return Span<const char>{ text, std::char_traits<char>::length(text) };
@@ -218,6 +276,15 @@ namespace kiotty::net::implementation
             return is_informational || status == STATUS_NO_CONTENT || status == STATUS_NOT_MODIFIED;
         }
 
+        bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)
+        {
+            const bool is_listed = type >= KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM
+                                   && type < KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION;
+            const bool is_event_stream = type == KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM;
+            const bool is_stream = storage == BodyStorage::STREAM;
+            return is_listed && (is_stream || !is_event_stream);
+        }
+
         void writeField(Span<char> target, Span<const char> name, Span<const char> value)
         {
             (void)target.copyFrom(name);
@@ -227,6 +294,27 @@ namespace kiotty::net::implementation
             (void)text.copyFrom(value);
             const Span<char> end = text.skip(value.length);
             (void)end.copyFrom(literalOf("\r\n"));
+        }
+
+        void appendFraming(PrefixText& prefix, const ResponseLayout& layout)
+        {
+            const bool is_stream = layout.has_body && layout.storage == BodyStorage::STREAM;
+            const Span<const char> name = literalOf("Transfer-Encoding");
+            if (is_stream) { (void)appendField(prefix, name, literalOf("chunked")); }
+            if (!is_stream) { (void)appendLengthField(prefix, layout.body.length); }
+        }
+
+        Span<const char> sealedBodyOf(const ResponseLayout& layout, bool is_bodiless)
+        {
+            const bool is_stream = layout.has_body && layout.storage == BodyStorage::STREAM;
+            if (!is_stream) { return layout.body; }
+            if (is_bodiless) { return Span<const char>{ nullptr, 0 }; }
+            return Span<const char>{ LAST_CHUNK, sizeof(LAST_CHUNK) - 1 };
+        }
+
+        size_t smallerOf(size_t left, size_t right)
+        {
+            return left < right ? left : right;
         }
     }
 }

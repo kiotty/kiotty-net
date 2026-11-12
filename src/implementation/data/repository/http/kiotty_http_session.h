@@ -18,6 +18,8 @@ namespace kiotty::net::implementation
     {
         READING,
         FILLING,
+        WORKING,
+        STREAMING,
         SENDING
     };
 
@@ -33,16 +35,22 @@ namespace kiotty::net::implementation
     {
         HttpSession(HttpSite& owner, int32_t index, const SessionBuffers& buffers);
 
-        HttpRequestStore        request;
-        HttpResponseStore       response;
-        HttpSite&               site;
-        KiottyNetConnectionInfo info;
-        uint64_t                body_remaining;
-        uint64_t                header_deadline;
-        size_t                  sent;
-        PoolHandle              id;
-        KiottyNetCode           close_reason;
-        SessionPhase            phase;
-        Persistence             persistence;
+        HttpRequestStore          request;
+        HttpResponseStore         response;
+        HttpSite&                 site;
+        KiottyNetConnectionInfo   info;
+        KiottyNetHttpRoute        route;
+        KiottyNetConnectionStream stream;
+        uint64_t                  body_remaining;
+        uint64_t                  header_deadline;
+        size_t                    sent;
+        PoolHandle                id;
+        KiottyNetCode             close_reason;
+        KiottyNetCode             stream_failure;
+        SessionPhase              phase;
+        Persistence               persistence;
+        bool                      is_work_requested;
+        bool                      is_worker_owned;
+        bool                      is_orphaned;
     };
 }

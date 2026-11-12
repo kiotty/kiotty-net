@@ -19,6 +19,7 @@ namespace kiotty::net::implementation
         CHUNK_END,
         TRAILER,
         CONTINUING,
+        WORKING,
         SENDING,
         CLOSING
     };
@@ -34,6 +35,7 @@ namespace kiotty::net::implementation
     KiottyNetTransition readBody(HttpSession& session, HttpState state);
     KiottyNetTransition reject(HttpSession& session, KiottyNetHttpStatus status);
     KiottyNetTransition dispatch(HttpSession& session);
+    KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream);
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection);
     KiottyNetTransition closeWith(KiottyNetCode reason);
     void                startHeaderClock(HttpSession& session);

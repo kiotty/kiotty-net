@@ -13,7 +13,8 @@ namespace kiotty::net::implementation
     enum class BodyStorage : uint8_t
     {
         COPY,
-        REFERENCE
+        REFERENCE,
+        STREAM
     };
 
     struct ResponseSeal
@@ -22,39 +23,60 @@ namespace kiotty::net::implementation
         Persistence         persistence;
     };
 
+    struct ResponseLayout
+    {
+        Span<char>               buffer;
+        Span<const char>         body;
+        size_t                   header_start;
+        size_t                   header_end;
+        size_t                   body_start;
+        size_t                   sendable_body;
+        KiottyNetHttpContentType type;
+        BodyStorage              storage;
+        bool                     has_body;
+    };
+
+    class ResponseFrame
+    {
+    public:
+        explicit ResponseFrame(const ResponseLayout& layout);
+
+        Span<const char> chunkAt(size_t offset, size_t max_length) const;
+        KiottyNetCode    checkChunk(Span<const char> data) const;
+        bool             isStream() const;
+        bool             hasSendableBody() const;
+        Span<const char> frameChunk(Span<const char> data, size_t kept, size_t limit) const;
+
+    private:
+        const ResponseLayout& _layout;
+    };
+
     class HttpResponseStore
     {
     public:
         explicit HttpResponseStore(Span<char> buffer);
 
-        void             begin();
-        KiottyNetCode    setStatus(int32_t status);
-        KiottyNetCode    addHeader(Span<const char> name, Span<const char> value);
-        KiottyNetCode    setCustomContentType(const char* content_type);
-        KiottyNetCode    setBody(KiottyNetHttpContentType type,
-                                 KiottyNetSpan data,
-                                 BodyStorage storage);
-        void             seal(const ResponseSeal& seal);
-        Span<const char> chunkAt(size_t offset, size_t max_length) const;
+        void          begin();
+        KiottyNetCode setStatus(int32_t status);
+        KiottyNetCode addHeader(Span<const char> name, Span<const char> value);
+        KiottyNetCode setCustomContentType(const char* content_type);
+        KiottyNetCode setBody(KiottyNetHttpContentType type,
+                              KiottyNetSpan data,
+                              BodyStorage storage);
+        void          seal(const ResponseSeal& seal);
+        ResponseFrame frame() const;
 
     private:
         using CustomType = FixedString<KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH>;
 
-        KiottyNetCode    checkBodyType(KiottyNetHttpContentType type) const;
+        KiottyNetCode    checkBodyType(KiottyNetHttpContentType type, BodyStorage storage) const;
         size_t           headerRoom() const;
         Span<const char> contentTypeText() const;
         int32_t          finalStatus() const;
 
-        Span<char>               _buffer;
-        Span<const char>         _body;
-        CustomType               _custom;
-        size_t                   _header_start;
-        size_t                   _header_end;
-        size_t                   _body_start;
-        size_t                   _sendable_body;
-        int32_t                  _status;
-        KiottyNetHttpContentType _type;
-        bool                     _has_body;
-        bool                     _is_touched;
+        ResponseLayout _layout;
+        CustomType     _custom;
+        int32_t        _status;
+        bool           _is_touched;
     };
 }

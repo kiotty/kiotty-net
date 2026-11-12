@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context/kiotty_http_configuration.h"
+#include "context/kiotty_http_work.h"
 #include "context/kiotty_server.h"
 #include "core/kiotty_result.h"
 #include "data/repository/http/kiotty_http_site.h"
@@ -33,7 +34,8 @@ namespace kiotty::net::implementation
                            const KiottyNetTlsServerConfiguration* tls);
         RegistryResult registry();
         NoticesResult  notices();
-        SessionResult  session(int64_t id);
+        HttpWork       work();
+        void           close();
 
     private:
         KiottyNetCode prepare(const HttpServerConfiguration& configuration);

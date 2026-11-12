@@ -5,6 +5,7 @@
 #include "data/repository/http/kiotty_http_session_pool.h"
 #include "kiotty_net_http.h"
 
+#include <atomic>
 #include <cstddef>
 
 namespace kiotty::net::implementation
@@ -23,6 +24,7 @@ namespace kiotty::net::implementation
         size_t                    receive_capacity;
         size_t                    send_capacity;
         KiottyNetHttpServerHandle owner;
+        std::atomic<bool>         is_closing;
     };
 
     inline HttpSite::HttpSite()
@@ -33,6 +35,7 @@ namespace kiotty::net::implementation
         , receive_capacity(0)
         , send_capacity(0)
         , owner(nullptr)
+        , is_closing(false)
     {
     }
 }

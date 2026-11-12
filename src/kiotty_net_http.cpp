@@ -11,18 +11,14 @@ namespace
 {
     constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
     constexpr size_t        MAX_HEADER_NAME_TEXT = 256;
+    constexpr KiottyNetSpan STREAM_PLACEHOLDER = { nullptr, 0 };
 
     using FillingResult = net::Result<net::HttpSession&, KiottyNetCode>;
 
     FillingResult fillingOf(KiottyNetHttpResponseHandle response)
     {
         if (response.server == nullptr) { return FillingResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
-        const net::SessionResult found = response.server->session(response.id);
-        if (!found) { return FillingResult::failure(found.code); }
-        net::HttpSession& session = found.value();
-        const bool is_filling = session.phase == net::SessionPhase::FILLING;
-        if (!is_filling) { return FillingResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return FillingResult::success(session);
+        return response.server->work().fill(response.id);
     }
 
     KiottyNetCode setBody(KiottyNetHttpResponseHandle response,
@@ -148,6 +144,46 @@ KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response,
                                        KiottyNetSpan data)
 {
     return setBody(response, type, data, net::BodyStorage::REFERENCE);
+}
+
+KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response,
+                                          KiottyNetHttpContentType type)
+{
+    return setBody(response, type, STREAM_PLACEHOLDER, net::BodyStorage::STREAM);
+}
+
+KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response)
+{
+    if (response.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
+    return response.server->work().start(response.id);
+}
+
+KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
+                                             KiottyNetSpan data,
+                                             uint32_t timeout_milliseconds)
+{
+    const KiottyNetResult closed = { 0, KIOTTY_NET_CODE_PEER_CLOSED };
+    if (work.server == nullptr) { return closed; }
+    return work.server->work().write(work.id, data, timeout_milliseconds);
+}
+
+KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work)
+{
+    if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
+    return work.server->work().finishWithResponse(work.id);
+}
+
+KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason)
+{
+    if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
+    return work.server->work().finishWithClose(work.id, reason);
+}
+
+KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work)
+{
+    if (work.server == nullptr) { return 0; }
+    const bool is_connected = work.server->work().isConnected(work.id);
+    return is_connected ? 1 : 0;
 }
 
 KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context,

@@ -28,6 +28,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onChunkEnd(Context context, Connection connection, Event event);
         KiottyNetTransition onTrailer(Context context, Connection connection, Event event);
         KiottyNetTransition onContinued(Context context, Connection connection, Event event);
+        KiottyNetTransition onWorkStarted(Context context, Connection connection, Event event);
         KiottyNetTransition onSent(Context context, Connection connection, Event event);
         KiottyNetTransition onTimeout(Context context, Connection connection, Event event);
         KiottyNetTransition onClosed(Context context, Connection connection, Event event);
@@ -56,12 +57,14 @@ namespace kiotty::net::implementation
         constexpr HttpState CHUNK_END = HttpState::CHUNK_END;
         constexpr HttpState TRAILER = HttpState::TRAILER;
         constexpr HttpState CONTINUING = HttpState::CONTINUING;
+        constexpr HttpState WORKING = HttpState::WORKING;
         constexpr HttpState SENDING = HttpState::SENDING;
         constexpr HttpState CLOSING = HttpState::CLOSING;
 
         constexpr EventType CONNECTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;
         constexpr EventType READ = KIOTTY_NET_CONNECTION_EVENT_TYPE_READ;
         constexpr EventType WRITTEN = KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN;
+        constexpr EventType WORK_STARTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED;
         constexpr EventType TIMEOUT = KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT;
         constexpr EventType CLOSED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED;
 
@@ -71,8 +74,8 @@ namespace kiotty::net::implementation
             KiottyNet_from(HEADER_LINE)
                 .when(READ)
                 .then(onHeaderLine)
-                .to(HEADER_LINE, BODY, CHUNK_SIZE, CONTINUING, SENDING),
-            KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING),
+                .to(HEADER_LINE, BODY, CHUNK_SIZE, CONTINUING, SENDING, WORKING),
+            KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING),
             KiottyNet_from(CHUNK_SIZE)
                 .when(READ)
                 .then(onChunkSize)
@@ -82,8 +85,11 @@ namespace kiotty::net::implementation
                 .then(onChunkData)
                 .to(CHUNK_DATA, CHUNK_END, SENDING),
             KiottyNet_from(CHUNK_END).when(READ).then(onChunkEnd).to(CHUNK_SIZE, SENDING),
-            KiottyNet_from(TRAILER).when(READ).then(onTrailer).to(TRAILER, SENDING),
+            KiottyNet_from(TRAILER).when(READ).then(onTrailer).to(TRAILER, SENDING, WORKING),
             KiottyNet_from(CONTINUING).when(WRITTEN).then(onContinued).to(BODY, CHUNK_SIZE),
+            KiottyNet_from(WORKING).when(WORK_STARTED).then(onWorkStarted).to(WORKING),
+            KiottyNet_from(WORKING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
+            KiottyNet_from(WORKING).when(READ).then(onRequestLine).to(HEADER_LINE, SENDING),
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
@@ -169,6 +175,11 @@ namespace kiotty::net::implementation
         KiottyNetTransition onContinued(Context context, Connection, Event)
         {
             return readFirstBody(sessionOf(context));
+        }
+
+        KiottyNetTransition onWorkStarted(Context context, Connection, Event event)
+        {
+            return startWork(sessionOf(context), event.stream);
         }
 
         KiottyNetTransition onSent(Context context, Connection connection, Event event)

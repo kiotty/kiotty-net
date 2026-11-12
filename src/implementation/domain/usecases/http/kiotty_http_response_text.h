@@ -11,13 +11,16 @@ namespace kiotty::net::implementation
 {
     inline constexpr size_t RESPONSE_PREFIX_BYTES = 256;
     inline constexpr size_t ALLOW_TEXT_BYTES = 64;
+    inline constexpr size_t CHUNK_HEAD_BYTES = 18;
 
     using PrefixText = FixedString<RESPONSE_PREFIX_BYTES + 1>;
     using AllowText = FixedString<ALLOW_TEXT_BYTES>;
+    using ChunkHead = FixedString<CHUNK_HEAD_BYTES + 1>;
 
     bool      appendStatusLine(PrefixText& text, int32_t status);
     bool      appendField(PrefixText& text, Span<const char> name, Span<const char> value);
     bool      appendLengthField(PrefixText& text, uint64_t length);
     bool      appendDateField(PrefixText& text, const CalendarTime& time);
     AllowText allowListOf(uint32_t methods);
+    ChunkHead chunkHeadOf(size_t length);
 }

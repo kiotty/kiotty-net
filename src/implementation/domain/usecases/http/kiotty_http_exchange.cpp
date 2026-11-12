@@ -19,12 +19,17 @@ namespace kiotty::net::implementation
         constexpr int32_t       NOT_FOUND = KIOTTY_NET_HTTP_STATUS_NOT_FOUND;
         constexpr int32_t       NOT_ALLOWED = KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
         constexpr int32_t       NO_CONTENT = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
+        constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;
         constexpr char          ALLOW_NAME[] = "Allow";
 
         size_t                      lineLimitOf(const HttpSite& site);
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session);
+        KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route);
+        KiottyNetTransition         afterRoute(HttpSession& session);
+        KiottyNetTransition         awaitWork(HttpSession& session);
         void answerAutomatically(HttpSession& session, const RouteMatch& match);
         void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed);
+        void answerWithoutWork(HttpSession& session);
         KiottyNetTransition         startSending(HttpSession& session);
     }
 
@@ -50,6 +55,9 @@ namespace kiotty::net::implementation
         session.body_remaining = 0;
         session.sent = 0;
         session.close_reason = KIOTTY_NET_CODE_SUCCESS;
+        session.stream = KiottyNetConnectionStream{ nullptr, 0 };
+        session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
+        session.is_work_requested = false;
         session.phase = SessionPhase::READING;
         session.persistence = Persistence::KEEP_ALIVE;
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
@@ -89,17 +97,27 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest& request = session.request.request();
         const Span<const char> path{ request.path.data, request.path.length };
         const RouteMatch match = session.site.registry.find(request.method, path);
-        const KiottyNetHttpRoute& route = match.route;
         const bool is_route = match.kind == MatchKind::ROUTE;
-        if (is_route) { route.onRequest(route.app_context, &request, responseHandleOf(session)); }
-        if (!is_route) { answerAutomatically(session, match); }
+        if (is_route) { return callRoute(session, match.route); }
+        answerAutomatically(session, match);
         return startSending(session);
+    }
+
+    KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream)
+    {
+        session.stream = stream;
+        const KiottyNetHttpRoute route = session.route;
+        const KiottyNetHttpRequest* request = &session.request.request();
+        const KiottyNetHttpResponseHandle response = responseHandleOf(session);
+        const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
+        route.onWorkStarted(route.app_context, request, response, work);
+        return Next::moveToNextState(HttpState::WORKING, thenWork());
     }
 
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)
     {
         const size_t capacity = session.site.send_capacity;
-        const Span<const char> chunk = session.response.chunkAt(session.sent, capacity);
+        const Span<const char> chunk = session.response.frame().chunkAt(session.sent, capacity);
         const KiottyNetSpan data{ chunk.data, chunk.length };
         const KiottyNetConnectionAction write = thenWrite(data, 0);
         if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, write); }
@@ -143,6 +161,33 @@ namespace kiotty::net::implementation
             return KiottyNetHttpResponseHandle{ session.site.owner, session.id.value() };
         }
 
+        KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
+        {
+            session.route = route;
+            const KiottyNetHttpRequest& request = session.request.request();
+            route.onRequest(route.app_context, &request, responseHandleOf(session));
+            return afterRoute(session);
+        }
+
+        KiottyNetTransition afterRoute(HttpSession& session)
+        {
+            const bool is_stream = session.response.frame().isStream();
+            const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
+            const bool is_head_stream = is_head && is_stream;
+            const bool is_working = session.is_work_requested && !is_head_stream;
+            if (is_working) { return awaitWork(session); }
+            const bool is_orphan_stream = is_stream && !session.is_work_requested;
+            if (is_orphan_stream) { answerWithoutWork(session); }
+            return startSending(session);
+        }
+
+        KiottyNetTransition awaitWork(HttpSession& session)
+        {
+            session.phase = SessionPhase::WORKING;
+            session.is_worker_owned = true;
+            return Next::moveToNextState(HttpState::WORKING, thenWork());
+        }
+
         void answerAutomatically(HttpSession& session, const RouteMatch& match)
         {
             switch (match.kind)
@@ -169,13 +214,21 @@ namespace kiotty::net::implementation
             (void)session.response.addHeader(name, allow.span());
         }
 
+        void answerWithoutWork(HttpSession& session)
+        {
+            session.response.begin();
+            (void)session.response.setStatus(SERVER_ERROR);
+            session.persistence = Persistence::CLOSE;
+        }
+
         KiottyNetTransition startSending(HttpSession& session)
         {
             session.phase = SessionPhase::SENDING;
             const KiottyNetHttpMethod method = session.request.request().method;
             session.response.seal(ResponseSeal{ method, session.persistence });
             session.sent = 0;
-            const Span<const char> chunk = session.response.chunkAt(0, session.site.send_capacity);
+            const size_t capacity = session.site.send_capacity;
+            const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
             const KiottyNetSpan data{ chunk.data, chunk.length };
             return Next::moveToNextState(HttpState::SENDING, thenWrite(data, 0));
         }

@@ -40,6 +40,7 @@ namespace kiotty::net::implementation
                                   const KiottyNetTlsServerConfiguration* tls)
     {
         _runs.fetch_add(1);
+        _site.is_closing.store(false);
         const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);
@@ -59,9 +60,15 @@ namespace kiotty::net::implementation
         return NoticesResult::success(_site.notices);
     }
 
-    SessionResult HttpServer::session(int64_t id)
+    HttpWork HttpServer::work()
     {
-        return _site.sessions.find(id);
+        return HttpWork(_site);
+    }
+
+    void HttpServer::close()
+    {
+        _site.is_closing.store(true);
+        Server::close();
     }
 
     KiottyNetCode HttpServer::prepare(const HttpServerConfiguration& configuration)

@@ -30,6 +30,7 @@ namespace kiotty::net::implementation
         , _sessions()
         , _free()
         , _generations()
+        , _mutex()
     {
     }
 
@@ -66,6 +67,7 @@ namespace kiotty::net::implementation
 
     SessionResult HttpSessionPool::acquire(const KiottyNetConnectionInfo& info)
     {
+        const std::lock_guard<std::mutex> lock(_mutex);
         if (_free.empty()) { return SessionResult::failure(KIOTTY_NET_CODE_SESSION_EXHAUSTED); }
         const int32_t index = _free.back();
         _free.pop_back();
@@ -76,8 +78,18 @@ namespace kiotty::net::implementation
 
     void HttpSessionPool::release(HttpSession& session)
     {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        session.is_orphaned = session.is_worker_owned;
+        if (session.is_orphaned) { return; }
         session.id.generation = nextSessionGeneration(session.id.generation);
         _free.push_back(session.id.index);
+    }
+
+    bool HttpSessionPool::handBack(HttpSession& session)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        session.is_worker_owned = false;
+        return session.is_orphaned;
     }
 
     SessionResult HttpSessionPool::find(int64_t id)

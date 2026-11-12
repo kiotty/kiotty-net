@@ -125,6 +125,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/http/kiotty_http_session_pool.cpp
     src/implementation/context/kiotty_http_configuration.cpp
     src/implementation/context/kiotty_http_server.cpp
+    src/implementation/context/kiotty_http_work.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
