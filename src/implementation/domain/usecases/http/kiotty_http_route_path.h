@@ -25,4 +25,6 @@ namespace kiotty::net::implementation
     RoutePathResult parseRoutePath(const char* text);
     RoutePathResult parseDirectoryPrefix(const char* text);
     bool            matchesPath(const RoutePath& route, Span<const char> path);
+    bool            hasParentSegment(Span<const char> path);
+    bool            isSafeRelativePath(Span<const char> path);
 }

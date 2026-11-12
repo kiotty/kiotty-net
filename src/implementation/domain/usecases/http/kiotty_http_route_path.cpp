@@ -18,6 +18,8 @@ namespace kiotty::net::implementation
         bool            isPathText(Span<const char> text);
         bool            hasWildcardSuffix(Span<const char> text);
         bool            endsWithSlash(Span<const char> text);
+        bool            isParentSegment(Span<const char> path, size_t start, size_t end);
+        bool            isUnsafeCharacter(char character);
     }
 
     RoutePathResult parseRoutePath(const char* text)
@@ -47,6 +49,28 @@ namespace kiotty::net::implementation
         if (is_exact && path.length != length) { return false; }
         if (path.length < length) { return false; }
         return std::memcmp(path.data, route.text.data, length) == 0;
+    }
+
+    bool hasParentSegment(Span<const char> path)
+    {
+        size_t segment_start = 0;
+        for (size_t i = 0; i <= path.length; ++i)
+        {
+            const bool is_end = i == path.length || path[i] == '/' || path[i] == '\\';
+            if (is_end && isParentSegment(path, segment_start, i)) { return true; }
+            if (is_end) { segment_start = i + 1; }
+        }
+        return false;
+    }
+
+    bool isSafeRelativePath(Span<const char> path)
+    {
+        if (hasParentSegment(path)) { return false; }
+        for (size_t i = 0; i < path.length; ++i)
+        {
+            if (isUnsafeCharacter(path[i])) { return false; }
+        }
+        return true;
     }
 
     namespace
@@ -84,6 +108,17 @@ namespace kiotty::net::implementation
         bool endsWithSlash(Span<const char> text)
         {
             return text[text.length - 1] == '/';
+        }
+
+        bool isParentSegment(Span<const char> path, size_t start, size_t end)
+        {
+            const bool is_two = end - start == 2;
+            return is_two && path[start] == '.' && path[start + 1] == '.';
+        }
+
+        bool isUnsafeCharacter(char character)
+        {
+            return character == '\\' || character == ':' || character == '\0';
         }
     }
 }

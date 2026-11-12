@@ -2,8 +2,10 @@
 
 #include "domain/entity/kiotty_action.h"
 #include "core/kiotty_clock.h"
+#include "data/repository/http/kiotty_http_file_body.h"
 #include "data/repository/http/kiotty_http_site.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"
+#include "domain/usecases/http/kiotty_http_static.h"
 
 #include <limits>
 
@@ -50,6 +52,7 @@ namespace kiotty::net::implementation
                                       uint32_t wait_milliseconds)
     {
         session.id.generation = nextSessionGeneration(session.id.generation);
+        detachFile(session);
         session.request.begin(connection);
         session.response.begin();
         session.body_remaining = 0;
@@ -116,8 +119,9 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)
     {
-        const size_t capacity = session.site.send_capacity;
-        const Span<const char> chunk = session.response.frame().chunkAt(session.sent, capacity);
+        const PieceResult piece = pieceAt(session, session.sent);
+        if (!piece) { return closeWith(piece.code); }
+        const Span<const char> chunk = piece.value;
         const KiottyNetSpan data{ chunk.data, chunk.length };
         const KiottyNetConnectionAction write = thenWrite(data, 0);
         if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, write); }
@@ -193,6 +197,9 @@ namespace kiotty::net::implementation
             switch (match.kind)
             {
             case MatchKind::ROUTE:
+                return;
+            case MatchKind::STATIC:
+                answerStatic(session, match.target);
                 return;
             case MatchKind::NOT_FOUND:
                 (void)session.response.setStatus(NOT_FOUND);

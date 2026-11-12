@@ -27,6 +27,7 @@ namespace kiotty::net::implementation
     HttpSessionPool::HttpSessionPool()
         : _block()
         , _headers()
+        , _files()
         , _sessions()
         , _free()
         , _generations()
@@ -46,6 +47,7 @@ namespace kiotty::net::implementation
         if (!header_slots) { return header_slots.code; }
         if (_block.size() < total.value) { _block.resize(total.value); }
         if (_headers.size() < header_slots.value) { _headers.resize(header_slots.value); }
+        if (_files.size() < count) { _files = std::vector<InputFile>(count); }
         keepGenerations();
         _sessions.clear();
         _sessions.reserve(count);
@@ -57,7 +59,7 @@ namespace kiotty::net::implementation
             SessionBuffers buffers = buffersAt(block, layout.value, i);
             buffers.headers = Span<KiottyNetHttpHeader>{ _headers.data() + i * limits.max_headers,
                                                          limits.max_headers };
-            _sessions.emplace_back(site, static_cast<int32_t>(i), buffers);
+            _sessions.emplace_back(site, _files[i], static_cast<int32_t>(i), buffers);
             const bool has_history = i < _generations.size();
             _sessions.back().id.generation = has_history ? _generations[i] : 0;
             _free.push_back(static_cast<int32_t>(count - 1 - i));
@@ -81,6 +83,7 @@ namespace kiotty::net::implementation
         const std::lock_guard<std::mutex> lock(_mutex);
         session.is_orphaned = session.is_worker_owned;
         if (session.is_orphaned) { return; }
+        session.file.close();
         session.id.generation = nextSessionGeneration(session.id.generation);
         _free.push_back(session.id.index);
     }

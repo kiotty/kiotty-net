@@ -2,10 +2,14 @@
 
 namespace kiotty::net::implementation
 {
-    HttpSession::HttpSession(HttpSite& owner, int32_t index, const SessionBuffers& buffers)
+    HttpSession::HttpSession(HttpSite& owner,
+                             InputFile& body_file,
+                             int32_t index,
+                             const SessionBuffers& buffers)
         : request(buffers.header, buffers.headers, buffers.body)
         , response(buffers.response)
         , site(owner)
+        , file(body_file)
         , info{}
         , route{}
         , stream{ nullptr, 0 }

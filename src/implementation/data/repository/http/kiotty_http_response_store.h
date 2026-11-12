@@ -14,7 +14,8 @@ namespace kiotty::net::implementation
     {
         COPY,
         REFERENCE,
-        STREAM
+        STREAM,
+        FILE
     };
 
     struct ResponseSeal
@@ -27,6 +28,7 @@ namespace kiotty::net::implementation
     {
         Span<char>               buffer;
         Span<const char>         body;
+        uint64_t                 file_length;
         size_t                   header_start;
         size_t                   header_end;
         size_t                   body_start;
@@ -34,6 +36,13 @@ namespace kiotty::net::implementation
         KiottyNetHttpContentType type;
         BodyStorage              storage;
         bool                     has_body;
+    };
+
+    struct FilePiece
+    {
+        Span<char> target;
+        uint64_t   file_offset;
+        bool       is_file;
     };
 
     class ResponseFrame
@@ -46,6 +55,7 @@ namespace kiotty::net::implementation
         bool             isStream() const;
         bool             hasSendableBody() const;
         Span<const char> frameChunk(Span<const char> data, size_t kept, size_t limit) const;
+        FilePiece        filePieceAt(size_t offset, size_t max_length) const;
 
     private:
         const ResponseLayout& _layout;

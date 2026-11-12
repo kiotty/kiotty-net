@@ -37,6 +37,8 @@ namespace kiotty::net::implementation
                                     Span<const char> value);
         void             appendFraming(PrefixText& prefix, const ResponseLayout& layout);
         Span<const char> sealedBodyOf(const ResponseLayout& layout, bool is_bodiless);
+        uint64_t         bodyLengthOf(const ResponseLayout& layout);
+        size_t           headerLengthOf(const ResponseLayout& layout);
         size_t           smallerOf(size_t left, size_t right);
     }
 
@@ -52,7 +54,8 @@ namespace kiotty::net::implementation
         const size_t start = is_header ? _layout.header_start + offset : 0;
         const size_t header_rest = is_header ? header_length - offset : 0;
         const Span<const char> header{ _layout.buffer.data + start, header_rest };
-        const Span<const char> body{ _layout.body.data, _layout.sendable_body };
+        const bool is_file = _layout.storage == BodyStorage::FILE;
+        const Span<const char> body{ _layout.body.data, is_file ? 0 : _layout.sendable_body };
         const Span<const char> rest = is_header ? header : body.skip(offset - header_length);
         return Span<const char>{ rest.data, smallerOf(rest.length, max_length) };
     }
@@ -69,6 +72,19 @@ namespace kiotty::net::implementation
     bool ResponseFrame::isStream() const
     {
         return _layout.has_body && _layout.storage == BodyStorage::STREAM;
+    }
+
+    FilePiece ResponseFrame::filePieceAt(size_t offset, size_t max_length) const
+    {
+        const size_t header_length = headerLengthOf(_layout);
+        const bool is_file = _layout.storage == BodyStorage::FILE && offset >= header_length;
+        const size_t body_offset = is_file ? offset - header_length : 0;
+        const bool has_rest = is_file && body_offset < _layout.sendable_body;
+        const FilePiece none{ Span<char>{ nullptr, 0 }, 0, false };
+        if (!has_rest) { return none; }
+        const size_t rest = _layout.sendable_body - body_offset;
+        const size_t length = smallerOf(smallerOf(rest, max_length), _layout.buffer.length);
+        return FilePiece{ Span<char>{ _layout.buffer.data, length }, body_offset, true };
     }
 
     bool ResponseFrame::hasSendableBody() const
@@ -149,12 +165,12 @@ namespace kiotty::net::implementation
                                              KiottyNetSpan data,
                                              BodyStorage storage)
     {
-        const bool is_missing = data.data == nullptr && data.length > 0;
+        const bool is_inline = storage == BodyStorage::COPY || storage == BodyStorage::REFERENCE;
+        const bool is_missing = is_inline && data.data == nullptr && data.length > 0;
         if (is_missing) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const KiottyNetCode checked = checkBodyType(type, storage);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
-        const bool is_stream = storage == BodyStorage::STREAM;
-        const Span<const char> body{ data.data, is_stream ? 0 : data.length };
+        const Span<const char> body{ data.data, is_inline ? data.length : 0 };
         const bool is_text = textKindOf(type) != TextKind::BINARY;
         if (is_text && !isUtf8(body)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
         const bool is_copy = storage == BodyStorage::COPY;
@@ -165,6 +181,7 @@ namespace kiotty::net::implementation
         const Span<char> target{ _layout.buffer.data + _layout.body_start, body.length };
         if (is_copy) { (void)target.copyFrom(body); }
         _layout.body = is_copy ? Span<const char>{ target.data, target.length } : body;
+        _layout.file_length = storage == BodyStorage::FILE ? data.length : 0;
         _layout.type = type;
         _layout.storage = storage;
         _layout.has_body = true;
@@ -192,7 +209,8 @@ namespace kiotty::net::implementation
         const Span<char> end{ _layout.buffer.data + _layout.header_end, LINE_END_BYTES };
         (void)end.copyFrom(literalOf("\r\n"));
         _layout.header_end += LINE_END_BYTES;
-        _layout.sendable_body = is_head || is_bodiless ? 0 : _layout.body.length;
+        const uint64_t length = bodyLengthOf(_layout);
+        _layout.sendable_body = is_head || is_bodiless ? 0 : static_cast<size_t>(length);
     }
 
     ResponseFrame HttpResponseStore::frame() const
@@ -234,6 +252,7 @@ namespace kiotty::net::implementation
             return ResponseLayout{
                 buffer,
                 Span<const char>{ nullptr, 0 },
+                0,
                 RESPONSE_PREFIX_BYTES,
                 RESPONSE_PREFIX_BYTES,
                 buffer.length,
@@ -301,7 +320,7 @@ namespace kiotty::net::implementation
             const bool is_stream = layout.has_body && layout.storage == BodyStorage::STREAM;
             const Span<const char> name = literalOf("Transfer-Encoding");
             if (is_stream) { (void)appendField(prefix, name, literalOf("chunked")); }
-            if (!is_stream) { (void)appendLengthField(prefix, layout.body.length); }
+            if (!is_stream) { (void)appendLengthField(prefix, bodyLengthOf(layout)); }
         }
 
         Span<const char> sealedBodyOf(const ResponseLayout& layout, bool is_bodiless)
@@ -310,6 +329,17 @@ namespace kiotty::net::implementation
             if (!is_stream) { return layout.body; }
             if (is_bodiless) { return Span<const char>{ nullptr, 0 }; }
             return Span<const char>{ LAST_CHUNK, sizeof(LAST_CHUNK) - 1 };
+        }
+
+        uint64_t bodyLengthOf(const ResponseLayout& layout)
+        {
+            const bool is_file = layout.storage == BodyStorage::FILE;
+            return is_file ? layout.file_length : layout.body.length;
+        }
+
+        size_t headerLengthOf(const ResponseLayout& layout)
+        {
+            return layout.header_end - layout.header_start;
         }
 
         size_t smallerOf(size_t left, size_t right)

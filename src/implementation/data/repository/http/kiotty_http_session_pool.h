@@ -32,6 +32,7 @@ namespace kiotty::net::implementation
 
         std::vector<char>                _block;
         std::vector<KiottyNetHttpHeader> _headers;
+        std::vector<InputFile>           _files;
         std::vector<HttpSession>         _sessions;
         std::vector<int32_t>             _free;
         std::vector<int32_t>             _generations;

@@ -6,6 +6,8 @@
 
 #include <string>
 
+using kiotty::net::implementation::hasParentSegment;
+using kiotty::net::implementation::isSafeRelativePath;
 using kiotty::net::implementation::matchesPath;
 using kiotty::net::implementation::parseDirectoryPrefix;
 using kiotty::net::implementation::parseRoutePath;
@@ -131,4 +133,35 @@ TEST(HttpDirectoryPrefix, MatchesPathsUnderThePrefix)
     EXPECT_TRUE(matchesDirectory("/static/", "/static/a/b.js"));
     EXPECT_FALSE(matchesDirectory("/static/", "/static"));
     EXPECT_TRUE(matchesDirectory("/", "/index.html"));
+}
+
+namespace
+{
+    Span<const char> spanOf(const std::string& text)
+    {
+        return Span<const char>{ text.data(), text.size() };
+    }
+}
+
+TEST(HttpRelativePath, ParentSegmentsAreFoundWithEitherSeparator)
+{
+    EXPECT_TRUE(hasParentSegment(spanOf("..")));
+    EXPECT_TRUE(hasParentSegment(spanOf("a/../b")));
+    EXPECT_TRUE(hasParentSegment(spanOf("a\\..\\b")));
+    EXPECT_TRUE(hasParentSegment(spanOf("a/..")));
+    EXPECT_FALSE(hasParentSegment(spanOf("")));
+    EXPECT_FALSE(hasParentSegment(spanOf("a..b/c")));
+    EXPECT_FALSE(hasParentSegment(spanOf(".../.")));
+    EXPECT_FALSE(hasParentSegment(spanOf("C:\\www\\a.txt")));
+}
+
+TEST(HttpRelativePath, SafeRelativePathRefusesParentsBackslashesColonsAndNul)
+{
+    EXPECT_TRUE(isSafeRelativePath(spanOf("")));
+    EXPECT_TRUE(isSafeRelativePath(spanOf("js/app.js")));
+    EXPECT_TRUE(isSafeRelativePath(spanOf("index..html")));
+    EXPECT_FALSE(isSafeRelativePath(spanOf("../secret")));
+    EXPECT_FALSE(isSafeRelativePath(spanOf("a\\b")));
+    EXPECT_FALSE(isSafeRelativePath(spanOf("c:x")));
+    EXPECT_FALSE(isSafeRelativePath(spanOf(std::string("a\0b", 3))));
 }

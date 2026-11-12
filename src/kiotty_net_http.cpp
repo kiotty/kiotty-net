@@ -3,7 +3,9 @@
 #include "context/kiotty_context.h"
 #include "context/kiotty_http_configuration.h"
 #include "core/kiotty_text.h"
+#include "data/repository/http/kiotty_http_file_body.h"
 #include "data/repository/http/kiotty_http_session.h"
+#include "domain/usecases/http/kiotty_http_route_path.h"
 
 namespace net = kiotty::net::implementation;
 
@@ -11,6 +13,7 @@ namespace
 {
     constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
     constexpr size_t        MAX_HEADER_NAME_TEXT = 256;
+    constexpr size_t        MAX_FILE_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
     constexpr KiottyNetSpan STREAM_PLACEHOLDER = { nullptr, 0 };
 
     using FillingResult = net::Result<net::HttpSession&, KiottyNetCode>;
@@ -146,6 +149,18 @@ KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response,
     return setBody(response, type, data, net::BodyStorage::REFERENCE);
 }
 
+KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response,
+                                    KiottyNetHttpContentType type,
+                                    const char* path)
+{
+    const FillingResult filling = fillingOf(response);
+    if (!filling) { return filling.code; }
+    const net::TextResult parsed = net::parseText(path, MAX_FILE_PATH_TEXT);
+    if (!parsed) { return parsed.code; }
+    if (net::hasParentSegment(parsed.value)) { return INVALID; }
+    return net::attachFile(filling.value(), type, parsed.value);
+}
+
 KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response,
                                           KiottyNetHttpContentType type)
 {
@@ -255,6 +270,37 @@ KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server,
     if (!notices) { return notices.code; }
     notices.value().setError(on_error, app_context);
     return KIOTTY_NET_CODE_SUCCESS;
+}
+
+KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server,
+                                           const char* url_prefix,
+                                           const char* directory)
+{
+    if (server == nullptr) { return INVALID; }
+    const net::RegistryResult registry = server->registry();
+    if (!registry) { return registry.code; }
+    return registry.value().addDirectory(url_prefix, directory);
+}
+
+KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server,
+                                      const char* url_path,
+                                      const char* file_path)
+{
+    if (server == nullptr) { return INVALID; }
+    const net::RegistryResult registry = server->registry();
+    if (!registry) { return registry.code; }
+    return registry.value().addFile(url_path, file_path);
+}
+
+KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server,
+                                        const char* url_path,
+                                        KiottyNetHttpContentType type,
+                                        KiottyNetSpan data)
+{
+    if (server == nullptr) { return INVALID; }
+    const net::RegistryResult registry = server->registry();
+    if (!registry) { return registry.code; }
+    return registry.value().addMemory(url_path, type, data);
 }
 
 KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server,

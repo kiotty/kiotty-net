@@ -112,6 +112,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_header_line.cpp
     src/implementation/domain/usecases/http/kiotty_http_message_framing.cpp
     src/implementation/domain/usecases/http/kiotty_http_route_path.cpp
+    src/implementation/domain/usecases/http/kiotty_http_static.cpp
     src/implementation/domain/usecases/http/kiotty_http_content_type.cpp
     src/implementation/domain/usecases/http/kiotty_http_response_text.cpp
     src/implementation/domain/usecases/http/kiotty_http_exchange.cpp
@@ -120,6 +121,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/http/kiotty_http_request_store.cpp
     src/implementation/data/repository/http/kiotty_http_response_store.cpp
     src/implementation/data/repository/http/kiotty_http_registry.cpp
+    src/implementation/data/repository/http/kiotty_http_file_body.cpp
     src/implementation/data/repository/http/kiotty_http_notices.cpp
     src/implementation/data/repository/http/kiotty_http_session.cpp
     src/implementation/data/repository/http/kiotty_http_session_pool.cpp

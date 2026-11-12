@@ -2,6 +2,7 @@
 
 #include "core/kiotty_span.h"
 #include "core/pool/kiotty_pool_handle.h"
+#include "data/infra/file/kiotty_input_file.h"
 #include "data/repository/http/kiotty_http_request_store.h"
 #include "data/repository/http/kiotty_http_response_store.h"
 #include "domain/usecases/http/kiotty_http_message_framing.h"
@@ -33,11 +34,12 @@ namespace kiotty::net::implementation
 
     struct HttpSession
     {
-        HttpSession(HttpSite& owner, int32_t index, const SessionBuffers& buffers);
+        HttpSession(HttpSite& owner, InputFile& file, int32_t index, const SessionBuffers& buffers);
 
         HttpRequestStore          request;
         HttpResponseStore         response;
         HttpSite&                 site;
+        InputFile&                file;
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;

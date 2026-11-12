@@ -171,3 +171,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-12 HTTP 사이클 H3 (`docs/progress/261112_progress_http_h3.md`): HttpServer 가 돈다. `HttpServer : Server`, Context 의 풀, HttpSite (라우트 표, 끊김 / 오류 action, Session 풀), 요청 / 응답 저장소, HTTP 표 (StateMachine rule 열하나), 자동 응답 (404 / 405 / OPTIONS / HEAD / 400 / 413 / 414 / 431 / 501), keep-alive, chunked 요청, Date 헤더. integration 21 개. 다음은 H4.
 
 2026-11-12 HTTP 사이클 H4 (`docs/progress/261112_progress_http_h4.md`): Work 와 Work 스트림. `startHttpWork`, `onWorkStarted`, `setHttpBodyStream`, `writeHttpWorkChunk` (chunked, 응답 버퍼에서 조립하거나 나눠 쓰기), `finishHttpWork*`, `isHttpWorkConnected`. HEAD 스트림 라우트는 Work 없이 헤더만 (결정 16), Work 없는 스트림 body 는 500. 서버 close 중 Work 의 Session 반납을 worker 의 finish 까지 미룬다. integration 9 개. 다음은 H5.
+
+2026-11-12 HTTP 사이클 H5 (`docs/progress/261112_progress_http_h5.md`): 정적 서빙. `serveHttpDirectory / File / Memory`, `setHttpFile`, 확장자로 content type, `..` / `\` / `:` 는 403, 없는 파일 404, 파일은 Session 의 `InputFile` 에서 `send_capacity` 조각으로. integration 7 개, unit 2 개. 다음은 H6.
