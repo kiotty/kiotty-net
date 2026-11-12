@@ -219,7 +219,7 @@ KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context,
     KiottyNetHttpServerResult result = { INVALID, nullptr };
     if (context == nullptr || configuration == nullptr || limits == nullptr) { return result; }
     const net::HttpServerConfiguration both{ *configuration, *limits };
-    const net::HttpServerResult created = context->createHttpServer(both);
+    const net::HttpServerResult created = context->create(both);
     result.code = created.code;
     if (created) { result.handle = &created.value(); }
     return result;

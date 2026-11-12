@@ -26,5 +26,6 @@ namespace kiotty::net::implementation
     KiottyNetTransition onCloseWritten(KiottyNetConnectionContext context,
                                        KiottyNetConnectionHandle connection,
                                        KiottyNetConnectionEvent event);
+    KiottyNetTransition openSocket(HttpSession& session);
     void                endSocket(HttpSession& session, KiottyNetCode reason);
 }

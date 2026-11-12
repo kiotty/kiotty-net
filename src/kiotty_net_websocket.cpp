@@ -1,8 +1,11 @@
 #include "kiotty_net_websocket.h"
 
+#include "context/kiotty_context.h"
 #include "context/kiotty_handles.h"
+#include "context/kiotty_http_configuration.h"
 #include "context/kiotty_websocket_endpoint.h"
 #include "core/kiotty_text.h"
+#include "domain/usecases/http/kiotty_http_token.h"
 #include "domain/usecases/websocket/kiotty_websocket_access.h"
 
 namespace net = kiotty::net::implementation;
@@ -83,4 +86,98 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server,
 {
     if (server == nullptr) { return INVALID; }
     return net::WebSocketAccess(server->site()).broadcast(path, opcode, data);
+}
+
+namespace
+{
+    constexpr size_t MAX_PATH_TEXT = KIOTTY_NET_MAX_URL_LENGTH - 1;
+
+    bool isRequestTarget(net::Span<const char> path)
+    {
+        if (path.empty() || path[0] != '/') { return false; }
+        for (const char character : path)
+        {
+            if (!net::isVisibleCharacter(character)) { return false; }
+        }
+        return true;
+    }
+
+    KiottyNetCode configurationOf(const KiottyNetHttpLimits* limits,
+                                  const char* path,
+                                  net::WebSocketClientConfiguration& configuration)
+    {
+        const net::TextResult text = net::parseText(path, MAX_PATH_TEXT);
+        if (!text || !isRequestTarget(text.value)) { return INVALID; }
+        (void)configuration.path.assign(text.value);
+        if (limits != nullptr)
+        {
+            configuration.limits = *limits;
+            return KIOTTY_NET_CODE_SUCCESS;
+        }
+        return net::initializeHttpLimits(configuration.limits);
+    }
+}
+
+KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(
+    KiottyNetContext context,
+    const KiottyNetClientConfiguration* configuration,
+    const KiottyNetHttpLimits* limits,
+    const char* path)
+{
+    KiottyNetWebSocketClientResult result = { INVALID, nullptr };
+    if (context == nullptr || configuration == nullptr) { return result; }
+    net::WebSocketClientConfiguration made{ *configuration, KiottyNetHttpLimits{}, {} };
+    const KiottyNetCode prepared = configurationOf(limits, path, made);
+    if (prepared != KIOTTY_NET_CODE_SUCCESS) { return result; }
+    const net::WebSocketClientResult created = context->create(made);
+    result.code = created.code;
+    if (created) { result.handle = &created.value(); }
+    return result;
+}
+
+void KiottyNet_destroyWebSocketClient(KiottyNetContext context,
+                                      KiottyNetWebSocketClientHandle client)
+{
+    if (context == nullptr || client == nullptr) { return; }
+    context->destroy(*client);
+}
+
+KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client,
+                                           const KiottyNetAddress* address,
+                                           const KiottyNetTlsClientConfiguration* tls,
+                                           const KiottyNetWebSocketHandler* handler,
+                                           KiottyNetAppContext app_context)
+{
+    if (client == nullptr || address == nullptr || handler == nullptr) { return INVALID; }
+    const KiottyNetAddress copied_address = *address;
+    const KiottyNetWebSocketHandler copied_handler = *handler;
+    const net::ClientRun run{ copied_address, tls, copied_handler, app_context };
+    return client->run(run);
+}
+
+void KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client)
+{
+    if (client == nullptr) { return; }
+    client->close();
+}
+
+KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle client,
+                                             uint64_t timeout_milliseconds)
+{
+    if (client == nullptr) { return INVALID; }
+    return client->await(timeout_milliseconds);
+}
+
+KiottyNetWebSocketHandle KiottyNet_getWebSocketClientSocket(KiottyNetWebSocketClientHandle client)
+{
+    if (client == nullptr) { return KiottyNetWebSocketHandle{ nullptr, 0 }; }
+    return client->socket();
+}
+
+KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle client,
+                                            KiottyNetWebSocketOpcode opcode,
+                                            KiottyNetSpan data)
+{
+    if (client == nullptr) { return INVALID; }
+    return KiottyNet_sendWebSocket(client->socket(), opcode, data);
 }

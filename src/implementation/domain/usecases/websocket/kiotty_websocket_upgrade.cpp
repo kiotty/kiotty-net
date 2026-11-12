@@ -107,6 +107,19 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
+    bool isUpgradeResponse(const KiottyNetHttpRequest& response, Span<const char> accept)
+    {
+        const TokenMatch caseless = TokenMatch::IGNORE_CASE;
+        const Span<const char> upgrade = headerNamed(response, "Upgrade");
+        const Span<const char> connection = headerNamed(response, "Connection");
+        const Span<const char> answered = headerNamed(response, "Sec-WebSocket-Accept");
+        const Span<const char> protocol = headerNamed(response, "Sec-WebSocket-Protocol");
+        const bool is_upgrade = hasToken(upgrade, literalOf("websocket"), caseless);
+        const bool is_connection = hasToken(connection, literalOf("upgrade"), caseless);
+        const bool is_accepted = isSameToken(answered, accept, TokenMatch::EXACT);
+        return is_upgrade && is_connection && is_accepted && protocol.empty();
+    }
+
     namespace
     {
         KiottyNetSpan publicSpanOf(Span<const char> text)

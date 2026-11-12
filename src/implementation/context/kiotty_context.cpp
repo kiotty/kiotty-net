@@ -55,9 +55,11 @@ namespace kiotty::net::implementation
         closeAll(_servers);
         closeAll(_event_clients);
         closeAll(_http_servers);
+        closeAll(_websocket_clients);
         joinAll(_servers);
         joinAll(_event_clients);
         joinAll(_http_servers);
+        joinAll(_websocket_clients);
         finishRelease();
     }
 
@@ -94,7 +96,7 @@ namespace kiotty::net::implementation
         return _event_clients.acquire(configuration);
     }
 
-    HttpServerResult Context::createHttpServer(const HttpServerConfiguration& configuration)
+    HttpServerResult Context::create(const HttpServerConfiguration& configuration)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         if (_phase != ContextPhase::OPEN)
@@ -103,6 +105,18 @@ namespace kiotty::net::implementation
         }
         sweep(_http_servers);
         return _http_servers.acquire(configuration);
+    }
+
+    WebSocketClientResult Context::create(
+        const WebSocketClientConfiguration& configuration)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN)
+        {
+            return WebSocketClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+        }
+        sweep(_websocket_clients);
+        return _websocket_clients.acquire(configuration);
     }
 
     void Context::destroy(KiottyNetServer& server)
@@ -127,11 +141,17 @@ namespace kiotty::net::implementation
         retire(_http_servers, server);
     }
 
+    void Context::destroy(KiottyNetWebSocketClient& client)
+    {
+        retire(_websocket_clients, client);
+    }
+
     Context::Context()
         : _servers()
         , _stream_clients()
         , _event_clients()
         , _http_servers()
+        , _websocket_clients()
         , _mutex()
         , _phase(ContextPhase::CLOSED)
     {
@@ -178,6 +198,7 @@ namespace kiotty::net::implementation
         _stream_clients.clear();
         _event_clients.clear();
         _http_servers.clear();
+        _websocket_clients.clear();
         stopSockets();
         _phase = ContextPhase::CLOSED;
     }

@@ -28,6 +28,8 @@ namespace kiotty::net::implementation
         KiottyNetHttpServerHandle owner;
         KiottyNetWebSocketEndpoint* socket_owner;
         PushLane*                 lane;
+        ClientUpgrade             upgrade;
+        SocketRole                role;
         std::atomic<bool>         is_closing;
     };
 
@@ -41,6 +43,8 @@ namespace kiotty::net::implementation
         , owner(nullptr)
         , socket_owner(nullptr)
         , lane(nullptr)
+        , upgrade{}
+        , role(SocketRole::SERVER)
         , is_closing(false)
     {
     }

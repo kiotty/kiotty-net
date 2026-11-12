@@ -38,7 +38,9 @@ namespace kiotty::net::implementation
         HttpSite&      site();
         void           close();
 
-        KiottyNetCode          push(int64_t connection, Span<const KiottyNetSpan> pieces) override;
+        KiottyNetCode          push(int64_t connection,
+                                    FrameOpcode opcode,
+                                    Span<const char> payload) override;
         KiottyNetWebSocketInfo socketInfo(int64_t id) override;
         KiottyNetSpan          upgradeHeader(int64_t id, Span<const char> name) override;
         KiottyNetCode          selectProtocol(int64_t id, Span<const char> protocol) override;

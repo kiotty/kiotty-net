@@ -126,6 +126,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/websocket/kiotty_websocket_upgrade.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_rows.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_timing.cpp
+    src/implementation/domain/usecases/websocket/kiotty_websocket_client_machine.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_access.cpp
     src/implementation/data/repository/websocket/kiotty_websocket_socket.cpp
     src/implementation/domain/usecases/http/kiotty_http_machine.cpp
@@ -140,6 +141,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/context/kiotty_http_configuration.cpp
     src/implementation/context/kiotty_http_server.cpp
     src/implementation/context/kiotty_http_work.cpp
+    src/implementation/context/kiotty_websocket_client.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp

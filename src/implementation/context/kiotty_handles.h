@@ -4,6 +4,7 @@
 #include "context/kiotty_http_server.h"
 #include "context/kiotty_server.h"
 #include "context/kiotty_stream_client.h"
+#include "context/kiotty_websocket_client.h"
 
 struct KiottyNetServer final : kiotty::net::implementation::Server
 {
@@ -18,5 +19,9 @@ struct KiottyNetEventClient final : kiotty::net::implementation::EventClient
 };
 
 struct KiottyNetHttpServer final : kiotty::net::implementation::HttpServer
+{
+};
+
+struct KiottyNetWebSocketClient final : kiotty::net::implementation::WebSocketClient
 {
 };

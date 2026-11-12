@@ -12,4 +12,6 @@ namespace kiotty::net::implementation
     KiottyNetWebSocketHandle socketHandleOf(const HttpSession& session);
     Span<const char>         headerOf(const KiottyNetHttpRequest& request, Span<const char> name);
     KiottyNetCode            chooseProtocol(HttpSession& session, Span<const char> protocol);
+    bool                     isUpgradeResponse(const KiottyNetHttpRequest& response,
+                                               Span<const char> accept);
 }

@@ -9,13 +9,7 @@ namespace kiotty::net::implementation
                             FrameOpcode opcode,
                             Span<const char> payload)
     {
-        const FrameHead head = buildFrameHead(opcode, payload.length);
-        const KiottyNetSpan pieces[] = {
-            KiottyNetSpan{ head.bytes, head.length },
-            KiottyNetSpan{ payload.data, payload.length },
-        };
-        const int64_t connection = link.connection.load();
-        return lane.push(connection, Span<const KiottyNetSpan>{ pieces, 2 });
+        return lane.push(link.connection.load(), opcode, payload);
     }
 
     KiottyNetCode pushClose(PushLane& lane,

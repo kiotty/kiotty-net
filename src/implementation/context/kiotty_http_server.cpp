@@ -72,9 +72,16 @@ namespace kiotty::net::implementation
         Server::close();
     }
 
-    KiottyNetCode HttpServer::push(int64_t connection, Span<const KiottyNetSpan> pieces)
+    KiottyNetCode HttpServer::push(int64_t connection,
+                                   FrameOpcode opcode,
+                                   Span<const char> payload)
     {
-        return Server::notify(connection, pieces);
+        const FrameHead head = buildFrameHead(opcode, payload.length);
+        const KiottyNetSpan pieces[] = {
+            KiottyNetSpan{ head.bytes, head.length },
+            KiottyNetSpan{ payload.data, payload.length },
+        };
+        return Server::notify(connection, Span<const KiottyNetSpan>{ pieces, 2 });
     }
 
     KiottyNetWebSocketInfo HttpServer::socketInfo(int64_t id)

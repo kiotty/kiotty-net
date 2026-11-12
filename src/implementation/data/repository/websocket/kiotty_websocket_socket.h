@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kiotty_fixed_string.h"
+#include "core/kiotty_parker.h"
 #include "core/kiotty_span.h"
 #include "domain/usecases/websocket/kiotty_websocket_frame.h"
 #include "kiotty_net_websocket.h"
@@ -12,7 +13,14 @@
 namespace kiotty::net::implementation
 {
     inline constexpr int32_t NO_SOCKET_PATH = -1;
-    inline constexpr size_t  CLOSE_FRAME_BYTES = FRAME_START_BYTES + MAX_CONTROL_PAYLOAD_BYTES;
+    inline constexpr size_t  CLOSE_FRAME_BYTES =
+        FRAME_START_BYTES + MASK_KEY_BYTES + MAX_CONTROL_PAYLOAD_BYTES;
+
+    enum class SocketRole : uint8_t
+    {
+        SERVER,
+        CLIENT
+    };
 
     struct WebSocketTarget
     {
@@ -45,6 +53,15 @@ namespace kiotty::net::implementation
     {
         size_t  length;
         int32_t state;
+    };
+
+    struct ClientUpgrade
+    {
+        WebSocketTarget  target;
+        Span<const char> request;
+        Span<const char> accept;
+        Parker*          opened;
+        KiottyNetCode    failure;
     };
 
     using ProtocolText = FixedString<KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH>;
@@ -80,7 +97,9 @@ namespace kiotty::net::implementation
         PushLane(const PushLane&) = delete;
         PushLane& operator=(const PushLane&) = delete;
 
-        virtual KiottyNetCode push(int64_t connection, Span<const KiottyNetSpan> pieces) = 0;
+        virtual KiottyNetCode push(int64_t connection,
+                                   FrameOpcode opcode,
+                                   Span<const char> payload) = 0;
 
     protected:
         ~PushLane() = default;
