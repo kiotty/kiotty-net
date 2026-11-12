@@ -34,6 +34,7 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_http_header_line.cpp
     kiotty_test_http_message_framing.cpp
     kiotty_test_http_route_path.cpp
+    kiotty_test_websocket_codec.cpp
     kiotty_test_http_content_type.cpp
     support/kiotty_test_handler.cpp
     support/kiotty_test_openssl_memory.cpp

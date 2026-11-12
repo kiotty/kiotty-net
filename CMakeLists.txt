@@ -49,6 +49,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/core/kiotty_parse_integer.cpp
     src/implementation/core/kiotty_stage.cpp
     src/implementation/core/kiotty_text.cpp
+    src/implementation/core/kiotty_sha1.cpp
+    src/implementation/core/kiotty_base64.cpp
     src/implementation/domain/entity/kiotty_connection_event.cpp
     src/implementation/data/infra/error/kiotty_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
@@ -116,6 +118,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_content_type.cpp
     src/implementation/domain/usecases/http/kiotty_http_response_text.cpp
     src/implementation/domain/usecases/http/kiotty_http_exchange.cpp
+    src/implementation/domain/usecases/websocket/kiotty_websocket_frame.cpp
+    src/implementation/domain/usecases/websocket/kiotty_websocket_close.cpp
+    src/implementation/domain/usecases/websocket/kiotty_websocket_handshake.cpp
     src/implementation/domain/usecases/http/kiotty_http_machine.cpp
     src/implementation/data/infra/clock/kiotty_wall_clock.cpp
     src/implementation/data/repository/http/kiotty_http_request_store.cpp
