@@ -40,6 +40,10 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.http_work_handle, sizeof(KiottyNetHttpWorkHandle));
     EXPECT_EQ(c.http_route, sizeof(KiottyNetHttpRoute));
     EXPECT_EQ(c.http_server_result, sizeof(KiottyNetHttpServerResult));
+    EXPECT_EQ(c.websocket_handle, sizeof(KiottyNetWebSocketHandle));
+    EXPECT_EQ(c.websocket_handle_id_offset, offsetof(KiottyNetWebSocketHandle, id));
+    EXPECT_EQ(c.websocket_client_result, sizeof(KiottyNetWebSocketClientResult));
+    EXPECT_EQ(c.websocket_handler, sizeof(KiottyNetWebSocketHandler));
     EXPECT_EQ(c.http_request_keep_alive, offsetof(KiottyNetHttpRequest, keep_alive));
 }
 
@@ -152,6 +156,19 @@ TEST(Headers, OwningWrappersTestAsBoolOnlyExplicitly)
     EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_StreamClient&>::value));
     EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_Context&>::value));
     EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_HttpServer&>::value));
-    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_WebSocketServer&>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_WebSocketClient&>::value));
     EXPECT_FALSE((std::is_convertible<const KiottyNet_WebSocketClient&, bool>::value));
+}
+
+TEST(Headers, WebSocketHandlesOrderByOwnerThenId)
+{
+    KiottyNetWebSocketEndpoint* owner = reinterpret_cast<KiottyNetWebSocketEndpoint*>(&owner);
+    const KiottyNetWebSocketHandle first = { owner, 1 };
+    const KiottyNetWebSocketHandle second = { owner, 2 };
+    const KiottyNetWebSocketHandle none = { nullptr, 0 };
+    EXPECT_TRUE(KiottyNet_WebSocket(first) == KiottyNet_WebSocket(first));
+    EXPECT_TRUE(KiottyNet_WebSocket(first) != KiottyNet_WebSocket(second));
+    EXPECT_TRUE(KiottyNet_WebSocket(first) < KiottyNet_WebSocket(second));
+    EXPECT_FALSE(KiottyNet_WebSocket(second) < KiottyNet_WebSocket(first));
+    EXPECT_TRUE(KiottyNet_WebSocket(none) < KiottyNet_WebSocket(first) || KiottyNet_WebSocket(first) < KiottyNet_WebSocket(none));
 }
