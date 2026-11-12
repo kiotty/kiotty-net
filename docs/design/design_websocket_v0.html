@@ -104,7 +104,7 @@
   <tr><td>1</td><td><b>WebSocketServer 를 없앤다.</b> 서버 쪽 WebSocket 은 HttpServer 에 Upgrade 경로와 handler 를 등록해서 쓴다 (2026-11-11)</td><td>WebSocket 은 언제나 HTTP 요청으로 시작한다 (2절). WebSocketServer 는 "Upgrade 경로 하나만 등록한 HttpServer" 라 같은 것을 두 이름으로 두는 셈이다. 장비의 웹 UI 와 실시간 채널이 한 포트, 한 서버에 있는 것이 흔한 모양이다. 따로 있던 내부 limits (헤더 8 KiB 고정) 문제도 함께 없어진다</td></tr>
   <tr><td>2</td><td><b>websocket.h 가 http.h 를 include 한다</b> (2026-11-11)</td><td>Upgrade 등록과 broadcast 가 <code>KiottyNetHttpServerHandle</code> 을 받는다. WebSocketServer 가 없으니 서버 쪽 WebSocket 을 쓰는 사용자는 http.h 도 반드시 쓴다. 가드된 typedef 복사 (첫 판) 는 필요 없어진다. statemachine.h 는 include 하지 않는다 (사용자는 표를 보지 않는다)</td></tr>
   <tr><td>3</td><td><b>다른 thread 의 close 는 플래그 + notify 로 끝낸다. drain 뒤 훅 (<code>Handler::afterDrain</code>) 은 두지 않는다</b> (2026-11-11)</td><td>WebSocket 에는 Work 가 없어서 "Work 를 돌려주며 닫기" 의 길이 없다. 대신 플래그를 IO thread 의 READ / TIMEOUT 행이 본다. 상대는 close frame 을 받으면 곧 close frame 으로 답하므로 그 READ 에서 끝난다 (7절)</td></tr>
-  <tr><td>4</td><td>Upgrade 경로의 handler 와 <code>app_context</code> 는 등록 때 복사해 고정한다 (2026-11-11)</td><td>HTTP 라우트와 같은 모델이다. HttpServer 의 run 이 받는 handler (<code>onDisconnected</code>, <code>onError</code>, http 설계 결정 15) 는 연결의 알림이라 따로다</td></tr>
+  <tr><td>4</td><td>Upgrade 경로의 handler 와 <code>app_context</code> 는 등록 때 복사해 고정한다 (2026-11-11)</td><td>HTTP 라우트와 같은 모델이다. HttpServer 의 끊김 / 오류 action (<code>setHttpDisconnectedAction</code>, <code>setHttpErrorAction</code>, http 설계 결정 15, 19) 은 연결의 알림이라 따로다</td></tr>
   <tr><td>5</td><td><code>KiottyNetWebSocketUpgrade</code> 의 필드는 <code>path</code>, <code>query</code>, <code>host</code>, <code>origin</code>, <code>protocols</code> 그대로. 나머지 헤더는 <code>findWebSocketUpgradeHeader</code> (2026-11-11)</td><td>user_guide 10절 5</td></tr>
   <tr><td>6</td><td>WebSocketClient 의 <code>Host</code> 헤더와 TLS SNI 는 run 이 받은 주소의 <code>host</code> 에서 가져온다 (2026-11-11. 결정 13 으로 설정의 <code>address</code> 에서 run 의 인자로)</td><td>연결하는 주소와 이름이 하나여야 인증서 검증이 맞는다</td></tr>
   <tr><td>7</td><td>소유자 타입 이름은 <code>KiottyNetWebSocketEndpoint</code> (2026-11-11)</td><td>base 의 <code>KiottyNetEndpoint</code> (옛 이름 Owner) 와 맞춘다. handle 의 필드 이름 <code>owner</code> 는 base 헤더와 같게 둔다</td></tr>
@@ -198,7 +198,7 @@ KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits
   </li>
   <li><b>WebSocket 경로의 요청.</b> GET 만 받는다. 다른 메서드는 405. Upgrade 헤더가 없는 GET 은 426 (<code>Upgrade: websocket</code> 헤더와 함께) 으로 거절하고 <code>onUpgrade</code> 는 부르지 않는다. 헤더 상한은 <code>max_header_bytes</code>, 시간 상한은 <code>header_timeout</code> 이다.</li>
   <li><b>broadcast.</b> 지금 헤더의 <code>broadcastWebSocketServer</code> 가 옮겨 온 것이다. 등록에 쓴 path 와 글자 그대로 비교한다. 소켓마다 push lane 에 복사하고, 자리가 없는 소켓은 건너뛴다 (지금 규칙 그대로). 아무 thread 에서나. 등록되지 않은 path 는 <code>INVALID_ARGUMENT</code>.</li>
-  <li><b>서버의 close.</b> HttpServer 의 close 는 WebSocket 연결도 close handshake 없이 끊는다 (<code>onClose(CLOSED, 1001)</code>). 연결이 끝나면 HttpServer 의 <code>onDisconnected</code> 도 불린다 (WebSocket 이었던 연결도 연결이다).</li>
+  <li><b>서버의 close.</b> HttpServer 의 close 는 WebSocket 연결도 close handshake 없이 끊는다 (<code>onClose(CLOSED, 1001)</code>). 연결이 끝나면 HttpServer 의 끊김 action 도 불린다 (WebSocket 이었던 연결도 연결이다).</li>
   <li>C++ 의 <code>KiottyNet_HttpServer</code> 에는 메서드를 더하지 않는다 (http.h 는 websocket.h 를 모른다). C++ 사용자는 <code>KiottyNet_addWebSocket(server.handle(), "/chat", handler, &amp;app)</code> 를 부른다.</li>
 </ul>
 

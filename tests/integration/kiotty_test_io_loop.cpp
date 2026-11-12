@@ -217,10 +217,9 @@ namespace
         }
     }
 
-    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         (void)context;
-        (void)connection;
         Probe& probe = probeOf(app_context);
         probe.marks.push_back(Mark::DISCONNECTED);
         probe.disconnect_reason = reason;

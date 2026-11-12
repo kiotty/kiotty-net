@@ -359,7 +359,6 @@ typedef struct KiottyNetConnectionHandler
     void (*onDisconnected)(
         KiottyNetAppContext app_context,
         KiottyNetConnectionContext connection_context,
-        KiottyNetConnectionHandle connection,
         KiottyNetCode reason);
     void (*onError)(
         KiottyNetAppContext app_context,

@@ -153,10 +153,9 @@ namespace
         app.work_started.fetch_add(1);
     }
 
-    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         (void)context;
-        (void)connection;
         appOf(app_context).reason.store(reason);
         appOf(app_context).disconnected.fetch_add(1);
     }

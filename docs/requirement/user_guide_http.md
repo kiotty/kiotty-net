@@ -185,7 +185,7 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 
 | 함수 | 하는 일 |
 |---|---|
-| `KiottyNet_runHttpServer(s, address, tls, handler, app_context)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드. tls 가 `NULL` 이면 평문, handler 는 `NULL` 이어도 된다 |
+| `KiottyNet_runHttpServer(s, address, tls)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드. tls 가 `NULL` 이면 평문 |
 | `KiottyNet_closeHttpServer(s)` | loop 를 멈추라고 알린다. 기다리지 않는다. Work 중인 연결도 바로 닫힌다 |
 | `KiottyNet_awaitHttpServer(s, timeout_milliseconds)` | loop 가 돌기 시작할 때까지 기다린다. 시작했으면 `KIOTTY_NET_CODE_SUCCESS`, run 이 이미 끝났으면 run 의 반환값, 시간 안에 못 봤으면 `KIOTTY_NET_CODE_TIMEOUT` |
 | `KiottyNet_destroyHttpServer(context, s)` | run 이 return 한 뒤에 부른다 |
@@ -194,12 +194,21 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 - 응답 setter 는 `onRequest` 안 (IO Thread) 에서, 또는 `onWorkStarted` 뒤 Work 를 들고 있는 thread 에서 부른다. 같은 응답을 두 thread 가 동시에 만지는 순간은 없다.
 - 다른 thread 가 불러도 되는 것은 `finishHttpWork*`, `isHttpWorkConnected`, `closeHttpServer`, `awaitHttpServer` 다. `writeHttpWorkChunk` 는 Work 를 든 worker 가 부른다.
 
-**서버 handler.** `KiottyNetHttpServerHandler` 는 연결 단위의 알림 둘이다. 둘 다 `NULL` 이어도 되고, IO Thread 에서 불리며, `app_context` 는 run 의 것이다 (라우트의 것과 따로다).
+**끊김과 오류.** 연결 단위의 알림 둘은 라우트처럼 콜백 하나씩 run 전에 등록한다. run 이 시작된 뒤의 등록은 `KIOTTY_NET_CODE_BUSY`, 다시 부르면 바꾸고 `NULL` 이면 지운다. 등록하지 않으면 알리지 않는다. IO Thread 에서 불리고, `app_context` 는 등록 때 함께 준 것이다.
 
-| 필드 | 언제 |
+```c
+typedef void (*KiottyNetHttpDisconnectedAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode reason);
+typedef void (*KiottyNetHttpErrorAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
+KiottyNetCode KiottyNet_setHttpDisconnectedAction(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
+KiottyNetCode KiottyNet_setHttpErrorAction(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
+```
+
+| action | 언제 |
 |---|---|
-| `onDisconnected(app_context, connection, info, reason)` | 연결마다 한 번. reason: `KIOTTY_NET_CODE_SUCCESS` (keep-alive 아님, 다 보냄), `KIOTTY_NET_CODE_TIMEOUT` (header / keep-alive timeout), `KIOTTY_NET_CODE_PEER_CLOSED`, `KIOTTY_NET_CODE_PEER_NOT_READING` (base 의 send timeout), `KIOTTY_NET_CODE_PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤), `KIOTTY_NET_CODE_CLOSED` (서버 close). connection 은 `request->connection` 과 같은 값이고 이 안에서는 이미 무효라 주소는 info 로 본다 |
-| `onError(app_context, info, code, message)` | 연결이 생기기 전이나 연결과 따로 생기는 문제: `KIOTTY_NET_CODE_TABLE_FULL` (연결 수 초과), `KIOTTY_NET_CODE_TLS_*` (handshake 실패), accept 실패. 잘못된 요청은 onDisconnected 로 오고 여기로 두 번 오지 않는다 |
+| `on_disconnected(app_context, info, reason)` | 연결마다 한 번. reason: `KIOTTY_NET_CODE_SUCCESS` (keep-alive 아님, 다 보냄), `KIOTTY_NET_CODE_TIMEOUT` (header / keep-alive timeout), `KIOTTY_NET_CODE_PEER_CLOSED`, `KIOTTY_NET_CODE_PEER_NOT_READING` (base 의 send timeout), `KIOTTY_NET_CODE_PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤), `KIOTTY_NET_CODE_CLOSED` (서버 close). 연결의 handle 은 오지 않는다 (끊긴 뒤라 쓸 곳이 없다). 상대는 info 로 본다 |
+| `on_error(app_context, info, code, message)` | 연결이 생기기 전이나 연결과 따로 생기는 문제: `KIOTTY_NET_CODE_TABLE_FULL` (연결 수 초과), `KIOTTY_NET_CODE_TLS_*` (handshake 실패), accept 실패. 잘못된 요청은 on_disconnected 로 오고 여기로 두 번 오지 않는다 |
+
+C++ 은 `server.onDisconnected(action, app_context)`, `server.onError(action, app_context)` 다.
 
 ### 1.8 C 예제
 
@@ -282,9 +291,8 @@ static void run_event_job(EventJob* job)
     }
 }
 
-static void onDisconnected(KiottyNetAppContext app, KiottyNetConnectionHandle connection, KiottyNetConnectionInfo info, KiottyNetCode reason)
+static void onDisconnected(KiottyNetAppContext app, KiottyNetConnectionInfo info, KiottyNetCode reason)
 {
-    (void)connection;
     audit_disconnect((App*)app, info, reason);
 }
 
@@ -335,8 +343,8 @@ int main(void)
     KiottyNet_serveHttpMemory(server, "/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasm_span());
     KiottyNet_serveHttpDirectory(server, "/", "./www/");
 
-    KiottyNetHttpServerHandler handler = { onDisconnected, NULL };
-    KiottyNet_runHttpServer(server, &address, NULL, &handler, &app);
+    KiottyNet_setHttpDisconnectedAction(server, onDisconnected, &app);
+    KiottyNet_runHttpServer(server, &address, NULL);
 
     KiottyNet_destroyHttpServer(context, server);
     KiottyNet_releaseContext(context);
@@ -435,8 +443,11 @@ int main()
     server.serveMemory("/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasmSpan());
     server.serveDirectory("/", "./www/");
 
-    KiottyNetHttpServerHandler handler = { nullptr, nullptr };
-    std::thread io([&] { server.run(address, handler, &app); });                // TLS 면 server.run(address, tls, handler, &app)
+    server.onError([](KiottyNetAppContext, KiottyNetConnectionInfo, KiottyNetCode code, const char* message)
+    {
+        std::fprintf(stderr, "http error %d: %s\n", static_cast<int>(code), message);
+    }, nullptr);
+    std::thread io([&] { server.run(address); });                               // TLS 면 server.run(address, tls)
     if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         server.close();
@@ -457,6 +468,7 @@ int main()
 | 함수 | 코드 | 뜻 |
 |---|---|---|
 | `addHttpRoute`, `setHttpNotFound`, `serveHttp*` | `KIOTTY_NET_CODE_TABLE_FULL` | `max_routes` 초과 |
+| `setHttpDisconnectedAction`, `setHttpErrorAction` | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
 | | `KIOTTY_NET_CODE_DUPLICATE_RULE` | 같은 (method, path) |
 | | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | path 형식 / 길이, `onRequest` NULL, 지원하지 않는 method, 끝에 `/` 없는 url_prefix |
 | | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
@@ -474,7 +486,7 @@ int main()
 | `finishHttpWork*` | `KIOTTY_NET_CODE_BUSY` | 두 번째 finish |
 | 응답 / Work 함수 공통 | `KIOTTY_NET_CODE_PEER_CLOSED` | 닫힌 handle |
 | `runHttpServer` | `KIOTTY_NET_CODE_SOCKET_ERROR`, `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `KIOTTY_NET_CODE_TLS_*` | listen 실패, handle / 주소 / TLS 설정 잘못, 인증서 |
-| 서버 handler 의 onDisconnected | `KIOTTY_NET_CODE_PEER_NOT_READING` | 상대가 읽지 않아 send timeout |
+| 끊김 action 의 reason | `KIOTTY_NET_CODE_PEER_NOT_READING` | 상대가 읽지 않아 send timeout |
 | `awaitHttpServer` | `KIOTTY_NET_CODE_TIMEOUT` | 시간 안에 loop 가 시작되지 않음 |
 
 ### 1.11 아직 없는 것

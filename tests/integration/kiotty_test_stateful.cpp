@@ -195,7 +195,7 @@ namespace
         return nullptr;
     }
 
-    void serverRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle)
+    void serverRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext context)
     {
         serverSession(context).in_use = false;
         static_cast<ServerApp*>(app_context)->released.fetch_add(1);
@@ -296,7 +296,7 @@ namespace
         return app_context;
     }
 
-    void clientRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext, KiottyNetConnectionHandle)
+    void clientRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext)
     {
         ++static_cast<ClientSession*>(app_context)->released;
     }

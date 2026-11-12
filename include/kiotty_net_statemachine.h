@@ -83,8 +83,7 @@ typedef struct KiottyNetStatefulAppContext
         KiottyNetConnectionInfo info);
     void (*releaseConnectionContext)(
         KiottyNetAppContext app_context,
-        KiottyNetConnectionContext connection_context,
-        KiottyNetConnectionHandle connection);
+        KiottyNetConnectionContext connection_context);
     void (*onError)(
         KiottyNetAppContext app_context,
         KiottyNetConnectionInfo info,

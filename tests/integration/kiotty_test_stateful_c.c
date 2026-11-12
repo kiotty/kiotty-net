@@ -128,10 +128,9 @@ static KiottyNetConnectionContext acquire(KiottyNetAppContext app_context, Kiott
     return NULL;
 }
 
-static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle connection)
+static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext session)
 {
     (void)app_context;
-    (void)connection;
     ((CSession*)session)->in_use = 0;
     ++g_released;
 }

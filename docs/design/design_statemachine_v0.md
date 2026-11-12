@@ -161,7 +161,7 @@ private:
 | WRITTEN | `onWritten(context, handle, event.length)` | 그 return |
 | TIMEOUT | `onTimeout(context, handle)` | 그 return |
 | WORK_STARTED | `onWorkStarted(context, event.stream)` | `KiottyNet_thenWork()`. stream 은 사용자가 가져갔다 |
-| CLOSED | `onDisconnected(app_context, context, handle, event.reason)` | `KiottyNet_thenHold(0)`. 버려진다 |
+| CLOSED | `onDisconnected(app_context, context, event.reason)` | `KiottyNet_thenHold(0)`. 버려진다 |
 
 ### 3.4 Connection 이 바뀌는 자리
 
@@ -185,7 +185,7 @@ struct Caller { const Handler& handler; const KiottyNetConnectionInfo& info; Sta
 | `Connection::onWritten` | `onWritten(_context, handle, length)` | `dispatch(caller, writtenEvent(length))` |
 | `Connection::onTimeout` | `onTimeout(_context, handle)` | `dispatch(caller, timeoutEvent())` |
 | `ReceiveFlow::deliver` | `caller.handler.callbacks.onRead(caller.context, caller.handle(), data)` | `caller.handler.dispatch(caller, readEvent(data))` |
-| `Connection::enterClosing` | `onDisconnected(app_context, _context, handle, reason)` | `(void)handler.dispatch(caller, closedEvent(reason))` |
+| `Connection::enterClosing` | `onDisconnected(app_context, _context, reason)` | `(void)handler.dispatch(caller, closedEvent(reason))` |
 | `Caller::reject` | `handler.callbacks.onError(handler.app_context, info, code, message)` | `handler.report(info, code, message)` |
 
 `onWorkReady` 만 모양이 바뀐다. 옛 `onWorkStarted` 는 void 였고 stream 은 사용자가 가져갔다. 이제 return 이 `thenWork()` 가 아니면 "stream 을 그 자리에서 닫고 다음 action 을 건다" 는 뜻이다 (requirement 8절: WORK_STARTED 의 entry action 이 HOLD / READ / READ_UNTIL / WRITE / CLOSE 면 `closeConnectionStream(stream, entry_action)`).
@@ -267,7 +267,7 @@ void StatefulHandler::release(const Caller& caller) const
 {
     if (_stateful.releaseConnectionContext == nullptr) { return; }
     if (caller.context == nullptr) { return; }
-    _stateful.releaseConnectionContext(_stateful.app_context, caller.context, caller.handle());
+    _stateful.releaseConnectionContext(_stateful.app_context, caller.context);
 }
 ```
 
@@ -364,7 +364,7 @@ echo 서버 (구현 가이드 3절의 표) 로 한 연결의 흐름을 적는다
 | RECEIVE 완료, body | 같은 길 | `(ReadingBody, READ)` → `onBody` 가 Session 에 복사하고 `{ Writing, thenWrite(frame, 5000) }` | Writing |
 | SEND 완료 (USER) | `Connection::onWritten` → `dispatch(writtenEvent(length))` | `(Writing, WRITTEN)` → `{ ReadingHeader, thenRead(4, 5000) }` | ReadingHeader |
 | 5 초 동안 아무것도 안 옴 | `Connection::onTimeout` → `dispatch(timeoutEvent())` | ANY 행 → `onTimeout` → `{ Closing, thenClose(TIMEOUT) }`. READ 가 걸려 있어도 CLOSE 는 바로 닫는다 (설계 v5 11절) | Closing |
-| CLOSE 뒤 enterClosing | `dispatch(closedEvent(reason))` | `(ANY, CLOSED)` → `onClosed` (Transition 무시) → `releaseConnectionContext(app, session, handle)` | 그대로. reset 이 0 으로 |
+| CLOSE 뒤 enterClosing | `dispatch(closedEvent(reason))` | `(ANY, CLOSED)` → `onClosed` (Transition 무시) → `releaseConnectionContext(app, session)` | 그대로. reset 이 0 으로 |
 
 다른 길들.
 
@@ -558,7 +558,7 @@ bool 을 돌려주는 것 (`KiottyNet_isConnectionStreamOpen`, `KiottyNet_isHttp
 | `kiotty::net::Rule` 의 8 인자 생성자 | 2절. `KiottyNetNextStates` |
 | `KiottyNet_HttpServer::route(method, path, on_request, on_work_started, app_context)` 와 메서드별 별칭의 5 인자 overload | 없앤다. 남는 overload 는 `(method, path, KiottyNetHttpRoute)` 와 `(method, path, KiottyNetHttpRequestAction)` (context 없고 Work 없는 라우트) 둘. 셋 다 필요하면 `KiottyNet_makeHttpRoute(context, onRequest, onWorkStarted)` 로 값을 만들어 넘긴다 (C 와 같은 모양) |
 
-그 밖의 공개 함수는 모두 4 개 이하다 (`onDisconnected`, `onError`, `onWorkStarted` 의 콜백 넷, `createWebSocketServer / Client` 넷, `configureServerBufferCapacity` 넷).
+그 밖의 공개 함수는 모두 4 개 이하다 (`onError` 의 콜백 넷 (`onDisconnected` 는 2026-11-12 에 handle 을 빼 셋), `createWebSocketServer / Client` 넷, `configureServerBufferCapacity` 넷).
 
 ### 12.5 wrapper 의 public 메서드 (수칙 4.1, DV11 의 셈법)
 

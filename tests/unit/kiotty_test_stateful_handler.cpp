@@ -71,7 +71,7 @@ namespace
         return app.has_session ? &app.session : nullptr;
     }
 
-    void release(KiottyNetAppContext app_context, KiottyNetConnectionContext, KiottyNetConnectionHandle)
+    void release(KiottyNetAppContext app_context, KiottyNetConnectionContext)
     {
         ++static_cast<App*>(app_context)->released;
     }

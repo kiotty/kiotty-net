@@ -167,10 +167,9 @@ namespace
         probe.work_started.fetch_add(1);
     }
 
-    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         (void)context;
-        (void)connection;
         (void)reason;
         probeOf(app_context).disconnected.fetch_add(1);
     }
@@ -626,10 +625,9 @@ namespace
         (void)stream;
     }
 
-    void onReentryDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onReentryDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         (void)context;
-        (void)connection;
         (void)reason;
         Reentry& reentry = reentryOf(app_context);
         reentry.disconnected.fetch_add(1);

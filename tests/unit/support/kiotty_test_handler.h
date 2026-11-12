@@ -65,7 +65,7 @@ namespace kiotty_test
         static KiottyNetConnectionAction   onWritten(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, size_t length);
         static KiottyNetConnectionAction   onTimeout(KiottyNetConnectionContext context, KiottyNetConnectionHandle connection);
         static void onWorkStarted(KiottyNetConnectionContext context, KiottyNetConnectionStream stream);
-        static void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason);
+        static void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason);
         static void onError(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
 
         std::vector<Record>                   _calls;

@@ -236,12 +236,11 @@ namespace kiotty_test
         of(context).record(entry);
     }
 
-    void Recorder::onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void Recorder::onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         Record entry = blank(Call::ON_DISCONNECTED);
         entry.app_context = app_context;
         entry.connection_context = context;
-        entry.handle = connection;
         entry.code = reason;
         of(app_context).record(entry);
     }

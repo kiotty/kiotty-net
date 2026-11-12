@@ -40,7 +40,6 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.http_work_handle, sizeof(KiottyNetHttpWorkHandle));
     EXPECT_EQ(c.http_route, sizeof(KiottyNetHttpRoute));
     EXPECT_EQ(c.http_server_result, sizeof(KiottyNetHttpServerResult));
-    EXPECT_EQ(c.http_server_handler, sizeof(KiottyNetHttpServerHandler));
     EXPECT_EQ(c.http_request_keep_alive, offsetof(KiottyNetHttpRequest, keep_alive));
 }
 
@@ -60,6 +59,16 @@ TEST(Headers, HttpRequestKeepAliveIsTheAbiBool)
 {
     EXPECT_TRUE((std::is_same<decltype(KiottyNetHttpRequest::keep_alive), KiottyNetBool>::value));
     EXPECT_EQ(sizeof(KiottyNetBool), sizeof(int32_t));
+}
+
+TEST(Headers, DisconnectCallbacksCarryNoConnectionHandle)
+{
+    typedef void (*BaseDisconnected)(KiottyNetAppContext, KiottyNetConnectionContext, KiottyNetCode);
+    typedef void (*StatefulRelease)(KiottyNetAppContext, KiottyNetConnectionContext);
+    typedef void (*HttpDisconnected)(KiottyNetAppContext, KiottyNetConnectionInfo, KiottyNetCode);
+    EXPECT_TRUE((std::is_same<decltype(KiottyNetConnectionHandler::onDisconnected), BaseDisconnected>::value));
+    EXPECT_TRUE((std::is_same<decltype(KiottyNetStatefulAppContext::releaseConnectionContext), StatefulRelease>::value));
+    EXPECT_TRUE((std::is_same<KiottyNetHttpDisconnectedAction, HttpDisconnected>::value));
 }
 
 TEST(Headers, HttpContentTypesEndWithByExtensionThenCustom)

@@ -451,7 +451,7 @@ struct SessionPool
         return nullptr;                                                          // 라이브러리가 onError(KIOTTY_NET_CODE_SESSION_EXHAUSTED) 로 알리고 연결을 받지 않는다
     }
 
-    static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle)
+    static void release(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context)
     {
         SessionPool& self = *static_cast<SessionPool*>(app_context);
         self.in_use[static_cast<Session*>(connection_context) - self.session] = false;
@@ -774,10 +774,9 @@ static KiottyNetConnectionContext acquire_session(KiottyNetAppContext app_contex
     return NULL;
 }
 
-static void release_session(KiottyNetAppContext app_context, KiottyNetConnectionContext session, KiottyNetConnectionHandle connection)
+static void release_session(KiottyNetAppContext app_context, KiottyNetConnectionContext session)
 {
     (void)app_context;
-    (void)connection;
     in_use[(ServerSession*)session - sessions] = false;
 }
 
@@ -916,7 +915,7 @@ static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, Kiotty
     return s;                                                                    // create 는 handle 을 받지 않는다. _connection 과 beginRequest (4.3) 는 CONNECTED action 이 한다
 }
 
-static void releaseSession(KiottyNetAppContext app, KiottyNetConnectionContext session, KiottyNetConnectionHandle)
+static void releaseSession(KiottyNetAppContext app, KiottyNetConnectionContext session)
 {
     HttpServer*  server = static_cast<HttpServer*>(app);
     HttpSession* s      = static_cast<HttpSession*>(session);

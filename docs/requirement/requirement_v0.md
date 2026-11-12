@@ -607,7 +607,7 @@ HOLD 뒤의 timeout 처럼 걸린 요청이 없으면 return 은 보통의 actio
 
 - `onConnected(app_context, info)` 는 전송 계층 연결이 생긴 직후 (서버의 accept, 클라이언트의 connect) 한 번 온다. 아직 handle 은 없다. `KiottyNet_acceptConnection(ctx)` 를 return 하면 그 ctx 가 이 연결의 connection_context 가 되고, `KiottyNet_ignoreConnection()` 을 return 하면 socket 을 바로 닫는다. ignore 한 연결에는 다른 콜백이 오지 않는다 (onDisconnected 도 없다).
 - `onReady(ctx, connection)` 는 accept 한 연결이 쓸 수 있게 된 때 한 번 온다. 평문은 onConnected 바로 뒤, TLS 는 handshake 가 끝난 뒤다. handle 이 처음 보이는 자리이며 첫 action 을 return 한다.
-- `onDisconnected(app_context, ctx, connection, reason)` 는 accept 한 연결마다 정확히 한 번, 마지막으로 온다. connection_context 해제는 여기서 한다.
+- `onDisconnected(app_context, ctx, reason)` 는 accept 한 연결마다 정확히 한 번, 마지막으로 온다. connection_context 해제는 여기서 한다. 연결의 handle 은 받지 않는다. 끊긴 뒤라 쓸 곳이 없고, 연결마다 남길 것은 ctx 에 있다.
 - `onError(app_context, info, code, message)` 는 onDisconnected 와 따로, 이유를 사람이 읽을 수 있게 알린다. TLS handshake / 복호화 실패, 거부된 action, accept 실패가 이것이다. info 는 그 연결의 상대이고, 연결이 없는 오류 (accept 실패) 는 소유자의 endpoint 다. message 는 static 문자열이다. onError 뒤에 그 연결이 닫히면 onDisconnected 가 따로 온다.
 
 ```c
@@ -670,7 +670,7 @@ typedef struct KiottyNetConnectionHandler {
     KiottyNetConnectionAction   (*onWritten)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, size_t length);                           /* write 하나의 완료 */
     KiottyNetConnectionAction   (*onTimeout)     (KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);                                          /* action 의 timeout_milliseconds 만료 */
     void                        (*onWorkStarted) (KiottyNetConnectionContext connection_context, KiottyNetConnectionStream stream);                                       /* 이 순간부터 closeConnectionStream 까지 연결은 worker 의 것 */
-    void                        (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection, KiottyNetCode reason);   /* 마지막 콜백 */
+    void                        (*onDisconnected)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetCode reason);   /* 마지막 콜백. handle 없음 */
     void                        (*onError)       (KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);         /* info 는 상대. 연결 없는 오류는 소유자의 address. message 는 static */
 } KiottyNetConnectionHandler;
 
@@ -734,7 +734,7 @@ KiottyNetConnectionAction onReady(KiottyNetConnectionContext session, KiottyNetC
     static_cast<Session*>(session)->connection = c;                  // handle 이 처음 보이는 자리
     return KiottyNet_thenReadUntil(CRLF, 1024, 30000);
 }
-void onDisconnected(KiottyNetAppContext ctx, KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetCode)
+void onDisconnected(KiottyNetAppContext ctx, KiottyNetConnectionContext session, KiottyNetCode)
 {
     static_cast<App*>(ctx)->sessions.release(static_cast<Session*>(session));
 }
@@ -896,7 +896,7 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 규칙
 
 - 라이브러리가 기억하는 것은 둘이다. **state** 는 연결마다 하나이고 Connection 안에 있다. **machine** (표 + 초기 상태) 은 run 마다 하나이고 `KiottyNetStatefulAppContext` 안에 있다. Session 에 state 멤버를 두지 않는다.
-- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, info)` 가 5절의 onConnected 자리에서 연결마다 하나를 돌려주고 (handle 은 아직 없다), `releaseConnectionContext(app_context, session, c)` 가 돌려받는다. create 가 NULL 을 돌려주면 Session 이 다 닳은 것으로 보고 `onError(KIOTTY_NET_CODE_SESSION_EXHAUSTED)` 로 알린 뒤 그 연결은 받지 않는다 (`ignoreConnection`. CONNECTED 도 CLOSED 행도 release 도 오지 않는다). create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
+- Session 의 저장소는 사용자 몫이다. `createConnectionContext(app_context, info)` 가 5절의 onConnected 자리에서 연결마다 하나를 돌려주고 (handle 은 아직 없다), `releaseConnectionContext(app_context, session)` 가 돌려받는다 (handle 은 받지 않는다). create 가 NULL 을 돌려주면 Session 이 다 닳은 것으로 보고 `onError(KIOTTY_NET_CODE_SESSION_EXHAUSTED)` 로 알린 뒤 그 연결은 받지 않는다 (`ignoreConnection`. CONNECTED 도 CLOSED 행도 release 도 오지 않는다). create 가 NULL 함수이면 session 은 NULL 이고 release 는 부르지 않는다. release 가 NULL 함수이면 부르지 않는다.
 - `onError(app_context, info, code, message)` 는 라이브러리가 표 밖의 일을 알리는 자리다. `SESSION_EXHAUSTED`, `UNHANDLED_EVENT`, `ILLEGAL_TRANSITION`, 그리고 `WORK_STARTED` 행이 돌려준 action 이 잘못되었을 때 (`INVALID_ARGUMENT`, `BUFFER_FULL`) 부른다. NULL 이면 부르지 않고 그 뒤의 처리 (닫기) 는 같다. 5절의 `onError` 와 같은 시그니처이고 IO Thread 에서 불린다.
 - transition action 은 app_context 를 받지 않는다. action 이 앱 객체에 닿아야 하면 create 가 Session 에 그 포인터를 넣어 둔다.
 - `Event` 는 IO Thread 가 알려주는 "무슨 일이 일어났는가", entry action (`KiottyNetConnectionAction`) 은 표가 돌려주는 "다음 상태에 들어가면서 해 달라" 다. 한 Transition 은 entry action 하나만 가진다.
@@ -955,7 +955,7 @@ typedef struct KiottyNetStatefulAppContext {
     KiottyNetAppContext          app_context;              /* create / release 가 받는다 */
     const KiottyNetStateMachine* machine;
     KiottyNetConnectionContext (*createConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info);                               /* 연결마다 Session 하나. NULL 이면 받지 않는다 (ignore) */
-    void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context, KiottyNetConnectionHandle connection);              /* CLOSED 행 뒤에 */
+    void (*releaseConnectionContext)(KiottyNetAppContext app_context, KiottyNetConnectionContext connection_context);                                                  /* CLOSED 행 뒤에 */
     void (*onError)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);                         /* 표 밖의 일. NULL 이면 부르지 않는다 */
 } KiottyNetStatefulAppContext;
 ```
@@ -1050,7 +1050,7 @@ std::thread                 io([&] { KiottyNet_runStatefulServer(server.handle()
 
 ### 9. HttpServer
 
-> 이 절은 공개 API 판 v1 을 적는다. `include/kiotty_net_http.h` 는 cycle H1 (2026-11-12) 에서 판 v2 (Streamable HTTP, Work 스트림, status / content type enum, 서버 handler, `{ code, handle }`) 가 되었고, 이 절은 cycle H6 에서 v2 로 고친다. 그때까지 v2 의 기준은 [design_http_v0.html](../design/design_http_v0.html) 4, 5절과 [user_guide_http.md](user_guide_http.md) 다.
+> 이 절은 공개 API 판 v1 을 적는다. `include/kiotty_net_http.h` 는 cycle H1 (2026-11-12) 에서 판 v2 (Streamable HTTP, Work 스트림, status / content type enum, 끊김 / 오류 action, `{ code, handle }`) 가 되었고, 이 절은 cycle H6 에서 v2 로 고친다. 그때까지 v2 의 기준은 [design_http_v0.html](../design/design_http_v0.html) 4, 5절과 [user_guide_http.md](user_guide_http.md) 다.
 
 HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다.
 

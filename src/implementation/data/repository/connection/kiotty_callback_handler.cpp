@@ -75,7 +75,7 @@ namespace kiotty::net::implementation
                                                           const Caller& caller) const
     {
         const KiottyNetCode reason = event.reason;
-        _callbacks.onDisconnected(_app_context, caller.context, caller.handle(), reason);
+        _callbacks.onDisconnected(_app_context, caller.context, reason);
         return actionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
     }
 

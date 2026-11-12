@@ -100,7 +100,7 @@ namespace kiotty::net::implementation
     {
         if (_stateful.releaseConnectionContext == nullptr) { return; }
         if (caller.context == nullptr) { return; }
-        _stateful.releaseConnectionContext(_stateful.app_context, caller.context, caller.handle());
+        _stateful.releaseConnectionContext(_stateful.app_context, caller.context);
     }
 
     namespace

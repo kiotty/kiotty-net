@@ -134,9 +134,8 @@ namespace
         app.work_started.fetch_add(1);
     }
 
-    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
-        (void)connection;
         (void)reason;
         delete static_cast<Slot*>(context);
         appOf(app_context).disconnected.fetch_add(1);
@@ -185,7 +184,7 @@ namespace
         return new Slot{ static_cast<App*>(app_context), {} };
     }
 
-    void statefulRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle)
+    void statefulRelease(KiottyNetAppContext app_context, KiottyNetConnectionContext context)
     {
         delete static_cast<Slot*>(context);
         appOf(app_context).disconnected.fetch_add(1);

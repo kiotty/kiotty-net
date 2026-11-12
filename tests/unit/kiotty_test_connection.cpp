@@ -263,7 +263,6 @@ TEST(Connection, ReceiveWithClosedCodeReturnsClosePeerClosedAndOnDisconnectedOnc
     EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, gone.code);
     EXPECT_EQ(&bench.recorder, gone.app_context);
     EXPECT_EQ(&bench.recorder, gone.connection_context);
-    EXPECT_EQ(connection.state().id.value(), gone.handle.id);
     EXPECT_EQ(net::Phase::CLOSING, connection.state().phase);
     EXPECT_EQ(0u, connection.state().deadline);
 }

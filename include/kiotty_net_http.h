@@ -245,19 +245,15 @@ typedef struct KiottyNetHttpServerResult
     KiottyNetHttpServerHandle handle;
 } KiottyNetHttpServerResult;
 
-typedef struct KiottyNetHttpServerHandler
-{
-    void (*onDisconnected)(
-        KiottyNetAppContext app_context,
-        KiottyNetConnectionHandle connection,
-        KiottyNetConnectionInfo info,
-        KiottyNetCode reason);
-    void (*onError)(
-        KiottyNetAppContext app_context,
-        KiottyNetConnectionInfo info,
-        KiottyNetCode code,
-        const char* message);
-} KiottyNetHttpServerHandler;
+typedef void (*KiottyNetHttpDisconnectedAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetConnectionInfo info,
+    KiottyNetCode reason);
+typedef void (*KiottyNetHttpErrorAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetConnectionInfo info,
+    KiottyNetCode code,
+    const char* message);
 
 KIOTTY_NET_API KiottyNetHttpServerResult KiottyNet_createHttpServer(
     KiottyNetContext context,
@@ -274,6 +270,14 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_addHttpRoute(
 KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpNotFound(
     KiottyNetHttpServerHandle server,
     KiottyNetHttpRoute route);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpDisconnectedAction(
+    KiottyNetHttpServerHandle server,
+    KiottyNetHttpDisconnectedAction on_disconnected,
+    KiottyNetAppContext app_context);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpErrorAction(
+    KiottyNetHttpServerHandle server,
+    KiottyNetHttpErrorAction on_error,
+    KiottyNetAppContext app_context);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_serveHttpDirectory(
     KiottyNetHttpServerHandle server,
     const char* url_prefix,
@@ -290,9 +294,7 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_serveHttpMemory(
 KIOTTY_NET_API KiottyNetCode             KiottyNet_runHttpServer(
     KiottyNetHttpServerHandle server,
     const KiottyNetAddress* address,
-    const KiottyNetTlsServerConfiguration* tls,
-    const KiottyNetHttpServerHandler* handler,
-    KiottyNetAppContext app_context);
+    const KiottyNetTlsServerConfiguration* tls);
 KIOTTY_NET_API void KiottyNet_closeHttpServer(
     KiottyNetHttpServerHandle server);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_awaitHttpServer(
@@ -510,6 +512,10 @@ public:
     KiottyNetCode notFound(KiottyNetHttpRoute route);
     KiottyNetCode notFound(
         KiottyNetHttpRequestAction on_request);
+    KiottyNetCode onDisconnected(
+        KiottyNetHttpDisconnectedAction on_disconnected,
+        KiottyNetAppContext app_context);
+    KiottyNetCode onError(KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
@@ -517,15 +523,6 @@ public:
 
     KiottyNetCode run(const KiottyNetAddress& address);
     KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);
-    KiottyNetCode run(
-        const KiottyNetAddress& address,
-        const KiottyNetHttpServerHandler& handler,
-        KiottyNetAppContext app_context);
-    KiottyNetCode run(
-        const KiottyNetAddress& address,
-        const KiottyNetTlsServerConfiguration& tls,
-        const KiottyNetHttpServerHandler& handler,
-        KiottyNetAppContext app_context);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
 
@@ -860,6 +857,20 @@ inline KiottyNetCode KiottyNet_HttpServer::notFound(
     return KiottyNet_setHttpNotFound(_handle.get(), route);
 }
 
+inline KiottyNetCode KiottyNet_HttpServer::onDisconnected(
+    KiottyNetHttpDisconnectedAction on_disconnected,
+    KiottyNetAppContext app_context)
+{
+    return KiottyNet_setHttpDisconnectedAction(_handle.get(), on_disconnected, app_context);
+}
+
+inline KiottyNetCode KiottyNet_HttpServer::onError(
+    KiottyNetHttpErrorAction on_error,
+    KiottyNetAppContext app_context)
+{
+    return KiottyNet_setHttpErrorAction(_handle.get(), on_error, app_context);
+}
+
 inline KiottyNetCode KiottyNet_HttpServer::serveDirectory(
     const char* url_prefix,
     const char* directory)
@@ -882,31 +893,14 @@ inline KiottyNetCode KiottyNet_HttpServer::serveMemory(
 
 inline KiottyNetCode KiottyNet_HttpServer::run(const KiottyNetAddress& address)
 {
-    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr, nullptr, nullptr);
+    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::run(
     const KiottyNetAddress& address,
     const KiottyNetTlsServerConfiguration& tls)
 {
-    return KiottyNet_runHttpServer(_handle.get(), &address, &tls, nullptr, nullptr);
-}
-
-inline KiottyNetCode KiottyNet_HttpServer::run(
-    const KiottyNetAddress& address,
-    const KiottyNetHttpServerHandler& handler,
-    KiottyNetAppContext app_context)
-{
-    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr, &handler, app_context);
-}
-
-inline KiottyNetCode KiottyNet_HttpServer::run(
-    const KiottyNetAddress& address,
-    const KiottyNetTlsServerConfiguration& tls,
-    const KiottyNetHttpServerHandler& handler,
-    KiottyNetAppContext app_context)
-{
-    return KiottyNet_runHttpServer(_handle.get(), &address, &tls, &handler, app_context);
+    return KiottyNet_runHttpServer(_handle.get(), &address, &tls);
 }
 
 inline void KiottyNet_HttpServer::close()

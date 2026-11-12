@@ -119,11 +119,10 @@ namespace
         (void)stream;
     }
 
-    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetConnectionHandle connection, KiottyNetCode reason)
+    void onDisconnected(KiottyNetAppContext app_context, KiottyNetConnectionContext context, KiottyNetCode reason)
     {
         (void)app_context;
         (void)context;
-        (void)connection;
         (void)reason;
     }
 
