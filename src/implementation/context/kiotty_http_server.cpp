@@ -3,6 +3,7 @@
 #include "context/kiotty_handles.h"
 #include "domain/usecases/http/kiotty_http_machine.h"
 #include "domain/usecases/statemachine/kiotty_stateful_handler.h"
+#include "domain/usecases/websocket/kiotty_websocket_access.h"
 
 namespace kiotty::net::implementation
 {
@@ -60,15 +61,47 @@ namespace kiotty::net::implementation
         return NoticesResult::success(_site.notices);
     }
 
-    HttpWork HttpServer::work()
+    HttpSite& HttpServer::site()
     {
-        return HttpWork(_site);
+        return _site;
     }
 
     void HttpServer::close()
     {
         _site.is_closing.store(true);
         Server::close();
+    }
+
+    KiottyNetCode HttpServer::push(int64_t connection, Span<const KiottyNetSpan> pieces)
+    {
+        return Server::notify(connection, pieces);
+    }
+
+    KiottyNetWebSocketInfo HttpServer::socketInfo(int64_t id)
+    {
+        return WebSocketAccess(_site).info(id);
+    }
+
+    KiottyNetSpan HttpServer::upgradeHeader(int64_t id, Span<const char> name)
+    {
+        return WebSocketAccess(_site).header(id, name);
+    }
+
+    KiottyNetCode HttpServer::selectProtocol(int64_t id, Span<const char> protocol)
+    {
+        return WebSocketAccess(_site).select(id, protocol);
+    }
+
+    KiottyNetCode HttpServer::sendSocket(int64_t id,
+                                         KiottyNetWebSocketOpcode opcode,
+                                         KiottyNetSpan data)
+    {
+        return WebSocketAccess(_site).send(id, opcode, data);
+    }
+
+    KiottyNetCode HttpServer::closeSocket(int64_t id, uint16_t status, Span<const char> reason)
+    {
+        return WebSocketAccess(_site).close(id, status, reason);
     }
 
     KiottyNetCode HttpServer::prepare(const HttpServerConfiguration& configuration)
@@ -79,6 +112,8 @@ namespace kiotty::net::implementation
         _site.receive_capacity = configuration.server.receive_capacity;
         _site.send_capacity = configuration.server.send_capacity;
         _site.owner = static_cast<KiottyNetHttpServer*>(this);
+        _site.socket_owner = this;
+        _site.lane = this;
         _site.registry.initialize(limits.max_routes);
         _site.notices.clear();
         return _site.sessions.initialize(_site, configuration.server.max_clients, limits);

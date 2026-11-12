@@ -203,6 +203,9 @@ namespace kiotty::net::implementation
         if (has_type) { (void)appendField(prefix, literalOf("Content-Type"), contentTypeText()); }
         const bool is_closing = seal.persistence == Persistence::CLOSE;
         if (is_closing) { (void)appendField(prefix, literalOf("Connection"), literalOf("close")); }
+        const Span<const char> upgrade = literalOf("Upgrade");
+        const bool is_upgrade = seal.persistence == Persistence::UPGRADE;
+        if (is_upgrade) { (void)appendField(prefix, literalOf("Connection"), upgrade); }
         _layout.header_start = RESPONSE_PREFIX_BYTES - prefix.length();
         const Span<char> head{ _layout.buffer.data + _layout.header_start, prefix.length() };
         (void)head.copyFrom(prefix.span());

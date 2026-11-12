@@ -26,6 +26,7 @@ namespace kiotty::net::implementation
         void          release(HttpSession& session);
         bool          handBack(HttpSession& session);
         SessionResult find(int64_t id);
+        Span<SocketLink> links();
 
     private:
         void keepGenerations();
@@ -33,6 +34,7 @@ namespace kiotty::net::implementation
         std::vector<char>                _block;
         std::vector<KiottyNetHttpHeader> _headers;
         std::vector<InputFile>           _files;
+        std::vector<SocketLink>          _links;
         std::vector<HttpSession>         _sessions;
         std::vector<int32_t>             _free;
         std::vector<int32_t>             _generations;

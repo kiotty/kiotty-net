@@ -82,6 +82,17 @@ namespace kiotty::net::implementation
         return NO_ERROR_STATUS;
     }
 
+    KiottyNetHttpStatus HttpRequestStore::appendBody(Span<const char> data,
+                                                     const MaskKey& key,
+                                                     size_t offset)
+    {
+        const size_t used = _request.body.length;
+        const KiottyNetHttpStatus status = appendBody(data);
+        if (status != NO_ERROR_STATUS) { return status; }
+        applyMask(Span<char>{ _body_buffer.data + used, data.length }, key, offset);
+        return NO_ERROR_STATUS;
+    }
+
     bool HttpRequestStore::expectsContinue() const
     {
         const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };

@@ -3,6 +3,7 @@
 #include "context/kiotty_http_configuration.h"
 #include "context/kiotty_http_work.h"
 #include "context/kiotty_server.h"
+#include "context/kiotty_websocket_endpoint.h"
 #include "core/kiotty_result.h"
 #include "data/repository/http/kiotty_http_site.h"
 #include "kiotty_net_http.h"
@@ -15,7 +16,7 @@ namespace kiotty::net::implementation
     using RegistryResult = Result<HttpRegistry&, KiottyNetCode>;
     using NoticesResult = Result<HttpNotices&, KiottyNetCode>;
 
-    class HttpServer : public Server
+    class HttpServer : public Server, public PushLane, public KiottyNetWebSocketEndpoint
     {
     public:
         using configuration_type = HttpServerConfiguration;
@@ -34,8 +35,19 @@ namespace kiotty::net::implementation
                            const KiottyNetTlsServerConfiguration* tls);
         RegistryResult registry();
         NoticesResult  notices();
-        HttpWork       work();
+        HttpSite&      site();
         void           close();
+
+        KiottyNetCode          push(int64_t connection, Span<const KiottyNetSpan> pieces) override;
+        KiottyNetWebSocketInfo socketInfo(int64_t id) override;
+        KiottyNetSpan          upgradeHeader(int64_t id, Span<const char> name) override;
+        KiottyNetCode          selectProtocol(int64_t id, Span<const char> protocol) override;
+        KiottyNetCode          sendSocket(int64_t id,
+                                          KiottyNetWebSocketOpcode opcode,
+                                          KiottyNetSpan data) override;
+        KiottyNetCode          closeSocket(int64_t id,
+                                           uint16_t status,
+                                           Span<const char> reason) override;
 
     private:
         KiottyNetCode prepare(const HttpServerConfiguration& configuration);

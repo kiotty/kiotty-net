@@ -6,6 +6,7 @@
 #include "data/repository/http/kiotty_http_site.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"
 #include "domain/usecases/http/kiotty_http_static.h"
+#include "domain/usecases/websocket/kiotty_websocket_upgrade.h"
 
 #include <limits>
 
@@ -32,7 +33,6 @@ namespace kiotty::net::implementation
         void answerAutomatically(HttpSession& session, const RouteMatch& match);
         void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed);
         void answerWithoutWork(HttpSession& session);
-        KiottyNetTransition         startSending(HttpSession& session);
     }
 
     HttpSession& sessionOf(KiottyNetConnectionContext context)
@@ -61,6 +61,7 @@ namespace kiotty::net::implementation
         session.stream = KiottyNetConnectionStream{ nullptr, 0 };
         session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
         session.is_work_requested = false;
+        session.has_body = false;
         session.phase = SessionPhase::READING;
         session.persistence = Persistence::KEEP_ALIVE;
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
@@ -102,6 +103,7 @@ namespace kiotty::net::implementation
         const RouteMatch match = session.site.registry.find(request.method, path);
         const bool is_route = match.kind == MatchKind::ROUTE;
         if (is_route) { return callRoute(session, match.route); }
+        if (match.kind == MatchKind::SOCKET) { return answerUpgrade(session, match.socket); }
         answerAutomatically(session, match);
         return startSending(session);
     }
@@ -129,6 +131,18 @@ namespace kiotty::net::implementation
         if (!is_kept) { return closeWith(session.close_reason); }
         const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
+    }
+
+    KiottyNetTransition startSending(HttpSession& session)
+    {
+        session.phase = SessionPhase::SENDING;
+        const KiottyNetHttpMethod method = session.request.request().method;
+        session.response.seal(ResponseSeal{ method, session.persistence });
+        session.sent = 0;
+        const size_t capacity = session.site.send_capacity;
+        const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
+        const KiottyNetSpan data{ chunk.data, chunk.length };
+        return Next::moveToNextState(HttpState::SENDING, thenWrite(data, 0));
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -197,6 +211,7 @@ namespace kiotty::net::implementation
             switch (match.kind)
             {
             case MatchKind::ROUTE:
+            case MatchKind::SOCKET:
                 return;
             case MatchKind::STATIC:
                 answerStatic(session, match.target);
@@ -228,16 +243,5 @@ namespace kiotty::net::implementation
             session.persistence = Persistence::CLOSE;
         }
 
-        KiottyNetTransition startSending(HttpSession& session)
-        {
-            session.phase = SessionPhase::SENDING;
-            const KiottyNetHttpMethod method = session.request.request().method;
-            session.response.seal(ResponseSeal{ method, session.persistence });
-            session.sent = 0;
-            const size_t capacity = session.site.send_capacity;
-            const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
-            const KiottyNetSpan data{ chunk.data, chunk.length };
-            return Next::moveToNextState(HttpState::SENDING, thenWrite(data, 0));
-        }
     }
 }

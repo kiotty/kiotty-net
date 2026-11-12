@@ -17,6 +17,9 @@ struct KiottyNetEndpoint
     using FileRange = kiotty::net::implementation::FileRange;
 
     virtual KiottyNetCode           notify(int64_t id, KiottyNetSpan data) = 0;
+    virtual KiottyNetCode           notify(
+        int64_t id,
+        kiotty::net::implementation::Span<const KiottyNetSpan> pieces) = 0;
     virtual KiottyNetConnectionInfo info(int64_t id) const = 0;
     virtual KiottyNetResult         readStream(int64_t id,
                                                kiotty::net::implementation::Span<char> buffer,

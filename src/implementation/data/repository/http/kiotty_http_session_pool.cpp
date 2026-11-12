@@ -28,6 +28,7 @@ namespace kiotty::net::implementation
         : _block()
         , _headers()
         , _files()
+        , _links()
         , _sessions()
         , _free()
         , _generations()
@@ -48,6 +49,7 @@ namespace kiotty::net::implementation
         if (_block.size() < total.value) { _block.resize(total.value); }
         if (_headers.size() < header_slots.value) { _headers.resize(header_slots.value); }
         if (_files.size() < count) { _files = std::vector<InputFile>(count); }
+        if (_links.size() < count) { _links = std::vector<SocketLink>(count); }
         keepGenerations();
         _sessions.clear();
         _sessions.reserve(count);
@@ -59,7 +61,9 @@ namespace kiotty::net::implementation
             SessionBuffers buffers = buffersAt(block, layout.value, i);
             buffers.headers = Span<KiottyNetHttpHeader>{ _headers.data() + i * limits.max_headers,
                                                          limits.max_headers };
-            _sessions.emplace_back(site, _files[i], static_cast<int32_t>(i), buffers);
+            const int32_t index = static_cast<int32_t>(i);
+            const SessionResources resources{ _files[i], _links[i] };
+            _sessions.emplace_back(site, resources, index, buffers);
             const bool has_history = i < _generations.size();
             _sessions.back().id.generation = has_history ? _generations[i] : 0;
             _free.push_back(static_cast<int32_t>(count - 1 - i));
@@ -107,6 +111,11 @@ namespace kiotty::net::implementation
             return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED);
         }
         return SessionResult::success(session);
+    }
+
+    Span<SocketLink> HttpSessionPool::links()
+    {
+        return Span<SocketLink>{ _links.data(), _sessions.size() };
     }
 
     void HttpSessionPool::keepGenerations()

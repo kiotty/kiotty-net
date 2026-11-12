@@ -260,6 +260,11 @@ namespace kiotty_test
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
+    KiottyNetCode FakeEndpoint::notify(int64_t, kiotty::net::implementation::Span<const KiottyNetSpan>)
+    {
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    }
+
     KiottyNetConnectionInfo FakeEndpoint::info(int64_t) const
     {
         return KiottyNetConnectionInfo();

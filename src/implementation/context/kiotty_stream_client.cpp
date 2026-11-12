@@ -93,6 +93,13 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
 
+    KiottyNetCode StreamClient::notify(int64_t id, Span<const KiottyNetSpan> pieces)
+    {
+        (void)id;
+        (void)pieces;
+        return KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    }
+
     KiottyNetConnectionInfo StreamClient::info(int64_t id) const
     {
         (void)id;

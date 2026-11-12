@@ -19,7 +19,8 @@ namespace kiotty::net::implementation
     enum class Persistence : uint8_t
     {
         CLOSE,
-        KEEP_ALIVE
+        KEEP_ALIVE,
+        UPGRADE
     };
 
     struct BodyFraming

@@ -12,6 +12,7 @@ namespace kiotty::net::implementation
         constexpr uint32_t GET_BIT = KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_GET);
         constexpr uint32_t HEAD_BIT = KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_HEAD);
         constexpr uint32_t STATIC_METHODS = GET_BIT | HEAD_BIT;
+        constexpr uint32_t ALL_METHODS = 0xFFFFFFFFU;
         constexpr size_t   MAX_LOCATION_LENGTH = KIOTTY_NET_MAX_PATH_LENGTH - 2;
         constexpr KiottyNetSpan NO_MEMORY{ nullptr, 0 };
 
@@ -24,10 +25,12 @@ namespace kiotty::net::implementation
         TextLocation parseLocation(const char* text);
         KiottyNetCode checkMemory(KiottyNetHttpContentType type, KiottyNetSpan data);
         RouteMatch   matchOf(MatchKind kind, uint32_t allowed);
+        uint32_t     takenMethodsOf(uint32_t methods, int32_t socket);
     }
 
     HttpRegistry::HttpRegistry()
         : _entries()
+        , _sockets()
         , _not_found{}
         , _max_routes(0)
     {
@@ -37,6 +40,8 @@ namespace kiotty::net::implementation
     {
         _entries.clear();
         _entries.reserve(max_routes);
+        _sockets.clear();
+        _sockets.reserve(max_routes);
         _not_found = KiottyNetHttpRoute{};
         _max_routes = max_routes;
     }
@@ -56,6 +61,29 @@ namespace kiotty::net::implementation
         (void)entry.path.assign(parsed.value.text);
         entry.route = route;
         entry.methods = bit;
+        entry.socket = NO_SOCKET_PATH;
+        entry.kind = parsed.value.kind;
+        entry.source = StaticKind::NONE;
+        _entries.push_back(entry);
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode HttpRegistry::addRoute(const char* path,
+                                         const KiottyNetWebSocketHandler& handler,
+                                         KiottyNetAppContext app_context)
+    {
+        const bool has_handler = handler.onOpen != nullptr && handler.onMessage != nullptr;
+        if (!has_handler) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const RoutePathResult parsed = parseRoutePath(path);
+        if (!parsed) { return parsed.code; }
+        const KiottyNetCode admitted = admit(parsed.value, ALL_METHODS);
+        if (admitted != KIOTTY_NET_CODE_SUCCESS) { return admitted; }
+        const int32_t index = static_cast<int32_t>(_sockets.size());
+        _sockets.push_back(WebSocketTarget{ handler, app_context, index });
+        RouteEntry entry{};
+        (void)entry.path.assign(parsed.value.text);
+        entry.methods = GET_BIT;
+        entry.socket = index;
         entry.kind = parsed.value.kind;
         entry.source = StaticKind::NONE;
         _entries.push_back(entry);
@@ -111,9 +139,21 @@ namespace kiotty::net::implementation
         const uint32_t bit = KIOTTY_NET_HTTP_METHOD_BIT(method);
         const uint32_t wanted = is_head ? bit | GET_BIT : bit;
         const RouteMatch found = findMethod(wanted, path);
-        const bool is_found = found.kind == MatchKind::ROUTE || found.kind == MatchKind::STATIC;
-        if (is_found) { return found; }
+        const bool is_missing = found.kind == MatchKind::NOT_ALLOWED;
+        if (!is_missing) { return found; }
         return missing(method, found.allowed);
+    }
+
+    int32_t HttpRegistry::find(Span<const char> socket_path) const
+    {
+        for (const RouteEntry& entry : _entries)
+        {
+            if (entry.socket == NO_SOCKET_PATH) { continue; }
+            const Span<const char> text = entry.path.span();
+            if (text.length != socket_path.length) { continue; }
+            if (std::memcmp(text.data, socket_path.data, text.length) == 0) { return entry.socket; }
+        }
+        return NO_SOCKET_PATH;
     }
 
     KiottyNetCode HttpRegistry::addStatic(const RoutePath& path, const StaticSource& source)
@@ -129,6 +169,7 @@ namespace kiotty::net::implementation
         entry.memory = source.memory;
         entry.type = source.type;
         entry.methods = STATIC_METHODS;
+        entry.socket = NO_SOCKET_PATH;
         entry.kind = path.kind;
         entry.source = source.kind;
         _entries.push_back(entry);
@@ -147,7 +188,8 @@ namespace kiotty::net::implementation
         for (const RouteEntry& entry : _entries)
         {
             const RoutePath stored{ entry.path.span(), entry.kind };
-            const bool is_same = isSamePath(stored, path) && (entry.methods & method) != 0;
+            const uint32_t taken = takenMethodsOf(entry.methods, entry.socket);
+            const bool is_same = isSamePath(stored, path) && (taken & method) != 0;
             if (is_same) { return true; }
         }
         return false;
@@ -162,14 +204,25 @@ namespace kiotty::net::implementation
             if (!matchesPath(stored, path)) { continue; }
             allowed |= entry.methods;
             if ((entry.methods & method) == 0) { continue; }
-            const bool is_static = entry.source != StaticKind::NONE;
-            const StaticTarget target{
-                stored.text, entry.location.span(), entry.memory, entry.type, entry.source,
-            };
-            const MatchKind kind = is_static ? MatchKind::STATIC : MatchKind::ROUTE;
-            return RouteMatch{ entry.route, target, allowed, kind };
+            return entryMatch(entry, stored.text, allowed);
         }
         return matchOf(MatchKind::NOT_ALLOWED, allowed);
+    }
+
+    RouteMatch HttpRegistry::entryMatch(const RouteEntry& entry,
+                                        Span<const char> prefix,
+                                        uint32_t allowed) const
+    {
+        const StaticTarget target{
+            prefix, entry.location.span(), entry.memory, entry.type, entry.source,
+        };
+        const WebSocketTarget no_socket{ KiottyNetWebSocketHandler{}, nullptr, NO_SOCKET_PATH };
+        RouteMatch match{ entry.route, target, no_socket, allowed, MatchKind::ROUTE };
+        if (entry.source != StaticKind::NONE) { match.kind = MatchKind::STATIC; }
+        if (entry.socket == NO_SOCKET_PATH) { return match; }
+        match.kind = MatchKind::SOCKET;
+        match.socket = _sockets[static_cast<size_t>(entry.socket)];
+        return match;
     }
 
     RouteMatch HttpRegistry::missing(KiottyNetHttpMethod method, uint32_t allowed) const
@@ -250,7 +303,13 @@ namespace kiotty::net::implementation
                 KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,
                 StaticKind::NONE,
             };
-            return RouteMatch{ KiottyNetHttpRoute{}, none, allowed, kind };
+            const WebSocketTarget no_socket{ KiottyNetWebSocketHandler{}, nullptr, NO_SOCKET_PATH };
+            return RouteMatch{ KiottyNetHttpRoute{}, none, no_socket, allowed, kind };
+        }
+
+        uint32_t takenMethodsOf(uint32_t methods, int32_t socket)
+        {
+            return socket == NO_SOCKET_PATH ? methods : ALL_METHODS;
         }
     }
 }

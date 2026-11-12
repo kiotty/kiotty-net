@@ -44,6 +44,7 @@ namespace kiotty::net::implementation
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
 
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
+        KiottyNetCode           notify(int64_t id, Span<const KiottyNetSpan> pieces) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
         KiottyNetResult         readStream(int64_t id,
                                            Span<char> buffer,

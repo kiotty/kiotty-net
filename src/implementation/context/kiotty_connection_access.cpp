@@ -21,6 +21,14 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
+    KiottyNetCode ConnectionAccess::notify(int64_t id, Span<const KiottyNetSpan> pieces)
+    {
+        const KiottyNetCode staged = _desk.notify(PoolHandle::fromValue(id), pieces);
+        if (staged != KIOTTY_NET_CODE_SUCCESS) { return staged; }
+        (void)_listener.wake();
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
     KiottyNetResult ConnectionAccess::readStream(int64_t id,
                                                  Span<char> buffer,
                                                  uint32_t timeout_milliseconds)

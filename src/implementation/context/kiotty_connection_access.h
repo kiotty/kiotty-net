@@ -17,6 +17,7 @@ namespace kiotty::net::implementation
         ConnectionAccess(NotificationDesk& desk, EventListener& listener, const IoLoop& loop);
 
         KiottyNetCode   notify(int64_t id, KiottyNetSpan data);
+        KiottyNetCode   notify(int64_t id, Span<const KiottyNetSpan> pieces);
         KiottyNetResult readStream(int64_t id, Span<char> buffer, uint32_t timeout_milliseconds);
         KiottyNetResult writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds);
         KiottyNetCode   writeStreamFile(int64_t id,

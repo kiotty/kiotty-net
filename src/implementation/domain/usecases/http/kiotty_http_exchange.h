@@ -21,7 +21,13 @@ namespace kiotty::net::implementation
         CONTINUING,
         WORKING,
         SENDING,
-        CLOSING
+        CLOSING,
+        SOCKET_OPENING,
+        FRAME_START,
+        FRAME_LENGTH,
+        FRAME_MASK,
+        FRAME_PAYLOAD,
+        SOCKET_CLOSING
     };
 
     HttpSession&        sessionOf(KiottyNetConnectionContext context);
@@ -37,6 +43,7 @@ namespace kiotty::net::implementation
     KiottyNetTransition dispatch(HttpSession& session);
     KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream);
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection);
+    KiottyNetTransition startSending(HttpSession& session);
     KiottyNetTransition closeWith(KiottyNetCode reason);
     void                startHeaderClock(HttpSession& session);
     uint32_t            headerTimeLeft(const HttpSession& session);

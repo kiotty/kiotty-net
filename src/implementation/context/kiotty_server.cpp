@@ -109,6 +109,11 @@ namespace kiotty::net::implementation
         return access().notify(id, data);
     }
 
+    KiottyNetCode Server::notify(int64_t id, Span<const KiottyNetSpan> pieces)
+    {
+        return access().notify(id, pieces);
+    }
+
     KiottyNetConnectionInfo Server::info(int64_t id) const
     {
         return _desk.info(PoolHandle::fromValue(id));

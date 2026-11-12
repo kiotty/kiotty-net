@@ -3,13 +3,15 @@
 namespace kiotty::net::implementation
 {
     HttpSession::HttpSession(HttpSite& owner,
-                             InputFile& body_file,
+                             const SessionResources& resources,
                              int32_t index,
                              const SessionBuffers& buffers)
         : request(buffers.header, buffers.headers, buffers.body)
         , response(buffers.response)
         , site(owner)
-        , file(body_file)
+        , file(resources.file)
+        , link(resources.link)
+        , socket()
         , info{}
         , route{}
         , stream{ nullptr, 0 }
@@ -24,6 +26,7 @@ namespace kiotty::net::implementation
         , is_work_requested(false)
         , is_worker_owned(false)
         , is_orphaned(false)
+        , has_body(false)
     {
     }
 }

@@ -179,3 +179,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-12 WebSocket 사이클 W1 (`docs/progress/261112_progress_websocket_w1.md`): `kiotty_net_websocket.h` 판 v2. WebSocketServer 와 설정 struct 를 없애고 HttpServer 의 `addWebSocket` / `broadcastWebSocket`, handle `{ owner, id }`, 클라이언트 create 가 `{ code, handle }` 과 limits / path. user guide 를 이 판으로.
 
 2026-11-12 WebSocket 사이클 W2 (`docs/progress/261112_progress_websocket_w2.md`): frame codec. core 의 SHA-1 / base64, `domain/usecases/websocket/` 의 frame 머리, mask, close payload, Sec-WebSocket-Accept. unit 11 개. 다음은 W3 (서버).
+
+2026-11-12 WebSocket 사이클 W3 (`docs/progress/261112_progress_websocket_w3.md`): 서버. HTTP 표에 WebSocket 행, 라우트 표의 WebSocket 경로, 405 / 426 / 400 / 403 / 101, onUpgrade / onOpen / onMessage / onClose, ping / pong / close 타이머, 다른 thread 의 send / close (atomic 플래그 + push lane), broadcastWebSocket. integration 10 개. 다음은 W4 (클라이언트).

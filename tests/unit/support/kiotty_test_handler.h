@@ -77,6 +77,7 @@ namespace kiotty_test
     {
     public:
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
+        KiottyNetCode           notify(int64_t id, kiotty::net::implementation::Span<const KiottyNetSpan> pieces) override;
         KiottyNetConnectionInfo info(int64_t id) const override;
         KiottyNetResult         readStream(int64_t id, kiotty::net::implementation::Span<char> buffer, uint32_t timeout_milliseconds) override;
         KiottyNetResult         writeStream(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds) override;

@@ -5,6 +5,7 @@
 #include "data/infra/file/kiotty_input_file.h"
 #include "data/repository/http/kiotty_http_request_store.h"
 #include "data/repository/http/kiotty_http_response_store.h"
+#include "data/repository/websocket/kiotty_websocket_socket.h"
 #include "domain/usecases/http/kiotty_http_message_framing.h"
 #include "kiotty_net_http.h"
 
@@ -21,7 +22,9 @@ namespace kiotty::net::implementation
         FILLING,
         WORKING,
         STREAMING,
-        SENDING
+        SENDING,
+        UPGRADING,
+        SOCKET
     };
 
     struct SessionBuffers
@@ -32,14 +35,25 @@ namespace kiotty::net::implementation
         Span<char>                response;
     };
 
+    struct SessionResources
+    {
+        InputFile&  file;
+        SocketLink& link;
+    };
+
     struct HttpSession
     {
-        HttpSession(HttpSite& owner, InputFile& file, int32_t index, const SessionBuffers& buffers);
+        HttpSession(HttpSite& owner,
+                    const SessionResources& resources,
+                    int32_t index,
+                    const SessionBuffers& buffers);
 
         HttpRequestStore          request;
         HttpResponseStore         response;
         HttpSite&                 site;
         InputFile&                file;
+        SocketLink&               link;
+        SocketState               socket;
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;
@@ -54,5 +68,6 @@ namespace kiotty::net::implementation
         bool                      is_work_requested;
         bool                      is_worker_owned;
         bool                      is_orphaned;
+        bool                      has_body;
     };
 }

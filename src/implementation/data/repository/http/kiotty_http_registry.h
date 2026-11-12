@@ -2,6 +2,7 @@
 
 #include "core/kiotty_fixed_string.h"
 #include "core/kiotty_span.h"
+#include "data/repository/websocket/kiotty_websocket_socket.h"
 #include "domain/usecases/http/kiotty_http_route_path.h"
 #include "kiotty_net_http.h"
 
@@ -15,6 +16,7 @@ namespace kiotty::net::implementation
     {
         ROUTE,
         STATIC,
+        SOCKET,
         NOT_FOUND,
         NOT_ALLOWED,
         OPTIONS
@@ -41,6 +43,7 @@ namespace kiotty::net::implementation
     {
         KiottyNetHttpRoute route;
         StaticTarget       target;
+        WebSocketTarget    socket;
         uint32_t           allowed;
         MatchKind          kind;
     };
@@ -62,6 +65,9 @@ namespace kiotty::net::implementation
         KiottyNetCode addRoute(KiottyNetHttpMethod method,
                                const char* path,
                                KiottyNetHttpRoute route);
+        KiottyNetCode addRoute(const char* path,
+                               const KiottyNetWebSocketHandler& handler,
+                               KiottyNetAppContext app_context);
         KiottyNetCode setNotFound(KiottyNetHttpRoute route);
         KiottyNetCode addDirectory(const char* url_prefix, const char* directory);
         KiottyNetCode addFile(const char* url_path, const char* file_path);
@@ -69,6 +75,7 @@ namespace kiotty::net::implementation
                                 KiottyNetHttpContentType type,
                                 KiottyNetSpan data);
         RouteMatch    find(KiottyNetHttpMethod method, Span<const char> path) const;
+        int32_t       find(Span<const char> socket_path) const;
 
     private:
         using Location = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
@@ -81,6 +88,7 @@ namespace kiotty::net::implementation
             KiottyNetSpan                          memory;
             KiottyNetHttpContentType               type;
             uint32_t                               methods;
+            int32_t                                socket;
             PathKind                               kind;
             StaticKind                             source;
         };
@@ -89,10 +97,14 @@ namespace kiotty::net::implementation
         KiottyNetCode admit(const RoutePath& path, uint32_t methods) const;
         bool          hasEntry(const RoutePath& path, uint32_t method) const;
         RouteMatch    findMethod(uint32_t method, Span<const char> path) const;
+        RouteMatch    entryMatch(const RouteEntry& entry,
+                                 Span<const char> prefix,
+                                 uint32_t allowed) const;
         RouteMatch    missing(KiottyNetHttpMethod method, uint32_t allowed) const;
         uint32_t      allMethods() const;
 
-        std::vector<RouteEntry> _entries;
+        std::vector<RouteEntry>      _entries;
+        std::vector<WebSocketTarget> _sockets;
         KiottyNetHttpRoute      _not_found;
         size_t                  _max_routes;
     };
