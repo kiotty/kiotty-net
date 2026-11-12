@@ -15,6 +15,7 @@ FetchContent_MakeAvailable(benchmark)
 add_executable(kiotty_net_benchmarks
     kiotty_bench_core.cpp
     kiotty_bench_base.cpp
+    kiotty_bench_http.cpp
     kiotty_bench_platform.cpp
     ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_os.cpp
     ${PROJECT_SOURCE_DIR}/tests/integration/support/kiotty_test_peer.cpp

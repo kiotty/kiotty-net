@@ -107,13 +107,13 @@ namespace kiotty::net::implementation
     RouteMatch HttpRegistry::find(KiottyNetHttpMethod method, Span<const char> path) const
     {
         if (isWholeServer(path)) { return matchOf(MatchKind::OPTIONS, allMethods()); }
-        const RouteMatch exact = findMethod(KIOTTY_NET_HTTP_METHOD_BIT(method), path);
-        const bool is_exact = exact.kind == MatchKind::ROUTE || exact.kind == MatchKind::STATIC;
-        if (is_exact) { return exact; }
         const bool is_head = method == KIOTTY_NET_HTTP_METHOD_HEAD;
-        const RouteMatch get = is_head ? findMethod(GET_BIT, path) : exact;
-        if (get.kind == MatchKind::ROUTE) { return get; }
-        return missing(method, exact.allowed);
+        const uint32_t bit = KIOTTY_NET_HTTP_METHOD_BIT(method);
+        const uint32_t wanted = is_head ? bit | GET_BIT : bit;
+        const RouteMatch found = findMethod(wanted, path);
+        const bool is_found = found.kind == MatchKind::ROUTE || found.kind == MatchKind::STATIC;
+        if (is_found) { return found; }
+        return missing(method, found.allowed);
     }
 
     KiottyNetCode HttpRegistry::addStatic(const RoutePath& path, const StaticSource& source)

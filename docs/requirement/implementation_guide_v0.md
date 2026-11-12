@@ -8,7 +8,7 @@
 1. Stage 와 수신 / 송신 흐름 (ReadRequest, Connection::read / readUntil, IOThread::pump, Work, write lane / push lane / drain, broadcast)
 2. StateMachine (Handler, Connection 이 기억하는 것, 표 찾기와 검사, dispatch, admit 과 CLOSED, HTTP / WebSocket 이 얹히는 방법)
 3. 예제 : Echo (프로토콜, EchoServer, EchoClient 두 가지, C 판)
-4. HttpServer : Connection 별 Request / Response 공급 (HttpSession, 줄 단위 헤더 읽기, 응답 버퍼 배치, handle, Work, 조각 송신)
+4. HttpServer : Connection 별 Request / Response 공급 (HttpSession, 줄 단위 헤더 읽기, 응답 버퍼 배치, handle, Work, 조각 송신과 파일, run, Work 스트림, content type)
 5. 미결
 
 ---
@@ -818,410 +818,666 @@ int run_echo_server(uint16_t port)
 
 ## 4. HttpServer : Connection 별 Request / Response 공급
 
-requirement_v0.md 9절과 `include/kiotty_net_http.h` 의 구현이다. 사용자는 `KiottyNetHttpRequest*` 를 받고 `KiottyNetHttpResponseHandle` 을 채우는데, 둘 다 Connection 마다 하나씩 있는 **HttpSession** 안에 있다. HttpSession 은 2.6 의 "라이브러리 안에 있는 Session 저장소" 다. 사용자 프로토콜이 `createConnectionContext` 로 Session 을 공급하는 것과 같은 자리에서 HttpServer 가 공급한다.
+requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 구현이다. cycle H3 (완성 응답), H4 (Work 와 Work 스트림), H5 (정적 서빙) 에서 만들었고 progress 는 `docs/progress/261112_progress_http_h3 / h4 / h5.md`, `261112_01_100-continue.md` 다. 설계는 `docs/design/design_http_v0.html` 3절, 8절이다. 이 절의 코드는 소스에서 줄인 것이다 (이름과 흐름은 소스 그대로).
 
-핵심은 세 가지다.
+사용자는 `KiottyNetHttpRequest*` 를 받고 `KiottyNetHttpResponseHandle` 을 채우는데, 둘 다 Connection 마다 하나씩 있는 **HttpSession** 안에 있다. HttpSession 은 2.6 의 "라이브러리 안에 있는 Session 저장소" 다. 사용자 프로토콜이 `createConnectionContext` 로 Session 을 공급하는 것과 같은 자리에서 HttpServer 가 공급한다.
+
+핵심은 네 가지다.
 
 - 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `receive_capacity` (기본 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
-- 응답은 HttpSession 의 응답 버퍼 하나에 쌓이고, 송신할 때 `send_capacity` 크기의 조각으로 write lane 에 옮긴다. 응답 버퍼가 write lane 보다 커도 된다.
-- 메모리는 `KiottyNet_createHttpServer` 가 `max_clients` 분량을 한 번 잡는다. 그 뒤 할당은 없다.
+- 완성 응답은 HttpSession 의 응답 버퍼 하나에 쌓이고, 송신할 때 `send_capacity` 크기의 조각으로 write lane 에 옮긴다. 응답 버퍼가 write lane 보다 커도 된다. 파일 body 는 같은 응답 버퍼로 `send_capacity` 만큼씩 읽어 보낸다 (sendfile 없음).
+- Work 스트림은 worker 가 base Stream 에 동기 write 한다 (`writeConnectionStream`). chunk 의 머리 / 꼬리는 응답 버퍼에서 조립한다. 새 버퍼는 없다.
+- 메모리는 `KiottyNet_createHttpServer` 가 `max_clients` 분량을 한 번 잡는다. run 중 할당은 없다.
+
+| 층 | 파일 | 하는 일 |
+|---|---|---|
+| context | `kiotty_http_server` | `HttpServer : Server`. close / await / lifetime / 연결 관리는 base 그대로. `run` 이 HTTP 표로 `StatefulHandler` 를 만든다 (4.8) |
+| | `kiotty_http_work` | `HttpWork` : setter 가 쓸 Session 찾기 (`fill`), `start`, `write`, `finishWithResponse`, `finishWithClose`, `isConnected` (4.5, 4.6, 4.9) |
+| | `kiotty_http_configuration` | `KiottyNetHttpLimits` 의 initialize / configure |
+| data/repository/http | `kiotty_http_site` | 서버 하나의 공유 부분 (4.1) |
+| | `kiotty_http_session`, `kiotty_http_session_pool` | Session 과 그 풀 (4.2) |
+| | `kiotty_http_request_store` | 요청 줄 / 헤더 줄을 헤더 버퍼로 복사하고 자른다. body 를 이어 붙인다 (4.3) |
+| | `kiotty_http_response_store` | 응답 버퍼의 배치, setter, `seal`, 송신 쪽 읽기 `ResponseFrame` (4.4) |
+| | `kiotty_http_registry`, `kiotty_http_notices` | 라우트 / 정적 경로 표, 끊김 / 오류 action |
+| | `kiotty_http_file_body` | 파일 body 의 `attachFile`, 송신 조각 `pieceAt`, `detachFile` (4.7) |
+| domain/usecases/http | `kiotty_http_machine` | HTTP 표와 transition action (4.3) |
+| | `kiotty_http_exchange` | 요청 하나의 흐름: `beginExchange`, `dispatch`, `startWork`, `sendNext`, `reject` |
+| | `kiotty_http_static` | 정적 경로의 응답 (`answerStatic`) |
+| | `kiotty_http_content_type`, `kiotty_http_response_text` 외 파서 | content type 표 (4.10), 상태줄 / Date / Allow / chunk 머리, H2 의 파서 |
+| C API | `src/kiotty_net_http.cpp` | 번역 층. 문자열 인자를 `parseText` 로 보고 HttpServer 에 넘긴다 |
 
 ### 4.1 HttpServer 가 잡는 것
 
 ```cpp
-struct RouteEntry {                                    // 라우트, 정적 경로, Upgrade 경로가 한 표에 들어간다. 등록 순서 = 매칭 순서
-    enum Kind { ROUTE, DIRECTORY, FILE, MEMORY, UPGRADE } kind;
-    uint32_t           methods;                        // KIOTTY_NET_HTTP_METHOD_BIT 의 합. ROUTE 는 비트 하나, 정적 경로는 GET | HEAD
-    char               path[KIOTTY_NET_MAX_URL_LENGTH];    // 등록 때 복사. 끝이 "/*" 면 wildcard, DIRECTORY 는 "/" 로 끝나는 접두
-    size_t             path_length;
-    KiottyNetHttpRoute route;                          // ROUTE, UPGRADE
-    char               file_path[KIOTTY_NET_MAX_PATH_LENGTH];                // DIRECTORY (디렉토리), FILE (파일)
-    KiottyNetSpan      memory;                         // MEMORY. 복사하지 않는다. 서버 생명 동안 사용자가 유효하게 둔다
-    char               content_type[KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH];     // MEMORY
+class HttpServer : public Server                      // context/kiotty_http_server
+{
+    HttpSite             _site;
+    std::atomic<int32_t> _runs;                       // run 중이면 registry() / notices() 가 KIOTTY_NET_CODE_BUSY
 };
 
-struct HttpServer {
-    KiottyNetContext      _context;
-    KiottyNetServerHandle _server;                     // 7절 Server. HttpServer 는 그 위의 프로토콜일 뿐이다
-    KiottyNetServerConfiguration _configuration;                     // receive_capacity, send_capacity, max_clients 를 뒤에 참조한다
-    KiottyNetHttpLimits   _limits;
-    RouteEntry*           _routes;                     // limits.max_routes 개
-    size_t                _route_count;
-    KiottyNetHttpRoute    _not_found;                  // onRequest == NULL 이면 미등록
-    HttpSession*          _sessions;                   // configuration.max_clients 개 (4.2)
-    int32_t*              _free;                       // 비어 있는 session index 의 stack
-    size_t                _free_count;
-    bool                  _running;                    // run 뒤의 등록은 KIOTTY_NET_CODE_BUSY
+struct HttpSite                                       // data/repository/http/kiotty_http_site.h. Session 이 이것을 참조한다
+{
+    HttpRegistry              registry;               // 라우트와 정적 경로의 표, not found 라우트
+    HttpNotices               notices;                // 끊김 / 오류 action 과 각자의 app_context
+    HttpSessionPool           sessions;               // max_clients 개 (4.2)
+    KiottyNetHttpLimits       limits;
+    size_t                    receive_capacity;
+    size_t                    send_capacity;
+    KiottyNetHttpServerHandle owner;                  // handle 의 server
+    std::atomic<bool>         is_closing;             // close() 가 켜고 run 이 시작할 때 끈다 (4.9 의 CLOSED)
+};
+
+class HttpRegistry                                    // data/repository/http/kiotty_http_registry
+{
+    struct RouteEntry                                 // 라우트와 정적 경로가 한 표에 들어간다. 등록 순서 = 매칭 순서
+    {
+        FixedString<KIOTTY_NET_MAX_URL_LENGTH>  path;      // 등록 때 복사. PathKind 가 정확 / "/*" wildcard / "/" 로 끝나는 디렉토리 접두
+        FixedString<KIOTTY_NET_MAX_PATH_LENGTH> location;  // DIRECTORY 는 "/" 나 "\" 로 끝나게 (없으면 "/" 를 붙인다), FILE 은 파일 경로
+        KiottyNetHttpRoute                      route;     // 라우트 (source == NONE)
+        KiottyNetSpan                           memory;    // MEMORY. 복사하지 않는다. 서버 생명 동안 사용자가 유효하게 둔다
+        KiottyNetHttpContentType                type;      // MEMORY 는 등록한 값, FILE 은 등록 때 확장자로 고른 값, DIRECTORY 는 BY_EXTENSION
+        uint32_t                                methods;   // KIOTTY_NET_HTTP_METHOD_BIT. 라우트는 비트 하나, 정적 경로는 GET | HEAD
+        PathKind                                kind;
+        StaticKind                              source;    // NONE, DIRECTORY, FILE, MEMORY
+    };
+    std::vector<RouteEntry> _entries;                 // initialize 가 max_routes 만큼 reserve 한다
+    KiottyNetHttpRoute      _not_found;               // onRequest == NULL 이면 미등록
+    size_t                  _max_routes;
 };
 ```
 
-- `createHttpServer` 는 `_server = KiottyNet_createServer(context, configuration).handle` 을 만들고 (주소와 TLS 는 run 이 받는다, B2), 표와 session 배열을 **블록 하나**로 잡아 잘라 쓴다. 블록 크기는 `max_routes × sizeof(RouteEntry) + max_clients × sessionBytes(limits)` 다. 어느 하나라도 실패하면 전부 되돌리고 NULL 을 돌려준다.
-- `sessionBytes(limits) = sizeof(HttpSession) + max_header_bytes + max_headers × sizeof(KiottyNetHttpHeader) + max_body_bytes + response_bytes`. 곱셈과 덧셈은 오버플로를 먼저 검사한다.
-- `KiottyNet_destroyHttpServer` 는 base Server 를 destroy 하고 블록을 돌려준다. run 이 return 한 뒤에만 불린다는 것은 사용자 규칙이다 (base 와 같다).
+- `KiottyNet_createHttpServer` 는 Context 의 `LazyReusablePool<KiottyNetHttpServer>` 에서 객체를 꺼내 `HttpServer::initialize(id, { configuration, limits })` 를 부른다. `Server::initialize` (Connection 슬롯, Stage) 뒤 `prepare` 가 limits 를 보고 (initialization mark, `max_routes > 0`, `response_bytes ≥ RESPONSE_PREFIX_BYTES + 2`) 표와 Session 풀을 잡는다. 결과는 `{ code, handle }` 이다.
+- 등록 함수는 `registry()` / `notices()` 를 거친다. `_runs > 0` 이면 `KIOTTY_NET_CODE_BUSY` 다. 표는 run 중에 IO Thread 가 읽기만 하고 등록은 run 전에만 하므로 lock 이 없다.
+- 등록의 검사: 같은 path 의 같은 method 비트가 있으면 `DUPLICATE_RULE`, `max_routes` 에 차면 `TABLE_FULL`. `serveHttpDirectory` 의 prefix 는 `/` 로 끝나야 하고, `serveHttpMemory` 는 목록 안의 type (BY_EXTENSION, EVENT_STREAM, CUSTOM 이 아닌 것) 이어야 하며 텍스트 계열이면 여기서 UTF-8 을 한 번 본다.
+- `KiottyNet_destroyHttpServer` 는 Server 와 같은 길이다. 객체는 풀에서 은퇴만 하므로 옛 handle 의 `server` 포인터는 살아 있고 generation 이 거른다 (설계 결정 1). 다시 create 하면 같은 객체의 블록을 (크면) 다시 쓰고 Session 의 generation 은 이어 간다.
+- 메모리를 잡지 못하면 process 가 끝난다 (base 와 같다. `OUT_OF_MEMORY` 는 없다).
 
 ### 4.2 HttpSession
 
 ```cpp
-struct HttpSession {
-    HttpServer*               _server;
-    KiottyNetConnectionHandle _connection;
-    int32_t                   _index;                  // _sessions 안의 위치. handle 의 index 부분
-    int32_t                   _generation;             // 요청마다 1 씩 증가. handle 의 generation 부분 (4.5)
+enum class SessionPhase : uint8_t { READING, FILLING, WORKING, STREAMING, SENDING };
 
-    // 요청. 수신 Stage 에서 여기로 복사된다
-    char*                     _header_buffer;          // limits.max_header_bytes. request line + 헤더 줄들
-    size_t                    _header_length;
-    KiottyNetHttpHeader*      _headers;                // limits.max_headers. name / value 는 _header_buffer 안을 가리킨다
-    char*                     _body_buffer;            // limits.max_body_bytes
-    size_t                    _body_length;
-    size_t                    _body_remaining;         // Content-Length 에서 아직 안 읽은 바이트. chunked 는 현재 chunk 의 남은 바이트
-    KiottyNetHttpRequest      _request;                // 사용자에게 주는 struct. span 들은 위 버퍼를 가리킨다
-    const RouteEntry*         _matched;                // 이번 요청이 고른 표 항목. 없으면 NULL
-    const KiottyNetHttpRoute* _matched_route;          // 실제로 onRequest 를 부른 라우트 (표 항목 또는 _not_found). onWorkStarted 를 여기서 찾는다
-    bool                      _chunked;
-
-    // 응답. setter 가 여기에 쓴다 (4.4)
-    char*                     _response_buffer;        // limits.response_bytes
-    size_t                    _header_end;             // 사용자 헤더가 쌓인 끝. RESPONSE_PREFIX_BYTES 부터 시작
-    int32_t                   _status;                 // 0 = setter 가 하나도 불리지 않음 → 404
-    enum BodyKind { BODY_NONE, BODY_COPIED, BODY_REF, BODY_FILE } _body_kind;
-    KiottyNetSpan             _body;                   // COPIED : _response_buffer 뒤쪽. REF : 사용자 포인터. FILE : 길이만 (stat 결과)
-    char                      _file_path[KIOTTY_NET_MAX_PATH_LENGTH];
-    char                      _content_type[KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH];
-    enum Phase { FILLING, WORKING, SENDING } _phase;   // setter 는 FILLING / WORKING 에서만 받는다
-
-    // Work (4.6)
-    bool                      _work_requested;         // startHttpWork 가 켠다. onRequest 가 return 하면 읽는다
-    KiottyNetConnectionStream _stream;                 // WORK_STARTED 이벤트가 준 base Stream. finishHttpWork* 가 닫는다
-    bool                      _work_finished;          // finish 는 한 번. 두 번째는 KIOTTY_NET_CODE_BUSY
-
-    // 송신 (4.7)
-    size_t                    _sent;                   // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
-    size_t                    _header_start;           // 상태줄을 채운 뒤의 헤더 블록 시작 (RESPONSE_PREFIX_BYTES 보다 작거나 같다)
-    FileHandle                _file;                   // BODY_FILE 일 때 열어 둔 파일. OS 의존
+struct HttpSession                                    // data/repository/http/kiotty_http_session.h
+{
+    HttpRequestStore          request;                // 헤더 버퍼, 헤더 span 배열, body 버퍼. KiottyNetHttpRequest 를 채운다 (4.3)
+    HttpResponseStore         response;               // 응답 버퍼 (4.4)
+    HttpSite&                 site;
+    InputFile&                file;                   // 풀이 Session 마다 하나 잡는다. 파일 body (4.7)
+    KiottyNetConnectionInfo   info;                   // acquire 때. 끊김 action 에 준다
+    KiottyNetHttpRoute        route;                  // 이번 요청에서 onRequest 를 부른 라우트 (not found 라우트 포함). onWorkStarted 를 여기서 찾는다
+    KiottyNetConnectionStream stream;                 // WORK_STARTED 가 준 base Stream. Work 의 write 와 finish 가 쓴다
+    uint64_t                  body_remaining;         // Content-Length 의 남은 바이트. chunked 는 지금 chunk 의 남은 바이트
+    uint64_t                  header_deadline;        // 요청 줄이 온 시각 + header_timeout. 0 이면 무한
+    size_t                    sent;                   // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
+    PoolHandle                id;                     // { generation, index }. response / work handle 의 id (4.5)
+    KiottyNetCode             close_reason;           // 응답 뒤 닫을 때 끊김 reason. 거절이면 PROTOCOL_ERROR
+    KiottyNetCode             stream_failure;         // Work 스트림의 첫 실패. 다음 write 와 finish 가 본다 (4.9)
+    SessionPhase              phase;
+    Persistence               persistence;            // KEEP_ALIVE, CLOSE
+    bool                      is_work_requested;      // startHttpWork 가 켠다. onRequest 가 return 하면 afterRoute 가 본다
+    bool                      is_worker_owned;        // Work 를 열 때 켠다. worker 의 finish 가 handBack 으로 끈다
+    bool                      is_orphaned;            // worker 가 들고 있는 동안 IO Thread 가 release 하려 했다
 };
 ```
 
-session 하나의 포인터 넷 (`_header_buffer`, `_headers`, `_body_buffer`, `_response_buffer`) 은 4.1 의 블록 안을 가리킨다. 포인터를 저장하는 대신 `_index × sessionBytes` 로 계산할 수도 있지만 코드가 길어져서 포인터로 둔다.
+| phase | 언제부터 | 언제까지 | setter (`HttpWork::fill`) |
+|---|---|---|---|
+| READING | `beginExchange` (연결, keep-alive 의 다음 요청) | 요청 끝 | BUSY. 이 generation 의 handle 은 아직 아무도 갖지 않았다 |
+| FILLING | `dispatch` (요청 끝) | `onRequest` 의 return | 된다 (IO Thread) |
+| WORKING | `awaitWork` (Work 를 열 때) | 스트림의 첫 write, 또는 finish | 된다 (worker) |
+| STREAMING | 스트림의 첫 write (헤더가 나감) | finish | BUSY |
+| SENDING | `startSending`, finish | 다음 `beginExchange` 또는 연결의 끝 | BUSY |
 
-acquire / release 는 2.6 의 `createConnectionContext` / `releaseConnectionContext` 다.
+Session 의 버퍼 넷 (헤더, 헤더 span, body, 응답) 은 풀이 create 때 잡은 블록 안을 가리킨다. 블록은 `max_clients × (max_header_bytes + max_body_bytes + response_bytes)` 의 `char` 하나, 헤더 span 은 `max_clients × max_headers` 의 `KiottyNetHttpHeader` 하나다. 곱셈과 덧셈은 `checkedAdd` / `checkedMultiply` 로 먼저 본다. `InputFile` 도 Session 마다 하나를 create 때 잡는다.
+
+acquire / release 는 2.6 의 `createConnectionContext` / `releaseConnectionContext` 다 (`kiotty_http_machine.cpp` 의 `createSession`, `releaseSession` 이 풀로 넘긴다). 풀에는 mutex 하나가 있다. IO Thread 의 acquire / release 와 worker 의 handBack 이 이 안에서 만난다.
 
 ```cpp
-static KiottyNetConnectionContext acquireSession(KiottyNetAppContext app, KiottyNetConnectionInfo)
+SessionResult HttpSessionPool::acquire(const KiottyNetConnectionInfo& info)
 {
-    HttpServer* server = static_cast<HttpServer*>(app);
-    if (server->_free_count == 0) return nullptr;                                // Stateful 계층이 KIOTTY_NET_CODE_SESSION_EXHAUSTED 로 닫는다 (2.5)
-    HttpSession* s = &server->_sessions[server->_free[--server->_free_count]];
-    return s;                                                                    // create 는 handle 을 받지 않는다. _connection 과 beginRequest (4.3) 는 CONNECTED action 이 한다
+    const std::lock_guard<std::mutex> lock(_mutex);
+    if (_free.empty()) { return SessionResult::failure(KIOTTY_NET_CODE_SESSION_EXHAUSTED); }   // createSession 이 NULL 을 돌려주고 Stateful 계층이 닫는다 (2.5)
+    const int32_t index = _free.back();
+    _free.pop_back();
+    HttpSession& session = _sessions[static_cast<size_t>(index)];
+    session.info = info;
+    return SessionResult::success(session);           // beginExchange 는 CONNECTED 행이 한다 (4.3)
 }
 
-static void releaseSession(KiottyNetAppContext app, KiottyNetConnectionContext session)
+void HttpSessionPool::release(HttpSession& session)
 {
-    HttpServer*  server = static_cast<HttpServer*>(app);
-    HttpSession* s      = static_cast<HttpSession*>(session);
-    closeFile(s);
-    ++s->_generation;                                                            // 들고 있던 response / work handle 이 모두 무효가 된다
-    server->_free[server->_free_count++] = s->_index;
+    const std::lock_guard<std::mutex> lock(_mutex);
+    session.is_orphaned = session.is_worker_owned;
+    if (session.is_orphaned) { return; }              // worker 가 들고 있다. 그 finish 가 돌려준다 (4.6)
+    session.file.close();
+    session.id.generation = nextSessionGeneration(session.id.generation);   // 들고 있던 response / work handle 이 모두 무효
+    _free.push_back(session.id.index);
+}
+
+bool HttpSessionPool::handBack(HttpSession& session)  // worker 의 finish 가 closeStream 전에 부른다
+{
+    const std::lock_guard<std::mutex> lock(_mutex);
+    session.is_worker_owned = false;
+    return session.is_orphaned;                       // true 면 finish 가 closeStream 뒤 release 한다
 }
 ```
 
-base 의 `max_clients` 와 session 수가 같으므로 `acquireSession` 이 NULL 을 돌려주는 일은 정상 경로에서는 없다. 그래도 검사한다.
+- HTTP 표의 CLOSED 행 (`onClosed`) 이 끊김 action 을 부르고, StatefulHandler 가 그 뒤 release 를 부른다 (2.5).
+- base 의 `max_clients` 와 Session 수가 같으므로 acquire 가 실패하는 일은 정상 경로에서는 없다. 그래도 검사한다.
+- generation 은 `INT32_MAX` 다음이 1 이다. handle 을 내주기 전에 `beginExchange` 가 한 번 올리므로 generation 0 인 handle 은 나가지 않는다.
 
 ### 4.3 요청 공급 : Stage → HttpSession
 
-HTTP 표의 상태다. 사용자 프로토콜의 표와 같은 `KiottyNetStateMachine` 이고, HttpServer 의 `.cpp` 안에 `static const` 로 있다.
+HTTP 표는 사용자 프로토콜의 표와 같은 `KiottyNetStateMachine` 이고 `domain/usecases/http/kiotty_http_machine.cpp` 안에 `constexpr` 로 있다 (8절의 C++ `KiottyNet_rules`). `.to(...)` 의 다음 상태가 여섯까지 있어 `KIOTTY_NET_MAX_NEXT` 는 8 이다 (`261112_01_100-continue.md`).
 
-| 상태 | entry action | READ 가 오면 |
+```cpp
+constexpr auto HTTP_RULES = KiottyNet_rules(
+    KiottyNet_when(CONNECTED).then(onConnected).to(REQUEST_LINE),
+    KiottyNet_from(REQUEST_LINE).when(READ).then(onRequestLine).to(HEADER_LINE, SENDING),
+    KiottyNet_from(HEADER_LINE).when(READ).then(onHeaderLine).to(HEADER_LINE, BODY, CHUNK_SIZE, CONTINUING, SENDING, WORKING),
+    KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING),
+    KiottyNet_from(CHUNK_SIZE).when(READ).then(onChunkSize).to(CHUNK_DATA, TRAILER, SENDING),
+    KiottyNet_from(CHUNK_DATA).when(READ).then(onChunkData).to(CHUNK_DATA, CHUNK_END, SENDING),
+    KiottyNet_from(CHUNK_END).when(READ).then(onChunkEnd).to(CHUNK_SIZE, SENDING),
+    KiottyNet_from(TRAILER).when(READ).then(onTrailer).to(TRAILER, SENDING, WORKING),
+    KiottyNet_from(CONTINUING).when(WRITTEN).then(onContinued).to(BODY, CHUNK_SIZE),
+    KiottyNet_from(WORKING).when(WORK_STARTED).then(onWorkStarted).to(WORKING),
+    KiottyNet_from(WORKING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
+    KiottyNet_from(WORKING).when(READ).then(onRequestLine).to(HEADER_LINE, SENDING),
+    KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
+    KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
+    KiottyNet_when(CLOSED).then(onClosed));
+```
+
+| 상태 | entry action | 이벤트가 오면 |
 |---|---|---|
-| `ReadingRequestLine` | `readUntil(CRLF, min(max_header_bytes, receive_capacity))` + `header_timeout_milliseconds` | 줄을 `_header_buffer` 에 복사하고 method / path / query 를 자른다. 모르는 method 는 501, 긴 path 는 414 |
-| `ReadingHeaderLine` | `readUntil(CRLF, min(남은 header 공간, receive_capacity))` (timeout 은 그대로 흐른다) | 빈 줄이면 헤더 끝. 아니면 복사하고 `_headers[n] = { name, value }`. `max_headers` 를 넘으면 431 |
-| `ReadingBody` | `read(min(_body_remaining, receive_capacity))` | `_body_buffer` 에 이어 붙이고 `_body_remaining` 을 줄인다. 0 이 되면 `handle(s)` (아래) |
-| `ReadingChunkSize` / `ReadingChunkData` / `ReadingChunkTrailer` | chunked 전용. 크기 줄은 `readUntil(CRLF)`, 데이터는 `ReadingBody` 와 같이 조각으로 | 합친 길이가 `max_body_bytes` 를 넘으면 413 |
-| `Working` | `startWork()` | WORK_STARTED 에서 `onWorkStarted` (4.6) |
-| `Sending` | `write(nextChunk(s))` | WRITTEN 마다 다음 조각. 끝나면 keep-alive 면 `ReadingRequestLine` + `keep_alive_timeout_milliseconds`, 아니면 `close(KIOTTY_NET_CODE_SUCCESS)` |
+| `REQUEST_LINE` | `readUntil(CRLF, lineLimit)` + `header_timeout` (keep-alive 의 다음 요청이면 `keep_alive_timeout`) | READ: `startHeaderClock`, 줄을 헤더 버퍼로 복사하고 method / path / query / version 을 자른다 (`takeRequestLine`). 400 / 414 / 431 / 501 은 `reject` |
+| `HEADER_LINE` | `readUntil(CRLF, lineLimit)` + `headerTimeLeft` | READ: 빈 줄이면 `afterHeaders`. 아니면 `takeHeader` (복사하고 `{ name, value }`). 공간이나 개수가 모자라면 431, 형식은 400 |
+| `BODY` | `read(min(body_remaining, receive_capacity))` + `header_timeout` | READ: body 버퍼에 이어 붙인다. 남은 것이 0 이면 `dispatch` |
+| `CHUNK_SIZE` | `readUntil(CRLF, lineLimit)` | READ: 크기를 읽는다 (확장은 버린다). 0 이면 `TRAILER`. 합이 `max_body_bytes` 를 넘으면 413 |
+| `CHUNK_DATA` | `read` 조각 | READ: 이어 붙인다. chunk 가 끝나면 `read(2)` 로 `CHUNK_END` |
+| `CHUNK_END` | `read(2)` | READ: CRLF 가 아니면 400 |
+| `TRAILER` | `readUntil(CRLF, lineLimit)` | READ: 빈 줄이면 `dispatch`. trailer 는 버린다 |
+| `CONTINUING` | `write("HTTP/1.1 100 Continue\r\n\r\n")` | WRITTEN: `readFirstBody` (Content-Length 면 `BODY`, chunked 면 `CHUNK_SIZE`) |
+| `WORKING` | `thenWork()` | WORK_STARTED: `startWork` (4.6). WRITTEN: finish 뒤의 조각 (4.7 의 `onSent`). READ: worker 가 다음 요청을 연 경우 (4.9 의 HEAD) |
+| `SENDING` | `write(조각)` | WRITTEN 마다 `sendNext` (4.7) |
+| `CLOSING` | `close(reason)` | — |
 
-**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ receive_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ receive_capacity" 뿐이고 헤더 전체 크기는 `_header_buffer` 가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. 줄이 `receive_capacity` 를 넘으면 base 가 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 닫고, 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
+TIMEOUT 은 어느 상태든 `close(TIMEOUT)` 이다 (408 은 보내지 않는다). CLOSED 는 `onClosed` 가 끊김 action 을 부른다.
 
-```cpp
-static void beginRequest(HttpSession* s)
-{
-    ++s->_generation;                                  // 이전 요청의 response / work handle 무효화
-    s->_header_length = 0;  s->_body_length = 0;  s->_body_remaining = 0;  s->_chunked = false;
-    s->_matched = nullptr;
-    memset(&s->_request, 0, sizeof s->_request);
-    s->_request.connection = s->_connection;
-    s->_request.headers    = s->_headers;
-    s->_header_end = RESPONSE_PREFIX_BYTES;  s->_status = 0;  s->_body_kind = HttpSession::BODY_NONE;
-    s->_phase = HttpSession::FILLING;  s->_work_requested = false;  s->_work_finished = false;  s->_sent = 0;
-}
-
-static KiottyNetTransition onHeaderLine(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
-{
-    HttpSession*  s    = static_cast<HttpSession*>(session);
-    KiottyNetSpan line = e.data;                                         // CRLF 포함. return 하면 무효라 먼저 복사한다
-    if (line.length == 2) return afterHeaders(s);                                // 빈 줄 = 헤더 끝
-    if (s->_header_length + line.length > s->_server->_limits.max_header_bytes) return reject(s, 431);
-    if (s->_request.header_count >= s->_server->_limits.max_headers)             return reject(s, 431);
-    char* at = s->_header_buffer + s->_header_length;
-    memcpy(at, line.data, line.length - 2);                                      // CRLF 는 버린다
-    s->_header_length += line.length - 2;
-    KiottyNetHttpHeader* h = &s->_headers[s->_request.header_count++];
-    if (!splitHeader(at, line.length - 2, h)) return reject(s, 400);            // "name: value". name 은 공백 없는 token, value 는 양끝 trim
-    return Next::moveToNextState(HttpState::ReadingHeaderLine, KiottyNet_thenReadUntil(CRLF, lineMax(s), 0));
-}
-
-static KiottyNetTransition afterHeaders(HttpSession* s)
-{
-    const KiottyNetHttpLimits& limits = s->_server->_limits;
-    KiottyNetSpan te = KiottyNet_findHttpHeader(&s->_request, "Transfer-Encoding");
-    KiottyNetSpan cl = KiottyNet_findHttpHeader(&s->_request, "Content-Length");
-    s->_request.keep_alive = keepAlive(s);                                       // HTTP/1.1 이고 "Connection: close" 가 아니면 1
-    s->_matched = match(s->_server, s->_request.method, s->_request.path);       // 4.4. 405 / 404 판정은 handle 에서
-    if (equalsIgnoreCase(te, "chunked")) { s->_chunked = true; return Next::moveToNextState(HttpState::ReadingChunkSize, KiottyNet_thenReadUntil(CRLF, lineMax(s), 0)); }
-    if (cl.length) {
-        if (!parseLength(cl, &s->_body_remaining))          return reject(s, 400);
-        if (s->_body_remaining > limits.max_body_bytes)     return reject(s, 413);   // 읽기 전에 거절. 연결은 닫는다 (body 를 버릴 수 없다)
-        if (s->_body_remaining > 0) return Next::moveToNextState(HttpState::ReadingBody, KiottyNet_thenRead(bodyChunk(s), 0));
-    }
-    return handle(s);
-}
-
-static size_t lineMax(const HttpSession* s)  { return min(s->_server->_configuration.receive_capacity, s->_server->_limits.max_header_bytes - s->_header_length + 2); }
-static size_t bodyChunk(const HttpSession* s) { return min(s->_body_remaining, s->_server->_configuration.receive_capacity); }
-```
-
-- `_request.path` / `query` / `headers[i].name` / `value` 는 모두 `_header_buffer` 안의 span 이다. 그래서 다음 `beginRequest` 까지, 즉 onRequest 가 return 하거나 Work 가 finish 될 때까지 유효하다. 요구사항 9절의 "request 는 defer 한 뒤 resumed 까지 유효" 가 이것이다.
-- body 는 `receive_capacity` 조각으로 받아 `_body_buffer` 에 이어 붙인다. 조각마다 READ 가 오고 같은 상태로 돌아간다 (`ReadingBody → READ → ReadingBody`). `_request.body = { _body_buffer, _body_length }`.
-- GET / HEAD 에 body 가 와도 같은 길로 읽는다. 읽고 나서 `_request.body` 로 주되 사용자가 보통 보지 않을 뿐이다. 요청 경계를 맞추려면 읽어야 한다.
-- `reject(s, status)` 는 응답 setter 로 status 만 놓고 `_request.keep_alive = 0` 으로 바꾼 뒤 `startSending(s)` 로 간다. 자동 응답도 사용자 응답과 같은 버퍼, 같은 송신 경로다.
-
-`handle(s)` 가 사용자 콜백을 부른다.
+**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ receive_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ receive_capacity" 뿐이고 헤더 전체 크기는 헤더 버퍼가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. `lineLimit = min(receive_capacity, max_header_bytes + 2)` 이고, 줄이 이것을 넘으면 base 가 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 닫는다 (응답 없음). 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
 
 ```cpp
-static KiottyNetTransition handle(HttpSession* s)
+KiottyNetTransition beginExchange(HttpSession& session, KiottyNetConnectionHandle connection, uint32_t wait_milliseconds)
 {
-    const RouteEntry* m = s->_matched;
-    if (!m) {
-        if (s->_server->_not_found.onRequest) callRoute(s, &s->_server->_not_found);
-        else                                  s->_status = 404;
-        return afterHandle(s);
-    }
-    if (!(m->methods & KIOTTY_NET_HTTP_METHOD_BIT(s->_request.method))) {
-        if (s->_request.method == KIOTTY_NET_HTTP_METHOD_HEAD && (m->methods & KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_GET))) { /* GET 으로 처리 */ }
-        else if (s->_request.method == KIOTTY_NET_HTTP_METHOD_OPTIONS) { s->_status = 204; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
-        else { s->_status = 405; setHeader(s, "Allow", allowList(s->_server, s->_request.path)); return afterHandle(s); }
-    }
-    switch (m->kind) {
-        case RouteEntry::ROUTE:     callRoute(s, &m->route); break;
-        case RouteEntry::DIRECTORY: serveFile(s, joinUnderRoot(m->file_path, s->_request.path, m->path_length)); break;   // ".." 가 있으면 403
-        case RouteEntry::FILE:      serveFile(s, m->file_path); break;
-        case RouteEntry::MEMORY:    s->_status = 200; setBodyRef(s, m->memory, m->content_type); break;
-        case RouteEntry::UPGRADE:   /* websocket 모듈. 5절 미결 */ break;
-    }
-    return afterHandle(s);
+    session.id.generation = nextSessionGeneration(session.id.generation);   // 이전 요청의 response / work handle 무효화
+    detachFile(session);                                                     // 지난 응답의 파일을 닫는다
+    session.request.begin(connection);
+    session.response.begin();
+    session.body_remaining = 0;
+    session.sent = 0;
+    session.close_reason = KIOTTY_NET_CODE_SUCCESS;
+    session.stream = KiottyNetConnectionStream{ nullptr, 0 };
+    session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
+    session.is_work_requested = false;
+    session.phase = SessionPhase::READING;
+    session.persistence = Persistence::KEEP_ALIVE;
+    return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
 }
 
-static void callRoute(HttpSession* s, const KiottyNetHttpRoute* route)
+KiottyNetTransition afterHeaders(HttpSession& session)
 {
-    s->_matched_route = route;                                                   // onWorkStarted 를 찾기 위해
-    route->onRequest(route->app_context, &s->_request, responseHandle(s));       // 사용자 코드. 여기서 setter 또는 startHttpWork
+    const FramingResult framing = session.request.finishHeaders();           // keep_alive 를 정하고 body framing 을 고른다. CL + TE 는 400, chunked 아닌 TE 는 501
+    if (!framing) { return reject(session, framing.code); }
+    const bool is_kept = session.request.request().keep_alive != 0;
+    session.persistence = is_kept ? Persistence::KEEP_ALIVE : Persistence::CLOSE;
+    switch (framing.value.kind)
+    {
+    case BodyKind::NONE:    return dispatch(session);
+    case BodyKind::LENGTH:  return afterLength(session, framing.value.length);   // max_body_bytes 를 넘으면 읽기 전에 413. 0 이면 dispatch
+    case BodyKind::CHUNKED: return beginBody(session);
+    }
+    return dispatch(session);
 }
 
-static KiottyNetTransition afterHandle(HttpSession* s)
+KiottyNetTransition beginBody(HttpSession& session)
 {
-    if (s->_work_requested) { s->_phase = HttpSession::WORKING; return Next::moveToNextState(HttpState::Working, KiottyNet_thenWork()); }
-    return startSending(s);
+    if (!session.request.expectsContinue()) { return readFirstBody(session); }  // HTTP/1.1 이고 Expect: 100-continue
+    return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
 }
 ```
 
-- `match` 는 표를 등록 순서대로 훑어 **path 가 맞는 첫 항목**을 돌려준다. method 는 그 뒤에 본다. 같은 path 에 GET 과 POST 라우트가 따로 등록되어 있으면 두 항목의 path 가 같으므로, `match` 는 path 가 같은 항목들 중 method 비트가 맞는 것을 고르고, 하나도 없으면 첫 항목을 돌려준다 (405 판정용). `allowList` 는 path 가 같은 모든 항목의 methods 를 OR 해서 `"GET, HEAD, OPTIONS"` 꼴로 만든다.
+- `request.path` / `query` / `headers[i].name` / `value` 는 모두 헤더 버퍼 안의 span 이다. 그래서 다음 `beginExchange` 까지, 즉 onRequest 가 return 하거나 Work 가 finish 될 때까지 유효하다.
+- body 는 `receive_capacity` 조각으로 받아 body 버퍼에 이어 붙인다. 조각마다 READ 가 오고 같은 상태로 돌아간다 (`BODY → READ → BODY`). 조각의 timeout 은 매번 `header_timeout` 이다.
+- 헤더의 timeout 은 요청 줄이 온 때 (`startHeaderClock`) 부터 흐른다. 줄마다 `headerTimeLeft` (남은 시간, 지났으면 1 ms) 를 건다.
+- GET / HEAD 에 body 가 와도 같은 길로 읽는다. 요청 경계를 맞추려면 읽어야 한다.
+- `reject(session, status)` 는 `response.begin()` 으로 사용자가 놓은 것을 지우고 status 만 놓은 뒤 `persistence = CLOSE`, `close_reason = PROTOCOL_ERROR` 로 `startSending` 에 간다. 자동 응답도 사용자 응답과 같은 버퍼, 같은 송신 경로다.
+
+`dispatch` 가 표를 찾고 사용자 콜백을 부른다.
+
+```cpp
+KiottyNetTransition dispatch(HttpSession& session)
+{
+    session.phase = SessionPhase::FILLING;
+    const KiottyNetHttpRequest& request = session.request.request();
+    const RouteMatch match = session.site.registry.find(request.method, Span<const char>{ request.path.data, request.path.length });
+    if (match.kind == MatchKind::ROUTE) { return callRoute(session, match.route); }   // not found 라우트도 ROUTE 로 온다
+    answerAutomatically(session, match);                                     // STATIC (4.7), NOT_FOUND 404, NOT_ALLOWED 405 + Allow, OPTIONS 204 + Allow
+    return startSending(session);
+}
+
+KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
+{
+    session.route = route;                                                   // onWorkStarted 를 찾기 위해
+    route.onRequest(route.app_context, &session.request.request(), responseHandleOf(session));   // 사용자 코드. setter, startHttpWork
+    return afterRoute(session);
+}
+
+KiottyNetTransition afterRoute(HttpSession& session)
+{
+    const bool is_stream = session.response.frame().isStream();
+    const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
+    const bool is_working = session.is_work_requested && !(is_head && is_stream);   // HEAD 의 스트림 라우트는 Work 를 열지 않는다 (설계 결정 16)
+    if (is_working) { return awaitWork(session); }                           // phase = WORKING, is_worker_owned = true, { WORKING, thenWork() }
+    if (is_stream && !session.is_work_requested) { answerWithoutWork(session); }    // 보낼 사람이 없다. 500 + Connection: close
+    return startSending(session);
+}
+```
+
+`HttpRegistry::find(method, path)` 의 순서다.
+
+1. path 가 `*` (요청 줄은 OPTIONS 에만 허용한다) 면 OPTIONS, Allow 는 표 전체의 method.
+2. 등록 순서대로 path 가 맞는 항목 중 method 비트가 맞는 첫 항목. HEAD 는 HEAD 와 GET 비트를 같이 찾는다 (HEAD 를 GET 라우트로). 라우트면 ROUTE, 정적 경로면 STATIC. 지나간 항목의 method 는 `allowed` 에 OR 한다. 그래서 `/` 정적 디렉토리를 라우트 뒤에 등록하면 HEAD 도 GET 과 같이 라우트로 간다.
+3. path 가 맞는 항목이 없으면 not found 라우트 (있으면 ROUTE), 없으면 NOT_FOUND.
+4. path 는 맞고 method 가 없으면 OPTIONS 는 OPTIONS (204), 나머지는 NOT_ALLOWED (405).
+
+`allowListOf(allowed)` 는 GET 이 있으면 HEAD 를 더하고 OPTIONS 를 늘 더해 `"GET, HEAD, POST, OPTIONS"` 꼴로 만든다 (method enum 순서).
+
 - 사용자 콜백은 IO Thread 에서, Stateful 계층의 transition action 안에서 불린다. 그래서 콜백 안에서 부른 setter 는 2절의 규칙과 충돌하지 않는다. 콜백 안에서 Connection 함수를 직접 부를 길은 없다 (handle 을 주지 않는다).
 
 ### 4.4 응답 공급 : setter → 응답 버퍼
 
-응답 버퍼 (`response_bytes`) 의 배치다.
+응답 버퍼 (`response_bytes`) 의 배치다. `HttpResponseStore` (`data/repository/http/kiotty_http_response_store`) 가 들고, 필드는 `ResponseLayout` 하나로 묶인다.
 
 ```
-_response_buffer
-│← RESPONSE_PREFIX_BYTES →│← 사용자 헤더 (앞에서 뒤로) →│      (빈 공간)      │← 복사된 body (뒤에서 앞으로) →│
-│  상태줄 + 라이브러리 헤더  │  "X-Foo: bar\r\n" ...          │                     │                                 │
-^                          ^                                 ^                     ^                                 ^
-0                 RESPONSE_PREFIX_BYTES                  _header_end         _body.data                      response_bytes
+buffer
+│← RESPONSE_PREFIX_BYTES (256) →│← 사용자 헤더 (앞에서 뒤로) →│     (빈 공간)     │← 복사된 body (뒤에서 앞으로) →│
+│  seal 이 상태줄 + 라이브러리   │  "X-Foo: bar\r\n" ...          │                   │                                 │
+│  헤더를 오른쪽 정렬로 쓴다    │                                 │                   │                                 │
+^                ^              ^                                 ^                   ^                                 ^
+0          header_start   RESPONSE_PREFIX_BYTES               header_end          body_start                       response_bytes
 ```
-
-- `RESPONSE_PREFIX_BYTES` 는 상태줄과 라이브러리가 넣는 헤더 (`Content-Length`, `Connection`, `Date`, `Content-Type`) 의 최대 길이다. 상수 (예: 192) 로 두고 `createHttpServer` 가 `response_bytes > RESPONSE_PREFIX_BYTES + 2` 를 검사한다.
-- 사용자 헤더는 `_header_end` 에서 앞으로 쌓인다. 복사된 body 는 **버퍼 끝에서 뒤로** 놓인다. 그래서 헤더와 body 를 어느 순서로 불러도 서로 밀어내지 않는다. 둘이 만나면 `KIOTTY_NET_CODE_BUFFER_FULL` 이다.
-- 송신 직전 `finalizeHeaders(s)` 가 상태줄과 라이브러리 헤더를 stack 의 작은 버퍼에 만들고, 그 길이만큼 `RESPONSE_PREFIX_BYTES` 에서 **오른쪽 정렬**로 복사한다. 그러면 `[_header_start, _header_end)` 가 빈 줄 `\r\n` 까지 포함한 연속된 헤더 블록이 된다. 송신은 이 블록 뒤에 body 를 이어 보낸다.
 
 ```cpp
-static KiottyNetCode setHeader(HttpSession* s, const char* name, const char* value)
+enum class BodyStorage : uint8_t { COPY, REFERENCE, STREAM, FILE };
+
+struct ResponseLayout
 {
-    if (s->_phase == HttpSession::SENDING) return KIOTTY_NET_CODE_BUSY;
-    size_t n = strnlen(name, s->_server->_limits.response_bytes), v = strnlen(value, s->_server->_limits.response_bytes);
-    size_t need = n + 2 + v + 2;                                                 // "name: value\r\n"
-    if (need > bodyStart(s) - s->_header_end - 2) return KIOTTY_NET_CODE_BUFFER_FULL;     // 마지막 "\r\n" 자리를 남긴다
-    char* at = s->_response_buffer + s->_header_end;
-    memcpy(at, name, n);  memcpy(at + n, ": ", 2);  memcpy(at + n + 2, value, v);  memcpy(at + n + 2 + v, "\r\n", 2);
-    s->_header_end += need;
-    if (s->_status == 0) s->_status = 200;                                       // setter 가 하나라도 불리면 기본 200
+    Span<char>               buffer;                  // Session 의 응답 버퍼
+    Span<const char>         body;                    // COPY : 버퍼 뒤쪽. REFERENCE : 사용자 포인터. STREAM : seal 뒤 끝 chunk "0\r\n\r\n". FILE : 비어 있다
+    uint64_t                 file_length;             // FILE 의 크기 (attachFile 이 연 파일)
+    size_t                   header_start;            // seal 전에는 RESPONSE_PREFIX_BYTES
+    size_t                   header_end;              // 사용자 헤더의 끝. seal 이 빈 줄 "\r\n" 을 붙인다
+    size_t                   body_start;              // COPY 면 body 의 시작, 아니면 response_bytes
+    size_t                   sendable_body;           // seal 이 정한다. HEAD 와 1xx / 204 / 304 는 0
+    KiottyNetHttpContentType type;
+    BodyStorage              storage;
+    bool                     has_body;                // body setter 를 불렀는가. 아니면 Content-Type 이 없다
+};
+```
+
+- `RESPONSE_PREFIX_BYTES` (256) 는 상태줄과 라이브러리 헤더 (`Date`, `Content-Length` 또는 `Transfer-Encoding: chunked`, `Content-Type`, `Connection: close`) 의 자리다. limits 의 `response_bytes` 는 이것 + 64 이상이어야 한다 (configure 의 범위).
+- 사용자 헤더는 `header_end` 에서 뒤로 쌓인다. 복사된 body 는 **버퍼 끝에서 앞으로** 놓인다. 그래서 헤더와 body 를 어느 순서로 불러도 서로 밀어내지 않는다. 둘이 만나면 (빈 줄 `\r\n` 자리를 남기고) `KIOTTY_NET_CODE_BUFFER_FULL` 이다.
+- 송신 직전 `seal` 이 상태줄과 라이브러리 헤더를 stack 의 `PrefixText` 에 만들고, 그 길이만큼 `RESPONSE_PREFIX_BYTES` 에서 **오른쪽 정렬**로 복사한다. 그러면 `[header_start, header_end)` 가 빈 줄까지 포함한 연속된 헤더 블록이 된다. 송신은 이 블록 뒤에 body 를 이어 보낸다.
+
+```cpp
+KiottyNetCode HttpResponseStore::addHeader(Span<const char> name, Span<const char> value)
+{
+    if (!isToken(name) || isReservedName(name)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }   // Content-Length, Transfer-Encoding, Connection, Date, Content-Type (대소문자 무시)
+    if (!isFieldValue(value)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }                      // 탭 밖의 제어 문자, DEL. CR / LF 가 여기서 걸린다
+    if (!isUtf8(value)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
+    const size_t needed = name.length + value.length + 4;                                       // "name: value\r\n"
+    if (needed > headerRoom()) { return KIOTTY_NET_CODE_BUFFER_FULL; }                          // body_start - header_end - 2
+    writeField(Span<char>{ _layout.buffer.data + _layout.header_end, needed }, name, value);
+    _layout.header_end += needed;
+    _is_touched = true;                                                                         // setter 가 하나라도 불리면 기본 200
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
-static KiottyNetCode setBody(HttpSession* s, KiottyNetSpan data, const char* content_type)
+KiottyNetCode HttpResponseStore::setBody(KiottyNetHttpContentType type, KiottyNetSpan data, BodyStorage storage)
 {
-    if (s->_phase == HttpSession::SENDING) return KIOTTY_NET_CODE_BUSY;
-    if (data.length > s->_server->_limits.response_bytes - s->_header_end - 2) return KIOTTY_NET_CODE_BUFFER_FULL;
-    char* at = s->_response_buffer + s->_server->_limits.response_bytes - data.length;
-    memcpy(at, data.data, data.length);                                          // 이전 body 가 있었으면 덮어쓴다 (셋 중 하나만)
-    s->_body_kind = HttpSession::BODY_COPIED;  s->_body = { at, data.length };
-    copyContentType(s, content_type);                                            // NULL 이면 "application/octet-stream". 길이 초과는 KIOTTY_NET_CODE_INVALID_ARGUMENT
-    if (s->_status == 0) s->_status = 200;
+    const bool is_inline = storage == BodyStorage::COPY || storage == BodyStorage::REFERENCE;
+    if (is_inline && data.data == nullptr && data.length > 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    const KiottyNetCode checked = checkBodyType(type, storage);                                 // 4.10
+    if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
+    const Span<const char> body{ data.data, is_inline ? data.length : 0 };
+    if (textKindOf(type) != TextKind::BINARY && !isUtf8(body)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
+    const bool is_copy = storage == BodyStorage::COPY;
+    if (is_copy && body.length > _layout.buffer.length - _layout.header_end - 2) { return KIOTTY_NET_CODE_BUFFER_FULL; }
+    _layout.body_start = is_copy ? _layout.buffer.length - body.length : _layout.buffer.length;
+    // COPY 면 body_start 에 복사. 이전 body 는 대체된다 (넷 중 하나만)
+    _layout.file_length = storage == BodyStorage::FILE ? data.length : 0;                      // FILE 은 data.length 로 크기를 받는다
+    _layout.type = type;
+    _layout.storage = storage;
+    _layout.has_body = true;
+    _is_touched = true;
     return KIOTTY_NET_CODE_SUCCESS;
+}
+
+void HttpResponseStore::seal(const ResponseSeal& seal)                                         // { method, persistence }
+{
+    const int32_t status = finalStatus();                                                      // 놓은 status, 아니면 setter 가 있었으면 200, 없었으면 404
+    const bool is_bodiless = isBodiless(status);                                               // 1xx, 204, 304
+    _layout.body = sealedBodyOf(_layout, is_bodiless);                                         // STREAM 이면 끝 chunk "0\r\n\r\n" (bodiless 면 비움)
+    PrefixText prefix;
+    appendStatusLine(prefix, status);                                                          // "HTTP/1.1 200 OK"
+    appendDateField(prefix, currentUtcTime());                                                 // IMF-fixdate
+    if (!is_bodiless) { appendFraming(prefix, _layout); }                                      // STREAM 이면 Transfer-Encoding: chunked, 아니면 Content-Length (FILE 은 파일 크기)
+    if (_layout.has_body && !is_bodiless) { appendField(prefix, "Content-Type", contentTypeText()); }
+    if (seal.persistence == Persistence::CLOSE) { appendField(prefix, "Connection", "close"); }
+    _layout.header_start = RESPONSE_PREFIX_BYTES - prefix.length();                           // 오른쪽 정렬
+    // prefix 를 header_start 에 복사하고 header_end 에 빈 줄 "\r\n"
+    const bool is_head = seal.method == KIOTTY_NET_HTTP_METHOD_HEAD;
+    _layout.sendable_body = is_head || is_bodiless ? 0 : bodyLength(_layout);                  // HEAD 는 Content-Length 만 적고 body 를 보내지 않는다
 }
 ```
 
-- `bodyStart(s)` 는 `BODY_COPIED` 면 `_body.data - _response_buffer`, 아니면 `response_bytes` 다.
-- `setBodyRef` 는 복사 없이 `_body = data` 를 들고 `BODY_REF`. `setFile` 은 경로를 `_file_path` 에 복사하고 `stat` 으로 길이를 얻어 `_body.length` 에 둔다 (`BODY_FILE`). 파일이 없으면 `KIOTTY_NET_CODE_NOT_FOUND`, `..` 가 있으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 파일은 송신 시작 때 연다.
-- 공개 함수 `KiottyNet_setHttpStatus` 등은 handle 을 session 으로 바꾸고 (4.5) 이 static 함수를 부른다. `_status` 는 100..599 만 받는다.
-- 자동 응답 (404, 405, 413, 431, 501, 204 + Allow) 도 같은 setter 를 쓴다. 다른 길이 없다.
-- HEAD : 라우트는 GET 으로 실행되고 setter 도 다 동작한다. `finalizeHeaders` 가 `Content-Length` 를 `_body.length` 로 쓰되, 송신 (4.7) 이 body 조각을 내보내지 않는다.
+- 공개 setter 는 handle 을 Session 으로 바꾸고 (4.5) `HttpResponseStore` 를 부른다. 번역 층이 이름 / 값을 `parseText` (상한 `response_bytes`) 로 먼저 본다. `setStatus` 는 100..599 만 받는다.
+- 자동 응답 (404, 405 + Allow, 204 + Allow, 403 / 404 의 정적 경로) 과 거절 (400 / 413 / 414 / 431 / 501) 도 같은 store 를 쓴다. 다른 길이 없다.
+- HEAD : 라우트는 GET 으로 실행되고 setter 도 다 동작한다. `seal` 이 `Content-Length` 를 GET 과 같게 쓰되 `sendable_body` 가 0 이라 송신 (4.7) 이 body 조각을 내보내지 않는다.
+- 송신 쪽은 `frame()` 이 주는 `ResponseFrame` 으로 읽는다. `chunkAt(offset, max)` (헤더 블록 → body 순서의 조각), `filePieceAt` (4.7), `isStream`, `hasSendableBody`, `checkChunk`, `frameChunk` (4.9).
 
 ### 4.5 handle : `{ server, id }`
 
-`KiottyNetHttpResponseHandle` 과 `KiottyNetHttpWorkHandle` 은 둘 다 `{ KiottyNetHttpServerHandle server; int64_t id; }` 다 (공개 API 판 v1, `design_statemachine_v0.md` 12.6). `id` 는 `{ generation = s->_generation, index = s->_index }` 를 `PoolHandle` 로 묶은 값이고, 소유자는 `server` 가 바로 준다. Work handle 을 따로 둔 이유는 사용자가 base 의 `KiottyNet_closeConnectionStream` 으로 HTTP 프레이밍을 건너뛰지 못하게 하려는 것이다.
+`KiottyNetHttpResponseHandle` 과 `KiottyNetHttpWorkHandle` 은 둘 다 `{ KiottyNetHttpServerHandle server; int64_t id; }` 다 (설계 결정 1, `design_statemachine_v0.md` 12.6). `server` 는 HttpServer 객체의 주소이고 `id` 는 Session 의 `PoolHandle { generation, index }` 를 `value()` 로 묶은 값이다. 소유자는 `server` 가 바로 준다. Work handle 을 따로 둔 이유는 사용자가 base 의 `KiottyNet_closeConnectionStream` 으로 HTTP 프레이밍을 건너뛰지 못하게 하려는 것이다.
 
 ```cpp
-static KiottyNetHttpResponseHandle responseHandle(const HttpSession* s) { return KiottyNetHttpResponseHandle{ s->_server_handle, packHandle(s->_generation, s->_index) }; }
-
-static HttpSession* sessionOf(KiottyNetHttpResponseHandle handle)   // KiottyNetHttpWorkHandle 도 같은 모양의 overload 하나. setter / finish 의 첫 줄. 실패하면 NULL 이고 공개 함수는 KIOTTY_NET_CODE_PEER_CLOSED 를 돌려준다
+KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session)          // callRoute, startWork 가 사용자에게 준다
 {
-    HttpServer*  server = handle.server;                       // 소유자는 handle 이 들고 있다. Connection handle 의 { owner, id } 와 같은 모양
-    PoolHandle   h      = unpackHandle(handle.id);
-    if (!server || slotOf(h.index) >= server->_configuration.max_clients) return nullptr;
-    HttpSession* s = &server->_sessions[slotOf(h.index)];
-    if (s->_generation != h.generation) return nullptr;       // 이전 요청 / 닫힌 연결의 handle
-    return s;
+    return KiottyNetHttpResponseHandle{ session.site.owner, session.id.value() };
+}
+
+SessionResult HttpSessionPool::find(int64_t id)                                   // 모든 response / work 함수의 첫 줄
+{
+    const PoolHandle handle = PoolHandle::fromValue(id);
+    const bool is_inside = handle.index >= 0 && static_cast<size_t>(handle.index) < _sessions.size();
+    if (!is_inside) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
+    HttpSession& session = _sessions[static_cast<size_t>(handle.index)];
+    if (session.id.generation != handle.generation) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }   // 이전 요청, 닫힌 연결
+    return SessionResult::success(session);
+}
+
+SessionResult HttpWork::fill(int64_t id)                                          // setter 일곱의 길 (C API 의 fillingOf)
+{
+    const SessionResult found = _site.sessions.find(id);
+    if (!found) { return found; }
+    const SessionPhase phase = found.value().phase;
+    if (phase != SessionPhase::FILLING && phase != SessionPhase::WORKING) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }   // 헤더가 나갔다
+    return found;
 }
 ```
 
-- `_generation` 은 요청마다 (`beginRequest`), 연결이 닫힐 때 (`releaseSession`) 오른다. 그래서 keep-alive 로 같은 session 이 다음 요청을 받으면 이전 응답 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_NET_CODE_PEER_CLOSED` 만 받는다.
-- 소유자 (HttpServer) 는 handle 의 `server` 다. 전역 소유자 표가 필요 없다 (구현 가이드의 옛 `ownerOf` 미결은 판 v1 로 닫혔다).
-- `_generation` 은 IO Thread 만 쓴다. worker 는 `sessionOf` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 session 에 아무 일도 하지 않으므로 (5절 Work 규칙) 값이 바뀌지 않고, Work 가 아닐 때 worker 가 handle 을 들고 있다면 그것은 사용자 규칙 위반이다. 그래도 읽기는 int32 하나라 찢어진 값은 없다.
+- C API 는 `response.server == NULL` 이면 `PEER_CLOSED` 를 돌려주고, 아니면 `response.server->work()` (`HttpWork`) 로 넘긴다. Work 함수는 `HttpWork::working(id)` 를 거친다. phase 가 WORKING / STREAMING 이고 stream 이 있어야 하며, 아니면 `BUSY` 다 (finish 뒤, Work 가 아닌 요청).
+- generation 은 요청마다 (`beginExchange`), 연결이 닫힐 때 (풀의 `release`) 오른다. 그래서 keep-alive 로 같은 Session 이 다음 요청을 받으면 이전 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_NET_CODE_PEER_CLOSED` 만 받는다.
+- 소유자 (HttpServer) 는 handle 의 `server` 다. 전역 소유자 표가 필요 없다. HttpServer 를 destroy 해도 객체는 Context 의 풀에서 은퇴만 하므로 포인터는 살아 있고 generation 이 거른다.
+- generation 을 쓰는 것은 IO Thread (`beginExchange`, 풀의 `release`) 와, worker 의 finish 두 경우다. orphan 이면 finish 가 `release` 를 부르고 (4.6), 헤더만 나간 스트림이면 finish 가 `beginExchange` 로 다음 요청을 연다 (4.9). worker 는 `find` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 Session 의 generation 을 바꾸지 않는다. Work 를 열 때 `is_worker_owned` 를 켜고 IO Thread 의 release 는 그것을 보고 미루기 때문이다 (4.2). Work 가 아닐 때 worker 가 handle 을 들고 있다면 그것은 사용자 규칙 위반이다.
 
 ### 4.6 Work
 
+Work 는 `context/kiotty_http_work` 의 `HttpWork` 가 한다 (`HttpServer::work()` 가 `HttpSite` 를 들고 만든다). Work stream 의 write 와 close 는 `stream.owner` (Endpoint, 곧 이 HttpServer) 로 부른다.
+
 ```cpp
-KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle handle)
+KiottyNetCode HttpWork::start(int64_t id)                                         // KiottyNet_startHttpWork
 {
-    HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
-    if (s->_phase != HttpSession::FILLING || !s->_matched_route) return KIOTTY_NET_CODE_BUSY;   // onRequest 안에서만, 한 번만
-    if (!s->_matched_route->onWorkStarted) return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-    s->_work_requested = true;                                                   // 실제 startWork 는 onRequest 가 return 한 뒤 afterHandle 의 entry action 이 한다
+    const SessionResult found = _site.sessions.find(id);
+    if (!found) { return found.code; }
+    HttpSession& session = found.value();
+    const bool is_first = session.phase == SessionPhase::FILLING && !session.is_work_requested;
+    if (!is_first) { return KIOTTY_NET_CODE_BUSY; }                               // onRequest 안에서만, 한 번만
+    if (session.route.onWorkStarted == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    session.is_work_requested = true;                                             // 실제 Work 는 onRequest 가 return 한 뒤 afterRoute 가 연다 (4.3)
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
-static KiottyNetTransition onWorkStarted(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream)   // (WORKING, WORK_STARTED) 행
 {
-    HttpSession* s = static_cast<HttpSession*>(session);
-    s->_stream = e.stream;
-    const KiottyNetHttpRoute* r = s->_matched_route;
-    r->onWorkStarted(r->app_context, &s->_request, responseHandle(s), workHandle(s));   // 사용자가 handle 둘을 worker 로 넘긴다
-    return Next::moveToNextState(HttpState::Working, KiottyNet_thenWork());      // stream 은 worker 의 것 (2.4). 닫는 것은 worker 의 몫
+    session.stream = stream;
+    const KiottyNetHttpRoute route = session.route;
+    const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
+    route.onWorkStarted(route.app_context, &session.request.request(), responseHandleOf(session), work);   // 사용자가 handle 둘을 worker 로 넘긴다
+    return Next::moveToNextState(HttpState::WORKING, thenWork());                // stream 은 worker 의 것 (2.4). 이 뒤로 IO Thread 는 Session 을 건드리지 않는다
 }
 
-KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle handle)
+KiottyNetCode HttpWork::finishWithResponse(int64_t id)                            // KiottyNet_finishHttpWorkWithResponse
 {
-    HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
-    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_NET_CODE_BUSY;
-    s->_work_finished = true;
-    s->_phase = HttpSession::SENDING;
-    finalizeHeaders(s);                                                          // 4.4. worker thread 에서 한다. IO Thread 는 이 session 을 안 본다
-    KiottyNetCode code = KiottyNet_closeConnectionStream(s->_stream, KiottyNet_thenWrite(nextChunk(s), 0));   // 첫 조각. 나머지는 WRITTEN 이벤트가 Sending 상태에서 이어 간다
-    if (code != KIOTTY_NET_CODE_SUCCESS) KiottyNet_closeConnectionStream(s->_stream, KiottyNet_thenClose(code));
-    return code;
+    const SessionResult found = working(id);                                      // WORKING / STREAMING 이 아니면 BUSY (두 번째 finish)
+    if (!found) { return found.code; }
+    HttpSession& session = found.value();
+    const SessionPhase phase = session.phase;
+    const KiottyNetConnectionStream stream = session.stream;
+    session.phase = SessionPhase::SENDING;
+    const KiottyNetConnectionAction then = finishingActionOf(session, phase);     // 아래
+    return handOver(session, stream, then);
 }
 
-KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle handle, KiottyNetCode reason)
+KiottyNetCode HttpWork::finishWithClose(int64_t id, KiottyNetCode reason)
 {
-    HttpSession* s = sessionOf(handle);
-    if (!s) return KIOTTY_NET_CODE_PEER_CLOSED;
-    if (s->_phase != HttpSession::WORKING || s->_work_finished) return KIOTTY_NET_CODE_BUSY;
-    s->_work_finished = true;
-    return KiottyNet_closeConnectionStream(s->_stream, KiottyNet_thenClose(reason));
+    const SessionResult found = working(id);
+    if (!found) { return found.code; }
+    HttpSession& session = found.value();
+    const KiottyNetConnectionStream stream = session.stream;
+    session.phase = SessionPhase::SENDING;
+    return handOver(session, stream, thenClose(reason));                          // 끝 chunk 없이 닫는다. reason 이 끊김 action 의 reason
 }
 
-KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle handle)
+KiottyNetCode handOver(HttpSession& session, KiottyNetConnectionStream stream, const KiottyNetConnectionAction& then)
 {
-    HttpSession* s = sessionOf(handle);
-    return s && s->_phase == HttpSession::WORKING && KiottyNet_isConnectionStreamOpen(s->_stream);
+    HttpSessionPool& sessions = session.site.sessions;
+    const bool is_orphaned = sessions.handBack(session);                          // 소유를 내려놓고, IO Thread 가 그사이 release 하려 했는지 받는다
+    const KiottyNetCode closed = stream.owner->closeStream(stream.id, then);      // closeConnectionStream(stream, then)
+    if (is_orphaned) { sessions.release(session); }                               // 미뤄 둔 반납
+    return closed;
+}
+
+bool HttpWork::isConnected(int64_t id)
+{
+    const SessionResult found = working(id);
+    if (!found) { return false; }
+    if (_site.is_closing.load()) { return false; }                                // 서버 close 중
+    const KiottyNetConnectionStream stream = found.value().stream;
+    return stream.owner->isStreamOpen(stream.id);
 }
 ```
 
-- Work 중 worker 가 setter 를 부르는 것이 안전한 이유는 base 의 Work 규칙 그대로다. WORKING 동안 IO Thread 는 이 Connection 에 콜백을 내지 않고 write lane 도 건드리지 않는다. session 의 응답 필드는 write lane 과 같은 소유 규칙을 따른다. RUNNING 이면 IO Thread, WORKING 이면 worker, 동시에 둘인 순간은 없다.
-- 첫 조각이 `send_capacity` 를 넘는 일은 없다. `nextChunk` 가 `send_capacity` 로 자른다. 그래서 `closeConnectionStream(thenWrite)` 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려주는 경우는 없고, 돌려주는 코드는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
-- Work 중 peer 가 끊으면 base 가 slot 을 붙잡아 두고 finish 뒤 `onDisconnected(KIOTTY_NET_CODE_PEER_CLOSED)` 를 낸다. 그때 `releaseSession` 이 돌아 generation 이 오른다. finish 전까지 session 은 살아 있으므로 worker 의 setter 는 안전하다.
+`finishingActionOf(session, phase)` 가 finish 때 stream 에 걸 action 을 고른다.
+
+| finish 전 phase | 상태 | action |
+|---|---|---|
+| WORKING | 아무것도 보내지 않았다 (완성 응답, 또는 chunk 를 쓰지 않은 스트림) | `seal` 하고 첫 조각 `thenWrite(chunkAt(0, send_capacity))`. 스트림이면 헤더 + 끝 chunk 가 나간다 |
+| STREAMING | 스트림이 열려 있다 (`stream_failure == SUCCESS`) | 끝 chunk 부터 `thenWrite(chunkAt(헤더 길이, send_capacity))` |
+| STREAMING | `CLOSED` 로 끝났고 보낼 body 가 없다 (HEAD, 1xx / 204 / 304) | `nextExchangeOf`: keep-alive 면 `beginExchange` 의 `thenReadUntil`, 아니면 `thenClose(SUCCESS)` (4.9) |
+| STREAMING | 그 밖의 실패 | `thenClose(stream_failure)` |
+
+- 나머지 조각은 `(WORKING, WRITTEN)` 행의 `onSent` 가 완성 응답과 같은 길 (`sendNext`, 4.7) 로 잇는다. 첫 조각은 `send_capacity` 이하이고 write lane 은 비어 있으므로 `closeConnectionStream(thenWrite)` 가 `BUFFER_FULL` 을 돌려주는 경우는 없다.
+- Work 중 worker 가 setter 를 부르는 것이 안전한 이유는 base 의 Work 규칙 그대로다. WORKING 동안 IO Thread 는 이 Connection 에 콜백을 내지 않고 write lane 도 건드리지 않는다. Session 의 응답 필드는 write lane 과 같은 소유 규칙을 따른다. `onRequest` 동안은 IO Thread, Work 중이면 worker, 동시에 둘인 순간은 없다.
+- Work 중 peer 가 끊거나 서버가 close 해도 Session 은 worker 의 finish 까지 풀로 돌아가지 않고 generation 도 그대로다 (아래 소유 표시). 그래서 finish 전까지 worker 의 setter 와 write 는 안전하고, 끊김은 write 의 코드로 안다.
+
+**Work 중 서버 close (H4 에서 고친 것).** base 는 서버 close 때 Work 중인 연결에도 CLOSED 를 곧바로 dispatch 하고 (`Connection::enterClosing`), stream 은 finish 까지 살려 둔다. 그래서 HTTP 의 `onClosed` (끊김 action `CLOSED`) 와 그 뒤의 release 가 worker 의 finish 보다 먼저 온다. release 가 그 자리에서 generation 을 올리면 worker 의 finish 가 `PEER_CLOSED` 로 끝나 `closeConnectionStream` 을 부르지 못하고, base 는 Work 를 영원히 기다린다 (run 이 돌아오지 않는다). 그래서 Session 의 소유를 표시한다.
+
+1. Work 를 열 때 (`awaitWork`) `is_worker_owned = true`.
+2. IO Thread 의 release 는 `is_worker_owned` 면 `is_orphaned` 만 켜고 돌려주지 않는다. generation 도 그대로라 worker 의 handle 이 산다.
+3. worker 의 finish 는 `handBack` (소유를 내려놓고 orphan 여부를 받음) → `closeConnectionStream` → orphan 이면 `release`.
+
+셋 다 풀의 mutex 안이다 (acquire 도). 그래서 run 은 모든 Work 가 finish 된 뒤 `CLOSED` 로 돌아온다. 서버 close 중 worker 의 write 는 `CLOSED` 를 받는다 (4.9).
 
 ### 4.7 송신 : 응답 버퍼 → write lane 조각
 
 ```cpp
-static KiottyNetTransition startSending(HttpSession* s)      // IO Thread 경로 (Work 없이 onRequest 가 return 한 경우, 자동 응답)
+KiottyNetTransition startSending(HttpSession& session)        // IO Thread 경로 (Work 없이 onRequest 가 return 한 경우, 자동 응답, 거절)
 {
-    s->_phase = HttpSession::SENDING;
-    finalizeHeaders(s);
-    return Next::moveToNextState(HttpState::Sending, KiottyNet_thenWrite(nextChunk(s), 0));
+    session.phase = SessionPhase::SENDING;
+    session.response.seal(ResponseSeal{ session.request.request().method, session.persistence });
+    session.sent = 0;
+    const Span<const char> chunk = session.response.frame().chunkAt(0, session.site.send_capacity);   // 첫 조각은 헤더 블록
+    return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0));
 }
 
-static KiottyNetSpan nextChunk(HttpSession* s)               // _sent 부터 최대 send_capacity 바이트. 헤더 블록 → body 순서
+KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)   // onSent: session.sent += event.length 뒤
 {
-    size_t cap    = s->_server->_configuration.send_capacity;
-    size_t header = s->_header_end - s->_header_start;
-    if (s->_sent < header) { size_t n = min(cap, header - s->_sent); return { s->_response_buffer + s->_header_start + s->_sent, n }; }
-    if (s->_request.method == KIOTTY_NET_HTTP_METHOD_HEAD) return { nullptr, 0 };
-    size_t off = s->_sent - header;
-    switch (s->_body_kind) {
-        case HttpSession::BODY_COPIED:
-        case HttpSession::BODY_REF:  return { s->_body.data + off, min(cap, s->_body.length - off) };
-        case HttpSession::BODY_FILE: return readFileInto(s, s->_response_buffer + RESPONSE_PREFIX_BYTES, min(cap, s->_body.length - off));   // 헤더 블록은 이미 나갔으므로 그 자리를 파일 조각의 staging 으로 쓴다
-        default:                     return { nullptr, 0 };
-    }
+    const PieceResult piece = pieceAt(session, session.sent);                     // 다음 조각. 파일이면 여기서 읽는다
+    if (!piece) { return closeWith(piece.code); }                                 // 파일을 읽지 못함 : NOT_FOUND 로 닫는다
+    const Span<const char> chunk = piece.value;
+    if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0)); }
+    if (session.persistence != Persistence::KEEP_ALIVE) { return closeWith(session.close_reason); }   // SUCCESS, 거절이면 PROTOCOL_ERROR
+    return beginExchange(session, connection, session.site.limits.keep_alive_timeout_milliseconds);   // 다음 요청. 파일은 여기서 닫힌다
 }
 
-static KiottyNetTransition onSent(KiottyNetConnectionContext session, KiottyNetConnectionHandle, KiottyNetConnectionEvent e)
+PieceResult pieceAt(HttpSession& session, size_t offset)      // data/repository/http/kiotty_http_file_body
 {
-    HttpSession* s = static_cast<HttpSession*>(session);
-    s->_sent += e.length;
-    KiottyNetSpan next = nextChunk(s);
-    if (next.length) return Next::moveToNextState(HttpState::Sending, KiottyNet_thenWrite(next, 0));
-    closeFile(s);
-    if (!s->_request.keep_alive) return Next::moveToNextState(HttpState::Closing, KiottyNet_thenClose(KIOTTY_NET_CODE_SUCCESS));
-    beginRequest(s);
-    return Next::moveToNextState(HttpState::ReadingRequestLine, KiottyNet_thenReadUntil(CRLF, lineMax(s), s->_server->_limits.keep_alive_timeout_milliseconds));
+    const size_t capacity = session.site.send_capacity;
+    const ResponseFrame frame = session.response.frame();
+    const FilePiece piece = frame.filePieceAt(offset, capacity);
+    if (!piece.is_file) { return PieceResult::success(frame.chunkAt(offset, capacity)); }   // 헤더 블록, 복사 / 참조 body, 끝 chunk
+    const FileReadResult read = session.file.read(piece.file_offset, piece.target);       // 응답 버퍼 앞부터 읽는다. 헤더 블록은 이미 나갔다
+    if (!read || read.value != piece.target.length) { return PieceResult::failure(KIOTTY_NET_CODE_NOT_FOUND); }
+    return PieceResult::success(Span<const char>{ piece.target.data, piece.target.length });
 }
 ```
 
-- 조각이 하나뿐이면 `write → WRITTEN → 다음 요청` 으로 끝난다. 큰 응답은 `Sending → WRITTEN → Sending` 을 돈다. 1.6 의 write lane 규칙 (한 번에 메시지 하나, onWritten 뒤 다음 write) 을 그대로 지킨다.
-- 파일은 `send_capacity` 만큼 읽어 보낸다. staging 은 응답 버퍼의 prefix + 헤더 영역을 재사용하므로 추가 메모리가 없다. `sendfile` / `TransmitFile` 은 Stage 를 거치지 않는 OS 경로라 base 의 drain 과 맞지 않으므로 v0 에서는 쓰지 않는다 (요구사항 9절의 "가능하면" 을 "v0 에서는 하지 않음" 으로 둔다).
+- `chunkAt(offset, max)` 는 `offset` 이 헤더 블록 안이면 그 나머지, 넘으면 `body.skip(offset - 헤더 길이)` 의 최대 `max` 바이트다. body 는 `sendable_body` 까지라 HEAD 와 1xx / 204 / 304 는 헤더 블록에서 끝난다. FILE 이면 body 쪽은 비어 있고 `filePieceAt` 이 대신한다.
+- `filePieceAt(offset, max)` 는 FILE 이고 `offset` 이 헤더 블록을 지났을 때 `{ 응답 버퍼 앞 min(남은 파일, max, response_bytes) 바이트, 파일 offset }` 을 준다. 읽기 자리는 응답 버퍼의 앞부분 (prefix + 헤더 영역) 을 다시 쓰므로 추가 메모리가 없다.
+- 조각이 하나뿐이면 `write → WRITTEN → 다음 요청` 으로 끝난다. 큰 응답은 `SENDING → WRITTEN → SENDING` 을 돈다. 1.6 의 write lane 규칙 (한 번에 메시지 하나, onWritten 뒤 다음 write) 을 그대로 지킨다.
 - `write` 의 data 는 `send_capacity` 이하이고 write lane 은 비어 있으므로 (이전 WRITTEN 뒤) `KIOTTY_NET_CODE_BUFFER_FULL` 로 닫히는 일은 없다.
+- `sendfile` / `TransmitFile` 은 쓰지 않는다 (설계 결정 6). Stage 를 거치지 않는 OS 경로라 base 의 drain, TLS 와 맞지 않는다.
+
+정적 경로와 `setHttpFile`.
+
+- `attachFile(session, type, path)` 가 Session 의 `InputFile` 을 열고 (실패하면 `NOT_FOUND`), 크기를 `size_t` 로 담을 수 있는지 보고, BY_EXTENSION 이면 경로의 확장자로 type 을 고른 뒤 `setBody(type, { nullptr, size }, FILE)` 한다. setBody 가 실패하면 (EVENT_STREAM 등) 파일을 닫는다.
+- `answerStatic` (`domain/usecases/http/kiotty_http_static`): MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
+- `setHttpFile` 은 번역 층이 `parseText` 와 `hasParentSegment` (`/`, `\` 로 나눈 `..` 조각) 를 본 뒤 `attachFile`. Work 중에도 같은 길이다.
+- 파일은 다음 요청 (`beginExchange` 의 `detachFile`) 이나 반납 (풀의 `release`) 때 닫는다.
 
 ### 4.8 run
 
 ```cpp
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls)
+KiottyNetCode HttpServer::run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration* tls)
 {
-    if (!server) return KIOTTY_NET_CODE_INVALID_ARGUMENT;
-    server->_running = true;
-    KiottyNetStatefulAppContext stateful = { server, &HTTP_MACHINE, &acquireSession, &releaseSession };   // run 동안만 살아 있으면 된다 (2.1)
-    KiottyNetCode code = KiottyNet_runStatefulServer(server->_server, address, tls, &stateful);
-    server->_running = false;
+    _runs.fetch_add(1);                                                           // 등록 함수가 BUSY 를 돌려주기 시작한다
+    _site.is_closing.store(false);
+    const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);           // { &site, &HTTP_MACHINE, createSession, releaseSession, reportError }
+    const StatefulHandler handler(stateful, *this);                               // run 의 stack 에만 산다 (2.1)
+    const KiottyNetCode code = Server::run(handler, address, tls);
+    _runs.fetch_sub(1);
     return code;
+}
+
+void HttpServer::close()
+{
+    _site.is_closing.store(true);                                                 // Work 의 write 가 PEER_CLOSED 대신 CLOSED 를 돌려주게 (4.9)
+    Server::close();
 }
 ```
 
-`close` / `await` 는 base 로 그대로 넘긴다. `addHttpRoute` / `serveHttp*` 는 `_running` 이면 `KIOTTY_NET_CODE_BUSY` 다. 표는 run 중에 IO Thread 가 읽기만 하고 등록 함수는 run 전에만 쓰므로 lock 이 없다.
+- `KiottyNet_runHttpServer` 는 server / address NULL 을 거르고 주소를 stack 에 복사해 넘긴다. 주소 / TLS 검사, `RunGate`, SSL_CTX 는 base 의 run 그대로다 (1.7).
+- `reportError` 는 base 의 onError (TLS handshake 실패, accept 실패, `SESSION_EXHAUSTED`) 를 오류 action 으로 넘긴다. 끊김 action 은 CLOSED 행의 `onClosed` 가 Session 의 `info` 와 event 의 reason 으로 부른다.
+- `await` 는 base 그대로다.
 
-HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `createServer / runStatefulServer / closeServer / awaitServer / destroyServer`, action 함수 (`KiottyNet_then*`), `closeConnectionStream`, `isConnectionStreamOpen` 뿐이다.
+HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `Server` 의 initialize / run / close / await, action 함수 (`then*`), Endpoint 의 `writeStream`, `closeStream`, `isStreamOpen` (`KiottyNet_writeConnectionStream`, `closeConnectionStream`, `isConnectionStreamOpen` 의 안쪽) 뿐이다.
+
+### 4.9 Work 스트림
+
+`setHttpBodyStream(response, type)` 은 `setBody(type, { nullptr, 0 }, STREAM)` 이다. 헤더는 아직 나가지 않는다. 스트림을 보내는 것은 worker 의 `HttpWork::write` 다.
+
+```cpp
+KiottyNetResult HttpWork::write(int64_t id, KiottyNetSpan data, uint32_t timeout_milliseconds)   // KiottyNet_writeHttpWorkChunk
+{
+    const SessionResult found = working(id);                                      // WORKING / STREAMING 이 아니면 BUSY
+    if (!found) { return resultOf(0, found.code); }
+    HttpSession& session = found.value();
+    const Span<const char> piece{ data.data, data.length };
+    if (piece.length > MAX_CHUNK_BYTES) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }   // bytes 가 int32_t 라 0x7FFFFFFF 까지
+    const KiottyNetCode checked = session.response.frame().checkChunk(piece);    // 스트림이 아님, 빈 data : INVALID_ARGUMENT. 텍스트 계열의 UTF-8 아님 : INVALID_ENCODING
+    if (checked != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, checked); }
+    if (session.stream_failure != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, session.stream_failure); }   // 한 번 실패하면 계속 그 코드
+    const Deadline deadline(timeout_milliseconds);                               // 호출 전체에 하나. 0 은 무한
+    const size_t kept = openStream(session);                                     // 첫 호출이면 seal, phase = STREAMING, 헤더 블록 길이. 아니면 0
+    const bool has_body = session.response.frame().hasSendableBody();
+    const KiottyNetCode sent = has_body ? sendChunk(session, piece, kept, deadline)
+                                        : sendHeaderOnly(session, kept, deadline);   // HEAD, 1xx / 204 / 304 : 헤더만 보내고 CLOSED
+    session.stream_failure = failureOf(session, sent);
+    return resultOf(sent == KIOTTY_NET_CODE_SUCCESS ? piece.length : 0, session.stream_failure);
+}
+
+KiottyNetCode sendChunk(HttpSession& session, Span<const char> data, size_t kept, const Deadline& deadline)
+{
+    const Span<const char> framed = session.response.frame().frameChunk(data, kept, session.site.send_capacity);
+    if (framed.empty()) { return sendPieces(session, data, kept, deadline); }     // 다 들어가지 않으면 조각 넷을 차례로
+    return sendSpan(session, framed, deadline);                                   // 헤더 + 머리 + data + 꼬리를 write 한 번
+}
+
+KiottyNetCode sendPieces(HttpSession& session, Span<const char> data, size_t kept, const Deadline& deadline)
+{
+    const ChunkHead head = chunkHeadOf(data.length);                              // 길이 hex + CRLF
+    const Span<const char> pieces[] = { session.response.frame().chunkAt(0, kept), head.span(), data, Span<const char>{ "\r\n", 2 } };
+    for (const Span<const char>& piece : pieces)                                  // 빈 조각 (kept == 0 의 헤더) 은 건너뛴다
+    {
+        const KiottyNetCode sent = sendSpan(session, piece, deadline);
+        if (sent != KIOTTY_NET_CODE_SUCCESS) { return sent; }
+    }
+    return KIOTTY_NET_CODE_SUCCESS;
+}
+
+KiottyNetCode sendSpan(const HttpSession& session, Span<const char> data, const Deadline& deadline)
+{
+    if (data.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
+    if (deadline.expired()) { return KIOTTY_NET_CODE_TIMEOUT; }
+    const uint32_t left = deadline.remaining();
+    const uint32_t wait = deadline.limited() && left < 1 ? 1 : left;            // 남은 시간이 0 ms 로 잘리면 1 ms (0 은 무한이라)
+    return session.stream.owner->writeStream(session.stream.id, KiottyNetSpan{ data.data, data.length }, wait).code;
+}
+
+KiottyNetCode failureOf(const HttpSession& session, KiottyNetCode code)           // base 의 코드를 HTTP 의 뜻으로
+{
+    const bool is_lost = code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
+    if (!is_lost) { return code; }
+    if (session.site.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }      // 서버 close 중 : FIN 뒤의 EPIPE 를 base 는 PEER_CLOSED 로 준다
+    const bool is_open = session.stream.owner->isStreamOpen(session.stream.id);
+    return is_open ? code : KIOTTY_NET_CODE_PEER_CLOSED;                          // 상대가 사라짐 : RST 를 base 는 SOCKET_ERROR 로 준다
+}
+```
+
+- **조립.** `frameChunk(data, kept, limit)` 는 응답 버퍼의 `header_start` 부터 `room = min(response_bytes - header_start, send_capacity)` 안에 `[헤더 블록 kept 바이트][머리][data][CRLF]` 가 들어가면 머리 / data / 꼬리를 헤더 블록 뒤에 복사하고 그 span 을 준다. 첫 write 의 헤더 블록은 이미 그 자리에 있으므로 복사하지 않는다. 들어가지 않으면 빈 span 이고 `sendPieces` 가 헤더 / 머리 / data / 꼬리를 넷의 write 로 보낸다. data 는 사용자 버퍼에서 바로 나간다.
+- **timeout.** `Deadline` 하나가 그 호출의 write 전부에 걸친다. 그래서 `TIMEOUT` 이면 일부가 나갔을 수 있다. 그 뒤는 `finishHttpWorkWithClose` 뿐이다.
+- **끼어듦.** 조각 넷 사이에 다른 바이트가 끼지 않는다. Work 중에는 base 의 drain 이 이 연결의 send / notify Stage 를 고르지 않는다 (`SendFlow::isBlocked`, 설계 결정 7).
+- **실패의 기억.** 첫 실패 코드를 `stream_failure` 에 남긴다. 다음 write 는 보내지 않고 같은 코드를 돌려주며, finish 는 그 코드로 닫는다 (4.6 의 표).
+- **HEAD.** onRequest 가 스트림을 정하고 `startHttpWork` 한 HEAD 는 `afterRoute` 가 Work 를 열지 않고 `startSending` 으로 헤더만 보낸다 (4.3). worker 가 스트림을 정한 HEAD 는 `sealFor` 가 `sendable_body = 0` 으로 두므로 첫 write 가 `sendHeaderOnly` 로 헤더만 보내고 `CLOSED` 를 돌려준다. 그 뒤 finish 는 `nextExchangeOf` 로 worker thread 에서 `beginExchange` 를 하고 `closeConnectionStream(thenReadUntil)` 로 다음 요청을 연다. 그래서 `(WORKING, READ)` 행이 있다.
+- **끝.** `finishHttpWorkWithResponse` 의 끝 chunk 는 `seal` 이 body 자리에 둔 `"0\r\n\r\n"` 이다. chunk 를 한 번도 쓰지 않은 스트림은 WORKING 에서 finish 하므로 `seal` 뒤 헤더 + 끝 chunk 가 완성 응답처럼 나간다.
+- **Work 없는 스트림.** `afterRoute` 가 `answerWithoutWork` 로 응답을 비우고 500 + `persistence = CLOSE` 로 보낸다. `close_reason` 은 SUCCESS 그대로다.
+
+### 4.10 content type
+
+content type 의 표는 `domain/usecases/http/kiotty_http_content_type.cpp` 의 `constexpr` 배열 둘이다. enum 순서와 같은 `CONTENT_TYPES[] = { type, 문자열, TextKind }` (`static_assert` 로 개수와 순서를 본다), 확장자 → enum 의 `EXTENSIONS[]`. 할당은 없다.
+
+| TextKind | 값 | 하는 일 |
+|---|---|---|
+| `UTF8_WITH_CHARSET` | TEXT_*, JAVASCRIPT, EVENT_STREAM | 문자열에 `; charset=utf-8` 이 들어 있다. UTF-8 을 본다 |
+| `UTF8` | JSON 계열, XML, YAML, FORM_URLENCODED, DICOM_JSON / XML, FHIR_JSON / XML, SVG | UTF-8 만 본다. 문법은 보지 않는다 |
+| `BINARY` | 나머지 | 보지 않는다 |
+
+```cpp
+bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)               // response store 의 checkBodyType 이 먼저 부른다
+{
+    const bool is_listed = type >= KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM && type < KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION;
+    const bool is_event_stream = type == KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM;
+    return is_listed && (storage == BodyStorage::STREAM || !is_event_stream);      // EVENT_STREAM 은 스트림에만
+}
+// checkBodyType : isNamedType 이면 SUCCESS, CUSTOM 이고 이름이 정해졌으면 SUCCESS, 아니면 INVALID_ARGUMENT
+```
+
+- `BY_EXTENSION` 은 `isNamedType` 을 지나지 못한다. 파일은 `attachFile` 이 `setBody` 전에 `contentTypeOfPath` 로 바꿔 넘기므로 store 에는 늘 목록 안의 값이 들어간다. `contentTypeOfPath` 는 마지막 `.` 뒤를 대소문자 무시로 `EXTENSIONS` 에서 찾고, 없으면 OCTET_STREAM 이다.
+- CUSTOM 의 이름은 response store 의 `FixedString<KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH>` 에 둔다. `parseCustomContentType` 이 `parseText` (UTF-8, 길이) 뒤 `token/token` 과 `; 이름=값` (값은 token 또는 quoted-string) 의 반복을 보고, CR / LF 를 포함한 다른 글자가 있으면 `INVALID_ARGUMENT` 다. `response.begin()` (다음 요청, 거절) 이 지운다.
+- Content-Type 은 `seal` 이 `has_body` 이고 bodiless status 가 아닐 때 한 줄 쓴다. CUSTOM 이면 그 이름, 아니면 표의 문자열이다. `setHttpHeader` 의 예약 이름에 `Content-Type` 이 있어 두 번 쓰일 일이 없다.
+- 텍스트 계열의 UTF-8 검사 자리는 셋이다. body setter (`setBody`, 복사 / 참조), Work 스트림의 chunk (`checkChunk`), `serveHttpMemory` 의 등록 (`checkMemory`). 파일과 CUSTOM 은 보지 않는다.
 
 ---
 
@@ -1230,4 +1486,4 @@ HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `createSer
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
 - (닫힘, 2026-11-09) WebSocket upgrade 뒤의 표: HTTP 와 WebSocket 은 한 표, 한 Session 이다 (`design_statemachine_v0.md` 11절, 14절 7, 8).
 - (닫힘, 2026-11-09) HttpResponse / HttpWork handle 의 소유자: handle 이 `{ server, id }` 라 `ownerOf` 가 필요 없다 (4.5, 공개 API 판 v1).
-- 정적 파일의 `sendfile` / `TransmitFile`. base 에는 `KiottyNet_writeConnectionStreamFile` (Stream 위의 sendfile / TransmitFile) 이 생겼다. 4.7 의 응답 버퍼 조각 송신 대신 이것을 쓸지는 HTTP 설계에서 정한다.
+- (닫힘, 2026-11-10) 정적 파일의 `sendfile` / `TransmitFile`: 쓰지 않고 4.7 의 응답 버퍼 조각으로 보낸다 (`design_http_v0.html` 1절 결정 6, H5 에서 구현).

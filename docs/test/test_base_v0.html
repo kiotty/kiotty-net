@@ -81,6 +81,7 @@
   <li><a href="#s16">케이스 : StateMachine (core text, Handler, StatefulHandler, C API)</a></li>
   <li><a href="#s17">케이스 : base 송신 (B1)</a></li>
   <li><a href="#s18">케이스 : 주소와 TLS 는 run / connect 때 (B2)</a></li>
+  <li><a href="#s19">케이스 : HttpServer (H2 ~ H6)</a></li>
 </ol>
 
 <h2 id="s1">1. 세 질문과 테스트의 층</h2>
@@ -881,6 +882,102 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Stateful</td><td>RunStatefulRejectsNullAndDuplicateRules</td><td><span class="tag misuse">오용</span></td><td>runStateful 둘의 주소 NULL</td></tr>
   <tr><td>Context</td><td>CreateRejectsConfigurationsThatWereNotInitialized</td><td><span class="tag misuse">오용</span></td><td>create 는 설정 struct 만 본다. TLS 설정의 mark 검사는 Destination 의 run / connect 로 옮겼다</td></tr>
 </table>
+
+<h2 id="s19">19. 케이스 : HttpServer (H2 ~ H6)</h2>
+<p><code>docs/design/design_http_v0.html</code> 11절의 H2 ~ H6 사이클 (2026-11-12) 의 테스트다. progress 는 <code>261112_progress_http_h2 / h3 / h4 / h5.md</code> 와 <code>261112_01_100-continue.md</code>. 파서는 unit, 나머지는 integration 이고 integration 은 공개 C API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 테스트 peer (<code>LoopbackPeer</code>) 가 보내는 날 HTTP 바이트이고, 응답을 바이트로 읽어 status, 헤더, body, chunk 를 본다. 매트릭스는 15절과 같다 (TLS 케이스 하나는 TLS 빌드에서만).</p>
+
+<h3>19.1 파서 (H2 unit)</h3>
+<p><code>domain/usecases/http/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력 (빈 것, 최대 길이, 최대 + 1, 중간 null 바이트, UTF-8 아님) 을 파서마다 넣는다. 할당은 없다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpRequestLine</td><td>EmptyInputIsBadRequest, TargetOfTheMaximumLengthIsAccepted, TargetOneOverTheMaximumIsUriTooLong, MiddleNullByteIsBadRequest, InvalidUtf8InTheTargetIsBadRequest</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. target 상한은 <code>KIOTTY_NET_MAX_URL_LENGTH</code>, 넘으면 414</td></tr>
+  <tr><td>HttpRequestLine</td><td>SplitsPathAndQueryAtTheFirstQuestionMark, PathWithoutQueryHasAnEmptyQuery, EverySupportedMethodIsRecognized</td><td><span class="tag ok">정상</span></td><td>path / query 를 첫 <code>?</code> 에서 자른다. 메서드 일곱</td></tr>
+  <tr><td>HttpRequestLine</td><td>UnsupportedMethodsAreNotImplemented, MethodThatIsNotATokenIsBadRequest, AsteriskIsOnlyForOptions, TargetsOtherThanOriginFormAreBadRequest, VersionsOtherThanOneZeroAndOneOneAreBadRequest, ExtraOrMissingSpacesAreBadRequest</td><td><span class="tag misuse">오용</span></td><td>CONNECT / TRACE / 모르는 method 는 501, <code>*</code> 는 OPTIONS 만, origin-form 밖과 HTTP/1.0 · 1.1 밖은 400</td></tr>
+  <tr><td>HttpHeaderLine</td><td>EmptyInputIsBadRequest, LineOfTheMaximumLengthIsAccepted, LineOneOverTheMaximumIsHeaderFieldsTooLarge, MiddleNullByteIsBadRequest, InvalidUtf8InTheValueIsBadRequest</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. 줄이 남은 헤더 공간을 넘으면 431</td></tr>
+  <tr><td>HttpHeaderLine</td><td>Utf8ValueIsAccepted, ValueIsTrimmedOfSpacesAndTabs, EmptyValueIsAccepted</td><td><span class="tag ok">정상</span></td><td>값의 양끝 공백 / 탭을 뗀다</td></tr>
+  <tr><td>HttpHeaderLine</td><td>MalformedNamesAreBadRequest, ControlCharactersInTheValueAreBadRequest</td><td><span class="tag misuse">오용</span></td><td>token 아닌 이름, 이름 뒤 공백, 값의 제어 문자</td></tr>
+  <tr><td>HttpContentLength</td><td>EmptyInputIsBadRequest, TwentyDigitMaximumIsAccepted, TwentyOneDigitsOrOverflowIsBadRequest, MiddleNullByteIsBadRequest, InvalidUtf8IsBadRequest, SignsSpacesAndListsAreBadRequest</td><td><span class="tag edge">엣지</span></td><td>64 비트 십진. 부호, 공백, <code>5, 5</code> 같은 목록은 400</td></tr>
+  <tr><td>HttpChunkSize</td><td>EmptyInputIsBadRequest, SixteenHexDigitsAreTheMaximum, MiddleNullByteIsBadRequest, InvalidUtf8IsBadRequest, ExtensionsAfterTheSemicolonAreIgnored</td><td><span class="tag edge">엣지</span></td><td>64 비트 십육진. <code>;</code> 뒤의 chunk 확장은 버린다</td></tr>
+  <tr><td>HttpBodyFraming</td><td>NoFramingHeadersMeansNoBody, ContentLengthGivesTheLength, ChunkedTransferEncodingIsAcceptedInAnyCase</td><td><span class="tag ok">정상</span></td><td>NONE / LENGTH / CHUNKED</td></tr>
+  <tr><td>HttpBodyFraming</td><td>OtherTransferCodingsAreNotImplemented, AmbiguousFramingIsBadRequest</td><td><span class="tag misuse">오용</span></td><td>chunked 밖의 coding (<code>gzip, chunked</code>) 은 501. Content-Length 와 Transfer-Encoding 이 같이, 같은 framing 헤더가 둘, 숫자 아닌 Content-Length 는 400 (request smuggling)</td></tr>
+  <tr><td>HttpPersistence</td><td>VersionDecidesTheDefault, ConnectionOptionsOverrideTheDefault, CloseWinsOverKeepAliveInAnyList</td><td><span class="tag ok">정상</span></td><td>1.1 은 keep-alive, 1.0 은 close 가 기본. <code>Connection</code> 목록의 <code>close</code> 가 이긴다</td></tr>
+  <tr><td>HttpExpectContinue</td><td>OnlyHttpOneOneWithTheContinueExpectation</td><td><span class="tag edge">엣지</span></td><td>HTTP/1.1 이고 <code>Expect: 100-continue</code> (대소문자 무시) 일 때만</td></tr>
+  <tr><td>HttpRoutePath</td><td>EmptyInputIsInvalidArgument, PathOfTheMaximumLengthIsAccepted, PathOneOverTheMaximumIsInvalidArgument, MiddleNullByteEndsThePath, InvalidUtf8IsInvalidEncoding, NullTextIsInvalidArgument</td><td><span class="tag edge">엣지</span></td><td>등록 경로의 다섯 입력과 NULL</td></tr>
+  <tr><td>HttpRoutePath</td><td>PathsThatARequestCannotCarryAreInvalidArgument, StarIsOnlyAWholeLastSegment</td><td><span class="tag misuse">오용</span></td><td><code>/</code> 로 시작하지 않음, 공백 / <code>?</code> / <code>#</code> / ASCII 밖 글자 포함, <code>*</code> 는 끝의 <code>/*</code> 만</td></tr>
+  <tr><td>HttpRoutePath</td><td>ExactPathMatchesOnlyItselfWithCase, WildcardMatchesEverythingUnderTheSlash</td><td><span class="tag ok">정상</span></td><td>정확 일치는 대소문자 구분, <code>/a/*</code> 는 <code>/a/</code> 밑 전부</td></tr>
+  <tr><td>HttpDirectoryPrefix</td><td>MustEndWithASlash, MatchesPathsUnderThePrefix</td><td><span class="tag ok">정상</span></td><td>디렉토리 prefix 는 <code>/</code> 로 끝나야 한다</td></tr>
+  <tr><td>HttpRelativePath</td><td>ParentSegmentsAreFoundWithEitherSeparator, SafeRelativePathRefusesParentsBackslashesColonsAndNul</td><td><span class="tag misuse">오용</span></td><td><code>/</code> 와 <code>\</code> 로 나눈 <code>..</code> 조각 (<code>index..html</code> 은 아님), 정적 디렉토리 밑 경로의 <code>\</code>, <code>:</code>, NUL (H5)</td></tr>
+  <tr><td>HttpContentTypeTable</td><td>EveryNamedTypeHasAMediaTypeText, TextTypesCarryTheCharsetAndStructuredTypesDoNot, PlaceholdersHaveNoText, TextKindTellsWhichBodiesAreUtf8</td><td><span class="tag ok">정상</span></td><td>enum 마다 문자열 하나, 텍스트 계열만 <code>; charset=utf-8</code>, BY_EXTENSION / CUSTOM 은 문자열 없음, UTF-8 을 볼 type</td></tr>
+  <tr><td>HttpContentTypeOfPath</td><td>ExtensionPicksTheTypeIgnoringCase, UnknownOrMissingExtensionIsOctetStream</td><td><span class="tag ok">정상</span></td><td>확장자 → enum. 모르면 OCTET_STREAM</td></tr>
+  <tr><td>HttpCustomContentType</td><td>EmptyInputIsInvalidArgument, NameOfTheMaximumLengthIsAccepted, NameOneOverTheMaximumIsInvalidArgument, MiddleNullByteEndsTheName, InvalidUtf8IsInvalidEncoding</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. 상한은 <code>KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH</code> 미만</td></tr>
+  <tr><td>HttpCustomContentType</td><td>DicomWebMultipartWithParametersIsAccepted</td><td><span class="tag ok">정상</span></td><td><code>multipart/related; type="application/dicom"; boundary=...</code></td></tr>
+  <tr><td>HttpCustomContentType</td><td>MalformedNamesAreInvalidArgument, HeaderInjectionIsInvalidArgument</td><td><span class="tag misuse">오용</span></td><td><code>token/token</code> 이 아님, 파라미터 모양, CR / LF</td></tr>
+</table>
+
+<h3>19.2 완성 응답 (H3 integration, <code>kiotty_test_http_server.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpServer</td><td>GetRouteAnswersWithLengthTypeAndDate</td><td><span class="tag ok">정상</span></td><td>상태줄 <code>HTTP/1.1 200 OK</code>, Content-Length, enum 의 Content-Type, Date (IMF-fixdate 29 자)</td></tr>
+  <tr><td>HttpServer</td><td>PostRouteReadsTheBodyQueryAndHeaders</td><td><span class="tag ok">정상</span></td><td>라우트가 body, query, <code>findHttpHeader</code> 를 읽고 201 + 사용자 헤더 + 텍스트 body</td></tr>
+  <tr><td>HttpServer</td><td>ChunkedRequestBodyIsJoined</td><td><span class="tag ok">정상</span></td><td>chunked 요청 body 를 합친다. chunk 확장과 trailer 는 버린다</td></tr>
+  <tr><td>HttpServer</td><td>KeepAliveServesPipelinedRequestsOnOneConnection</td><td><span class="tag ok">정상</span></td><td>한 연결에 pipelined 요청 둘 + 하나 더. 끊김 action 없음</td></tr>
+  <tr><td>HttpServer</td><td>ConnectionCloseEndsAfterTheResponseWithSuccess</td><td><span class="tag ok">정상</span></td><td><code>Connection: close</code> 요청이면 응답에도 <code>Connection: close</code>, 서버가 닫고 끊김 reason <code>SUCCESS</code></td></tr>
+  <tr><td>HttpServer</td><td>HttpOneZeroClosesUnlessKeepAliveIsAsked</td><td><span class="tag edge">엣지</span></td><td>HTTP/1.0 은 <code>Connection: keep-alive</code> 일 때만 유지</td></tr>
+  <tr><td>HttpServer</td><td>UnknownPathIsNotFoundAndTheNotFoundRouteCanAnswer</td><td><span class="tag ok">정상</span></td><td>맞는 경로가 없으면 404 (Content-Length 0), not found 라우트를 등록하면 그것이 답한다 (problem+json)</td></tr>
+  <tr><td>HttpServer</td><td>RouteThatSetsNothingAnswersNotFound</td><td><span class="tag edge">엣지</span></td><td>setter 를 하나도 부르지 않은 라우트는 404</td></tr>
+  <tr><td>HttpServer</td><td>MissingMethodIsMethodNotAllowedWithAllow</td><td><span class="tag ok">정상</span></td><td>405 + <code>Allow: GET, HEAD, POST, OPTIONS</code> (GET 이 있으면 HEAD)</td></tr>
+  <tr><td>HttpServer</td><td>OptionsWithoutARouteIsNoContentWithAllow</td><td><span class="tag ok">정상</span></td><td>OPTIONS 자동 응답 204 + Allow (Content-Length 없음), <code>OPTIONS *</code> 는 서버 전체의 method</td></tr>
+  <tr><td>HttpServer</td><td>HeadRunsTheGetRouteAndSendsNoBody</td><td><span class="tag ok">정상</span></td><td>HEAD 는 GET 라우트를 돌리고 GET 의 Content-Length 만, 같은 연결의 다음 GET 은 body 까지</td></tr>
+  <tr><td>HttpServer</td><td>BodyOverTheLimitIsContentTooLargeAndCloses</td><td><span class="tag edge">엣지</span></td><td><code>max_body_bytes</code> 초과는 413 + <code>Connection: close</code>, 끊김 reason <code>PROTOCOL_ERROR</code></td></tr>
+  <tr><td>HttpServer</td><td>ExpectContinueGetsAnInterimResponseBeforeTheBody</td><td><span class="tag ok">정상</span></td><td>Content-Length 와 chunked 둘 다 <code>HTTP/1.1 100 Continue</code> 를 받은 뒤 body 를 보내고 최종 응답</td></tr>
+  <tr><td>HttpServer</td><td>ExpectContinueOverTheLimitIsContentTooLargeWithoutContinue</td><td><span class="tag edge">엣지</span></td><td>상한 초과면 100 없이 413 하고 닫는다</td></tr>
+  <tr><td>HttpServer</td><td>ExpectIsIgnoredForHttpOneZeroAndRequestsWithoutABody</td><td><span class="tag edge">엣지</span></td><td>body 없는 GET 과 HTTP/1.0 POST 는 100 없이 최종 응답</td></tr>
+  <tr><td>HttpServer</td><td>TooManyHeadersAreHeaderFieldsTooLarge</td><td><span class="tag edge">엣지</span></td><td><code>max_headers</code> 초과는 431 하고 닫는다</td></tr>
+  <tr><td>HttpServer</td><td>MalformedRequestsGetTheirAutomaticStatus</td><td><span class="tag misuse">오용</span></td><td>긴 target 414, 모르는 method 501, 버전 400, 헤더 이름 400, Content-Length + Transfer-Encoding 400. 모두 닫는다</td></tr>
+  <tr><td>HttpServer</td><td>SlowHeadersCloseWithTimeout</td><td><span class="tag edge">엣지</span></td><td>헤더가 <code>header_timeout</code> (200 ms) 안에 끝나지 않으면 408 없이 닫고 끊김 reason <code>TIMEOUT</code></td></tr>
+  <tr><td>HttpServer</td><td>ConnectionOverMaxClientsWaitsUntilASlotFrees</td><td><span class="tag edge">엣지</span></td><td><code>max_clients</code> 1 에서 두 번째 연결은 첫 연결이 끝난 뒤 응답을 받는다 (base 는 accept 를 멈추고 OS backlog 에 둔다)</td></tr>
+  <tr><td>HttpServer</td><td>TlsHandshakeFailureIsReportedThroughTheErrorAction</td><td><span class="tag edge">엣지</span></td><td>TLS 서버에 평문을 보내면 오류 action 이 온다. TLS 빌드에서만</td></tr>
+  <tr><td>HttpServer</td><td>SettersEnforceTheContentTypeAndHeaderRules</td><td><span class="tag misuse">오용</span></td><td>이름 없는 CUSTOM, <code>Content-Type</code> 헤더, 값의 CR / LF 는 INVALID_ARGUMENT. UTF-8 아닌 JSON body 는 INVALID_ENCODING. 완성 응답의 EVENT_STREAM, 범위 밖 status 는 INVALID_ARGUMENT. CUSTOM + 이름은 그 문자열이 Content-Type</td></tr>
+  <tr><td>HttpServer</td><td>ResponseHandleOfAnEarlierRequestIsPeerClosed</td><td><span class="tag misuse">오용</span></td><td>keep-alive 의 다음 요청에서 앞 요청의 response handle 은 <code>PEER_CLOSED</code> (generation)</td></tr>
+  <tr><td>HttpServer</td><td>RegistrationIsBusyWhileRunningAndDuplicatesAreRefused</td><td><span class="tag misuse">오용</span></td><td>같은 (method, path) 는 DUPLICATE_RULE, 같은 path 의 다른 method 는 SUCCESS, <code>/</code> 없는 path 는 INVALID_ARGUMENT, run 중의 라우트 / action 등록은 BUSY, close 뒤에는 다시 된다</td></tr>
+  <tr><td>HttpServer</td><td>CreateRefusesLimitsThatWereNotInitialized</td><td><span class="tag misuse">오용</span></td><td>초기화하지 않은 limits, NULL 설정은 <code>{ INVALID_ARGUMENT, NULL }</code>. 너무 작은 <code>response_bytes</code> 는 configure 가 거절</td></tr>
+</table>
+
+<h3>19.3 Work 와 Work 스트림 (H4 integration, <code>kiotty_test_http_work.cpp</code>)</h3>
+<p>worker 는 테스트 안의 thread 다. 응답 쪽은 chunk 를 하나씩 읽어 (<code>readChunks</code>) 끝 chunk 를 <code>&lt;end&gt;</code> 로 적는다. 각 테스트는 worker 가 받은 코드의 열을 본다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpWork</td><td>WorkFinishesWithACompleteResponseAndKeepsAlive</td><td><span class="tag ok">정상</span></td><td>worker 가 JSON 완성 응답 (201) 을 채워 finish, 같은 연결의 다음 요청</td></tr>
+  <tr><td>HttpWork</td><td>StreamSendsEachChunkThenTheLastChunkAndKeepsAlive</td><td><span class="tag ok">정상</span></td><td>SSE 이벤트 셋: <code>Transfer-Encoding: chunked</code>, Content-Length 없음, <code>text/event-stream; charset=utf-8</code>, 사용자 헤더 (Cache-Control), 끝 chunk. 첫 write 뒤 setter 는 BUSY. 같은 연결의 다음 요청</td></tr>
+  <tr><td>HttpWork</td><td>ChunkLargerThanTheSendCapacityGoesOutWhole</td><td><span class="tag edge">엣지</span></td><td><code>send_capacity × 3 + 17</code> 바이트 chunk 하나가 조각 넷의 write 로 (응답 버퍼에서 조립하지 못하는 길) 한 chunk 로 온다</td></tr>
+  <tr><td>HttpWork</td><td>HeadOnAStreamRouteSendsHeadersWithoutOpeningWork</td><td><span class="tag edge">엣지</span></td><td>onRequest 가 스트림을 정한 라우트에 HEAD: <code>onWorkStarted</code> 없이 헤더만 (chunked, Content-Type), 같은 연결의 다음 요청 (설계 결정 16)</td></tr>
+  <tr><td>HttpWork</td><td>HeadOnAStreamChosenByTheWorkerClosesTheFirstWrite</td><td><span class="tag edge">엣지</span></td><td>worker 가 스트림을 정한 HEAD: 첫 write 가 헤더만 보내고 CLOSED, 다음 write 도 CLOSED, finish 는 SUCCESS 이고 keep-alive</td></tr>
+  <tr><td>HttpWork</td><td>PeerThatLeavesEndsTheStreamWithPeerClosed</td><td><span class="tag edge">엣지</span></td><td>상대가 끊으면 write 가 <code>PEER_CLOSED</code> (RST 의 SOCKET_ERROR 를 바꾼다), 그 뒤 <code>isHttpWorkConnected</code> 는 거짓</td></tr>
+  <tr><td>HttpWork</td><td>ServerCloseEndsTheStreamWithClosed</td><td><span class="tag edge">엣지</span></td><td>스트림 중 서버 close: write 가 <code>CLOSED</code>, worker 의 finish 뒤 run 이 <code>CLOSED</code> 로 돌아온다 (Session 의 handBack, H4 에서 고친 것)</td></tr>
+  <tr><td>HttpWork</td><td>StreamBodyWithoutWorkIsInternalServerErrorAndCloses</td><td><span class="tag misuse">오용</span></td><td>onRequest 가 스트림을 정하고 Work 없이 return 하면 500 + Content-Length 0 + <code>Connection: close</code></td></tr>
+  <tr><td>HttpWork</td><td>WorkCallsEnforceTheirRules</td><td><span class="tag misuse">오용</span></td><td>onWorkStarted 없는 라우트의 start 는 INVALID_ARGUMENT (그 라우트는 404), 두 번째 start 와 worker 의 start 는 BUSY, 스트림 아닌 write / BY_EXTENSION 스트림 / 빈 data 는 INVALID_ARGUMENT, 깨진 UTF-8 chunk 는 INVALID_ENCODING</td></tr>
+</table>
+
+<h3>19.4 정적 서빙 (H5 integration, <code>kiotty_test_http_static.cpp</code>)</h3>
+<p>fixture 가 임시 디렉토리에 <code>www/</code> 와 파일을 만든다. 메모리 데이터는 서버 close 뒤까지 사는 fixture 멤버다 (라이브러리는 복사하지 않는다).</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpStatic</td><td>DirectoryServesFilesWithTheContentTypeOfTheirExtension</td><td><span class="tag ok">정상</span></td><td>디렉토리 밑 파일과 하위 디렉토리의 파일, 확장자의 content type (html, js), HEAD 의 Content-Length, 라우트와 같이 쓴다</td></tr>
+  <tr><td>HttpStatic</td><td>MissingFileOrADirectoryIsNotFound</td><td><span class="tag edge">엣지</span></td><td>없는 파일, 디렉토리 경로 (끝 <code>/</code> 있고 없고), 없는 파일에 매핑한 <code>serveHttpFile</code> 은 404</td></tr>
+  <tr><td>HttpStatic</td><td>PathsThatLeaveTheDirectoryAreForbidden</td><td><span class="tag misuse">오용</span></td><td><code>..</code>, <code>js/../..</code>, <code>..\</code>, <code>c:</code> 는 403. <code>index..html</code> 은 이름이라 404</td></tr>
+  <tr><td>HttpStatic</td><td>MemoryServesBinaryAndOnlyGetAndHead</td><td><span class="tag ok">정상</span></td><td>wasm 바이너리 (NUL 포함) 를 그대로, HEAD 의 Content-Length, POST 는 405 + <code>Allow: GET, HEAD, OPTIONS</code></td></tr>
+  <tr><td>HttpStatic</td><td>LargeFileGoesOutInPiecesAndTheConnectionStaysOpen</td><td><span class="tag edge">엣지</span></td><td><code>send_capacity × 5 + 3</code> 바이트 파일이 응답 버퍼 조각으로 다 오고 (모르는 확장자는 octet-stream), 같은 연결의 다음 요청</td></tr>
+  <tr><td>HttpStatic</td><td>RouteAnswersWithAFile</td><td><span class="tag ok">정상</span></td><td>라우트의 <code>setHttpFile</code>: <code>..</code> 경로 INVALID_ARGUMENT, 없는 파일 NOT_FOUND, EVENT_STREAM INVALID_ARGUMENT, 성공하면 csv 와 그 content type</td></tr>
+  <tr><td>HttpStatic</td><td>RegistrationChecksPathsTypesAndTiming</td><td><span class="tag misuse">오용</span></td><td><code>/</code> 없는 prefix, 빈 디렉토리, NULL 파일 경로, 메모리의 BY_EXTENSION / EVENT_STREAM / CUSTOM 은 INVALID_ARGUMENT, 텍스트 type 의 깨진 UTF-8 은 INVALID_ENCODING (바이너리 type 은 SUCCESS), 같은 경로 DUPLICATE_RULE, run 중 BUSY</td></tr>
+</table>
+
+<h3>19.5 MCP 서버 골격 (H6 integration, <code>kiotty_test_http_mcp.cpp</code>)</h3>
+<p>설계 6절의 MCP 서버를 JSON 라이브러리 없이 문자열로 옮긴 테스트다. 작성 중이며 다 되면 테스트 이름별로 나눈다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpMcp</td><td>(작성 중)</td><td><span class="tag ok">정상</span></td><td>MCP 서버 골격: initialize 와 세션 헤더, 406, 없는 세션 404, 알림 202, tools/call 의 SSE 진행 알림 뒤 최종 응답, GET 스트림에 앱이 넣은 이벤트, DELETE 로 스트림의 끝 chunk, HEAD 는 Work 없이 헤더만, 라우트 뒤의 정적 디렉토리</td></tr>
+</table>
+<p>하지 않은 것: 연결 수 초과의 <code>onError(TABLE_FULL)</code> 는 재현하지 않는다 (base 가 accept 를 멈추므로 경합 때만 난다. 대신 19.2 의 <code>ConnectionOverMaxClientsWaitsUntilASlotFrees</code>). 설계 11절의 benchmark 둘 (Work 스트림의 chunk 1 KiB × 1000 latency, 큰 파일) 은 아직 없다.</p>
 
 </body>
 </html>

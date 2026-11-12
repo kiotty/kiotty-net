@@ -173,3 +173,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-12 HTTP 사이클 H4 (`docs/progress/261112_progress_http_h4.md`): Work 와 Work 스트림. `startHttpWork`, `onWorkStarted`, `setHttpBodyStream`, `writeHttpWorkChunk` (chunked, 응답 버퍼에서 조립하거나 나눠 쓰기), `finishHttpWork*`, `isHttpWorkConnected`. HEAD 스트림 라우트는 Work 없이 헤더만 (결정 16), Work 없는 스트림 body 는 500. 서버 close 중 Work 의 Session 반납을 worker 의 finish 까지 미룬다. integration 9 개. 다음은 H5.
 
 2026-11-12 HTTP 사이클 H5 (`docs/progress/261112_progress_http_h5.md`): 정적 서빙. `serveHttpDirectory / File / Memory`, `setHttpFile`, 확장자로 content type, `..` / `\` / `:` 는 403, 없는 파일 404, 파일은 Session 의 `InputFile` 에서 `send_capacity` 조각으로. integration 7 개, unit 2 개. 다음은 H6.
+
+2026-11-12 HTTP 사이클 H6 (`docs/progress/261112_progress_http_h6.md`): MCP 서버 골격 integration 5 개 (C++ wrapper), HEAD 가 앞의 GET 라우트보다 뒤의 정적 항목으로 가던 매칭 수정, benchmark 셋 (GET JSON, Work chunk latency, 1 MiB 정적 파일), requirement 9절 / 구현 가이드 4절 / 테스트 계획 19절. 설계 11절의 HTTP 행은 끝. 다음은 어긋난 곳 정리 또는 WebSocket W1.

@@ -1050,17 +1050,30 @@ std::thread                 io([&] { KiottyNet_runStatefulServer(server.handle()
 
 ### 9. HttpServer
 
-> 이 절은 공개 API 판 v1 을 적는다. `include/kiotty_net_http.h` 는 cycle H1 (2026-11-12) 에서 판 v2 (Streamable HTTP, Work 스트림, status / content type enum, 끊김 / 오류 action, `{ code, handle }`) 가 되었고, 이 절은 cycle H6 에서 v2 로 고친다. 그때까지 v2 의 기준은 [design_http_v0.html](../design/design_http_v0.html) 4, 5절과 [user_guide_http.md](user_guide_http.md) 다.
+> 이 절은 `include/kiotty_net_http.h` 의 공개 API 판 v2 (cycle H1, 2026-11-12) 와 그 구현 (cycle H3 ~ H5) 을 적는다. 설계의 근거는 [design_http_v0.html](../design/design_http_v0.html), 사용법은 [user_guide_http.md](user_guide_http.md), 안의 모양은 [implementation_guide_v0.md](implementation_guide_v0.md) 4절이다. 판 v1 의 `deferHttpResponse` + `resumeConnection(payload)` + `resumedWork` 는 없다.
 
-HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다.
+HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine (8절) 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다. 응답은 두 모양이다.
 
-- 라우트는 `KiottyNet_addHttpRoute(server, method, path, route)` 로 등록하며 C++ 의 `get / head / post / put / patch / del / options` 는 그 별칭이다 (`delete` 는 C++ 예약어라 `del`). 콜백을 등록하는 방식이지 하나의 handler 구조체를 넘기는 방식이 아니다. 등록은 `run` 전에만 되고 표는 고정 크기다 (`KiottyNetHttpLimits::max_routes`).
-- path 매칭은 정확 일치와 `/*` 접미 wildcard 두 가지다. 등록 순서대로 검사한다. `:id` 같은 파라미터 파싱은 하지 않으며 `request.path` 를 사용자가 파싱한다.
-- 정적 서빙은 세 가지다. 디렉토리 매핑, 파일 하나 매핑, 메모리 바이너리 매핑. 라우트와 같은 표에서 등록 순서대로 매칭하며 GET / HEAD 에만 적용된다.
+| | 완성 응답 | Work 스트림 |
+|---|---|---|
+| body | 복사 / 참조 / 파일 / 없음 | 스트림 (`setHttpBodyStream`) |
+| 누가 채우나 | IO Thread 의 `onRequest`, 또는 Work 를 든 worker | Work 를 든 worker 하나 |
+| 언제 나가나 | `onRequest` 가 return 할 때, 또는 `finishHttpWorkWithResponse` | `writeHttpWorkChunk` 마다 바로 (동기) |
+| 끝 | body 끝이 응답 끝 | `finishHttpWorkWithResponse` 가 끝 chunk |
+| framing 헤더 | `Content-Length` | `Transfer-Encoding: chunked` |
+| MCP 에서 | JSON 응답, 202, 404, 405, 406 | POST 에 대한 SSE, GET 스트림 |
+
+- 라우트는 `KiottyNet_addHttpRoute(server, method, path, route)` 로 등록하며 C++ 의 `get / head / post / put / patch / del / options` 는 그 별칭이다 (`delete` 는 C++ 예약어라 `del`). 콜백을 등록하는 방식이지 하나의 handler 구조체를 넘기는 방식이 아니다. 등록은 `run` 전에만 되고 (run 중이면 `KIOTTY_NET_CODE_BUSY`) 표는 고정 크기다 (`KiottyNetHttpLimits::max_routes`). 같은 (method, path) 는 `KIOTTY_NET_CODE_DUPLICATE_RULE`, 같은 path 에 다른 method 는 중복이 아니다.
+- path 매칭은 정확 일치와 `/*` 접미 wildcard 두 가지다. 등록 순서대로 검사한다. `:id` 같은 파라미터 파싱과 percent-decoding 은 하지 않으며 `request.path` 를 사용자가 파싱한다.
+- 정적 서빙은 세 가지다. 디렉토리 매핑, 파일 하나 매핑, 메모리 바이너리 매핑. 라우트와 같은 표에서 등록 순서대로 매칭하며 GET / HEAD 에만 적용된다 (아래 정적 서빙).
 - path 가 맞는 라우트가 하나도 없으면 `notFound` 라우트, 그것도 없으면 404. path 는 맞지만 method 가 없으면 405 다 (아래 메서드별 동작).
-- 요청은 공용 struct `KiottyNetHttpRequest` 로 오고, 응답은 pool handle `KiottyNetHttpResponseHandle` 로 채운다. 둘 다 Connection 마다 고정 크기 버퍼(`KiottyNetHttpLimits`)에 있다. body 가 `max_body_bytes` 를 넘으면 413 으로 라이브러리가 거절한다. 응답 버퍼가 넘치면 setter 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려준다.
-- 긴 작업은 5절 Work 를 HTTP 에 맞게 줄인 것이다. `onRequest` 안에서 `KiottyNet_startHttpWork(response)` 를 부르고 return 하면 응답은 보내지 않고 연결을 IO Thread 에서 떼어낸 뒤, 같은 loop 안에서 라우트의 `onWorkStarted(app_context, request, response, work)` 가 한 번 온다. worker 는 `response` 를 setter 로 채우고 `KiottyNet_finishHttpWorkWithResponse(work)` 로 보내거나 `KiottyNet_finishHttpWorkWithClose(work, reason)` 로 끊는다. finish 는 한 번만이며 그때까지 request 는 유효하다. `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 본다.
-- keep-alive 는 라이브러리가 처리한다. `Connection: close` 또는 HTTP/1.0 이면 응답 후 닫는다.
+- 요청은 공용 struct `KiottyNetHttpRequest` 로 오고, 응답은 pool handle `KiottyNetHttpResponseHandle` 로 채운다. 둘 다 Connection 마다 하나씩 있는 Session 의 고정 크기 버퍼 (`KiottyNetHttpLimits`) 에 있다. body 가 `max_body_bytes` 를 넘으면 413 으로 라이브러리가 거절한다. 응답 버퍼가 넘치면 setter 가 `KIOTTY_NET_CODE_BUFFER_FULL` 을 돌려준다.
+- status 는 `KiottyNetHttpStatus`, content type 은 `KiottyNetHttpContentType` enum 이다. status 인자는 정수라 목록 밖의 코드 (100..599) 도 받는다. content type 은 body 를 정할 때만 적는다 (아래 content type).
+- 아무 setter 도 부르지 않은 라우트는 404, setter 를 불렀고 status 가 없으면 200 이다. 1xx / 204 / 304 는 Content-Length, Content-Type, body 를 보내지 않는다. 라이브러리가 `Date`, `Content-Length` 또는 `Transfer-Encoding`, `Content-Type`, 닫을 때의 `Connection: close` 를 채운다.
+- 긴 작업은 5절 Work 를 HTTP 에 맞게 줄인 것이고, 스트림 응답 (SSE) 은 그 Work 위의 Work 스트림이다 (아래 Work 와 Work 스트림).
+- keep-alive 는 라이브러리가 처리한다. `Connection: close`, 또는 `Connection: keep-alive` 가 없는 HTTP/1.0 이면 응답 후 닫는다. 라이브러리의 거절 (400 / 413 / 414 / 431 / 501) 과 Work 없는 스트림 body 의 500 도 `Connection: close` 를 붙이고 닫는다.
+- `Expect: 100-continue` 는 라이브러리가 답한다. HTTP/1.1 요청에 body (Content-Length 가 0 보다 크거나 chunked) 가 있으면 헤더를 다 읽은 직후 `HTTP/1.1 100 Continue` 를 보내고 body 를 읽는다. Content-Length 가 `max_body_bytes` 를 넘으면 100 없이 413 을 보내고 닫는다. HTTP/1.0, body 없는 요청, `100-continue` 가 아닌 값은 무시한다 (417 은 보내지 않는다).
+- 연결 단위의 끝과 오류는 끊김 / 오류 action 으로 받는다 (아래, 설계 결정 19). 요청 단위의 성공은 알리지 않는다 (라우트가 안다).
 
 메서드별 동작
 
@@ -1069,17 +1082,104 @@ HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachi
 | 메서드 | 용도 | 요청 body | 자동 |
 |---|---|---|---|
 | GET | 조회 | 없음 (와도 읽고 버린다) | 없음 |
-| HEAD | GET 과 같은 헤더만 | 없음 | 같은 path 의 GET 라우트를 실행하고 body 는 보내지 않는다. Content-Length 는 GET 과 같게 둔다. 정적 서빙도 같다 |
+| HEAD | GET 과 같은 헤더만 | 없음 | 같은 path 의 GET 라우트를 실행하고 body 는 보내지 않는다. Content-Length 는 GET 과 같게 둔다. 정적 서빙도 같다. 스트림 라우트는 아래 HEAD |
 | POST | 생성, 명령 | 있음 | 없음 |
 | PUT | 전체 교체 | 있음 | 없음 |
 | PATCH | 부분 수정 | 있음 | 없음 |
 | DELETE | 삭제 | 보통 없음 (오면 `request.body` 로 준다) | 없음 |
-| OPTIONS | 허용 메서드 조회, CORS preflight | 없음 | 204 + `Allow` 헤더. 값은 그 path 에 등록된 메서드 + HEAD (GET 이 있으면) + OPTIONS. `OPTIONS *` 는 서버 전체에 등록된 메서드 |
+| OPTIONS | 허용 메서드 조회, CORS preflight | 없음 | 204 + `Allow` 헤더 (Content-Length 없음). 값은 그 path 에 등록된 메서드 + HEAD (GET 이 있으면) + OPTIONS. `OPTIONS *` 는 서버 전체에 등록된 메서드 |
 
-- **405 Method Not Allowed.** path 가 맞는 라우트나 정적 경로가 있지만 그 method 가 없으면 405 와 `Allow` 헤더 (OPTIONS 자동 응답과 같은 값) 를 보낸다. `notFound` 는 부르지 않는다.
+- **405 Method Not Allowed.** path 가 맞는 라우트나 정적 경로가 있지만 그 method 가 없으면 405 와 `Allow` 헤더 (OPTIONS 자동 응답과 같은 값) 를 보낸다. `notFound` 는 부르지 않는다. 정적 경로의 `Allow` 는 `GET, HEAD, OPTIONS` 다.
 - **501 Not Implemented.** CONNECT, TRACE, 그리고 7개 밖의 메서드. CONNECT 는 프록시용이고 TRACE 는 보안상 쓰지 않으므로 라우트로 등록할 수도 없다.
 - **CORS.** 라이브러리는 CORS 헤더를 자동으로 붙이지 않는다. preflight 에 응답하려면 OPTIONS 라우트를 직접 등록하고 `Access-Control-Allow-*` 헤더를 넣는다 (미결: 간단한 CORS 설정 제공 여부).
-- **body 를 읽는 기준은 메서드가 아니라 헤더다.** 어느 메서드든 `Content-Length` 가 있으면 그만큼 읽어서 연결의 다음 요청 경계를 맞춘다. `Transfer-Encoding: chunked` 요청은 라이브러리가 합쳐서 `request.body` 로 준다.
+- **body 를 읽는 기준은 메서드가 아니라 헤더다.** 어느 메서드든 `Content-Length` 가 있으면 그만큼 읽어서 연결의 다음 요청 경계를 맞춘다. `Transfer-Encoding: chunked` 요청은 라이브러리가 합쳐서 `request.body` 로 준다 (chunk 확장과 trailer 는 버린다). `Content-Length` 와 `Transfer-Encoding` 이 같이 오면 400, chunked 가 아닌 transfer coding 은 501 이다.
+
+HEAD (설계 결정 16)
+
+라이브러리가 GET 라우트 (와 정적 경로) 로 처리하고 body 바이트만 보내지 않는다. `onRequest` 는 `request->method` 로 HEAD 인 것을 알 수 있지만 따로 처리하지 않아도 된다. HEAD 요청은 등록 순서대로 HEAD 나 GET 이 맞는 첫 항목으로 간다 (같은 path 에 GET 라우트와 HEAD 라우트가 둘 다 있으면 먼저 등록한 쪽).
+
+- 완성 응답: `Content-Length` 는 GET 일 때의 길이를 적고 body 를 떼고 보낸다.
+- `onRequest` 에서 `setHttpBodyStream` 과 `startHttpWork` 를 부른 스트림 라우트: Work 를 열지 않는다. `startHttpWork` 는 SUCCESS 이고 `onWorkStarted` 는 불리지 않으며, 그때까지 놓인 status, 헤더, `Content-Type`, `Transfer-Encoding: chunked` 만 보내고 keep-alive 로 다음 요청을 읽는다. 그래서 스트림 라우트는 status 와 body 종류를 `onRequest` 에서 정하는 것을 권한다.
+- 그 밖의 Work (body 종류를 worker 가 정하는 것): Work 를 그대로 연다. worker 가 완성 응답으로 끝내면 body 를 떼고 보낸다. worker 가 스트림을 열면 첫 `writeHttpWorkChunk` 가 헤더만 보내고 `KIOTTY_NET_CODE_CLOSED` 를 돌려주며, 그 뒤의 write 도 CLOSED 다. `finishHttpWorkWithResponse` 는 keep-alive 로 다음 요청을 읽는다. body 를 보내지 않는 status (1xx / 204 / 304) 에 스트림을 연 경우도 같다.
+
+content type
+
+- 목록 안이면 enum 하나로 끝난다. 라이브러리가 표에서 문자열을 꺼내 `Content-Type` 을 쓴다. 텍스트 계열 (TEXT_*, JAVASCRIPT, EVENT_STREAM) 은 `; charset=utf-8` 을 붙인다.
+- 목록 밖이거나 파라미터가 필요하면 (`multipart/related; boundary=...`) `KiottyNet_setHttpCustomContentType(response, text)` 로 이름을 먼저 정하고 body setter 에 `KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM` 을 넘긴다. 이름은 `token/token` 뒤에 `; 이름=값` 이 0 개 이상, CR / LF 없음, UTF-8, `KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH` 미만이다. 그 응답 하나에만 유효하다. 이름 없이 CUSTOM 이 오면 body setter 가 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
+- `setHttpHeader(response, "Content-Type", ...)` 는 `KIOTTY_NET_CODE_INVALID_ARGUMENT` 다 (이름 비교는 대소문자 무시).
+- 자리가 정해진 값이 둘이다. `BY_EXTENSION` 은 파일 (`setHttpFile`, 정적 경로) 에만, `EVENT_STREAM` 은 스트림 (`setHttpBodyStream`) 에만 쓴다. 다른 자리면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. `BY_EXTENSION` 은 enum 주석의 확장자로 고르고 (대소문자 무시), 모르는 확장자는 `OCTET_STREAM` 이다.
+- 텍스트 계열 (구조화 텍스트와 DICOM / FHIR 의 json / xml, SVG 포함) 은 UTF-8 을 본다. 복사 / 참조 body 는 setter 를 부를 때, 스트림은 chunk 마다, `serveHttpMemory` 는 등록 때. UTF-8 이 아니면 `KIOTTY_NET_CODE_INVALID_ENCODING` 이고 body 는 바뀌지 않는다. 파일과 CUSTOM 은 보지 않는다.
+- status 만 놓고 body 가 없으면 `Content-Type` 은 없다 (202, 204 등).
+
+정적 서빙
+
+| 함수 | 매핑 | 요청 때 |
+|---|---|---|
+| `serveHttpDirectory(server, url_prefix, directory)` | `url_prefix` 는 `/` 로 끝나야 한다. `directory` 끝에 `/` 나 `\` 가 없으면 등록 때 `/` 를 붙인다 | prefix 뒤의 경로에 `..` 조각, `\`, `:` 가 있으면 403 (Windows 의 구분자, 드라이브, ADS 를 막는다). 붙인 경로가 `KIOTTY_NET_MAX_PATH_LENGTH` 를 넘거나, 파일이 없거나, 디렉토리면 404. index 파일 (`index.html`) 은 찾지 않는다. content type 은 확장자 |
+| `serveHttpFile(server, url_path, file_path)` | content type 은 등록 때 확장자로 정한다 | 요청 때 열고 없으면 404 |
+| `serveHttpMemory(server, url_path, type, data)` | 복사하지 않는다. data 는 서버 생명 동안 유효해야 한다. type 은 목록 안이어야 하고 `BY_EXTENSION`, `EVENT_STREAM`, `CUSTOM` 은 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 텍스트 계열이면 등록 때 UTF-8 | 참조 body |
+
+- 라우트 안의 파일은 `KiottyNet_setHttpFile(response, type, path)` 다. type 은 보통 `BY_EXTENSION`. 경로에 `..` 조각 (`/` 나 `\` 로 나눈) 이 있으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`, 열지 못하면 `KIOTTY_NET_CODE_NOT_FOUND`. 절대 경로는 된다. Work 안에서도 쓸 수 있다.
+- 파일은 응답 버퍼로 `send_capacity` 만큼씩 읽어 write lane 으로 보낸다. 헤더 블록이 이미 나간 응답 버퍼의 앞부분이 읽기 자리다. `sendfile` / `TransmitFile` 은 쓰지 않는다 (설계 결정 6). 보내는 중에 파일을 읽지 못하면 `KIOTTY_NET_CODE_NOT_FOUND` 로 닫는다. HEAD 는 Content-Length 만 보낸다.
+- 파일은 Session 마다 하나 열 수 있고 (create 때 잡는다), 다음 요청이나 연결이 끝날 때 닫는다.
+
+Work 와 Work 스트림
+
+긴 작업. `onRequest` 안에서 `KiottyNet_startHttpWork(response)` 를 부르고 return 하면 응답은 보내지 않고 연결을 IO Thread 에서 떼어낸 뒤, 같은 loop 안에서 라우트의 `onWorkStarted(app_context, request, response, work)` 가 IO Thread 에서 한 번 온다. `onWorkStarted` 는 response 와 work 를 worker 에게 넘기고 return 한다. worker 는 둘 중 하나를 한다.
+
+- 완성 응답: setter 로 `response` 를 채우고 `KiottyNet_finishHttpWorkWithResponse(work)`. 응답 버퍼의 내용이 나가고 keep-alive 면 다음 요청을 읽는다.
+- 스트림: `KiottyNet_setHttpBodyStream(response, type)` 뒤 `KiottyNet_writeHttpWorkChunk(work, data, timeout)` 를 여러 번, 끝에 `finishHttpWorkWithResponse(work)`.
+- 어느 쪽이든 끊으려면 `KiottyNet_finishHttpWorkWithClose(work, reason)`. 끝 chunk 없이 닫는다.
+
+| 함수 | 규칙 |
+|---|---|
+| `startHttpWork` | `onRequest` 안에서 한 번만. 두 번째와 worker 에서의 호출은 `KIOTTY_NET_CODE_BUSY`. 라우트에 `onWorkStarted` 가 없으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` |
+| `setHttpBodyStream` | body 를 스트림으로 정한다. `Transfer-Encoding: chunked`, Content-Length 없음. `onRequest` 에서도 worker 에서도 된다. `onRequest` 에서 정했는데 `startHttpWork` 없이 return 하면 라이브러리가 500 을 보내고 닫는다 (보낼 사람이 없다. 끊김 reason 은 SUCCESS) |
+| `writeHttpWorkChunk` | chunk 하나를 보내고 다 나갈 때까지 기다린다 (동기). 첫 호출이면 상태줄 + 헤더를 먼저 보낸다. 라이브러리가 chunk 머리 (길이 hex CRLF) 와 꼬리 (CRLF) 를 씌운다. 돌려주는 `bytes` 는 `data.length` 다. timeout 은 호출 전체의 한도이고 0 은 무한. 돌아오면 data 는 버려도 된다 |
+| `finishHttpWorkWithResponse` | 스트림이면 끝 chunk `0\r\n\r\n` 을 보낸다. chunk 를 한 번도 쓰지 않은 스트림이면 헤더 + 끝 chunk. 실패한 스트림이면 그 코드로 닫는다. 스트림이 아니면 완성 응답을 보낸다 |
+| `finishHttpWorkWithClose` | 보내지 않고 닫는다. reason 은 끊김 action 의 reason 이 된다 |
+| `isHttpWorkConnected` | peer 가 살아 있고 서버가 close 중이 아니면 참. 이벤트를 기다리는 worker 가 끊김을 볼 때 |
+
+- finish 는 한 번만이다. 그때까지 request 는 유효하다. worker 가 오래 쓰는 값 (MCP 의 `Mcp-Session-Id`) 은 복사해 두는 것이 안전하다.
+- setter 는 Work 중에도 된다. 스트림의 첫 write 뒤와 finish 뒤에는 `KIOTTY_NET_CODE_BUSY` (헤더가 이미 나갔다).
+- `writeHttpWorkChunk` 의 코드: `SUCCESS`. `PEER_CLOSED` (상대가 끊음). `TIMEOUT` (일부가 나갔을 수 있다). `CLOSED` (서버 close, 또는 body 를 보내지 않는 응답). `BUSY` (finish 뒤). `INVALID_ARGUMENT` (body 가 스트림이 아님, 빈 data. 길이 0 chunk 는 끝이라). `INVALID_ENCODING` (텍스트 계열인데 UTF-8 아님. 아무것도 보내지 않았다). 한 번 실패하면 다음 write 도 같은 코드이고, 그 뒤는 `finishHttpWorkWithClose` 뿐이다.
+- 텍스트 계열 스트림은 chunk 마다 UTF-8 을 보므로 문자 하나를 두 chunk 에 나눠 쓰면 안 된다. SSE 이벤트는 줄 단위라 그럴 일이 없다.
+- 끝을 알리는 콜백은 없다. 상대가 끊으면 다음 write 가 `PEER_CLOSED`, 서버가 close 하면 `CLOSED` 다. 이벤트가 없는 동안 끊김을 빨리 알려면 worker 가 주기적으로 `: ping\n\n` 을 쓰거나 `isHttpWorkConnected` 를 본다.
+- 큰 chunk 를 여러 write 로 나눠 보내도 사이에 끼어드는 것은 없다. Work 중에는 base 가 이 연결의 send / notify Stage 를 고르지 않는다 (설계 결정 7).
+- 오래 가는 스트림 (MCP 의 GET 스트림) 은 그동안 worker 하나를 쓴다. 동시 스트림 수만큼 worker 가 필요하다 (설계 결정 4, 11).
+- 서버 close: Work 중인 연결의 끊김 action (`CLOSED`) 은 worker 의 finish 전에 온다. worker 의 다음 write 가 `CLOSED` 를 돌려주므로 worker 가 finish 하고 끝난다. run 은 모든 Work 가 finish 된 뒤 `KIOTTY_NET_CODE_CLOSED` 로 돌아온다.
+
+끊김 / 오류 action (설계 결정 19)
+
+| 등록 | 언제 | 인자 |
+|---|---|---|
+| `KiottyNet_onHttpDisconnected(server, action, app_context)` | 연결마다 한 번, 끝날 때 | `info` (상대 주소), `reason`: `SUCCESS` (keep-alive 아님, 다 보냄), `TIMEOUT` (header / keep-alive timeout), `PEER_CLOSED`, `PEER_NOT_READING` (send timeout), `PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤, 줄 하나가 receive_capacity 를 넘음), `CLOSED` (서버 close), 또는 `finishHttpWorkWithClose` 의 reason |
+| `KiottyNet_onHttpError(server, action, app_context)` | 연결이 생기기 전이나 연결과 따로 생기는 문제 | `info`, `code`, `message`: TLS handshake 실패 (`TLS_*`), accept 실패, 연결 수 초과. base 의 onError 가 받는 것을 그대로 넘긴다 |
+
+- 라우트처럼 run 전에 등록하고 run 중의 등록은 `KIOTTY_NET_CODE_BUSY` 다. 다시 부르면 바꾸고, action 이 NULL 이면 지운다. app_context 는 라우트의 것과 따로다.
+- 둘 다 IO Thread 에서 불린다. 끊김 action 은 연결의 handle 을 받지 않는다 (끊긴 뒤라 쓸 곳이 없다).
+- 잘못된 요청은 끊김 action 의 reason 으로 오고 오류 action 으로 두 번 오지 않는다. base 는 연결 자리가 없으면 accept 를 멈추고 다음 연결을 OS backlog 에 두므로 연결 수 초과는 경합 때만 온다.
+
+timeout
+
+| 구간 | 한도 | 넘으면 |
+|---|---|---|
+| 요청 줄 | `header_timeout_milliseconds`. keep-alive 로 다음 요청을 기다릴 때는 `keep_alive_timeout_milliseconds` | 408 없이 닫는다. 끊김 reason `TIMEOUT` |
+| 헤더 | 요청 줄이 온 때부터 `header_timeout_milliseconds` 안에 빈 줄까지 | 같다 |
+| body 조각, chunk 크기 줄, trailer | 조각마다 `header_timeout_milliseconds` | 같다 |
+| 응답 송신 (write lane 조각) | base 의 `send_timeout_milliseconds` (7절) | 끊김 reason `PEER_NOT_READING` |
+| Work 의 write | `writeHttpWorkChunk` 의 인자 | 그 호출이 `TIMEOUT`. 연결은 worker 가 닫는다 |
+
+- 줄 하나는 `min(receive_capacity, max_header_bytes + 2)` 까지 읽는다. 넘으면 base 가 `PROTOCOL_ERROR` 로 닫는다 (응답 없음). 헤더 공간이나 개수가 모자라면 431 이다.
+
+thread
+
+| 어디서든 | IO Thread (`onRequest` 안) 또는 Work 를 든 worker | IO Thread 만 |
+|---|---|---|
+| `finishHttpWork*`, `isHttpWorkConnected`, `closeHttpServer`, `awaitHttpServer` | setter 일곱. `startHttpWork` 는 `onRequest` 안만. `writeHttpWorkChunk` 는 worker 만 | `findHttpHeader` (request 가 유효한 동안), 등록 함수 (run 전) |
+
+- 같은 응답을 두 thread 가 동시에 만지는 순간은 없다. `onRequest` 동안은 IO Thread, Work 중이면 worker 다.
+- response / work handle 은 요청 하나의 것이다. 완성 응답은 `onRequest` return 까지 (Work 면 finish 까지) 쓸 수 있다. 송신이 시작된 뒤에는 `KIOTTY_NET_CODE_BUSY`, 다음 요청이 시작되거나 연결이 끝나면 `KIOTTY_NET_CODE_PEER_CLOSED` 다. HttpServer 를 destroy 한 뒤에도 `PEER_CLOSED` 만 돌아온다 (Context 의 풀이 은퇴만 한다).
 
 공용 타입
 
@@ -1101,13 +1201,16 @@ typedef enum KiottyNetHttpMethod {
 
 typedef struct KiottyNetHttpLimits {     /* 3절의 설정 struct 규칙을 따른다. initialize 한 번, configure 여러 번 */
     uint32_t initialization_mark;
-    size_t   max_routes;            /* 라우트 + 정적 경로 + 승격 경로 합계. 기본 64 */
-    size_t   max_header_bytes;      /* request line + headers. 기본 8 KiB */
-    size_t   max_headers;           /* 기본 32 */
-    size_t   max_body_bytes;        /* 기본 64 KiB. 초과시 413 */
-    size_t   response_bytes;        /* 응답 버퍼 (status + headers + 복사된 body). 기본 64 KiB */
-    uint32_t header_timeout_milliseconds;     /* 헤더 수신 완료까지. 기본 10000 */
+    size_t   max_routes;            /* 라우트 + 정적 경로 합계 (WebSocket 경로도 여기에 든다). 기본 64, 1..4096 */
+    size_t   max_header_bytes;      /* request line + headers. 기본 8 KiB, 64..1 MiB. 넘으면 431 */
+    size_t   max_headers;           /* 기본 32, 1..1024. 넘으면 431 */
+    size_t   max_body_bytes;        /* 기본 64 KiB, 0..64 MiB. 넘으면 413. Upgrade 뒤 WebSocket 메시지 버퍼도 이 크기 */
+    size_t   response_bytes;        /* 응답 버퍼. 상태줄 + 헤더 + 복사된 body. 스트림 chunk 의 조립, 파일 조각의 읽기 자리. 기본 64 KiB, 320..64 MiB */
+    uint32_t header_timeout_milliseconds;     /* 요청 줄 / 헤더 / body 조각. 기본 10000 */
     uint32_t keep_alive_timeout_milliseconds; /* 다음 요청 대기. 기본 15000 */
+    uint32_t websocket_ping_interval_milliseconds;  /* 기본 30000. WebSocket 경로가 있을 때만 쓴다. 0 이면 ping 을 보내지 않는다 */
+    uint32_t websocket_pong_timeout_milliseconds;   /* 기본 10000 */
+    uint32_t websocket_close_timeout_milliseconds;  /* 기본 5000 */
 } KiottyNetHttpLimits;
 
 KiottyNetCode KiottyNet_initializeHttpLimits(KiottyNetHttpLimits* limits);
@@ -1116,6 +1219,86 @@ KiottyNetCode KiottyNet_configureHttpHeaderCapacity(KiottyNetHttpLimits* limits,
 KiottyNetCode KiottyNet_configureHttpBodyCapacity(KiottyNetHttpLimits* limits, size_t max_body_bytes);
 KiottyNetCode KiottyNet_configureHttpResponseCapacity(KiottyNetHttpLimits* limits, size_t response_bytes);
 KiottyNetCode KiottyNet_configureHttpTimeouts(KiottyNetHttpLimits* limits, uint32_t header_timeout_milliseconds, uint32_t keep_alive_timeout_milliseconds);
+KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits, uint32_t ping_interval_milliseconds, uint32_t pong_timeout_milliseconds, uint32_t close_timeout_milliseconds);
+
+typedef enum KiottyNetHttpStatus {       /* setHttpStatus 의 인자는 int32_t 라 목록 밖의 코드 (100..599) 도 받는다 */
+    KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS     = 101,   /* WebSocket Upgrade. 라이브러리만 보낸다 */
+    KIOTTY_NET_HTTP_STATUS_OK                      = 200,
+    KIOTTY_NET_HTTP_STATUS_CREATED                 = 201,
+    KIOTTY_NET_HTTP_STATUS_ACCEPTED                = 202,   /* MCP : 알림 / 응답만 담은 POST */
+    KIOTTY_NET_HTTP_STATUS_NO_CONTENT              = 204,
+    KIOTTY_NET_HTTP_STATUS_MOVED_PERMANENTLY       = 301,
+    KIOTTY_NET_HTTP_STATUS_FOUND                   = 302,
+    KIOTTY_NET_HTTP_STATUS_NOT_MODIFIED            = 304,
+    KIOTTY_NET_HTTP_STATUS_BAD_REQUEST             = 400,   /* 라이브러리 : 요청 형식 */
+    KIOTTY_NET_HTTP_STATUS_UNAUTHORIZED            = 401,
+    KIOTTY_NET_HTTP_STATUS_FORBIDDEN               = 403,   /* 라이브러리 : 정적 디렉토리를 벗어나는 경로 */
+    KIOTTY_NET_HTTP_STATUS_NOT_FOUND               = 404,   /* 라이브러리 : 맞는 경로 없음, 없는 정적 파일 */
+    KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED      = 405,   /* 라이브러리 : path 는 맞고 method 가 없음 */
+    KIOTTY_NET_HTTP_STATUS_NOT_ACCEPTABLE          = 406,   /* MCP : Accept 가 맞지 않음 */
+    KIOTTY_NET_HTTP_STATUS_REQUEST_TIMEOUT         = 408,
+    KIOTTY_NET_HTTP_STATUS_CONFLICT                = 409,
+    KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE       = 413,   /* 라이브러리 : max_body_bytes */
+    KIOTTY_NET_HTTP_STATUS_URI_TOO_LONG            = 414,   /* 라이브러리 : KIOTTY_NET_MAX_URL_LENGTH */
+    KIOTTY_NET_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE  = 415,
+    KIOTTY_NET_HTTP_STATUS_UPGRADE_REQUIRED        = 426,
+    KIOTTY_NET_HTTP_STATUS_TOO_MANY_REQUESTS       = 429,
+    KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE = 431,   /* 라이브러리 : max_header_bytes, max_headers */
+    KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR   = 500,   /* 라이브러리 : Work 없는 스트림 body */
+    KIOTTY_NET_HTTP_STATUS_NOT_IMPLEMENTED         = 501,   /* 라이브러리 : CONNECT, TRACE, 모르는 method, chunked 아닌 transfer coding */
+    KIOTTY_NET_HTTP_STATUS_SERVICE_UNAVAILABLE     = 503
+} KiottyNetHttpStatus;
+
+typedef enum KiottyNetHttpContentType {  /* 주석은 Content-Type 의 값과 BY_EXTENSION 의 확장자. (u) 는 UTF-8 을 보는 텍스트 계열 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,      /* application/octet-stream .bin */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN,        /* text/plain .txt (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_HTML,         /* text/html .html .htm (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSS,          /* text/css .css (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSV,          /* text/csv .csv (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_MARKDOWN,     /* text/markdown .md (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JAVASCRIPT,        /* text/javascript .js .mjs (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM,      /* text/event-stream (u). setHttpBodyStream 만 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JSON,              /* application/json .json .map (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROBLEM_JSON,      /* application/problem+json (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_NDJSON,            /* application/x-ndjson .ndjson (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MANIFEST_JSON,     /* application/manifest+json .webmanifest (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_XML,               /* application/xml .xml (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_YAML,              /* application/yaml .yaml .yml (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FORM_URLENCODED,   /* application/x-www-form-urlencoded (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM,             /* application/dicom .dcm */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_JSON,        /* application/dicom+json (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_XML,         /* application/dicom+xml (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_JSON,         /* application/fhir+json (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_XML,          /* application/fhir+xml (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROTOBUF,          /* application/x-protobuf .pb */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MSGPACK,           /* application/msgpack .msgpack */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CBOR,              /* application/cbor .cbor */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PNG,               /* image/png .png */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JPEG,              /* image/jpeg .jpg .jpeg */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GIF,               /* image/gif .gif */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBP,              /* image/webp .webp */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_AVIF,              /* image/avif .avif */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BMP,               /* image/bmp .bmp */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_SVG,               /* image/svg+xml .svg (u) */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ICON,              /* image/x-icon .ico */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF,              /* font/woff .woff */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF2,             /* font/woff2 .woff2 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TTF,               /* font/ttf .ttf */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OTF,               /* font/otf .otf */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP3,               /* audio/mpeg .mp3 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WAV,               /* audio/wav .wav */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OGG,               /* audio/ogg .ogg */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP4,               /* video/mp4 .mp4 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBM,              /* video/webm .webm */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PDF,               /* application/pdf .pdf */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ZIP,               /* application/zip .zip */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GZIP,              /* application/gzip .gz */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TAR,               /* application/x-tar .tar */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WASM,              /* application/wasm .wasm */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION,      /* 파일에만. 위의 확장자로 고르고 모르면 OCTET_STREAM */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM,            /* 목록 밖, 또는 파라미터가 필요한 것. setHttpCustomContentType 의 문자열 */
+    KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT
+} KiottyNetHttpContentType;
 
 typedef struct KiottyNetHttpHeader { KiottyNetSpan name; KiottyNetSpan value; } KiottyNetHttpHeader;
 
@@ -1126,13 +1309,13 @@ typedef struct KiottyNetHttpRequest {
     KiottyNetSpan              query;           /* '?' 뒤. 없으면 길이 0 */
     const KiottyNetHttpHeader* headers;
     size_t                     header_count;    /* 최대 KiottyNetHttpLimits::max_headers */
-    KiottyNetSpan              body;            /* Content-Length 만큼. 없으면 길이 0 */
-    int                        keep_alive;
+    KiottyNetSpan              body;            /* Content-Length 만큼, 또는 chunked 를 합친 것. 없으면 길이 0 */
+    KiottyNetBool              keep_alive;
 } KiottyNetHttpRequest;                         /* onRequest 가 return 하면 무효. startHttpWork 했으면 finish 까지 유효 */
 
 typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
 
-typedef struct KiottyNetHttpResponseHandle {    /* pool handle (규약 8). 응답을 채운다 */
+typedef struct KiottyNetHttpResponseHandle {    /* pool handle (규약 8). 응답을 채운다. id 는 Session index + generation */
     KiottyNetHttpServerHandle server;
     int64_t                   id;
 } KiottyNetHttpResponseHandle;
@@ -1147,9 +1330,14 @@ typedef void (*KiottyNetHttpWorkAction)   (KiottyNetAppContext app_context, cons
 
 typedef struct KiottyNetHttpRoute {
     KiottyNetAppContext        app_context;     /* onRequest / onWorkStarted 의 첫 인자로 돌아온다. 라이브러리는 읽지 않는다 */
-    KiottyNetHttpRequestAction onRequest;       /* 요청이 다 들어오면 IO Thread 에서 한 번. NULL 이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-    KiottyNetHttpWorkAction    onWorkStarted;   /* startHttpWork 뒤 한 번. 긴 작업이 없는 라우트는 NULL */
+    KiottyNetHttpRequestAction onRequest;       /* 요청이 다 들어오면 IO Thread 에서 한 번. NULL 이면 KIOTTY_NET_CODE_INVALID_ARGUMENT. 블로킹하지 않는다 */
+    KiottyNetHttpWorkAction    onWorkStarted;   /* startHttpWork 뒤 IO Thread 에서 한 번. 긴 작업이 없는 라우트는 NULL */
 } KiottyNetHttpRoute;
+
+typedef struct KiottyNetHttpServerResult { KiottyNetCode code; KiottyNetHttpServerHandle handle; } KiottyNetHttpServerResult;
+
+typedef void (*KiottyNetHttpDisconnectedAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode reason);
+typedef void (*KiottyNetHttpErrorAction)       (KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
 ```
 
 C 함수
@@ -1159,26 +1347,34 @@ KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context, Kiot
 
 KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */
 
-KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int32_t status);                                  /* 100..599. 부르지 않으면 200. 아무 setter 도 부르지 않으면 404 */
-KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response, const char* name, const char* value);              /* Content-Length, Connection, Date 는 라이브러리가 채운다 */
-KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);       /* 응답 버퍼로 복사 */
-KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response, KiottyNetSpan data, const char* content_type);    /* 복사하지 않음. data 는 송신 완료까지 유효해야 한다 (정적 데이터, 메모리 바이너리) */
-KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response, const char* path, const char* content_type);         /* 파일을 chunk 로 스트리밍. 가능하면 sendfile / TransmitFile. 없으면 KIOTTY_NET_CODE_NOT_FOUND */
-KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);                                                   /* onRequest 안에서. 라우트에 onWorkStarted 가 없으면 KIOTTY_NET_CODE_INVALID_ARGUMENT, 두 번째는 KIOTTY_NET_CODE_BUSY */
+/* 응답 setter. onRequest 안 (IO Thread) 또는 Work 중 (worker). 닫힌 handle 은 KIOTTY_NET_CODE_PEER_CLOSED, 헤더가 이미 나갔으면 KIOTTY_NET_CODE_BUSY */
+KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int32_t status);                                            /* 100..599, 밖이면 INVALID_ARGUMENT. 부르지 않으면 200. 아무 setter 도 부르지 않으면 404 */
+KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response, const char* name, const char* value);                        /* name 은 token. Content-Length, Transfer-Encoding, Connection, Date, Content-Type 과 값의 제어 문자 (탭 제외) 는 INVALID_ARGUMENT. 값이 UTF-8 아니면 INVALID_ENCODING. 자리가 없으면 BUFFER_FULL */
+KiottyNetCode KiottyNet_setHttpCustomContentType(KiottyNetHttpResponseHandle response, const char* content_type);                        /* 이 응답의 CUSTOM 이름. 다시 부르면 바꾼다 */
+KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, KiottyNetSpan data);             /* 응답 버퍼로 복사. 자리가 없으면 BUFFER_FULL */
+KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, KiottyNetSpan data);          /* 복사하지 않음. data 는 송신 완료까지 유효해야 한다 */
+KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, const char* path);               /* 파일. 보통 BY_EXTENSION. 응답 버퍼 조각으로 보낸다. ".." 은 INVALID_ARGUMENT, 열지 못하면 NOT_FOUND */
+KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type);                           /* 스트림. Work 와 함께만 보낼 수 있다. BY_EXTENSION 은 INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);                                                             /* onRequest 안에서 한 번. 라우트에 onWorkStarted 가 없으면 INVALID_ARGUMENT, 두 번째와 worker 에서는 BUSY */
+/* body setter 넷은 서로를 대체한다 (마지막 것이 body). 텍스트 계열인데 UTF-8 이 아니면 INVALID_ENCODING, 자리에 맞지 않는 type 이나 이름 없는 CUSTOM 은 INVALID_ARGUMENT */
 
-/* Work 를 받은 thread 에서. finish 는 한 번만이고 두 번째는 KIOTTY_NET_CODE_BUSY. 닫힌 연결이면 KIOTTY_NET_CODE_PEER_CLOSED */
-KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);                                              /* 응답 버퍼의 내용을 보낸다 */
-KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);                          /* 보내지 않고 닫는다 */
-KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
+/* Work 를 받은 worker 에서. finish 는 한 번만. finish 뒤와 Work 가 아닌 handle 은 KIOTTY_NET_CODE_BUSY, 닫힌 handle 은 KIOTTY_NET_CODE_PEER_CLOSED */
+KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work, KiottyNetSpan data, uint32_t timeout_milliseconds);          /* chunk 하나를 보내고 기다린다. 첫 호출이 헤더를 보낸다. timeout 0 은 무한 */
+KiottyNetCode   KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);                                                      /* 완성 응답을 보내거나, 스트림의 끝 chunk 를 보낸다 */
+KiottyNetCode   KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);                                  /* 보내지 않고 닫는다 */
+KiottyNetBool   KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
 
-KiottyNetHttpServerHandle KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetHttpLimits* limits);   /* 실패하면 NULL. 주소와 TLS 는 run 이 받는다 */
+KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetHttpLimits* limits);   /* 주소와 TLS 는 run 이 받는다. 실패하면 { code, NULL }: INVALID_ARGUMENT (설정이나 limits 미초기화), TABLE_FULL */
 void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
-KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);                          /* 아무 라우트도 안 맞을 때 */
-KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);  /* "/static/" -> "./www/". ".." 포함 경로는 403. content type 은 확장자로 */
-KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);         /* "/favicon.ico" -> "./www/favicon.ico" */
-KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetSpan data, const char* content_type);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls);   /* tls 가 NULL 이면 평문 */
+KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);                                    /* 아무 라우트도 안 맞을 때 */
+KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   /* NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        /* NULL 이면 지운다 */
+KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);            /* "/static/" -> "./www/". 벗어나는 경로는 403. content type 은 확장자로 */
+KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);                   /* "/favicon.ico" -> "./www/favicon.ico". content type 은 확장자로 */
+KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
+/* 등록 함수 공통: run 중이면 BUSY, 같은 (method, path) 는 DUPLICATE_RULE, max_routes 초과는 TABLE_FULL, path 형식 / 길이 / onRequest NULL 은 INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls);   /* tls 가 NULL 이면 평문. close 뒤 KIOTTY_NET_CODE_CLOSED 로 돌아온다 */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);
 ```
@@ -1194,18 +1390,21 @@ public:
     KiottyNet_HttpLimitsBuilder& bodyCapacity(size_t max_body_bytes);
     KiottyNet_HttpLimitsBuilder& responseCapacity(size_t response_bytes);
     KiottyNet_HttpLimitsBuilder& timeouts(uint32_t header_timeout_milliseconds, uint32_t keep_alive_timeout_milliseconds);
+    KiottyNet_HttpLimitsBuilder& webSocketTimers(uint32_t ping_interval_milliseconds, uint32_t pong_timeout_milliseconds, uint32_t close_timeout_milliseconds);
     KiottyNetCode build() const;                     // 처음 실패한 코드
 };
 
-class KiottyNet_HttpResponse {                       // pool handle 의 비소유 래퍼. 콜백 안에서 handle 로 만든다
+class KiottyNet_HttpResponse {                       // pool handle 의 비소유 값 타입. 콜백 안에서 handle 로 만든다
 public:
     explicit KiottyNet_HttpResponse(KiottyNetHttpResponseHandle handle);
     KiottyNetHttpResponseHandle handle() const;
-    KiottyNetCode status(int32_t status);
+    KiottyNetCode status(int32_t status);            // KiottyNetHttpStatus 를 그대로 넘긴다
     KiottyNetCode header(const char* name, const char* value);
-    KiottyNetCode body(KiottyNetSpan data, const char* content_type);
-    KiottyNetCode bodyRef(KiottyNetSpan data, const char* content_type);
-    KiottyNetCode file(const char* path, const char* content_type = nullptr);
+    KiottyNetCode customContentType(const char* content_type);
+    KiottyNetCode body(KiottyNetHttpContentType type, KiottyNetSpan data);
+    KiottyNetCode bodyRef(KiottyNetHttpContentType type, KiottyNetSpan data);
+    KiottyNetCode file(const char* path, KiottyNetHttpContentType type = KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION);   // 기본값 때문에 C 와 인자 순서가 다르다
+    KiottyNetCode bodyStream(KiottyNetHttpContentType type);
     KiottyNetCode startWork();
 };
 
@@ -1215,15 +1414,17 @@ public:
     KiottyNet_HttpWork(KiottyNet_HttpWork&& other);
     KiottyNet_HttpWork& operator=(KiottyNet_HttpWork&& other);   // 받는 쪽이 아직 finish 하지 않았으면 먼저 finishWithClose()
     ~KiottyNet_HttpWork();                           // 아직 finish 하지 않았으면 finishWithClose()
-    bool          connected() const;
-    KiottyNetCode finishWithResponse();
-    KiottyNetCode finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
+    bool            connected() const;
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);   // writeHttpWorkChunk
+    KiottyNetCode   finishWithResponse();
+    KiottyNetCode   finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
 };
 
-class KiottyNet_HttpServer {
+class KiottyNet_HttpServer {                         // destroy 를 소유한다 (OwnedHandle). 이동만
 public:
     KiottyNet_HttpServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetHttpLimits& limits);
     explicit operator bool() const;                  // create 가 실패하면 false
+    KiottyNetCode             code() const;          // create 의 코드
     KiottyNetHttpServerHandle handle() const;
 
     // 라우트 등록. 두 가지 오버로드가 있다.
@@ -1249,10 +1450,12 @@ public:
     KiottyNetCode options(const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode notFound(KiottyNetHttpRoute route);
     KiottyNetCode notFound(KiottyNetHttpRequestAction on_request);
+    KiottyNetCode onDisconnected(KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
+    KiottyNetCode onError(KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
-    KiottyNetCode serveMemory(const char* url_path, KiottyNetSpan data, const char* content_type);
+    KiottyNetCode serveMemory(const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);
 
     KiottyNetCode run(const KiottyNetAddress& address);
     KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);   // TLS
@@ -1265,8 +1468,11 @@ public:
 
 ```cpp
 KiottyNet_HttpServer server(context.handle(), config, limits);
+if (!server) { return server.code(); }
 
-server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
+server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) {
+    KiottyNet_HttpResponse(r).body(KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, KiottyNetSpan{ "{\"ok\":true}", 11 });
+});
 
 // 긴 작업 : onRequest 에서 startWork, onWorkStarted 에서 worker 로 넘기고, worker 가 응답을 채워 finish
 server.get("/report", KiottyNet_makeHttpRoute(&app,
@@ -1276,21 +1482,45 @@ server.get("/report", KiottyNet_makeHttpRoute(&app,
     [](KiottyNetAppContext ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r, KiottyNetHttpWorkHandle w) {
         std::string        query(q->query.data, q->query.length);
         KiottyNet_HttpWork work(w);
-        static_cast<App*>(ctx)->workerPool.post([query, r, work = std::move(work)]() mutable {   // C++14 init capture. C++11 은 shared_ptr 로
+        static_cast<App*>(ctx)->workerPool.post([query, r, work = std::move(work)]() mutable {   // C++14 init capture
             Result result = compute(query);
             if (!work.connected()) { return; }                                                // 끊겼으면 소멸자의 finishWithClose
-            KiottyNet_HttpResponse(r).body(result.span(), "application/json");
+            KiottyNet_HttpResponse(r).body(KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, result.span());
             work.finishWithResponse();
         });
     }));
 
-server.serveDirectory("/", "./www/");
-server.serveMemory("/app.wasm", wasm, "application/wasm");
+// 스트림 (SSE) : 헤더와 body 종류는 onRequest 에서 정한다. HEAD 면 이것만 나가고 Work 는 열리지 않는다
+server.get("/events", KiottyNet_makeHttpRoute(&app,
+    [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) {
+        KiottyNet_HttpResponse response(r);
+        response.header("Cache-Control", "no-cache");
+        response.bodyStream(KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);
+        response.startWork();
+    },
+    [](KiottyNetAppContext ctx, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle, KiottyNetHttpWorkHandle w) {
+        KiottyNet_HttpWork work(w);
+        static_cast<App*>(ctx)->workerPool.post([ctx, work = std::move(work)]() mutable {
+            std::string event;
+            while (static_cast<App*>(ctx)->events.waitFor(event, 15000))                    // 이벤트가 없으면 끝
+            {
+                KiottyNetResult sent = work.write(KiottyNetSpan{ event.data(), event.size() }, 5000);   // "data: ...\n\n"
+                if (sent.code != KIOTTY_NET_CODE_SUCCESS) { return; }                        // PEER_CLOSED, CLOSED, TIMEOUT. 소멸자가 finishWithClose
+            }
+            work.finishWithResponse();                                                       // 끝 chunk. keep-alive 면 다음 요청
+        });
+    }));
+
+server.onDisconnected(onDisconnected, &app);                                    // 감사 로그 : info 와 끝난 이유
+server.serveDirectory("/", "./www/");                                           // 라우트 뒤에 등록한다 (등록 순서 = 매칭 순서)
+server.serveMemory("/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasm);
 KiottyNetAddress address;
 KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
 std::thread io([&] { server.run(address); });                                   // TLS 면 server.run(address, tls)
 server.await(3000);
 ```
+
+MCP Streamable HTTP 서버의 골격 (POST / GET / DELETE `/mcp`, 202, 404, 406, SSE 응답, GET 스트림) 은 [design_http_v0.html](../design/design_http_v0.html) 6절과 `tests/integration/kiotty_test_http_mcp.cpp` 다.
 
 ### 10. WebSocket / WebSocketServer
 
