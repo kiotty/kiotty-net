@@ -1,6 +1,6 @@
 #include "kiotty_net_base.h"
 
-#include "context/kiotty_action.h"
+#include "domain/entity/kiotty_action.h"
 #include "context/kiotty_configuration.h"
 #include "context/kiotty_context.h"
 #include "context/kiotty_tls_configuration.h"

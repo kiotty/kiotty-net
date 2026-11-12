@@ -129,7 +129,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
     src/implementation/context/kiotty_tls_configuration.cpp
-    src/implementation/context/kiotty_action.cpp
+    src/implementation/domain/entity/kiotty_action.cpp
     src/implementation/context/kiotty_run_gate.cpp
     src/implementation/context/kiotty_run_lifetime.cpp
     src/implementation/context/kiotty_connection_access.cpp

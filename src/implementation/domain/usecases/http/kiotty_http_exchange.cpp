@@ -1,6 +1,6 @@
 #include "domain/usecases/http/kiotty_http_exchange.h"
 
-#include "context/kiotty_action.h"
+#include "domain/entity/kiotty_action.h"
 #include "core/kiotty_clock.h"
 #include "data/repository/http/kiotty_http_site.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"

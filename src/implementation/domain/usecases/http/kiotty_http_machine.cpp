@@ -1,6 +1,6 @@
 #include "domain/usecases/http/kiotty_http_machine.h"
 
-#include "context/kiotty_action.h"
+#include "domain/entity/kiotty_action.h"
 #include "domain/usecases/http/kiotty_http_exchange.h"
 #include "domain/usecases/http/kiotty_http_message_framing.h"
 
