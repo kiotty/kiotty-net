@@ -89,10 +89,12 @@ WSL Release, TLS OFF (`build/wsl-bench`, epoll), `--benchmark_min_time=1s --benc
 
 Windows MSVC Release (`build/msvc-bench`) 에서는 Server 를 쓰는 benchmark (EchoRoundtrip, WriteHeavy, BroadcastFanOut) 가 90 초 안에 끝나지 않는다. HEAD 에서도 똑같이 멈추므로 B1 이 만든 것이 아니다. EventClientWriteHeavy 는 둘 다 돈다 (575 us / 571 us). 원인은 따로 본다.
 
+2026-11-12 원인: benchmark 의 문제였고 라이브러리는 무관하다. `BenchServer` 는 멤버 순서상 `port(unusedPort())` 가 `_context(KiottyNet_initializeContext())` 보다 먼저 돈다. benchmark 는 gtest 의 `PlatformEnvironment` 가 없어서 그때 Winsock 이 시작되지 않았고, `isBindable` 의 `socket()` 이 매번 실패해 `unusedPort` 의 `while` 이 끝나지 않았다. Client benchmark 는 Context 를 먼저 만들어서 돌았고, Linux 는 WSAStartup 이 없어서 돌았다. 고친 것: `tests/benchmark/kiotty_bench_platform.cpp` (프로세스 시작 때 WSAStartup, POSIX 는 SIGPIPE 무시), `unusedPort` 의 시도를 `LEASED_PORT_COUNT` 번으로 묶고 넘으면 `kernelChosenPort`. 그 뒤 MSVC Release 의 benchmark 26 개가 모두 끝까지 돈다 (TLS 둘은 TLS OFF 빌드라 SKIP).
+
 ## 하지 않은 것
 
 - HTTP 설계 11절이 적은 `NotifyLatency` benchmark 는 없다. notify 쪽은 `BroadcastFanOut` 으로 대신 비교했다.
-- Windows Release 의 Server benchmark 가 멈추는 것 (위). B1 전부터 있던 일이라 이 사이클에서 고치지 않았다.
+- Windows Release 의 Server benchmark 가 멈추는 것 (위). B1 전부터 있던 일이라 이 사이클에서 고치지 않았다. 2026-11-12 에 고쳤다 (위).
 - StreamClient 는 `send_timeout_milliseconds` 를 쓰지 않는다 (동기 write 가 호출마다 timeout 을 받는다). requirement 의 주석에 적었다.
 
 ## CI

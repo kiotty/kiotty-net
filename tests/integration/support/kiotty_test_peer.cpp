@@ -244,12 +244,15 @@ namespace kiotty_test
         {
             return kernelChosenPort();
         }
-        uint16_t port = leasedPort(lease);
-        while (!isBindable(port))
+        for (uint32_t attempt = 0; attempt < LEASED_PORT_COUNT; ++attempt)
         {
-            port = leasedPort(lease);
+            const uint16_t port = leasedPort(lease);
+            if (isBindable(port))
+            {
+                return port;
+            }
         }
-        return port;
+        return kernelChosenPort();
     }
 
     std::string uniqueSocketPath()
