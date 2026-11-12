@@ -270,11 +270,11 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_addHttpRoute(
 KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpNotFound(
     KiottyNetHttpServerHandle server,
     KiottyNetHttpRoute route);
-KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpDisconnectedAction(
+KIOTTY_NET_API KiottyNetCode             KiottyNet_onHttpDisconnected(
     KiottyNetHttpServerHandle server,
     KiottyNetHttpDisconnectedAction on_disconnected,
     KiottyNetAppContext app_context);
-KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpErrorAction(
+KIOTTY_NET_API KiottyNetCode             KiottyNet_onHttpError(
     KiottyNetHttpServerHandle server,
     KiottyNetHttpErrorAction on_error,
     KiottyNetAppContext app_context);
@@ -861,14 +861,14 @@ inline KiottyNetCode KiottyNet_HttpServer::onDisconnected(
     KiottyNetHttpDisconnectedAction on_disconnected,
     KiottyNetAppContext app_context)
 {
-    return KiottyNet_setHttpDisconnectedAction(_handle.get(), on_disconnected, app_context);
+    return KiottyNet_onHttpDisconnected(_handle.get(), on_disconnected, app_context);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::onError(
     KiottyNetHttpErrorAction on_error,
     KiottyNetAppContext app_context)
 {
-    return KiottyNet_setHttpErrorAction(_handle.get(), on_error, app_context);
+    return KiottyNet_onHttpError(_handle.get(), on_error, app_context);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::serveDirectory(

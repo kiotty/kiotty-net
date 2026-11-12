@@ -133,7 +133,7 @@
   <tr><td>5</td><td>JSON 은 라이브러리에 두지 않는다</td><td>MCP 를 만드는 사용자가 가져다 쓴다</td></tr>
   <tr><td>6</td><td>정적 서빙 셋 (디렉토리, 파일, URL 경로에 메모리) 은 반드시 넣는다. sendfile 경로는 두지 않고 응답 버퍼 조각으로 보낸다</td><td>장비의 웹 UI. MCP 의 binary resource 는 앱이 worker 에서 base64 로 JSON 에 넣는다</td></tr>
   <tr><td>7</td><td>Work 스트림의 chunk 를 여러 write 로 나눠도 사이에 끼어드는 것은 없다 (닫음)</td><td>코드 확인: <code>SendFlow::isBlocked()</code> 가 Work 중 drain 을 막는다</td></tr>
-  <tr><td>8</td><td><b>base 의 송신 순서는 (c) "한 WRITE 에 send 다음 notify, 둘 다".</b> 2.1</td><td>지금 코드 (설계 v4 9.6: 한 WRITE 에 한 맥락, notify 먼저) 는 notify 가 계속 들어오면 응답이 굶는다. 처음 의도 (<code>design_base_v7_feedback.html</code> 2절: 같이 싣는다) 로 돌아간다</td></tr>
+  <tr><td>8</td><td><b>base 의 송신 순서는 (c) "한 WRITE 에 send 다음 notify, 둘 다".</b> 2.1</td><td>지금 코드 (설계 v4 9.6: 한 WRITE 에 한 맥락, notify 먼저) 는 notify 가 계속 들어오면 응답이 굶는다. 처음 의도 (v7 피드백 2절: 같이 싣는다. 그 문서는 지웠고 git 기록에 있다) 로 돌아간다</td></tr>
   <tr><td>9</td><td><b>base 에 송신 timeout 을 둔다.</b> 상대가 읽지 않아 WRITE 가 끝나지 않으면 서버가 끊고 <code>onDisconnected</code> 의 reason 으로 알린다. 2.2</td><td>읽지 않는 클라이언트가 Session 과 push Stage 를 붙잡는다. worker 가 thread 를 오래 붙잡는 것은 사용자의 handler 과실이라 계산하지 않는다</td></tr>
   <tr><td>10</td><td>HttpClient 는 이 판에 넣지 않는다. MCP 클라이언트는 연결을 둘 이상 연다 (GET 스트림 하나, 요청 하나 이상) 는 전제로 다음 판에서 "body 를 받은 만큼 꺼내는 read" 하나를 정한다</td><td>SSE 응답은 끝나지 않는 body 하나라 통째로 돌려주는 API 로는 받을 수 없다</td></tr>
   <tr><td>11</td><td>GET 스트림 하나가 worker 하나를 쓰는 것을 받아들인다 (2026-11-11)</td><td>MCP 의 GET 스트림은 클라이언트 (session) 마다 따로다. 같은 알림을 여러 클라이언트에 보낼 때도 앱이 session 마다의 큐에 넣고 각 worker 가 자기 스트림에 쓴다. 한 스트림을 여럿에게 나눠 보내는 일 (fan-out) 은 MCP 에 없다. 많은 브라우저에 실시간으로 뿌리는 일은 WebSocket 의 broadcast 가 맡는다</td></tr>
@@ -144,7 +144,7 @@
   <tr><td>16</td><td>HEAD 는 라이브러리가 처리한다. GET 라우트를 실행하고 body 를 떼며, <code>onRequest</code> 에서 스트림을 정한 라우트는 Work 를 열지 않고 헤더만 보내고 다음 요청으로 간다 (4.9) (2026-11-11)</td><td>worker 를 쓰지 않고 HEAD 를 끝낸다. 앱이 직접 처리해도 되지만 하지 않아도 틀리지 않게 한다</td></tr>
   <tr><td>17</td><td><code>KiottyNetHttpLimits</code> 에 WebSocket 타이머 셋 (ping 간격, pong timeout, close timeout) 과 <code>configureHttpWebSocketTimers</code> 를 더한다 (2026-11-11)</td><td>WebSocket 전용 설정 struct 를 없앴다 (websocket 설계 결정 11). WebSocketClient 도 이 limits 를 받는다</td></tr>
   <tr><td>18</td><td><b>주소와 TLS 설정은 create 가 아니라 run / connect 가 받는다.</b> 서버와 클라이언트 모두. create 는 자원 (연결 수, 버퍼, timeout, 재시도) 만 받는다. run / connect 의 TLS 인자가 NULL 이면 평문이다. TLS 설정 struct 와 그 initialize / configure 는 지금 것 그대로 쓴다. endpoint 는 TLS 를 쓰든 안 쓰든 TLS Stage 를 최대치로 잡아 둔다. SSL_CTX 는 run / connect 마다 새로 만든다 (2.3) (2026-11-11)</td><td>DICOM 라이브러리가 자기 Context 를 만들 때 Server / Client 를 전부 만들고, Association 은 그 자원 위에서 연다. 접속할 원격 AE 의 주소, TLS 사용 여부, trust store, 인증서, 버전, cipher 는 실행 중에 정해지고 바뀐다. 같은 주소에서 http:// 와 https:// 를 바꾸는 것과 같은 느낌이고, Node.js 도 port 를 listen 때 정한다. endpoint 마다의 TLS 설정 함수 (init + builder) 는 핸들 종류마다 함수가 늘어 버렸고, 미리 만드는 TlsProfile 핸들은 설정이 바뀔 때마다 새 자원이 필요해 버렸다. SSL_CTX 를 재사용하지 않는 것은 run / connect 가 자주 불리는 함수가 아니고, 같은 경로의 인증서 파일이 바뀐 것 (인증서 갱신) 을 놓치지 않기 위해서다</td></tr>
-  <tr><td>19</td><td>결정 15 의 <code>KiottyNetHttpServerHandler</code> 와 run 의 handler 인자를 없앤다. 끊김과 오류는 콜백 타입 둘 (<code>KiottyNetHttpDisconnectedAction(app_context, info, reason)</code>, <code>KiottyNetHttpErrorAction(app_context, info, code, message)</code>) 과 등록 함수 둘 (<code>KiottyNet_setHttpDisconnectedAction(server, action, app_context)</code>, <code>KiottyNet_setHttpErrorAction(server, action, app_context)</code>) 이다. run 전에 라우트처럼 등록한다. 끊김 콜백에는 <code>KiottyNetConnectionHandle</code> 이 없다. base 의 <code>onDisconnected</code> 와 StateMachine 의 <code>releaseConnectionContext</code> 에서도 handle 을 뺀다 (2026-11-12)</td><td>handler struct 하나를 run 에 넘기는 모양은 라우트 (콜백 하나씩, 등록 함수, <code>KiottyNet_makeHttpRoute</code>) 와 사용 경험이 갑자기 달랐다. 끊긴 연결의 handle 로는 할 수 있는 일이 없다 (모든 함수가 <code>PEER_CLOSED</code>). 연결마다 남길 것은 base 에선 <code>connection_context</code>, HTTP 에선 <code>info</code> 로 충분하다</td></tr>
+  <tr><td>19</td><td>결정 15 의 <code>KiottyNetHttpServerHandler</code> 와 run 의 handler 인자를 없앤다. 끊김과 오류는 콜백 타입 둘 (<code>KiottyNetHttpDisconnectedAction(app_context, info, reason)</code>, <code>KiottyNetHttpErrorAction(app_context, info, code, message)</code>) 과 등록 함수 둘 (<code>KiottyNet_onHttpDisconnected(server, action, app_context)</code>, <code>KiottyNet_onHttpError(server, action, app_context)</code>) 이다. run 전에 라우트처럼 등록한다. 끊김 콜백에는 <code>KiottyNetConnectionHandle</code> 이 없다. base 의 <code>onDisconnected</code> 와 StateMachine 의 <code>releaseConnectionContext</code> 에서도 handle 을 뺀다 (2026-11-12)</td><td>handler struct 하나를 run 에 넘기는 모양은 라우트 (콜백 하나씩, 등록 함수, <code>KiottyNet_makeHttpRoute</code>) 와 사용 경험이 갑자기 달랐다. 끊긴 연결의 handle 로는 할 수 있는 일이 없다 (모든 함수가 <code>PEER_CLOSED</code>). 연결마다 남길 것은 base 에선 <code>connection_context</code>, HTTP 에선 <code>info</code> 로 충분하다</td></tr>
 </table>
 
 <h2 id="s2">2. base 에 먼저 필요한 것</h2>
@@ -539,8 +539,8 @@ KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const ch
 KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);   /* 인자 순서와 타입 변경 */
 typedef void (*KiottyNetHttpDisconnectedAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode reason);                  /* 추가 (결정 19) */
 typedef void (*KiottyNetHttpErrorAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);     /* 추가 (결정 19) */
-KiottyNetCode KiottyNet_setHttpDisconnectedAction(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   /* 추가. NULL 이면 지운다 */
-KiottyNetCode KiottyNet_setHttpErrorAction(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        /* 추가. NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   /* 추가. NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        /* 추가. NULL 이면 지운다 */
 
 KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls);   /* tls 는 NULL 이면 평문 (2.3) */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
@@ -598,8 +598,8 @@ public:
     KiottyNetCode             code() const;                     // 추가
     KiottyNetHttpServerHandle handle() const;
     ...                                                         // route / get / ... / notFound 의 두 overload, serve* (serveMemory 는 type 이 enum), close / await
-    KiottyNetCode             onDisconnected(KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   // 추가 (결정 19). setHttpDisconnectedAction
-    KiottyNetCode             onError(KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        // 추가 (결정 19). setHttpErrorAction
+    KiottyNetCode             onDisconnected(KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   // 추가 (결정 19). onHttpDisconnected
+    KiottyNetCode             onError(KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        // 추가 (결정 19). onHttpError
     KiottyNetCode             run(const KiottyNetAddress&amp; address);                                                             // handler 인자 없음 (결정 19)
     KiottyNetCode             run(const KiottyNetAddress&amp; address, const KiottyNetTlsServerConfiguration&amp; tls);                // 추가 (2.3). TLS 를 받던 생성자는 없앤다
 };</code></pre>
@@ -831,7 +831,7 @@ int main()
   <tr><td>WebSocket Upgrade</td><td>http.h, <code>HttpServer::upgrade</code></td><td>websocket.h 로 미룸</td><td>websocket.h (http.h 를 include). <code>HttpServer::upgrade</code> 와 WebSocketServer 는 없다</td></tr>
   <tr><td>정적 파일 송신</td><td>sendfile / TransmitFile "가능하면"</td><td>chunk</td><td>응답 버퍼 조각. sendfile 없음</td></tr>
   <tr><td>base 송신</td><td>requirement 4절 "write lane 먼저"</td><td>코드는 "notify 먼저, 한 맥락"</td><td>한 WRITE 에 send 다음 notify (2.1), send timeout (2.2)</td></tr>
-  <tr><td><code>runHttpServer</code></td><td><code>run(handler, app_context)</code> (7절 표)</td><td><code>(server)</code></td><td><code>(server, address, tls)</code>. 주소와 tls 는 2.3. 끊김 / 오류는 <code>setHttpDisconnectedAction</code>, <code>setHttpErrorAction</code> (결정 19)</td></tr>
+  <tr><td><code>runHttpServer</code></td><td><code>run(handler, app_context)</code> (7절 표)</td><td><code>(server)</code></td><td><code>(server, address, tls)</code>. 주소와 tls 는 2.3. 끊김 / 오류는 <code>onHttpDisconnected</code>, <code>onHttpError</code> (결정 19)</td></tr>
   <tr><td>주소와 tls</td><td>create 가 받음</td><td>create 가 받음</td><td>run 이 받는다 (2.3, 1절 결정 18)</td></tr>
   <tr><td>HttpClient</td><td>11절 초안</td><td>없음</td><td>다음 판 (1절 결정 10)</td></tr>
 </table>

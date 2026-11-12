@@ -162,7 +162,7 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 
 ### 1.5 Work / timeout
 
-설계 v4 (`docs/design/design_base_v4.md`) 9.5 (dispatch → apply, onTimeout), 9.7 (WorkContext 네 상태, ConnectionStream, closeStream), 11절 (TIMEOUT 과 CLOSE) 이 이 절을 대신한다. 옛 DRAINING / startWork(handle) 설명은 지웠다.
+설계 v4 (지금은 `docs/design/design_base_v5.html`, 절 번호가 같다) 9.5 (dispatch → apply, onTimeout), 9.7 (WorkContext 네 상태, ConnectionStream, closeStream), 11절 (TIMEOUT 과 CLOSE) 이 이 절을 대신한다. 옛 DRAINING / startWork(handle) 설명은 지웠다.
 
 ### 1.6 송신 : write lane, notify, broadcast
 

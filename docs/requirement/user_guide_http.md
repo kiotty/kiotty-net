@@ -199,8 +199,8 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 ```c
 typedef void (*KiottyNetHttpDisconnectedAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode reason);
 typedef void (*KiottyNetHttpErrorAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
-KiottyNetCode KiottyNet_setHttpDisconnectedAction(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
-KiottyNetCode KiottyNet_setHttpErrorAction(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
+KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
+KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
 ```
 
 | action | 언제 |
@@ -343,7 +343,7 @@ int main(void)
     KiottyNet_serveHttpMemory(server, "/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasm_span());
     KiottyNet_serveHttpDirectory(server, "/", "./www/");
 
-    KiottyNet_setHttpDisconnectedAction(server, onDisconnected, &app);
+    KiottyNet_onHttpDisconnected(server, onDisconnected, &app);
     KiottyNet_runHttpServer(server, &address, NULL);
 
     KiottyNet_destroyHttpServer(context, server);
@@ -468,7 +468,7 @@ int main()
 | 함수 | 코드 | 뜻 |
 |---|---|---|
 | `addHttpRoute`, `setHttpNotFound`, `serveHttp*` | `KIOTTY_NET_CODE_TABLE_FULL` | `max_routes` 초과 |
-| `setHttpDisconnectedAction`, `setHttpErrorAction` | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
+| `onHttpDisconnected`, `onHttpError` | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
 | | `KIOTTY_NET_CODE_DUPLICATE_RULE` | 같은 (method, path) |
 | | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | path 형식 / 길이, `onRequest` NULL, 지원하지 않는 method, 끝에 `/` 없는 url_prefix |
 | | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |

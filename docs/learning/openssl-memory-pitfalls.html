@@ -53,7 +53,7 @@ footer{margin-top:60px;color:var(--muted);font-size:.85rem;border-top:1px solid 
 <header class="top">
 <h1>OpenSSL 메모리를 고정 arena 에 가둘 때의 함정</h1>
 <p class="sub">R8 (TlsMemory) 에서 실제로 부딪힌 것과 그 진단 방법</p>
-<p class="meta">작성일 2026-11-05 · OpenSSL 3.6.1 (정적 링크, <code>KIOTTY_NET_USES_TLS_STATIC_LIBRARY</code>) · 관련 문서: <code>docs/design/design_base_v4.md</code> 19.5 ~ 19.7, <code>docs/progress/261105_progress_base_r8.md</code> · 코드: <code>src/implementation/base/tls/kiotty_tls_memory.*</code>, <code>backend/kiotty_openssl_tls.cpp</code></p>
+<p class="meta">작성일 2026-11-05 · OpenSSL 3.6.1 (정적 링크, <code>KIOTTY_NET_USES_TLS_STATIC_LIBRARY</code>) · 관련 문서: <code>docs/design/design_base_v5.html</code> 19절 (v4 의 19.5 ~ 19.7), <code>docs/progress/261105_progress_base_r8.md</code> · 코드: <code>src/implementation/base/tls/kiotty_tls_memory.*</code>, <code>backend/kiotty_openssl_tls.cpp</code></p>
 </header>
 
 <div class="box warn"><strong>이 방식은 버렸다 (2026-11-05)</strong>아래의 <code>TlsMemory</code> (hook, 전역 arena, Owner 서브풀, 예열, Scope 의 attach / detach) 는 R8 에서 만들고 보정까지 한 뒤 뺐다. OpenSSL 의 lazy 할당을 수명이 맞는 arena 로 보내는 규칙이 OpenSSL 내부 동작 (파일 이름, ERR 칸의 표시, provider 키 캐시) 에 기대며 계속 늘었기 때문이다. 지금 kiotty 는 OpenSSL 의 기본 malloc 을 쓴다 (설계 v4 19.5). 이 노트는 다시 hook 을 검토할 때 같은 함정을 다시 밟지 않도록 남긴다.</div>
