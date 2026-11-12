@@ -492,6 +492,60 @@ TEST_F(HttpServerTest, BodyOverTheLimitIsContentTooLargeAndCloses)
     EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, app.disconnectList()[0]);
 }
 
+TEST_F(HttpServerTest, ExpectContinueGetsAnInterimResponseBeforeTheBody)
+{
+    create();
+    route(KIOTTY_NET_HTTP_METHOD_POST, "/echo", onEcho);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    std::string interim;
+    send(peer, "POST /echo HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n");
+    ASSERT_TRUE(readHead(peer, interim));
+    EXPECT_EQ("HTTP/1.1 100 Continue\r\n\r\n", interim);
+    send(peer, "hello");
+    const Response sized = readResponse(peer);
+    EXPECT_EQ(201, sized.status);
+    EXPECT_EQ("hello", sized.body);
+    send(peer, "POST /echo HTTP/1.1\r\nExpect: 100-continue\r\nTransfer-Encoding: chunked\r\n\r\n");
+    ASSERT_TRUE(readHead(peer, interim));
+    EXPECT_EQ("HTTP/1.1 100 Continue\r\n\r\n", interim);
+    send(peer, "3\r\nabc\r\n0\r\n\r\n");
+    const Response chunked = readResponse(peer);
+    EXPECT_EQ(201, chunked.status);
+    EXPECT_EQ("abc", chunked.body);
+}
+
+TEST_F(HttpServerTest, ExpectContinueOverTheLimitIsContentTooLargeWithoutContinue)
+{
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureHttpBodyCapacity(&limits, 4));
+    create();
+    route(KIOTTY_NET_HTTP_METHOD_POST, "/echo", onEcho);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    send(peer, "POST /echo HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n");
+    const Response response = readResponse(peer);
+    EXPECT_EQ(413, response.status);
+    EXPECT_TRUE(isClosedByServer(peer));
+}
+
+TEST_F(HttpServerTest, ExpectIsIgnoredForHttpOneZeroAndRequestsWithoutABody)
+{
+    create();
+    route(KIOTTY_NET_HTTP_METHOD_POST, "/echo", onEcho);
+    route(KIOTTY_NET_HTTP_METHOD_GET, "/health", onHealth);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    send(peer, "GET /health HTTP/1.1\r\nExpect: 100-continue\r\n\r\n");
+    EXPECT_EQ(200, readResponse(peer).status);
+    send(peer, "POST /echo HTTP/1.0\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\nhello");
+    const Response response = readResponse(peer);
+    EXPECT_EQ(201, response.status);
+    EXPECT_EQ("hello", response.body);
+}
+
 TEST_F(HttpServerTest, TooManyHeadersAreHeaderFieldsTooLarge)
 {
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureHttpHeaderCapacity(&limits, 1024, 2));

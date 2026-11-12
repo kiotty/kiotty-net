@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define KIOTTY_NET_ANY_STATE  (-1)
-#define KIOTTY_NET_MAX_NEXT   4
+#define KIOTTY_NET_MAX_NEXT   8
 
 typedef enum KiottyNetConnectionEventType
 {
@@ -105,6 +105,8 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_runStatefulEventClient(
 #ifdef __cplusplus
 }
 
+#include <type_traits>
+
 namespace kiotty
 {
     namespace net
@@ -121,21 +123,16 @@ namespace kiotty
                 KiottyNetTransitionAction transition_action,
                 KiottyNetNextStates next);
 
-            template <typename State>
-            constexpr Rule to(State a) const;
-            template <typename State>
-            constexpr Rule to(State a, State b) const;
-            template <typename State>
-            constexpr Rule to(State a, State b, State c) const;
-            template <typename State>
-            constexpr Rule to(State a, State b, State c, State d) const;
+            template <typename State, typename... Rest>
+            constexpr Rule to(State first, Rest... rest) const;
 
             KiottyNetRule raw;
         };
 
-        static_assert(
-            KIOTTY_NET_MAX_NEXT == 4,
-            "Rule::to overloads assume KIOTTY_NET_MAX_NEXT == 4");
+        template <typename State>
+        constexpr bool sameTypes();
+        template <typename State, typename Other, typename... Rest>
+        constexpr bool sameTypes();
 
         template <size_t N>
         struct Table
@@ -246,7 +243,7 @@ namespace kiotty
             int32_t state,
             KiottyNetConnectionEventType event,
             KiottyNetTransitionAction transition_action)
-            : raw{ state, event, transition_action, { { 0, 0, 0, 0 }, 0 } }
+            : raw{ state, event, transition_action, { { 0 }, 0 } }
         {
         }
 
@@ -259,32 +256,27 @@ namespace kiotty
         {
         }
 
-        template <typename State>
-        constexpr Rule Rule::to(State a) const
+        template <typename State, typename... Rest>
+        constexpr Rule Rule::to(State first, Rest... rest) const
         {
-            const KiottyNetNextStates next = { { static_cast<int32_t>(a), 0, 0, 0 }, 1 };
+            static_assert(sizeof...(Rest) < KIOTTY_NET_MAX_NEXT, "too many next states");
+            static_assert(sameTypes<State, Rest...>(), "next states must share one type");
+            const uint32_t count = static_cast<uint32_t>(1 + sizeof...(Rest));
+            const KiottyNetNextStates next = {
+                { static_cast<int32_t>(first), static_cast<int32_t>(rest)... }, count };
             return Rule(raw.state, raw.event, raw.transition_action, next);
         }
 
         template <typename State>
-        constexpr Rule Rule::to(State a, State b) const
+        constexpr bool sameTypes()
         {
-            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), 0, 0 }, 2 };
-            return Rule(raw.state, raw.event, raw.transition_action, next);
+            return true;
         }
 
-        template <typename State>
-        constexpr Rule Rule::to(State a, State b, State c) const
+        template <typename State, typename Other, typename... Rest>
+        constexpr bool sameTypes()
         {
-            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), 0 }, 3 };
-            return Rule(raw.state, raw.event, raw.transition_action, next);
-        }
-
-        template <typename State>
-        constexpr Rule Rule::to(State a, State b, State c, State d) const
-        {
-            const KiottyNetNextStates next = { { static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c), static_cast<int32_t>(d) }, 4 };
-            return Rule(raw.state, raw.event, raw.transition_action, next);
+            return std::is_same<State, Other>::value && sameTypes<Other, Rest...>();
         }
 
         constexpr FromWhen::FromWhen(int32_t state_, KiottyNetConnectionEventType event_)

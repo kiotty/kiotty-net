@@ -906,7 +906,7 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 - `WORK_STARTED` 에서 돌려준 entry action 은 Connection 이 아니라 Stream 에 적용된다. HOLD / READ / READ_UNTIL / WRITE / CLOSE 면 그 자리에서 `KiottyNet_closeConnectionStream(stream, entry_action)`. `thenWork()` 면 Stream 을 그대로 두는데, action 이 `stream` 을 worker 에게 넘겼다는 뜻이다. 그 action 이 잘못되었으면 (`INVALID_ARGUMENT`, `BUFFER_FULL`) `onError` 로 알리고 Stream 은 열린 채 남는다. `WORK_STARTED` 행이 없으면 `UNHANDLED_EVENT` 로 Stream 이 닫힌다.
 - `CLOSED` 는 마지막 Event 다. 그 action 의 Transition 은 무시된다. 그 뒤에 release 가 불린다. `CLOSED` 행이 없어도 release 는 하고, `UNHANDLED_EVENT` 는 알리지 않는다 (이미 닫힌 연결이다).
 - 표에 (state, event) 행이 없으면 `onError(KIOTTY_NET_CODE_UNHANDLED_EVENT)` 뒤 `thenClose`. 조용히 무시하지 않는다. 정확 일치 행이 ANY 행보다 우선한다.
-- `.to(...)` 는 action 이 갈 수 있는 다음 상태 목록이다. 목록 밖으로 가면 `onError(KIOTTY_NET_CODE_ILLEGAL_TRANSITION)` 뒤 `thenClose`. release 빌드에서도 검사한다 (사용자 결정 2026-11-09). `.to()` 가 없는 행 (`next.count` 0) 은 검사하지 않는다.
+- `.to(...)` 는 action 이 갈 수 있는 다음 상태 목록이다. 목록 밖으로 가면 `onError(KIOTTY_NET_CODE_ILLEGAL_TRANSITION)` 뒤 `thenClose`. release 빌드에서도 검사한다 (사용자 결정 2026-11-09). `.to()` 가 없는 행 (`next.count` 0) 은 검사하지 않는다. 한 행의 다음 상태는 `KIOTTY_NET_MAX_NEXT` (8) 개까지다 (2026-11-12 4 에서 8 로. HTTP 헤더 줄 행이 다섯을 쓴다). C++ 의 `.to()` 는 가변 인자 하나이고 개수와 타입을 컴파일 타임에 검사한다.
 - `event.data` 는 수신 Stage 를 가리키며 action 이 return 하면 무효다. 보관하려면 Session 으로 복사한다.
 - 표는 컴파일 타임 상수다. C++ 의 `KiottyNet_rules()` 는 (state, event) 로 정렬하고 중복 행을 컴파일 에러로 만든다. C 의 표는 `static const` 배열이며 run 이 시작할 때 중복을 검사해 `KIOTTY_NET_CODE_DUPLICATE_RULE` 을 돌려준다. machine 이나 표가 NULL 이면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
 
@@ -914,7 +914,7 @@ HTTP, WebSocket, Custom Protocol 작성을 돕는 **선택적 계층**이다. Co
 
 ```c
 #define KIOTTY_NET_ANY_STATE  (-1)
-#define KIOTTY_NET_MAX_NEXT   4
+#define KIOTTY_NET_MAX_NEXT   8
 
 typedef enum KiottyNetConnectionEventType { KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ, KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN, KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED, KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT, KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED } KiottyNetConnectionEventType;
 

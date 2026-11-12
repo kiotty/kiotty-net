@@ -39,7 +39,7 @@ HttpServer 가 처음으로 돈다. 요청을 읽고, 라우트를 부르고, �
 - 연결 수 초과의 `onError(TABLE_FULL)` 는 테스트하지 않았다. base 는 자리가 없으면 accept 를 멈추고 새 연결을 OS backlog 에 두므로 (`IoLoop::rearmAccept`) 경합 때만 TABLE_FULL 이 난다. 대신 자리가 날 때까지 기다린 연결이 응답을 받는 것과, 오류 action 이 TLS handshake 실패를 받는 것을 본다. 설계 4.9 / 11절과 user guide 1.7 의 문장을 이에 맞췄다.
 - user guide 1.1 / 1.10 의 `OUT_OF_MEMORY` 를 뺐다. base 와 같이 메모리를 잡지 못하면 process 가 끝난다.
 - usecases 가 `context/kiotty_action.h` (action 만들기) 를 include 했다. 의존 방향 (수칙 7.3) 에서 어긋나서 같은 날 `domain/entity/kiotty_action.h/.cpp` 로 옮겼다 (사용자 결정).
-- `Expect: 100-continue` 는 처리하지 않는다. curl 은 1 KiB 넘는 body 에 이것을 보내고 1 초 기다린 뒤 body 를 보낸다. 처리 방법은 `261112_01_100-continue.md` 에 적었다.
+- `Expect: 100-continue` 는 H3 첫 판에서 빠졌다가 같은 날 넣었다. 이를 위해 `KIOTTY_NET_MAX_NEXT` 를 8 로 올렸다 (사용자 결정). 내용은 `261112_01_100-continue.md`.
 
 ## 테스트
 

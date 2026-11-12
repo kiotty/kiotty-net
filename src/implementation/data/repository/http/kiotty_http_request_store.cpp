@@ -82,6 +82,12 @@ namespace kiotty::net::implementation
         return NO_ERROR_STATUS;
     }
 
+    bool HttpRequestStore::expectsContinue() const
+    {
+        const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };
+        return implementation::expectsContinue(_version, found);
+    }
+
     const KiottyNetHttpRequest& HttpRequestStore::request() const
     {
         return _request;

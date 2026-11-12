@@ -35,4 +35,5 @@ namespace kiotty::net::implementation
     LengthResult  parseChunkSize(Span<const char> line);
     FramingResult selectBodyFraming(Span<const KiottyNetHttpHeader> headers);
     Persistence   decidePersistence(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
+    bool          expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
 }

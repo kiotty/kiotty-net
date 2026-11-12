@@ -16,6 +16,8 @@ namespace kiotty::net::implementation
 
         constexpr size_t CHUNK_END_BYTES = 2;
         constexpr KiottyNetHttpStatus CONTENT_TOO_LARGE = KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE;
+        constexpr char          CONTINUE_LINE[] = "HTTP/1.1 100 Continue\r\n\r\n";
+        constexpr KiottyNetSpan CONTINUE_SPAN{ CONTINUE_LINE, sizeof(CONTINUE_LINE) - 1 };
 
         KiottyNetTransition onConnected(Context context, Connection connection, Event event);
         KiottyNetTransition onRequestLine(Context context, Connection connection, Event event);
@@ -25,12 +27,15 @@ namespace kiotty::net::implementation
         KiottyNetTransition onChunkData(Context context, Connection connection, Event event);
         KiottyNetTransition onChunkEnd(Context context, Connection connection, Event event);
         KiottyNetTransition onTrailer(Context context, Connection connection, Event event);
+        KiottyNetTransition onContinued(Context context, Connection connection, Event event);
         KiottyNetTransition onSent(Context context, Connection connection, Event event);
         KiottyNetTransition onTimeout(Context context, Connection connection, Event event);
         KiottyNetTransition onClosed(Context context, Connection connection, Event event);
 
         KiottyNetTransition afterHeaders(HttpSession& session);
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length);
+        KiottyNetTransition beginBody(HttpSession& session);
+        KiottyNetTransition readFirstBody(HttpSession& session);
         KiottyNetTransition takeBody(HttpSession& session, KiottyNetSpan data, HttpState more);
         uint32_t            bodyTimeOf(const HttpSession& session);
 
@@ -50,6 +55,7 @@ namespace kiotty::net::implementation
         constexpr HttpState CHUNK_DATA = HttpState::CHUNK_DATA;
         constexpr HttpState CHUNK_END = HttpState::CHUNK_END;
         constexpr HttpState TRAILER = HttpState::TRAILER;
+        constexpr HttpState CONTINUING = HttpState::CONTINUING;
         constexpr HttpState SENDING = HttpState::SENDING;
         constexpr HttpState CLOSING = HttpState::CLOSING;
 
@@ -65,7 +71,7 @@ namespace kiotty::net::implementation
             KiottyNet_from(HEADER_LINE)
                 .when(READ)
                 .then(onHeaderLine)
-                .to(HEADER_LINE, BODY, CHUNK_SIZE, SENDING),
+                .to(HEADER_LINE, BODY, CHUNK_SIZE, CONTINUING, SENDING),
             KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING),
             KiottyNet_from(CHUNK_SIZE)
                 .when(READ)
@@ -77,6 +83,7 @@ namespace kiotty::net::implementation
                 .to(CHUNK_DATA, CHUNK_END, SENDING),
             KiottyNet_from(CHUNK_END).when(READ).then(onChunkEnd).to(CHUNK_SIZE, SENDING),
             KiottyNet_from(TRAILER).when(READ).then(onTrailer).to(TRAILER, SENDING),
+            KiottyNet_from(CONTINUING).when(WRITTEN).then(onContinued).to(BODY, CHUNK_SIZE),
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
@@ -159,6 +166,11 @@ namespace kiotty::net::implementation
             return readLine(session, TRAILER, bodyTimeOf(session));
         }
 
+        KiottyNetTransition onContinued(Context context, Connection, Event)
+        {
+            return readFirstBody(sessionOf(context));
+        }
+
         KiottyNetTransition onSent(Context context, Connection connection, Event event)
         {
             HttpSession& session = sessionOf(context);
@@ -191,7 +203,7 @@ namespace kiotty::net::implementation
             case BodyKind::LENGTH:
                 return afterLength(session, framing.value.length);
             case BodyKind::CHUNKED:
-                return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
+                return beginBody(session);
             }
             return dispatch(session);
         }
@@ -202,7 +214,19 @@ namespace kiotty::net::implementation
             if (is_too_large) { return reject(session, KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE); }
             if (length == 0) { return dispatch(session); }
             session.body_remaining = length;
-            return readBody(session, BODY);
+            return beginBody(session);
+        }
+
+        KiottyNetTransition beginBody(HttpSession& session)
+        {
+            if (!session.request.expectsContinue()) { return readFirstBody(session); }
+            return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
+        }
+
+        KiottyNetTransition readFirstBody(HttpSession& session)
+        {
+            if (session.body_remaining > 0) { return readBody(session, BODY); }
+            return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
         KiottyNetTransition takeBody(HttpSession& session, KiottyNetSpan data, HttpState more)

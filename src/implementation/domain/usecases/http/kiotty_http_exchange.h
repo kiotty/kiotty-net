@@ -18,6 +18,7 @@ namespace kiotty::net::implementation
         CHUNK_DATA,
         CHUNK_END,
         TRAILER,
+        CONTINUING,
         SENDING,
         CLOSING
     };

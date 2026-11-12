@@ -30,6 +30,8 @@ namespace kiotty::net::implementation
         constexpr char CHUNKED[] = "chunked";
         constexpr char CLOSE_OPTION[] = "close";
         constexpr char KEEP_ALIVE_OPTION[] = "keep-alive";
+        constexpr char EXPECT[] = "Expect";
+        constexpr char CONTINUE_EXPECTATION[] = "100-continue";
 
         FramingHeaders collectFraming(Span<const KiottyNetHttpHeader> headers);
         FramingResult  frameByEncoding(const FramingHeaders& found);
@@ -72,6 +74,19 @@ namespace kiotty::net::implementation
         if (option == Option::KEEP_ALIVE) { return Persistence::KEEP_ALIVE; }
         if (version == HttpVersion::V11) { return Persistence::KEEP_ALIVE; }
         return Persistence::CLOSE;
+    }
+
+    bool expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers)
+    {
+        if (version != HttpVersion::V11) { return false; }
+        for (const KiottyNetHttpHeader& header : headers)
+        {
+            const bool is_expect = equalsLiteralIgnoreCase(spanOf(header.name), EXPECT);
+            const Span<const char> value = spanOf(header.value);
+            const bool is_continue = equalsLiteralIgnoreCase(value, CONTINUE_EXPECTATION);
+            if (is_expect && is_continue) { return true; }
+        }
+        return false;
     }
 
     namespace

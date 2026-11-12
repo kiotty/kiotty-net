@@ -8,6 +8,7 @@
 
 using kiotty::net::implementation::BodyKind;
 using kiotty::net::implementation::decidePersistence;
+using kiotty::net::implementation::expectsContinue;
 using kiotty::net::implementation::FramingResult;
 using kiotty::net::implementation::HttpVersion;
 using kiotty::net::implementation::LengthResult;
@@ -57,6 +58,12 @@ namespace
     {
         const std::vector<KiottyNetHttpHeader> headers = headersOf(fields);
         return decidePersistence(version, Span<const KiottyNetHttpHeader>{ headers.data(), headers.size() });
+    }
+
+    bool continueOf(HttpVersion version, const std::vector<Field>& fields)
+    {
+        const std::vector<KiottyNetHttpHeader> headers = headersOf(fields);
+        return expectsContinue(version, Span<const KiottyNetHttpHeader>{ headers.data(), headers.size() });
     }
 
     KiottyNetHttpStatus lengthStatusOf(const std::string& text)
@@ -197,4 +204,14 @@ TEST(HttpPersistence, CloseWinsOverKeepAliveInAnyList)
     EXPECT_EQ(Persistence::CLOSE, persistenceOf(HttpVersion::V11, { { "Connection", "keep-alive , close" } }));
     EXPECT_EQ(Persistence::CLOSE,
               persistenceOf(HttpVersion::V10, { { "Connection", "keep-alive" }, { "Connection", "close" } }));
+}
+
+TEST(HttpExpectContinue, OnlyHttpOneOneWithTheContinueExpectation)
+{
+    EXPECT_TRUE(continueOf(HttpVersion::V11, { { "Expect", "100-continue" } }));
+    EXPECT_TRUE(continueOf(HttpVersion::V11, { { "Host", "a" }, { "expect", "100-Continue" } }));
+    EXPECT_FALSE(continueOf(HttpVersion::V10, { { "Expect", "100-continue" } }));
+    EXPECT_FALSE(continueOf(HttpVersion::V11, { { "Expect", "something-else" } }));
+    EXPECT_FALSE(continueOf(HttpVersion::V11, { { "X-Expect", "100-continue" } }));
+    EXPECT_FALSE(continueOf(HttpVersion::V11, {}));
 }

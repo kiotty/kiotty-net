@@ -23,6 +23,7 @@ namespace kiotty::net::implementation
         KiottyNetHttpStatus         takeHeader(Span<const char> line);
         FramingResult               finishHeaders();
         KiottyNetHttpStatus         appendBody(Span<const char> data);
+        bool                        expectsContinue() const;
         const KiottyNetHttpRequest& request() const;
 
     private:
