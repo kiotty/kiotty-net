@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <type_traits>
 
@@ -33,6 +34,14 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.stream_client_result, sizeof(KiottyNetStreamClientResult));
     EXPECT_EQ(c.transition, sizeof(KiottyNetTransition));
     EXPECT_EQ(c.rule, sizeof(KiottyNetRule));
+    EXPECT_EQ(c.http_limits, sizeof(KiottyNetHttpLimits));
+    EXPECT_EQ(c.http_request, sizeof(KiottyNetHttpRequest));
+    EXPECT_EQ(c.http_response_handle, sizeof(KiottyNetHttpResponseHandle));
+    EXPECT_EQ(c.http_work_handle, sizeof(KiottyNetHttpWorkHandle));
+    EXPECT_EQ(c.http_route, sizeof(KiottyNetHttpRoute));
+    EXPECT_EQ(c.http_server_result, sizeof(KiottyNetHttpServerResult));
+    EXPECT_EQ(c.http_server_handler, sizeof(KiottyNetHttpServerHandler));
+    EXPECT_EQ(c.http_request_keep_alive, offsetof(KiottyNetHttpRequest, keep_alive));
 }
 
 TEST(Headers, CAndCppSeeTheSameEnumeratorValues)
@@ -43,6 +52,31 @@ TEST(Headers, CAndCppSeeTheSameEnumeratorValues)
     EXPECT_EQ(static_cast<int>(KIOTTY_NET_CODE_INVALID_ENCODING), 25);
     EXPECT_EQ(c.last_action_type, static_cast<int>(KIOTTY_NET_ACTION_TYPE_CLOSE));
     EXPECT_EQ(c.last_tls_verification, static_cast<int>(KIOTTY_NET_TLS_VERIFICATION_NONE));
+    EXPECT_EQ(c.http_content_type_count, static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT));
+    EXPECT_EQ(c.http_status_header_fields_too_large, 431);
+}
+
+TEST(Headers, HttpRequestKeepAliveIsTheAbiBool)
+{
+    EXPECT_TRUE((std::is_same<decltype(KiottyNetHttpRequest::keep_alive), KiottyNetBool>::value));
+    EXPECT_EQ(sizeof(KiottyNetBool), sizeof(int32_t));
+}
+
+TEST(Headers, HttpContentTypesEndWithByExtensionThenCustom)
+{
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM), 0);
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION) + 1,
+              static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM));
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM) + 1,
+              static_cast<int>(KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT));
+}
+
+TEST(Headers, HttpStatusEnumeratorsAreTheWireCodes)
+{
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS), 101);
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_STATUS_ACCEPTED), 202);
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_STATUS_NOT_ACCEPTABLE), 406);
+    EXPECT_EQ(static_cast<int>(KIOTTY_NET_HTTP_STATUS_SERVICE_UNAVAILABLE), 503);
 }
 
 TEST(Headers, CRuleMacroAndCppRuleFillTheSameNextStates)

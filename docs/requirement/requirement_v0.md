@@ -1050,7 +1050,7 @@ std::thread                 io([&] { KiottyNet_runStatefulServer(server.handle()
 
 ### 9. HttpServer
 
-> 이 절은 지금의 `include/kiotty_net_http.h` 를 적는다. 다시 설계한 판 (Streamable HTTP, Work stream, status / content type enum) 은 [design_http_v0.html](../design/design_http_v0.html) 에 있고 cycle H1 에서 헤더와 이 절에 들어온다.
+> 이 절은 공개 API 판 v1 을 적는다. `include/kiotty_net_http.h` 는 cycle H1 (2026-11-12) 에서 판 v2 (Streamable HTTP, Work 스트림, status / content type enum, 서버 handler, `{ code, handle }`) 가 되었고, 이 절은 cycle H6 에서 v2 로 고친다. 그때까지 v2 의 기준은 [design_http_v0.html](../design/design_http_v0.html) 4, 5절과 [user_guide_http.md](user_guide_http.md) 다.
 
 HTTP/1.1 서버. 7절 Server 위에 라이브러리가 구현한 HTTP StateMachine 을 얹은 것이다. 사용자는 라우트를 등록하고 응답을 채운다.
 

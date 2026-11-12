@@ -28,11 +28,21 @@ typedef struct KiottyTestHeaderLayout
     size_t stream_client_result;
     size_t transition;
     size_t rule;
+    size_t http_limits;
+    size_t http_request;
+    size_t http_response_handle;
+    size_t http_work_handle;
+    size_t http_route;
+    size_t http_server_result;
+    size_t http_server_handler;
+    size_t http_request_keep_alive;
     size_t rule_next_count;
     int    rule_second_next;
     int    last_tls_verification;
     int    last_code;
     int    last_action_type;
+    int    http_content_type_count;
+    int    http_status_header_fields_too_large;
 } KiottyTestHeaderLayout;
 
 KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void);

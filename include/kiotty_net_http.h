@@ -34,6 +34,9 @@ typedef struct KiottyNetHttpLimits
     size_t   response_bytes;
     uint32_t header_timeout_milliseconds;
     uint32_t keep_alive_timeout_milliseconds;
+    uint32_t websocket_ping_interval_milliseconds;
+    uint32_t websocket_pong_timeout_milliseconds;
+    uint32_t websocket_close_timeout_milliseconds;
 } KiottyNetHttpLimits;
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeHttpLimits(KiottyNetHttpLimits* limits);
@@ -54,6 +57,92 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureHttpTimeouts(
     KiottyNetHttpLimits* limits,
     uint32_t header_timeout_milliseconds,
     uint32_t keep_alive_timeout_milliseconds);
+KIOTTY_NET_API KiottyNetCode KiottyNet_configureHttpWebSocketTimers(
+    KiottyNetHttpLimits* limits,
+    uint32_t ping_interval_milliseconds,
+    uint32_t pong_timeout_milliseconds,
+    uint32_t close_timeout_milliseconds);
+
+typedef enum KiottyNetHttpStatus
+{
+    KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS     = 101,
+    KIOTTY_NET_HTTP_STATUS_OK                      = 200,
+    KIOTTY_NET_HTTP_STATUS_CREATED                 = 201,
+    KIOTTY_NET_HTTP_STATUS_ACCEPTED                = 202,
+    KIOTTY_NET_HTTP_STATUS_NO_CONTENT              = 204,
+    KIOTTY_NET_HTTP_STATUS_MOVED_PERMANENTLY       = 301,
+    KIOTTY_NET_HTTP_STATUS_FOUND                   = 302,
+    KIOTTY_NET_HTTP_STATUS_NOT_MODIFIED            = 304,
+    KIOTTY_NET_HTTP_STATUS_BAD_REQUEST             = 400,
+    KIOTTY_NET_HTTP_STATUS_UNAUTHORIZED            = 401,
+    KIOTTY_NET_HTTP_STATUS_FORBIDDEN               = 403,
+    KIOTTY_NET_HTTP_STATUS_NOT_FOUND               = 404,
+    KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED      = 405,
+    KIOTTY_NET_HTTP_STATUS_NOT_ACCEPTABLE          = 406,
+    KIOTTY_NET_HTTP_STATUS_REQUEST_TIMEOUT         = 408,
+    KIOTTY_NET_HTTP_STATUS_CONFLICT                = 409,
+    KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE       = 413,
+    KIOTTY_NET_HTTP_STATUS_URI_TOO_LONG            = 414,
+    KIOTTY_NET_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE  = 415,
+    KIOTTY_NET_HTTP_STATUS_UPGRADE_REQUIRED        = 426,
+    KIOTTY_NET_HTTP_STATUS_TOO_MANY_REQUESTS       = 429,
+    KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE = 431,
+    KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR   = 500,
+    KIOTTY_NET_HTTP_STATUS_NOT_IMPLEMENTED         = 501,
+    KIOTTY_NET_HTTP_STATUS_SERVICE_UNAVAILABLE     = 503
+} KiottyNetHttpStatus;
+
+typedef enum KiottyNetHttpContentType
+{
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_HTML,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSS,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_CSV,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_MARKDOWN,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JAVASCRIPT,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROBLEM_JSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_NDJSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MANIFEST_JSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_XML,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_YAML,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FORM_URLENCODED,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_JSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_DICOM_XML,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_JSON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_FHIR_XML,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PROTOBUF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MSGPACK,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CBOR,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PNG,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_JPEG,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GIF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBP,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_AVIF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BMP,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_SVG,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ICON,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WOFF2,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TTF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OTF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP3,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WAV,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_OGG,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_MP4,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WEBM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_PDF,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_ZIP,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_GZIP,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_TAR,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_WASM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM,
+    KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT
+} KiottyNetHttpContentType;
 
 typedef struct KiottyNetHttpHeader
 {
@@ -70,7 +159,7 @@ typedef struct KiottyNetHttpRequest
     const KiottyNetHttpHeader* headers;
     size_t                     header_count;
     KiottyNetSpan              body;
-    int                        keep_alive;
+    KiottyNetBool              keep_alive;
 } KiottyNetHttpRequest;
 
 typedef struct KiottyNetHttpServer* KiottyNetHttpServerHandle;
@@ -98,20 +187,30 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpHeader(
     KiottyNetHttpResponseHandle response,
     const char* name,
     const char* value);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpCustomContentType(
+    KiottyNetHttpResponseHandle response,
+    const char* content_type);
 KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpBody(
     KiottyNetHttpResponseHandle response,
-    KiottyNetSpan data,
-    const char* content_type);
+    KiottyNetHttpContentType type,
+    KiottyNetSpan data);
 KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpBodyRef(
     KiottyNetHttpResponseHandle response,
-    KiottyNetSpan data,
-    const char* content_type);
+    KiottyNetHttpContentType type,
+    KiottyNetSpan data);
 KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpFile(
     KiottyNetHttpResponseHandle response,
-    const char* path,
-    const char* content_type);
+    KiottyNetHttpContentType type,
+    const char* path);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setHttpBodyStream(
+    KiottyNetHttpResponseHandle response,
+    KiottyNetHttpContentType type);
 KIOTTY_NET_API KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);
 
+KIOTTY_NET_API KiottyNetResult KiottyNet_writeHttpWorkChunk(
+    KiottyNetHttpWorkHandle work,
+    KiottyNetSpan data,
+    uint32_t timeout_milliseconds);
 KIOTTY_NET_API KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work);
 KIOTTY_NET_API KiottyNetCode KiottyNet_finishHttpWorkWithClose(
     KiottyNetHttpWorkHandle work,
@@ -140,7 +239,27 @@ KIOTTY_NET_API KiottyNetHttpRoute KiottyNet_makeHttpRoute(
     KiottyNetHttpRequestAction onRequest,
     KiottyNetHttpWorkAction onWorkStarted);
 
-KIOTTY_NET_API KiottyNetHttpServerHandle KiottyNet_createHttpServer(
+typedef struct KiottyNetHttpServerResult
+{
+    KiottyNetCode             code;
+    KiottyNetHttpServerHandle handle;
+} KiottyNetHttpServerResult;
+
+typedef struct KiottyNetHttpServerHandler
+{
+    void (*onDisconnected)(
+        KiottyNetAppContext app_context,
+        KiottyNetConnectionHandle connection,
+        KiottyNetConnectionInfo info,
+        KiottyNetCode reason);
+    void (*onError)(
+        KiottyNetAppContext app_context,
+        KiottyNetConnectionInfo info,
+        KiottyNetCode code,
+        const char* message);
+} KiottyNetHttpServerHandler;
+
+KIOTTY_NET_API KiottyNetHttpServerResult KiottyNet_createHttpServer(
     KiottyNetContext context,
     const KiottyNetServerConfiguration* configuration,
     const KiottyNetHttpLimits* limits);
@@ -166,12 +285,14 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_serveHttpFile(
 KIOTTY_NET_API KiottyNetCode             KiottyNet_serveHttpMemory(
     KiottyNetHttpServerHandle server,
     const char* url_path,
-    KiottyNetSpan data,
-    const char* content_type);
+    KiottyNetHttpContentType type,
+    KiottyNetSpan data);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_runHttpServer(
     KiottyNetHttpServerHandle server,
     const KiottyNetAddress* address,
-    const KiottyNetTlsServerConfiguration* tls);
+    const KiottyNetTlsServerConfiguration* tls,
+    const KiottyNetHttpServerHandler* handler,
+    KiottyNetAppContext app_context);
 KIOTTY_NET_API void KiottyNet_closeHttpServer(
     KiottyNetHttpServerHandle server);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_awaitHttpServer(
@@ -284,6 +405,10 @@ public:
     KiottyNet_HttpLimitsBuilder& timeouts(
         uint32_t header_timeout_milliseconds,
         uint32_t keep_alive_timeout_milliseconds);
+    KiottyNet_HttpLimitsBuilder& webSocketTimers(
+        uint32_t ping_interval_milliseconds,
+        uint32_t pong_timeout_milliseconds,
+        uint32_t close_timeout_milliseconds);
 
     KiottyNetCode build() const;
 
@@ -302,9 +427,13 @@ public:
     KiottyNetHttpResponseHandle handle() const;
     KiottyNetCode               status(int32_t status);
     KiottyNetCode               header(const char* name, const char* value);
-    KiottyNetCode               body(KiottyNetSpan data, const char* content_type);
-    KiottyNetCode               bodyRef(KiottyNetSpan data, const char* content_type);
-    KiottyNetCode               file(const char* path, const char* content_type = nullptr);
+    KiottyNetCode               customContentType(const char* content_type);
+    KiottyNetCode               body(KiottyNetHttpContentType type, KiottyNetSpan data);
+    KiottyNetCode               bodyRef(KiottyNetHttpContentType type, KiottyNetSpan data);
+    KiottyNetCode               file(
+        const char* path,
+        KiottyNetHttpContentType type = KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION);
+    KiottyNetCode               bodyStream(KiottyNetHttpContentType type);
     KiottyNetCode               startWork();
 
 private:
@@ -322,9 +451,10 @@ public:
     KiottyNet_HttpWork(const KiottyNet_HttpWork&) = delete;
     KiottyNet_HttpWork& operator=(const KiottyNet_HttpWork&) = delete;
 
-    bool          connected() const;
-    KiottyNetCode finishWithResponse();
-    KiottyNetCode finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
+    bool            connected() const;
+    KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+    KiottyNetCode   finishWithResponse();
+    KiottyNetCode   finishWithClose(KiottyNetCode reason = KIOTTY_NET_CODE_SUCCESS);
 
 private:
     KiottyNetHttpWorkHandle release();
@@ -341,6 +471,7 @@ public:
         const KiottyNetHttpLimits& limits);
 
     explicit operator bool() const;
+    KiottyNetCode             code() const;
     KiottyNetHttpServerHandle handle() const;
 
     KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
@@ -382,14 +513,26 @@ public:
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
-    KiottyNetCode serveMemory(const char* url_path, KiottyNetSpan data, const char* content_type);
+    KiottyNetCode serveMemory(const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);
 
     KiottyNetCode run(const KiottyNetAddress& address);
     KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);
+    KiottyNetCode run(
+        const KiottyNetAddress& address,
+        const KiottyNetHttpServerHandler& handler,
+        KiottyNetAppContext app_context);
+    KiottyNetCode run(
+        const KiottyNetAddress& address,
+        const KiottyNetTlsServerConfiguration& tls,
+        const KiottyNetHttpServerHandler& handler,
+        KiottyNetAppContext app_context);
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
 
 private:
+    KiottyNet_HttpServer(KiottyNetContext context, KiottyNetHttpServerResult result);
+
+    KiottyNetCode _code;
     kiotty::net::OwnedHandle<KiottyNetHttpServerHandle, KiottyNet_destroyHttpServer> _handle;
 };
 
@@ -437,6 +580,19 @@ inline KiottyNet_HttpLimitsBuilder& KiottyNet_HttpLimitsBuilder::timeouts(
     return *this;
 }
 
+inline KiottyNet_HttpLimitsBuilder& KiottyNet_HttpLimitsBuilder::webSocketTimers(
+    uint32_t ping_interval_milliseconds,
+    uint32_t pong_timeout_milliseconds,
+    uint32_t close_timeout_milliseconds)
+{
+    record(KiottyNet_configureHttpWebSocketTimers(
+        &_limits,
+        ping_interval_milliseconds,
+        pong_timeout_milliseconds,
+        close_timeout_milliseconds));
+    return *this;
+}
+
 inline KiottyNetCode KiottyNet_HttpLimitsBuilder::build() const
 {
     return _code;
@@ -470,19 +626,31 @@ inline KiottyNetCode KiottyNet_HttpResponse::header(const char* name, const char
     return KiottyNet_setHttpHeader(_handle, name, value);
 }
 
-inline KiottyNetCode KiottyNet_HttpResponse::body(KiottyNetSpan data, const char* content_type)
+inline KiottyNetCode KiottyNet_HttpResponse::customContentType(const char* content_type)
 {
-    return KiottyNet_setHttpBody(_handle, data, content_type);
+    return KiottyNet_setHttpCustomContentType(_handle, content_type);
 }
 
-inline KiottyNetCode KiottyNet_HttpResponse::bodyRef(KiottyNetSpan data, const char* content_type)
+inline KiottyNetCode KiottyNet_HttpResponse::body(KiottyNetHttpContentType type, KiottyNetSpan data)
 {
-    return KiottyNet_setHttpBodyRef(_handle, data, content_type);
+    return KiottyNet_setHttpBody(_handle, type, data);
 }
 
-inline KiottyNetCode KiottyNet_HttpResponse::file(const char* path, const char* content_type)
+inline KiottyNetCode KiottyNet_HttpResponse::bodyRef(
+    KiottyNetHttpContentType type,
+    KiottyNetSpan data)
 {
-    return KiottyNet_setHttpFile(_handle, path, content_type);
+    return KiottyNet_setHttpBodyRef(_handle, type, data);
+}
+
+inline KiottyNetCode KiottyNet_HttpResponse::file(const char* path, KiottyNetHttpContentType type)
+{
+    return KiottyNet_setHttpFile(_handle, type, path);
+}
+
+inline KiottyNetCode KiottyNet_HttpResponse::bodyStream(KiottyNetHttpContentType type)
+{
+    return KiottyNet_setHttpBodyStream(_handle, type);
 }
 
 inline KiottyNetCode KiottyNet_HttpResponse::startWork()
@@ -526,6 +694,11 @@ inline bool KiottyNet_HttpWork::connected() const
     return KiottyNet_isHttpWorkConnected(_work) != 0;
 }
 
+inline KiottyNetResult KiottyNet_HttpWork::write(KiottyNetSpan data, uint32_t timeout_milliseconds)
+{
+    return KiottyNet_writeHttpWorkChunk(_work, data, timeout_milliseconds);
+}
+
 inline KiottyNetCode KiottyNet_HttpWork::finishWithResponse()
 {
     return KiottyNet_finishHttpWorkWithResponse(release());
@@ -547,13 +720,26 @@ inline KiottyNet_HttpServer::KiottyNet_HttpServer(
     KiottyNetContext context,
     const KiottyNetServerConfiguration& configuration,
     const KiottyNetHttpLimits& limits)
-    : _handle(context, KiottyNet_createHttpServer(context, &configuration, &limits))
+    : KiottyNet_HttpServer(context, KiottyNet_createHttpServer(context, &configuration, &limits))
+{
+}
+
+inline KiottyNet_HttpServer::KiottyNet_HttpServer(
+    KiottyNetContext context,
+    KiottyNetHttpServerResult result)
+    : _code(result.code)
+    , _handle(context, result.handle)
 {
 }
 
 inline KiottyNet_HttpServer::operator bool() const
 {
     return _handle.get() != nullptr;
+}
+
+inline KiottyNetCode KiottyNet_HttpServer::code() const
+{
+    return _code;
 }
 
 inline KiottyNetHttpServerHandle KiottyNet_HttpServer::handle() const
@@ -688,22 +874,39 @@ inline KiottyNetCode KiottyNet_HttpServer::serveFile(const char* url_path, const
 
 inline KiottyNetCode KiottyNet_HttpServer::serveMemory(
     const char* url_path,
-    KiottyNetSpan data,
-    const char* content_type)
+    KiottyNetHttpContentType type,
+    KiottyNetSpan data)
 {
-    return KiottyNet_serveHttpMemory(_handle.get(), url_path, data, content_type);
+    return KiottyNet_serveHttpMemory(_handle.get(), url_path, type, data);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::run(const KiottyNetAddress& address)
 {
-    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr);
+    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr, nullptr, nullptr);
 }
 
 inline KiottyNetCode KiottyNet_HttpServer::run(
     const KiottyNetAddress& address,
     const KiottyNetTlsServerConfiguration& tls)
 {
-    return KiottyNet_runHttpServer(_handle.get(), &address, &tls);
+    return KiottyNet_runHttpServer(_handle.get(), &address, &tls, nullptr, nullptr);
+}
+
+inline KiottyNetCode KiottyNet_HttpServer::run(
+    const KiottyNetAddress& address,
+    const KiottyNetHttpServerHandler& handler,
+    KiottyNetAppContext app_context)
+{
+    return KiottyNet_runHttpServer(_handle.get(), &address, nullptr, &handler, app_context);
+}
+
+inline KiottyNetCode KiottyNet_HttpServer::run(
+    const KiottyNetAddress& address,
+    const KiottyNetTlsServerConfiguration& tls,
+    const KiottyNetHttpServerHandler& handler,
+    KiottyNetAppContext app_context)
+{
+    return KiottyNet_runHttpServer(_handle.get(), &address, &tls, &handler, app_context);
 }
 
 inline void KiottyNet_HttpServer::close()

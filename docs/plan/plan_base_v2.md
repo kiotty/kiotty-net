@@ -163,3 +163,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-11 base 사이클 B1 (`docs/progress/261111_progress_base_b1.md`): 한 WRITE 에 send Stage 다음 notify Stage (IoPayload 조각 둘, backend 넷의 gather 송신, TLS 의 encode 순서), notify / broadcast 의 여러 조각 복사, `send_timeout_milliseconds` (기본 30000) 와 `KIOTTY_NET_CODE_PEER_NOT_READING`. requirement 4절의 송신 순서를 코드에 맞췄다. 다음은 H1.
 
 2026-11-11 base 사이클 B2 (`docs/progress/261111_progress_base_b2.md`): 주소와 TLS 설정을 create 가 아니라 run / connect 가 받는다 (서버도). 설정 struct 의 `address` 제거, `initializeServer / ClientConfiguration`, `initializeTcp / PipeAddress`, TLS Stage 는 늘 최대치, SSL_CTX 는 run / connect 마다. DICOM 라이브러리의 Association 이 미리 만든 endpoint 위에서 다른 AE 와 TLS 설정으로 열리게 하기 위해서다 (`design_http_v0.html` 결정 18). 다음은 H1.
+
+2026-11-12 HTTP 사이클 H1 (`docs/progress/261112_progress_http_h1.md`): `kiotty_net_http.h` 공개 API 판 v2. status / content type enum, `setHttpCustomContentType`, body setter 의 type, `setHttpBodyStream`, `writeHttpWorkChunk`, `KiottyNetHttpServerResult`, `KiottyNetHttpServerHandler`, limits 의 WebSocket 타이머 셋, `keep_alive` 를 `KiottyNetBool` 로. `user_guide_http.md` 를 v2 로. 구현은 H2 부터. 다음은 H2.

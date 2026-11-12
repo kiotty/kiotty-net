@@ -34,10 +34,20 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.stream_client_result = sizeof(KiottyNetStreamClientResult);
     layout.transition           = sizeof(KiottyNetTransition);
     layout.rule                 = sizeof(KiottyNetRule);
+    layout.http_limits          = sizeof(KiottyNetHttpLimits);
+    layout.http_request         = sizeof(KiottyNetHttpRequest);
+    layout.http_response_handle = sizeof(KiottyNetHttpResponseHandle);
+    layout.http_work_handle     = sizeof(KiottyNetHttpWorkHandle);
+    layout.http_route           = sizeof(KiottyNetHttpRoute);
+    layout.http_server_result   = sizeof(KiottyNetHttpServerResult);
+    layout.http_server_handler  = sizeof(KiottyNetHttpServerHandler);
+    layout.http_request_keep_alive = offsetof(KiottyNetHttpRequest, keep_alive);
     layout.rule_next_count      = RULES[0].next.count;
     layout.rule_second_next     = RULES[0].next.at[1];
     layout.last_tls_verification = KIOTTY_NET_TLS_VERIFICATION_NONE;
     layout.last_code            = KIOTTY_NET_CODE_INVALID_ENCODING;
     layout.last_action_type     = KIOTTY_NET_ACTION_TYPE_CLOSE;
+    layout.http_content_type_count = KIOTTY_NET_HTTP_CONTENT_TYPE_COUNT;
+    layout.http_status_header_fields_too_large = KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE;
     return layout;
 }
