@@ -1171,14 +1171,14 @@ KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work)
 KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason);                          /* 보내지 않고 닫는다 */
 KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work);
 
-KiottyNetHttpServerHandle KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetHttpLimits* limits);   /* 실패하면 NULL */
+KiottyNetHttpServerHandle KiottyNet_createHttpServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetHttpLimits* limits);   /* 실패하면 NULL. 주소와 TLS 는 run 이 받는다 */
 void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
 KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);                          /* 아무 라우트도 안 맞을 때 */
 KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);  /* "/static/" -> "./www/". ".." 포함 경로는 403. content type 은 확장자로 */
 KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);         /* "/favicon.ico" -> "./www/favicon.ico" */
 KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetSpan data, const char* content_type);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server);
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls);   /* tls 가 NULL 이면 평문 */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);
 ```
@@ -1223,7 +1223,6 @@ public:
 class KiottyNet_HttpServer {
 public:
     KiottyNet_HttpServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetHttpLimits& limits);
-    KiottyNet_HttpServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetTlsServerConfiguration& tls, const KiottyNetHttpLimits& limits);   // TLS
     explicit operator bool() const;                  // create 가 실패하면 false
     KiottyNetHttpServerHandle handle() const;
 
@@ -1255,7 +1254,8 @@ public:
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
     KiottyNetCode serveMemory(const char* url_path, KiottyNetSpan data, const char* content_type);
 
-    KiottyNetCode run();
+    KiottyNetCode run(const KiottyNetAddress& address);
+    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);   // TLS
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
 };
@@ -1286,7 +1286,9 @@ server.get("/report", KiottyNet_makeHttpRoute(&app,
 
 server.serveDirectory("/", "./www/");
 server.serveMemory("/app.wasm", wasm, "application/wasm");
-std::thread io([&] { server.run(); });
+KiottyNetAddress address;
+KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
+std::thread io([&] { server.run(address); });                                   // TLS 면 server.run(address, tls)
 server.await(3000);
 ```
 
@@ -1390,9 +1392,9 @@ KiottyNetCode KiottyNet_sendWebSocket(KiottyNetWebSocketHandle websocket, Kiotty
 KiottyNetCode KiottyNet_closeWebSocket(KiottyNetWebSocketHandle websocket, uint16_t status, const char* reason);           /* 아무 thread 에서나. reason 은 NULL 이거나 KIOTTY_NET_MAX_WEB_SOCKET_REASON_LENGTH 미만 */
 
 typedef struct KiottyNetWebSocketServer* KiottyNetWebSocketServerHandle;
-KiottyNetWebSocketServerHandle KiottyNet_createWebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetTlsServerConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL */
+KiottyNetWebSocketServerHandle KiottyNet_createWebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration* configuration, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL. 주소와 TLS 는 run 이 받는다 */
 void          KiottyNet_destroyWebSocketServer(KiottyNetContext context, KiottyNetWebSocketServerHandle server);
-KiottyNetCode KiottyNet_runWebSocketServer(KiottyNetWebSocketServerHandle server, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);
+KiottyNetCode KiottyNet_runWebSocketServer(KiottyNetWebSocketServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);   /* tls 가 NULL 이면 ws */
 void          KiottyNet_closeWebSocketServer(KiottyNetWebSocketServerHandle server);
 KiottyNetCode KiottyNet_awaitWebSocketServer(KiottyNetWebSocketServerHandle server, uint64_t timeout_milliseconds);
 KiottyNetCode KiottyNet_broadcastWebSocketServer(KiottyNetWebSocketServerHandle server, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);   /* onOpen 이 나간 모든 소켓에 send. 하나라도 건너뛰면 KIOTTY_NET_CODE_BUFFER_FULL */
@@ -1426,10 +1428,10 @@ public:
 class KiottyNet_WebSocketServer {
 public:
     KiottyNet_WebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetWebSocketConfiguration& websocket);
-    KiottyNet_WebSocketServer(KiottyNetContext context, const KiottyNetServerConfiguration& configuration, const KiottyNetTlsServerConfiguration& tls, const KiottyNetWebSocketConfiguration& websocket);   // TLS
     explicit operator bool() const;                  // create 가 실패하면 false
     KiottyNetWebSocketServerHandle handle() const;
-    KiottyNetCode run(const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
+    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
+    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);   // wss
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
     KiottyNetCode broadcast(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
@@ -1448,7 +1450,9 @@ static const KiottyNetWebSocketHandler HANDLER = { nullptr, onOpen, onMessage, o
 KiottyNetWebSocketConfiguration websocket;
 KiottyNet_WebSocketConfigurationBuilder(websocket, "/ws").build();
 KiottyNet_WebSocketServer server(context.handle(), config, websocket);
-std::thread io([&] { server.run(HANDLER, &app); });
+KiottyNetAddress address;
+KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
+std::thread io([&] { server.run(address, HANDLER, &app); });
 
 // 앱 thread : 센서 값이 바뀌면 모든 클라이언트에게 push. 아무 thread 에서나
 server.broadcast(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.span());
@@ -1557,15 +1561,15 @@ if (allow.code == KIOTTY_NET_CODE_SUCCESS && (KiottyNet_getHttpAllowedMethods(&a
 
 **WebSocketClient.** 6절 EventClient 위에 10절과 같은 `KiottyNetWebSocketHandler` 와 `KiottyNetWebSocketConfiguration` 를 올린 것이다. 서버와 같은 콜백을 쓰므로 서버 쪽 코드를 그대로 옮길 수 있다. 선언은 `kiotty_net_websocket.h` 에 있다.
 
-- `run(handler, app_context)` 이 연결, HTTP Upgrade 핸드셰이크, loop 를 모두 한다. 101 을 받으면 `onOpen` 이고 그때부터 `await` 가 `KIOTTY_NET_CODE_SUCCESS` 다. `onUpgrade` 는 클라이언트에서 호출되지 않는다 (NULL 로 둔다).
+- `run(address, tls, handler, app_context)` 이 연결, HTTP Upgrade 핸드셰이크, loop 를 모두 한다. 주소의 host 가 Host 헤더와 SNI 이고, tls 가 NULL 이면 ws 다 (6절의 EventClient 와 같이 주소와 TLS 는 run 때). 101 을 받으면 `onOpen` 이고 그때부터 `await` 가 `KIOTTY_NET_CODE_SUCCESS` 다. `onUpgrade` 는 클라이언트에서 호출되지 않는다 (NULL 로 둔다).
 - 송신 frame 은 masking 한다 (클라이언트). 나머지 규칙(조각 합치기, ping / pong, close handshake, 설정)은 10절과 같다.
 - 앱 thread 에서 보내려면 서버와 같이 `KiottyNet_sendWebSocket(ws, opcode, data)` 를 아무 thread 에서나 부른다. `KiottyNet_sendWebSocketClient(client, opcode, data)` 는 그 소켓 하나의 `sendWebSocket` 이다 (`notifyEventClient` 와 같은 관계).
 
 ```c
 typedef struct KiottyNetWebSocketClient* KiottyNetWebSocketClientHandle;
-KiottyNetWebSocketClientHandle KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetTlsClientConfiguration* tls, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL */
+KiottyNetWebSocketClientHandle KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetWebSocketConfiguration* websocket);   /* 실패하면 NULL */
 void          KiottyNet_destroyWebSocketClient(KiottyNetContext context, KiottyNetWebSocketClientHandle client);
-KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);   /* 연결 + Upgrade + loop */
+KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);   /* 연결 + Upgrade + loop */
 void          KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client);                   /* close handshake 없이 끊는다. 정상 종료는 KiottyNet_closeWebSocket */
 KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle client, uint64_t timeout_milliseconds);
 KiottyNetWebSocketHandle KiottyNet_getWebSocketClientSocket(KiottyNetWebSocketClientHandle client);   /* onOpen 전이면 0 */
@@ -1576,10 +1580,10 @@ KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle clien
 class KiottyNet_WebSocketClient {
 public:
     KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetWebSocketConfiguration& websocket);
-    KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetTlsClientConfiguration& tls, const KiottyNetWebSocketConfiguration& websocket);   // TLS
     explicit operator bool() const;                  // create 가 실패하면 false
     KiottyNetWebSocketClientHandle handle() const;
-    KiottyNetCode            run(const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
+    KiottyNetCode            run(const KiottyNetAddress& address, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
+    KiottyNetCode            run(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);   // wss
     void                     close();
     KiottyNetCode            await(uint64_t timeout_milliseconds);
     KiottyNetWebSocketHandle socket() const;
