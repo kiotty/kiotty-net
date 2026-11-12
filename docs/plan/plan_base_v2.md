@@ -167,3 +167,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-12 HTTP 사이클 H1 (`docs/progress/261112_progress_http_h1.md`): `kiotty_net_http.h` 공개 API 판 v2. status / content type enum, `setHttpCustomContentType`, body setter 의 type, `setHttpBodyStream`, `writeHttpWorkChunk`, `KiottyNetHttpServerResult`, `KiottyNetHttpServerHandler`, limits 의 WebSocket 타이머 셋, `keep_alive` 를 `KiottyNetBool` 로. `user_guide_http.md` 를 v2 로. 구현은 H2 부터. 다음은 H2.
 
 2026-11-12 HTTP 사이클 H2 (`docs/progress/261112_progress_http_h2.md`): `domain/usecases/http/` 의 파서. request line, header line, Content-Length, chunk 크기, body 경계 (Transfer-Encoding 과 Content-Length 의 모호함은 400), keep-alive, 라우트 경로와 매칭, content type 표와 확장자, CUSTOM 이름. 요청 파서는 실패가 곧 자동 응답의 status 다. unit 69 개. 다음은 H3.
+
+2026-11-12 HTTP 사이클 H3 (`docs/progress/261112_progress_http_h3.md`): HttpServer 가 돈다. `HttpServer : Server`, Context 의 풀, HttpSite (라우트 표, 끊김 / 오류 action, Session 풀), 요청 / 응답 저장소, HTTP 표 (StateMachine rule 열하나), 자동 응답 (404 / 405 / OPTIONS / HEAD / 400 / 413 / 414 / 431 / 501), keep-alive, chunked 요청, Date 헤더. integration 21 개. 다음은 H4.

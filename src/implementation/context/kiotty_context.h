@@ -24,6 +24,7 @@ namespace kiotty::net::implementation
     using ServerResult = Result<KiottyNetServer&, KiottyNetCode>;
     using StreamClientResult = Result<KiottyNetStreamClient&, KiottyNetCode>;
     using EventClientResult = Result<KiottyNetEventClient&, KiottyNetCode>;
+    using HttpServerResult = Result<KiottyNetHttpServer&, KiottyNetCode>;
 
     class Context
     {
@@ -39,9 +40,11 @@ namespace kiotty::net::implementation
         ServerResult       createServer(const KiottyNetServerConfiguration& configuration);
         StreamClientResult createStreamClient(const KiottyNetClientConfiguration& configuration);
         EventClientResult  createEventClient(const KiottyNetClientConfiguration& configuration);
+        HttpServerResult   createHttpServer(const HttpServerConfiguration& configuration);
         void               destroy(KiottyNetServer& server);
         void               destroy(KiottyNetStreamClient& client);
         void               destroy(KiottyNetEventClient& client);
+        void               destroy(KiottyNetHttpServer& server);
 
     protected:
         Context();
@@ -57,6 +60,7 @@ namespace kiotty::net::implementation
         LazyReusablePool<KiottyNetServer>       _servers;
         LazyReusablePool<KiottyNetStreamClient> _stream_clients;
         LazyReusablePool<KiottyNetEventClient>  _event_clients;
+        LazyReusablePool<KiottyNetHttpServer>   _http_servers;
         std::mutex                              _mutex;
         ContextPhase                            _phase;
     };

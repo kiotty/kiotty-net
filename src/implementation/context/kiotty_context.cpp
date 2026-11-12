@@ -54,8 +54,10 @@ namespace kiotty::net::implementation
         }
         closeAll(_servers);
         closeAll(_event_clients);
+        closeAll(_http_servers);
         joinAll(_servers);
         joinAll(_event_clients);
+        joinAll(_http_servers);
         finishRelease();
     }
 
@@ -92,6 +94,17 @@ namespace kiotty::net::implementation
         return _event_clients.acquire(configuration);
     }
 
+    HttpServerResult Context::createHttpServer(const HttpServerConfiguration& configuration)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN)
+        {
+            return HttpServerResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+        }
+        sweep(_http_servers);
+        return _http_servers.acquire(configuration);
+    }
+
     void Context::destroy(KiottyNetServer& server)
     {
         retire(_servers, server);
@@ -109,10 +122,16 @@ namespace kiotty::net::implementation
         retire(_event_clients, client);
     }
 
+    void Context::destroy(KiottyNetHttpServer& server)
+    {
+        retire(_http_servers, server);
+    }
+
     Context::Context()
         : _servers()
         , _stream_clients()
         , _event_clients()
+        , _http_servers()
         , _mutex()
         , _phase(ContextPhase::CLOSED)
     {
@@ -158,6 +177,7 @@ namespace kiotty::net::implementation
         _servers.clear();
         _stream_clients.clear();
         _event_clients.clear();
+        _http_servers.clear();
         stopSockets();
         _phase = ContextPhase::CLOSED;
     }

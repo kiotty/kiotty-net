@@ -21,7 +21,7 @@
 
 ### 1.1 준비 : Context, ServerConfig, HttpLimits
 
-HttpServer 는 소유 handle 이다. `KiottyNet_createHttpServer` 가 만들고 `KiottyNet_destroyHttpServer` 가 없앤다. create 는 `KiottyNetHttpServerResult { code, handle }` 를 돌려준다. 실패하면 handle 이 `NULL` 이고 code 가 이유다 (`KIOTTY_NET_CODE_INVALID_ARGUMENT` 설정 미초기화 또는 `response_bytes` 가 상태줄 + 라이브러리 헤더 자리보다 작음, `KIOTTY_NET_CODE_TABLE_FULL`, `KIOTTY_NET_CODE_OUT_OF_MEMORY`). 만들 때 세 가지를 넘긴다.
+HttpServer 는 소유 handle 이다. `KiottyNet_createHttpServer` 가 만들고 `KiottyNet_destroyHttpServer` 가 없앤다. create 는 `KiottyNetHttpServerResult { code, handle }` 를 돌려준다. 실패하면 handle 이 `NULL` 이고 code 가 이유다 (`KIOTTY_NET_CODE_INVALID_ARGUMENT` 설정 미초기화 또는 `response_bytes` 가 상태줄 + 라이브러리 헤더 자리보다 작음, `KIOTTY_NET_CODE_TABLE_FULL`. 메모리를 잡지 못하면 process 가 끝난다). 만들 때 세 가지를 넘긴다.
 
 1. `KiottyNetContext` : `KiottyNet_initializeContext()` 가 돌려주는 `KiottyNetContextResult` 의 `handle`. 라이브러리 전역 컨텍스트다. 실패하면 `code` 가 `KIOTTY_NET_CODE_SUCCESS` 가 아니다. 소유 handle 은 모두 같은 context 를 받고, destroy 때도 같은 context 를 넘긴다.
 2. `KiottyNetServerConfiguration` : `max_clients`, 버퍼 크기. `KiottyNet_initializeServerConfiguration(&configuration)` 로 채우고 `KiottyNet_configureServer*` 로 바꾼다. 주소와 TLS 는 여기에 없고 `KiottyNet_runHttpServer` 가 받는다. 주소는 `KiottyNet_initializeTcpAddress(&address, host, port)` 또는 `KiottyNet_initializePipeAddress(&address, name)` 로 만든다. TLS 를 쓰면 `KiottyNetTlsServerConfiguration` 를 run 에 넘기고, 평문이면 `NULL`.
@@ -206,7 +206,7 @@ KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetH
 | action | 언제 |
 |---|---|
 | `on_disconnected(app_context, info, reason)` | 연결마다 한 번. reason: `KIOTTY_NET_CODE_SUCCESS` (keep-alive 아님, 다 보냄), `KIOTTY_NET_CODE_TIMEOUT` (header / keep-alive timeout), `KIOTTY_NET_CODE_PEER_CLOSED`, `KIOTTY_NET_CODE_PEER_NOT_READING` (base 의 send timeout), `KIOTTY_NET_CODE_PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤), `KIOTTY_NET_CODE_CLOSED` (서버 close). 연결의 handle 은 오지 않는다 (끊긴 뒤라 쓸 곳이 없다). 상대는 info 로 본다 |
-| `on_error(app_context, info, code, message)` | 연결이 생기기 전이나 연결과 따로 생기는 문제: `KIOTTY_NET_CODE_TABLE_FULL` (연결 수 초과), `KIOTTY_NET_CODE_TLS_*` (handshake 실패), accept 실패. 잘못된 요청은 on_disconnected 로 오고 여기로 두 번 오지 않는다 |
+| `on_error(app_context, info, code, message)` | 연결이 생기기 전이나 연결과 따로 생기는 문제: `KIOTTY_NET_CODE_TLS_*` (handshake 실패), `KIOTTY_NET_CODE_TABLE_FULL` (연결 수 초과. 자리가 없으면 서버가 accept 를 멈추고 새 연결은 OS 대기열에서 기다리므로 드물다), accept 실패. 잘못된 요청은 on_disconnected 로 오고 여기로 두 번 오지 않는다 |
 
 C++ 은 `server.onDisconnected(action, app_context)`, `server.onError(action, app_context)` 다.
 
@@ -472,7 +472,7 @@ int main()
 | | `KIOTTY_NET_CODE_DUPLICATE_RULE` | 같은 (method, path) |
 | | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | path 형식 / 길이, `onRequest` NULL, 지원하지 않는 method, 끝에 `/` 없는 url_prefix |
 | | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
-| `createHttpServer` | `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `KIOTTY_NET_CODE_TABLE_FULL`, `KIOTTY_NET_CODE_OUT_OF_MEMORY` | 1.1 |
+| `createHttpServer` | `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `KIOTTY_NET_CODE_TABLE_FULL` | 1.1. 메모리를 잡지 못하면 process 가 끝난다 (base 와 같다) |
 | `setHttpHeader`, `setHttpBody` | `KIOTTY_NET_CODE_BUFFER_FULL` | `response_bytes` 초과 |
 | `setHttpHeader` | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | `Content-Type`, 라이브러리 헤더, CR / LF |
 | body setter, `writeHttpWorkChunk` | `KIOTTY_NET_CODE_INVALID_ENCODING` | 텍스트 계열인데 UTF-8 아님 |

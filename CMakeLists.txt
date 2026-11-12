@@ -43,6 +43,7 @@ target_compile_definitions(kiotty_net_hardening INTERFACE
 set(KIOTTY_NET_SOURCES
     src/kiotty_net_base.cpp
     src/kiotty_net_statemachine.cpp
+    src/kiotty_net_http.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_deadline.cpp
     src/implementation/core/kiotty_parse_integer.cpp
@@ -112,6 +113,18 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_message_framing.cpp
     src/implementation/domain/usecases/http/kiotty_http_route_path.cpp
     src/implementation/domain/usecases/http/kiotty_http_content_type.cpp
+    src/implementation/domain/usecases/http/kiotty_http_response_text.cpp
+    src/implementation/domain/usecases/http/kiotty_http_exchange.cpp
+    src/implementation/domain/usecases/http/kiotty_http_machine.cpp
+    src/implementation/data/infra/clock/kiotty_wall_clock.cpp
+    src/implementation/data/repository/http/kiotty_http_request_store.cpp
+    src/implementation/data/repository/http/kiotty_http_response_store.cpp
+    src/implementation/data/repository/http/kiotty_http_registry.cpp
+    src/implementation/data/repository/http/kiotty_http_notices.cpp
+    src/implementation/data/repository/http/kiotty_http_session.cpp
+    src/implementation/data/repository/http/kiotty_http_session_pool.cpp
+    src/implementation/context/kiotty_http_configuration.cpp
+    src/implementation/context/kiotty_http_server.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
