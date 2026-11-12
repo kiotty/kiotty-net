@@ -16,7 +16,6 @@ namespace kiotty::net::implementation
         constexpr unsigned char ASCII_END = 0x80;
         constexpr char          UPPER_TO_LOWER = 'a' - 'A';
 
-        bool          isUtf8(Span<const char> text);
         size_t        measureSequence(Span<const char> rest);
         size_t        sequenceLength(unsigned char lead);
         ByteRange     secondByteRange(unsigned char lead);
@@ -46,20 +45,20 @@ namespace kiotty::net::implementation
         return true;
     }
 
+    bool isUtf8(Span<const char> text)
+    {
+        size_t position = 0;
+        while (position < text.length)
+        {
+            const size_t length = measureSequence(text.skip(position));
+            if (length == 0) { return false; }
+            position += length;
+        }
+        return true;
+    }
+
     namespace
     {
-        bool isUtf8(Span<const char> text)
-        {
-            size_t position = 0;
-            while (position < text.length)
-            {
-                const size_t length = measureSequence(text.skip(position));
-                if (length == 0) { return false; }
-                position += length;
-            }
-            return true;
-        }
-
         size_t measureSequence(Span<const char> rest)
         {
             const unsigned char lead = byteOf(rest[0]);

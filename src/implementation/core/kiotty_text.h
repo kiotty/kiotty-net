@@ -13,6 +13,7 @@ namespace kiotty::net::implementation
 
     TextResult parseText(const char* text, size_t max_length);
     bool       equalsIgnoreCase(Span<const char> left, Span<const char> right);
+    bool       isUtf8(Span<const char> text);
 
     template <size_t N>
     Span<const char> textOf(const char (&field)[N])

@@ -128,7 +128,7 @@ KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, Kiotty
 **content type.** `Content-Type` 은 body setter 의 `KiottyNetHttpContentType` 으로만 정한다. 라이브러리가 표에서 문자열을 꺼내 쓰므로 오타가 없다.
 
 - 목록은 텍스트 (`TEXT_PLAIN`, `TEXT_HTML`, `TEXT_CSS`, `TEXT_CSV`, `TEXT_MARKDOWN`, `JAVASCRIPT`, `EVENT_STREAM`), 구조화 데이터 (`JSON`, `PROBLEM_JSON`, `NDJSON`, `MANIFEST_JSON`, `XML`, `YAML`, `FORM_URLENCODED`), 의료 (`DICOM`, `DICOM_JSON`, `DICOM_XML`, `FHIR_JSON`, `FHIR_XML`), 바이너리 직렬화 (`PROTOBUF`, `MSGPACK`, `CBOR`), 이미지, 글꼴, 소리 / 영상, 문서 / 묶음 (`PDF`, `ZIP`, `GZIP`, `TAR`, `WASM`), `OCTET_STREAM` 이다. 각 값의 문자열과 확장자는 설계 4.3절의 표다.
-- 텍스트 계열 (텍스트, 구조화 데이터, `DICOM_JSON` / `DICOM_XML` / `FHIR_*`, `SVG`) 은 `; charset=utf-8` 이 붙고 UTF-8 을 검사한다. 복사 / 참조 body 는 setter 를 부를 때, 스트림은 chunk 마다다. UTF-8 이 아니면 `KIOTTY_NET_CODE_INVALID_ENCODING` 이고 body 는 바뀌지 않는다. 문법 (JSON 등) 은 보지 않는다.
+- 텍스트 묶음 (`TEXT_*`, `JAVASCRIPT`, `EVENT_STREAM`) 은 `; charset=utf-8` 이 붙는다. 그 묶음과 구조화 데이터, `DICOM_JSON` / `DICOM_XML` / `FHIR_*`, `SVG` 는 UTF-8 을 검사한다. 복사 / 참조 body 는 setter 를 부를 때, 스트림은 chunk 마다다. UTF-8 이 아니면 `KIOTTY_NET_CODE_INVALID_ENCODING` 이고 body 는 바뀌지 않는다. 문법 (JSON 등) 은 보지 않는다.
 - `BY_EXTENSION` 은 파일 (`setHttpFile`, 정적 경로) 에만, `EVENT_STREAM` 은 스트림에만 된다. 다른 자리면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
 - 목록 밖이거나 파라미터가 필요하면 (`multipart/related; type="application/dicom"; boundary=b1`) `setHttpCustomContentType` 으로 이름을 정하고 `CUSTOM` 을 넘긴다. 이름은 `KIOTTY_NET_MAX_CONTENT_TYPE_LENGTH` (64) 미만, `token/token` 뒤에 `; 이름=값` 이 0 개 이상, CR / LF 없음. 이름 없이 `CUSTOM` 이 오면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 그 응답 하나에만 유효하고, `CUSTOM` body 는 UTF-8 을 보지 않는다.
 

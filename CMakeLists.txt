@@ -106,6 +106,12 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_step.cpp
     src/implementation/domain/usecases/statemachine/kiotty_rule_table.cpp
     src/implementation/domain/usecases/statemachine/kiotty_stateful_handler.cpp
+    src/implementation/domain/usecases/http/kiotty_http_token.cpp
+    src/implementation/domain/usecases/http/kiotty_http_request_line.cpp
+    src/implementation/domain/usecases/http/kiotty_http_header_line.cpp
+    src/implementation/domain/usecases/http/kiotty_http_message_framing.cpp
+    src/implementation/domain/usecases/http/kiotty_http_route_path.cpp
+    src/implementation/domain/usecases/http/kiotty_http_content_type.cpp
     src/implementation/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/context/kiotty_endpoint.cpp
     src/implementation/context/kiotty_configuration.cpp
