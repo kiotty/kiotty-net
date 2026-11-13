@@ -302,7 +302,7 @@ namespace
                    KiottyNetHttpRequestAction action,
                    KiottyNetHttpWorkAction work)
         {
-            const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(&app, action, work);
+            const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(action, work);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, method, path, made));
         }
 
@@ -310,7 +310,7 @@ namespace
         {
             port = kiotty_test::unusedPort();
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_address, LOOPBACK_HOST, port));
-            _thread = std::thread([this]() { _code.store(KiottyNet_runHttpServer(server, &_address, nullptr)); });
+            _thread = std::thread([this]() { _code.store(KiottyNet_runHttpServer(server, &_address, nullptr, &app)); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 

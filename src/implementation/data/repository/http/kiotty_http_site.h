@@ -26,6 +26,7 @@ namespace kiotty::net::implementation
         size_t                    receive_capacity;
         size_t                    send_capacity;
         KiottyNetHttpServerHandle owner;
+        KiottyNetAppContext       app_context;
         KiottyNetWebSocketEndpoint* socket_owner;
         PushLane*                 lane;
         ClientUpgrade             upgrade;
@@ -41,6 +42,7 @@ namespace kiotty::net::implementation
         , receive_capacity(0)
         , send_capacity(0)
         , owner(nullptr)
+        , app_context(nullptr)
         , socket_owner(nullptr)
         , lane(nullptr)
         , upgrade{}

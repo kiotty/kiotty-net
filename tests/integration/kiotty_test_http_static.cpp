@@ -138,7 +138,7 @@ namespace
             const KiottyNetHttpServerResult created = KiottyNet_createHttpServer(context, &configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             server = created.handle;
-            const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(&app, onHealth, nullptr);
+            const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(onHealth, nullptr);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health", health));
         }
 
@@ -161,7 +161,7 @@ namespace
         {
             port = kiotty_test::unusedPort();
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_address, LOOPBACK_HOST, port));
-            _thread = std::thread([this]() { KiottyNet_runHttpServer(server, &_address, nullptr); });
+            _thread = std::thread([this]() { KiottyNet_runHttpServer(server, &_address, nullptr, &app); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 
@@ -274,7 +274,7 @@ TEST_F(HttpStaticTest, RouteAnswersWithAFile)
     app.report_path = pathOf(root / "report.csv");
     app.missing_path = pathOf(root / "none.csv");
     app.escaping_path = pathOf(root / "www" / ".." / "report.csv");
-    const KiottyNetHttpRoute report = KiottyNet_makeHttpRoute(&app, onReport, nullptr);
+    const KiottyNetHttpRoute report = KiottyNet_makeHttpRoute(onReport, nullptr);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/report", report));
     start();
     kiotty_test::LoopbackPeer peer;

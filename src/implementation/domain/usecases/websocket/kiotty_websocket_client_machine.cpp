@@ -208,7 +208,7 @@ namespace kiotty::net::implementation
                          const char* message)
         {
             const HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.notices.reportError(info, code, message);
+            site.notices.reportError(site.app_context, info, code, message);
         }
     }
 }

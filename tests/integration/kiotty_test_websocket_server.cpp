@@ -338,7 +338,7 @@ namespace
             const KiottyNetHttpServerResult created = KiottyNet_createHttpServer(context, &configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             server = created.handle;
-            const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(&app, onHealth, nullptr);
+            const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(onHealth, nullptr);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health", health));
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addWebSocket(server, "/chat", HANDLER, &chat));
         }
@@ -348,7 +348,7 @@ namespace
             if (server == nullptr) { create(); }
             port = kiotty_test::unusedPort();
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_address, LOOPBACK_HOST, port));
-            _thread = std::thread([this]() { _code.store(KiottyNet_runHttpServer(server, &_address, nullptr)); });
+            _thread = std::thread([this]() { _code.store(KiottyNet_runHttpServer(server, &_address, nullptr, &app)); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 
@@ -658,7 +658,7 @@ TEST_F(WebSocketServerTest, RegistrationRulesAndServerCloseGivesClosed1001)
 {
     create();
     const KiottyNetWebSocketHandler no_message = { nullptr, onOpen, nullptr, nullptr };
-    const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(&app, onHealth, nullptr);
+    const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(onHealth, nullptr);
     EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addWebSocket(server, "/chat", HANDLER, &chat));
     EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_POST, "/chat", health));
     EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addWebSocket(server, "/health", HANDLER, &chat));

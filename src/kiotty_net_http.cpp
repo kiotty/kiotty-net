@@ -201,12 +201,10 @@ KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work)
     return is_connected ? 1 : 0;
 }
 
-KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context,
-                                           KiottyNetHttpRequestAction onRequest,
+KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetHttpRequestAction onRequest,
                                            KiottyNetHttpWorkAction onWorkStarted)
 {
     KiottyNetHttpRoute route = {};
-    route.app_context = app_context;
     route.onRequest = onRequest;
     route.onWorkStarted = onWorkStarted;
     return route;
@@ -251,24 +249,22 @@ KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, Kiotty
 }
 
 KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server,
-                                           KiottyNetHttpDisconnectedAction on_disconnected,
-                                           KiottyNetAppContext app_context)
+                                           KiottyNetHttpDisconnectedAction on_disconnected)
 {
     if (server == nullptr) { return INVALID; }
     const net::NoticesResult notices = server->notices();
     if (!notices) { return notices.code; }
-    notices.value().setDisconnected(on_disconnected, app_context);
+    notices.value().setDisconnected(on_disconnected);
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server,
-                                    KiottyNetHttpErrorAction on_error,
-                                    KiottyNetAppContext app_context)
+                                    KiottyNetHttpErrorAction on_error)
 {
     if (server == nullptr) { return INVALID; }
     const net::NoticesResult notices = server->notices();
     if (!notices) { return notices.code; }
-    notices.value().setError(on_error, app_context);
+    notices.value().setError(on_error);
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
@@ -305,11 +301,12 @@ KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server,
 
 KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server,
                                       const KiottyNetAddress* address,
-                                      const KiottyNetTlsServerConfiguration* tls)
+                                      const KiottyNetTlsServerConfiguration* tls,
+                                      KiottyNetAppContext app_context)
 {
     if (server == nullptr || address == nullptr) { return INVALID; }
     const KiottyNetAddress copied = *address;
-    return server->run(copied, tls);
+    return server->run(copied, tls, app_context);
 }
 
 void KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server)

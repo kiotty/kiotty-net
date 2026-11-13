@@ -65,11 +65,11 @@ KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, Kiotty
 - `path` 는 `/` 로 시작하는 URL 경로다. 정확 일치, 또는 `/*` 로 끝나면 접두 wildcard 다 (`/api/devices/*`). `:id` 같은 파라미터 파싱은 없다. `request.path` 를 사용자가 자른다. 길이는 `KIOTTY_NET_MAX_URL_LENGTH` (256) 미만이어야 하며 넘으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
 - 라우트, 정적 경로, Upgrade 경로는 한 표에 **등록한 순서대로** 매칭한다. 좁은 경로를 먼저, `/*` 나 `/` 디렉토리 매핑을 마지막에 등록한다.
 - 같은 (method, path) 를 두 번 등록하면 `KIOTTY_NET_CODE_DUPLICATE_RULE`. 표가 가득 차면 `KIOTTY_NET_CODE_TABLE_FULL`.
-- `KiottyNetHttpRoute` 는 세 필드다. `KiottyNet_makeHttpRoute(app_context, onRequest, onWorkStarted)` 로 만들면 C 에서도 한 줄이다.
+- `KiottyNetHttpRoute` 는 두 필드다. `KiottyNet_makeHttpRoute(onRequest, onWorkStarted)` 로 만들면 C 에서도 한 줄이다.
+- 콜백의 첫 인자 `app_context` 는 `KiottyNet_runHttpServer` 에 준 사용자 포인터 하나다 (라우트마다 따로 두지 않는다). 라이브러리는 읽지 않는다. 라우트마다 다른 데이터가 필요하면 그 안에 두고 `request->path` 로 가른다.
 
 | 필드 | 뜻 |
 |---|---|
-| `app_context` | `onRequest` / `onWorkStarted` 의 첫 인자로 그대로 돌아오는 사용자 포인터. 라이브러리는 읽지 않는다 |
 | `onRequest(app_context, request, response)` | 요청이 다 들어오면 IO Thread 에서 한 번. 여기서 응답을 채우거나 `KiottyNet_startHttpWork` 를 부른다. `NULL` 이면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` |
 | `onWorkStarted(app_context, request, response, work)` | `startHttpWork` 뒤 다음 loop 에서 한 번 (1.5). 긴 작업이 없는 라우트는 `NULL` |
 
@@ -185,7 +185,7 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 
 | 함수 | 하는 일 |
 |---|---|
-| `KiottyNet_runHttpServer(s, address, tls)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드. tls 가 `NULL` 이면 평문 |
+| `KiottyNet_runHttpServer(s, address, tls, app_context)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드. tls 가 `NULL` 이면 평문. `app_context` 는 이 run 동안의 모든 콜백 (라우트, Work, 끊김, 오류) 의 첫 인자다. worker 가 run 뒤까지 들고 있을 수 있으므로 수명은 앱이 지킨다 |
 | `KiottyNet_closeHttpServer(s)` | loop 를 멈추라고 알린다. 기다리지 않는다. Work 중인 연결도 바로 닫힌다 |
 | `KiottyNet_awaitHttpServer(s, timeout_milliseconds)` | loop 가 돌기 시작할 때까지 기다린다. 시작했으면 `KIOTTY_NET_CODE_SUCCESS`, run 이 이미 끝났으면 run 의 반환값, 시간 안에 못 봤으면 `KIOTTY_NET_CODE_TIMEOUT` |
 | `KiottyNet_destroyHttpServer(context, s)` | run 이 return 한 뒤에 부른다 |
@@ -194,13 +194,13 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 - 응답 setter 는 `onRequest` 안 (IO Thread) 에서, 또는 `onWorkStarted` 뒤 Work 를 들고 있는 thread 에서 부른다. 같은 응답을 두 thread 가 동시에 만지는 순간은 없다.
 - 다른 thread 가 불러도 되는 것은 `finishHttpWork*`, `isHttpWorkConnected`, `closeHttpServer`, `awaitHttpServer` 다. `writeHttpWorkChunk` 는 Work 를 든 worker 가 부른다.
 
-**끊김과 오류.** 연결 단위의 알림 둘은 라우트처럼 콜백 하나씩 run 전에 등록한다. run 이 시작된 뒤의 등록은 `KIOTTY_NET_CODE_BUSY`, 다시 부르면 바꾸고 `NULL` 이면 지운다. 등록하지 않으면 알리지 않는다. IO Thread 에서 불리고, `app_context` 는 등록 때 함께 준 것이다.
+**끊김과 오류.** 연결 단위의 알림 둘은 라우트처럼 콜백 하나씩 run 전에 등록한다. run 이 시작된 뒤의 등록은 `KIOTTY_NET_CODE_BUSY`, 다시 부르면 바꾸고 `NULL` 이면 지운다. 등록하지 않으면 알리지 않는다. IO Thread 에서 불리고, `app_context` 는 run 에 준 것이다.
 
 ```c
 typedef void (*KiottyNetHttpDisconnectedAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode reason);
 typedef void (*KiottyNetHttpErrorAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);
-KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
-KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
+KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected);
+KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error);
 ```
 
 | action | 언제 |
@@ -208,7 +208,7 @@ KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetH
 | `on_disconnected(app_context, info, reason)` | 연결마다 한 번. reason: `KIOTTY_NET_CODE_SUCCESS` (keep-alive 아님, 다 보냄), `KIOTTY_NET_CODE_TIMEOUT` (header / keep-alive timeout), `KIOTTY_NET_CODE_PEER_CLOSED`, `KIOTTY_NET_CODE_PEER_NOT_READING` (base 의 send timeout), `KIOTTY_NET_CODE_PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤), `KIOTTY_NET_CODE_CLOSED` (서버 close). 연결의 handle 은 오지 않는다 (끊긴 뒤라 쓸 곳이 없다). 상대는 info 로 본다 |
 | `on_error(app_context, info, code, message)` | 연결이 생기기 전이나 연결과 따로 생기는 문제: `KIOTTY_NET_CODE_TLS_*` (handshake 실패), `KIOTTY_NET_CODE_TABLE_FULL` (연결 수 초과. 자리가 없으면 서버가 accept 를 멈추고 새 연결은 OS 대기열에서 기다리므로 드물다), accept 실패. 잘못된 요청은 on_disconnected 로 오고 여기로 두 번 오지 않는다 |
 
-C++ 은 `server.onDisconnected(action, app_context)`, `server.onError(action, app_context)` 다.
+C++ 은 `server.onDisconnected(action)`, `server.onError(action)` 다.
 
 ### 1.8 C 예제
 
@@ -336,15 +336,15 @@ int main(void)
     }
     KiottyNetHttpServerHandle server = created.handle;
 
-    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health",         KiottyNet_makeHttpRoute(&app, onHealth, NULL));
-    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/devices/*", KiottyNet_makeHttpRoute(&app, onDevice, NULL));
-    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/report",    KiottyNet_makeHttpRoute(&app, onReport, onReportWork));
-    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/events",    KiottyNet_makeHttpRoute(&app, onEvents, onEventsWork));
+    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health",         KiottyNet_makeHttpRoute(onHealth, NULL));
+    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/devices/*", KiottyNet_makeHttpRoute(onDevice, NULL));
+    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/report",    KiottyNet_makeHttpRoute(onReport, onReportWork));
+    KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/api/events",    KiottyNet_makeHttpRoute(onEvents, onEventsWork));
     KiottyNet_serveHttpMemory(server, "/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasm_span());
     KiottyNet_serveHttpDirectory(server, "/", "./www/");
 
-    KiottyNet_onHttpDisconnected(server, onDisconnected, &app);
-    KiottyNet_runHttpServer(server, &address, NULL);
+    KiottyNet_onHttpDisconnected(server, onDisconnected);
+    KiottyNet_runHttpServer(server, &address, NULL, &app);
 
     KiottyNet_destroyHttpServer(context, server);
     KiottyNet_releaseContext(context);
@@ -388,14 +388,14 @@ int main()
         KiottyNet_HttpResponse(r).status(KIOTTY_NET_HTTP_STATUS_OK);
     });
 
-    server.get("/api/devices/*", KiottyNet_makeHttpRoute(&app,
+    server.get("/api/devices/*", KiottyNet_makeHttpRoute(
         [](KiottyNetAppContext ctx, const KiottyNetHttpRequest* q, KiottyNetHttpResponseHandle r)
         {
             KiottyNet_HttpResponse(r).body(KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, static_cast<App*>(ctx)->render(q->path));
         },
         nullptr));
 
-    server.get("/api/report", KiottyNet_makeHttpRoute(&app,
+    server.get("/api/report", KiottyNet_makeHttpRoute(
         [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r)
         {
             KiottyNet_HttpResponse(r).startWork();
@@ -416,7 +416,7 @@ int main()
             });
         }));
 
-    server.get("/api/events", KiottyNet_makeHttpRoute(&app,
+    server.get("/api/events", KiottyNet_makeHttpRoute(
         [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r)
         {
             KiottyNet_HttpResponse response(r);
@@ -446,8 +446,8 @@ int main()
     server.onError([](KiottyNetAppContext, KiottyNetConnectionInfo, KiottyNetCode code, const char* message)
     {
         std::fprintf(stderr, "http error %d: %s\n", static_cast<int>(code), message);
-    }, nullptr);
-    std::thread io([&] { server.run(address); });                               // TLS 면 server.run(address, tls)
+    });
+    std::thread io([&] { server.run(address, &app); });                         // TLS 면 server.run(address, tls, &app)
     if (server.await(3000) != KIOTTY_NET_CODE_SUCCESS)
     {
         server.close();
@@ -459,7 +459,7 @@ int main()
 }
 ```
 
-- capture 없는 람다는 함수 포인터로 바뀌므로 그대로 들어간다. capture 가 필요하면 `app_context` 로 넘긴다.
+- capture 없는 람다는 함수 포인터로 바뀌므로 그대로 들어간다. capture 가 필요하면 run 의 `app_context` 로 넘긴다.
 - 스트림 worker 가 write 실패로 return 하면 `KiottyNet_HttpWork` 의 소멸자가 `finishWithClose()` 를 부른다.
 - `KiottyNet_HttpServer` 는 소멸자가 `KiottyNet_destroyHttpServer` 를 부른다. `run` 이 return 한 뒤 (`io.join()` 뒤) 소멸되어야 한다.
 

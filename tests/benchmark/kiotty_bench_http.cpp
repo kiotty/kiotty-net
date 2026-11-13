@@ -109,11 +109,11 @@ namespace
             KiottyNet_releaseContext(context);
         }
 
-        bool start()
+        bool start(KiottyNetAppContext app_context)
         {
             port = kiotty_test::unusedPort();
             KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port);
-            thread = std::thread([this]() { KiottyNet_runHttpServer(server, &address, nullptr); });
+            thread = std::thread([this, app_context]() { KiottyNet_runHttpServer(server, &address, nullptr, app_context); });
             return KiottyNet_awaitHttpServer(server, WAIT_MS) == KIOTTY_NET_CODE_SUCCESS;
         }
 
@@ -130,8 +130,8 @@ namespace
 static void HttpGetJsonRoundtrip(benchmark::State& state)
 {
     BenchHttpServer bench;
-    KiottyNet_addHttpRoute(bench.server, KIOTTY_NET_HTTP_METHOD_GET, "/health", KiottyNet_makeHttpRoute(nullptr, onHealth, nullptr));
-    if (!bench.start()) { state.SkipWithError("run failed"); return; }
+    KiottyNet_addHttpRoute(bench.server, KIOTTY_NET_HTTP_METHOD_GET, "/health", KiottyNet_makeHttpRoute(onHealth, nullptr));
+    if (!bench.start(nullptr)) { state.SkipWithError("run failed"); return; }
     kiotty_test::LoopbackPeer peer;
     if (!peer.connectTcp(bench.port)) { state.SkipWithError("connect failed"); return; }
     const std::string request = "GET /health HTTP/1.1\r\nHost: a\r\n\r\n";
@@ -149,8 +149,8 @@ static void HttpWorkChunkLatency(benchmark::State& state)
 {
     BenchHttpServer bench;
     ChunkFeed feed;
-    KiottyNet_addHttpRoute(bench.server, KIOTTY_NET_HTTP_METHOD_GET, "/stream", KiottyNet_makeHttpRoute(&feed, onStream, onStreamWork));
-    if (!bench.start()) { state.SkipWithError("run failed"); return; }
+    KiottyNet_addHttpRoute(bench.server, KIOTTY_NET_HTTP_METHOD_GET, "/stream", KiottyNet_makeHttpRoute(onStream, onStreamWork));
+    if (!bench.start(&feed)) { state.SkipWithError("run failed"); return; }
     kiotty_test::LoopbackPeer peer;
     if (!peer.connectTcp(bench.port)) { state.SkipWithError("connect failed"); return; }
     const std::string request = "GET /stream HTTP/1.1\r\n\r\n";
@@ -192,7 +192,7 @@ static void HttpStaticFile1MiB(benchmark::State& state)
     {
         BenchHttpServer bench;
         KiottyNet_serveHttpFile(bench.server, "/file.bin", path.string().c_str());
-        if (!bench.start()) { state.SkipWithError("run failed"); return; }
+        if (!bench.start(nullptr)) { state.SkipWithError("run failed"); return; }
         kiotty_test::LoopbackPeer peer;
         if (!peer.connectTcp(bench.port)) { state.SkipWithError("connect failed"); return; }
         const std::string request = "GET /file.bin HTTP/1.1\r\n\r\n";

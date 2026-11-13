@@ -38,10 +38,12 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetCode HttpServer::run(const KiottyNetAddress& address,
-                                  const KiottyNetTlsServerConfiguration* tls)
+                                  const KiottyNetTlsServerConfiguration* tls,
+                                  KiottyNetAppContext app_context)
     {
         _runs.fetch_add(1);
         _site.is_closing.store(false);
+        _site.app_context = app_context;
         const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);

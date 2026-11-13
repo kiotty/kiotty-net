@@ -354,7 +354,7 @@ int run_echo_server(uint16_t port)
     code = KiottyNet_addWebSocket(server, "/echo", ECHO_HANDLER, NULL);
     if (code == KIOTTY_NET_CODE_SUCCESS)
     {
-        code = KiottyNet_runHttpServer(server, &address, NULL);   /* 이 thread 가 IO Thread. 다른 thread 의 KiottyNet_closeHttpServer 로 끝난다 */
+        code = KiottyNet_runHttpServer(server, &address, NULL, NULL);   /* 이 thread 가 IO Thread. 다른 thread 의 KiottyNet_closeHttpServer 로 끝난다 */
     }
     KiottyNet_destroyHttpServer(context, server);
     KiottyNet_releaseContext(context);

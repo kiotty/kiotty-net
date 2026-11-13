@@ -191,7 +191,7 @@ namespace
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addWebSocket(server, "/chat", HANDLER, &server_side));
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_server_address, LOOPBACK_HOST, port));
             const KiottyNetTlsServerConfiguration* copied = tls;
-            _server_thread = std::thread([this, copied]() { (void)KiottyNet_runHttpServer(server, &_server_address, copied); });
+            _server_thread = std::thread([this, copied]() { (void)KiottyNet_runHttpServer(server, &_server_address, copied, nullptr); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 

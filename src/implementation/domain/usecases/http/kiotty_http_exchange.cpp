@@ -117,7 +117,7 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest* request = &session.request.request();
         const KiottyNetHttpResponseHandle response = responseHandleOf(session);
         const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
-        route.onWorkStarted(route.app_context, request, response, work);
+        route.onWorkStarted(session.site.app_context, request, response, work);
         return Next::moveToNextState(HttpState::WORKING, thenWork());
     }
 
@@ -182,7 +182,8 @@ namespace kiotty::net::implementation
         {
             session.route = route;
             const KiottyNetHttpRequest& request = session.request.request();
-            route.onRequest(route.app_context, &request, responseHandleOf(session));
+            const KiottyNetAppContext app_context = session.site.app_context;
+            route.onRequest(app_context, &request, responseHandleOf(session));
             return afterRoute(session);
         }
 

@@ -244,13 +244,13 @@ namespace
             const KiottyNetHttpServerResult created = KiottyNet_createHttpServer(context, &configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             server = created.handle;
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onHttpDisconnected(server, onDisconnected, &app));
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onHttpError(server, onError, &app));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onHttpDisconnected(server, onDisconnected));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onHttpError(server, onError));
         }
 
         void route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRequestAction action)
         {
-            const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(&app, action, nullptr);
+            const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(action, nullptr);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, method, path, made));
         }
 
@@ -258,7 +258,7 @@ namespace
         {
             port = kiotty_test::unusedPort();
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_address, LOOPBACK_HOST, port));
-            _thread = std::thread([this, tls]() { _code.store(KiottyNet_runHttpServer(server, &_address, tls)); });
+            _thread = std::thread([this, tls]() { _code.store(KiottyNet_runHttpServer(server, &_address, tls, &app)); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 
@@ -406,7 +406,7 @@ TEST_F(HttpServerTest, UnknownPathIsNotFoundAndTheNotFoundRouteCanAnswer)
     server = nullptr;
 
     create();
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setHttpNotFound(server, KiottyNet_makeHttpRoute(&app, onMissing, nullptr)));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setHttpNotFound(server, KiottyNet_makeHttpRoute(onMissing, nullptr)));
     start();
     kiotty_test::LoopbackPeer second;
     connect(second);
@@ -673,13 +673,13 @@ TEST_F(HttpServerTest, RegistrationIsBusyWhileRunningAndDuplicatesAreRefused)
 {
     create();
     route(KIOTTY_NET_HTTP_METHOD_GET, "/health", onHealth);
-    const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(&app, onHealth, nullptr);
+    const KiottyNetHttpRoute made = KiottyNet_makeHttpRoute(onHealth, nullptr);
     EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health", made));
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_POST, "/health", made));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "health", made));
     start();
     EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_PUT, "/x", made));
-    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_onHttpError(server, onError, &app));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_onHttpError(server, onError));
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, stop());
     EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_PUT, "/x", made));
 }

@@ -32,7 +32,8 @@ namespace kiotty::net::implementation
         KiottyNetCode  initialize(PoolHandle id, const HttpServerConfiguration& configuration);
         void           reset() noexcept;
         KiottyNetCode  run(const KiottyNetAddress& address,
-                           const KiottyNetTlsServerConfiguration* tls);
+                           const KiottyNetTlsServerConfiguration* tls,
+                           KiottyNetAppContext app_context);
         RegistryResult registry();
         NoticesResult  notices();
         HttpSite&      site();

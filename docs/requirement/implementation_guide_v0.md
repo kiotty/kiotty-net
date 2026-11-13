@@ -861,12 +861,13 @@ class HttpServer : public Server                      // context/kiotty_http_ser
 struct HttpSite                                       // data/repository/http/kiotty_http_site.h. Session 이 이것을 참조한다
 {
     HttpRegistry              registry;               // 라우트와 정적 경로의 표, not found 라우트
-    HttpNotices               notices;                // 끊김 / 오류 action 과 각자의 app_context
+    HttpNotices               notices;                // 끊김 / 오류 action. app_context 는 들지 않는다
     HttpSessionPool           sessions;               // max_clients 개 (4.2)
     KiottyNetHttpLimits       limits;
     size_t                    receive_capacity;
     size_t                    send_capacity;
     KiottyNetHttpServerHandle owner;                  // handle 의 server
+    KiottyNetAppContext       app_context;            // run 이 받은 것. 라우트, Work, 끊김, 오류 콜백의 첫 인자
     std::atomic<bool>         is_closing;             // close() 가 켜고 run 이 시작할 때 끈다 (4.9 의 CLOSED)
 };
 
@@ -1072,7 +1073,7 @@ KiottyNetTransition dispatch(HttpSession& session)
 KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
 {
     session.route = route;                                                   // onWorkStarted 를 찾기 위해
-    route.onRequest(route.app_context, &session.request.request(), responseHandleOf(session));   // 사용자 코드. setter, startHttpWork
+    route.onRequest(session.site.app_context, &session.request.request(), responseHandleOf(session));   // 사용자 코드. setter, startHttpWork
     return afterRoute(session);
 }
 
@@ -1247,7 +1248,7 @@ KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream st
     session.stream = stream;
     const KiottyNetHttpRoute route = session.route;
     const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
-    route.onWorkStarted(route.app_context, &session.request.request(), responseHandleOf(session), work);   // 사용자가 handle 둘을 worker 로 넘긴다
+    route.onWorkStarted(session.site.app_context, &session.request.request(), responseHandleOf(session), work);   // 사용자가 handle 둘을 worker 로 넘긴다
     return Next::moveToNextState(HttpState::WORKING, thenWork());                // stream 은 worker 의 것 (2.4). 이 뒤로 IO Thread 는 Session 을 건드리지 않는다
 }
 
@@ -1363,10 +1364,11 @@ PieceResult pieceAt(HttpSession& session, size_t offset)      // data/repository
 ### 4.8 run
 
 ```cpp
-KiottyNetCode HttpServer::run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration* tls)
+KiottyNetCode HttpServer::run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration* tls, KiottyNetAppContext app_context)
 {
     _runs.fetch_add(1);                                                           // 등록 함수가 BUSY 를 돌려주기 시작한다
     _site.is_closing.store(false);
+    _site.app_context = app_context;                                              // 이 run 의 모든 콜백이 받는다
     const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);           // { &site, &HTTP_MACHINE, createSession, releaseSession, reportError }
     const StatefulHandler handler(stateful, *this);                               // run 의 stack 에만 산다 (2.1)
     const KiottyNetCode code = Server::run(handler, address, tls);
@@ -1382,7 +1384,7 @@ void HttpServer::close()
 ```
 
 - `KiottyNet_runHttpServer` 는 server / address NULL 을 거르고 주소를 stack 에 복사해 넘긴다. 주소 / TLS 검사, `RunGate`, SSL_CTX 는 base 의 run 그대로다 (1.7).
-- `reportError` 는 base 의 onError (TLS handshake 실패, accept 실패, `SESSION_EXHAUSTED`) 를 오류 action 으로 넘긴다. 끊김 action 은 CLOSED 행의 `onClosed` 가 Session 의 `info` 와 event 의 reason 으로 부른다.
+- `reportError` 는 base 의 onError (TLS handshake 실패, accept 실패, `SESSION_EXHAUSTED`) 를 오류 action 으로 넘긴다. 끊김 action 은 CLOSED 행의 `onClosed` 가 Session 의 `info` 와 event 의 reason 으로 부른다. 둘 다 `site.app_context` 를 첫 인자로 준다 (`HttpNotices::report*(app_context, ...)`).
 - `await` 는 base 그대로다.
 
 HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `Server` 의 initialize / run / close / await, action 함수 (`then*`), Endpoint 의 `writeStream`, `closeStream`, `isStreamOpen` (`KiottyNet_writeConnectionStream`, `closeConnectionStream`, `isConnectionStreamOpen` 의 안쪽) 뿐이다.

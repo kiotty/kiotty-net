@@ -373,13 +373,13 @@ namespace
             KiottyNet_HttpLimitsBuilder(_limits).bodyCapacity(256 * 1024).build();
             _server.reset(new KiottyNet_HttpServer(_context.handle(), _configuration, _limits));
             ASSERT_TRUE(static_cast<bool>(*_server));
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->post("/mcp", KiottyNet_makeHttpRoute(&app, onPost, onPostWork)));
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->get("/mcp", KiottyNet_makeHttpRoute(&app, onGet, onGetWork)));
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->del("/mcp", KiottyNet_makeHttpRoute(&app, onDelete, nullptr)));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->post("/mcp", KiottyNet_makeHttpRoute(onPost, onPostWork)));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->get("/mcp", KiottyNet_makeHttpRoute(onGet, onGetWork)));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->del("/mcp", KiottyNet_makeHttpRoute(onDelete, nullptr)));
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->serveDirectory("/", _root.string().c_str()));
             port = kiotty_test::unusedPort();
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_address, LOOPBACK_HOST, port));
-            _thread = std::thread([this]() { _server->run(_address); });
+            _thread = std::thread([this]() { _server->run(_address, &app); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, _server->await(WAIT_MS));
         }
 

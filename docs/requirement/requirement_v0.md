@@ -1155,10 +1155,10 @@ Work 와 Work 스트림
 
 | 등록 | 언제 | 인자 |
 |---|---|---|
-| `KiottyNet_onHttpDisconnected(server, action, app_context)` | 연결마다 한 번, 끝날 때 | `info` (상대 주소), `reason`: `SUCCESS` (keep-alive 아님, 다 보냄), `TIMEOUT` (header / keep-alive timeout), `PEER_CLOSED`, `PEER_NOT_READING` (send timeout), `PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤, 줄 하나가 receive_capacity 를 넘음), `CLOSED` (서버 close), 또는 `finishHttpWorkWithClose` 의 reason |
-| `KiottyNet_onHttpError(server, action, app_context)` | 연결이 생기기 전이나 연결과 따로 생기는 문제 | `info`, `code`, `message`: TLS handshake 실패 (`TLS_*`), accept 실패, 연결 수 초과. base 의 onError 가 받는 것을 그대로 넘긴다 |
+| `KiottyNet_onHttpDisconnected(server, action)` | 연결마다 한 번, 끝날 때 | `info` (상대 주소), `reason`: `SUCCESS` (keep-alive 아님, 다 보냄), `TIMEOUT` (header / keep-alive timeout), `PEER_CLOSED`, `PEER_NOT_READING` (send timeout), `PROTOCOL_ERROR` (400 / 413 / 414 / 431 / 501 뒤, 줄 하나가 receive_capacity 를 넘음), `CLOSED` (서버 close), 또는 `finishHttpWorkWithClose` 의 reason |
+| `KiottyNet_onHttpError(server, action)` | 연결이 생기기 전이나 연결과 따로 생기는 문제 | `info`, `code`, `message`: TLS handshake 실패 (`TLS_*`), accept 실패, 연결 수 초과. base 의 onError 가 받는 것을 그대로 넘긴다 |
 
-- 라우트처럼 run 전에 등록하고 run 중의 등록은 `KIOTTY_NET_CODE_BUSY` 다. 다시 부르면 바꾸고, action 이 NULL 이면 지운다. app_context 는 라우트의 것과 따로다.
+- 라우트처럼 run 전에 등록하고 run 중의 등록은 `KIOTTY_NET_CODE_BUSY` 다. 다시 부르면 바꾸고, action 이 NULL 이면 지운다. action 의 app_context 는 라우트와 같이 run 에 준 것이다.
 - 둘 다 IO Thread 에서 불린다. 끊김 action 은 연결의 handle 을 받지 않는다 (끊긴 뒤라 쓸 곳이 없다).
 - 잘못된 요청은 끊김 action 의 reason 으로 오고 오류 action 으로 두 번 오지 않는다. base 는 연결 자리가 없으면 accept 를 멈추고 다음 연결을 OS backlog 에 두므로 연결 수 초과는 경합 때만 온다.
 
@@ -1330,8 +1330,7 @@ typedef struct KiottyNetHttpWorkHandle {        /* pool handle. onWorkStarted �
 typedef void (*KiottyNetHttpRequestAction)(KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response);
 typedef void (*KiottyNetHttpWorkAction)   (KiottyNetAppContext app_context, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work);
 
-typedef struct KiottyNetHttpRoute {
-    KiottyNetAppContext        app_context;     /* onRequest / onWorkStarted 의 첫 인자로 돌아온다. 라이브러리는 읽지 않는다 */
+typedef struct KiottyNetHttpRoute {               /* 콜백의 app_context 는 KiottyNet_runHttpServer 에 준 것 하나다 */
     KiottyNetHttpRequestAction onRequest;       /* 요청이 다 들어오면 IO Thread 에서 한 번. NULL 이면 KIOTTY_NET_CODE_INVALID_ARGUMENT. 블로킹하지 않는다 */
     KiottyNetHttpWorkAction    onWorkStarted;   /* startHttpWork 뒤 IO Thread 에서 한 번. 긴 작업이 없는 라우트는 NULL */
 } KiottyNetHttpRoute;
@@ -1345,7 +1344,7 @@ typedef void (*KiottyNetHttpErrorAction)       (KiottyNetAppContext app_context,
 C 함수
 
 ```c
-KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetAppContext app_context, KiottyNetHttpRequestAction onRequest, KiottyNetHttpWorkAction onWorkStarted);
+KiottyNetHttpRoute KiottyNet_makeHttpRoute(KiottyNetHttpRequestAction onRequest, KiottyNetHttpWorkAction onWorkStarted);
 
 KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */
 
@@ -1370,13 +1369,13 @@ KiottyNetHttpServerResult KiottyNet_createHttpServer(KiottyNetContext context, c
 void          KiottyNet_destroyHttpServer(KiottyNetContext context, KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server, KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
 KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route);                                    /* 아무 라우트도 안 맞을 때 */
-KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);   /* NULL 이면 지운다 */
-KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);                        /* NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server, KiottyNetHttpDisconnectedAction on_disconnected);   /* NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server, KiottyNetHttpErrorAction on_error);                        /* NULL 이면 지운다 */
 KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server, const char* url_prefix, const char* directory);            /* "/static/" -> "./www/". 벗어나는 경로는 403. content type 은 확장자로 */
 KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server, const char* url_path, const char* file_path);                   /* "/favicon.ico" -> "./www/favicon.ico". content type 은 확장자로 */
 KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server, const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);   /* 메모리 바이너리. 복사하지 않으며 서버 생명 동안 유효해야 한다 */
 /* 등록 함수 공통: run 중이면 BUSY, 같은 (method, path) 는 DUPLICATE_RULE, max_routes 초과는 TABLE_FULL, path 형식 / 길이 / onRequest NULL 은 INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls);   /* tls 가 NULL 이면 평문. close 뒤 KIOTTY_NET_CODE_CLOSED 로 돌아온다 */
+KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server, const KiottyNetAddress* address, const KiottyNetTlsServerConfiguration* tls, KiottyNetAppContext app_context);   /* tls 가 NULL 이면 평문. app_context 는 모든 콜백의 첫 인자. close 뒤 KIOTTY_NET_CODE_CLOSED 로 돌아온다 */
 void          KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server);
 KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server, uint64_t timeout_milliseconds);
 ```
@@ -1430,8 +1429,8 @@ public:
     KiottyNetHttpServerHandle handle() const;
 
     // 라우트 등록. 두 가지 오버로드가 있다.
-    //   KiottyNetHttpRoute         : app_context + onRequest + onWorkStarted. C 와 같은 모양
-    //   KiottyNetHttpRequestAction : onRequest 하나. app_context, onWorkStarted 는 NULL. capture 없는 람다가 여기로 온다
+    //   KiottyNetHttpRoute         : onRequest + onWorkStarted. C 와 같은 모양
+    //   KiottyNetHttpRequestAction : onRequest 하나. onWorkStarted 는 NULL. capture 없는 람다가 여기로 온다
     //                                server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) { KiottyNet_HttpResponse(r).status(200); });
     KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRoute route);
     KiottyNetCode route(KiottyNetHttpMethod method, const char* path, KiottyNetHttpRequestAction on_request);
@@ -1452,15 +1451,15 @@ public:
     KiottyNetCode options(const char* path, KiottyNetHttpRequestAction on_request);
     KiottyNetCode notFound(KiottyNetHttpRoute route);
     KiottyNetCode notFound(KiottyNetHttpRequestAction on_request);
-    KiottyNetCode onDisconnected(KiottyNetHttpDisconnectedAction on_disconnected, KiottyNetAppContext app_context);
-    KiottyNetCode onError(KiottyNetHttpErrorAction on_error, KiottyNetAppContext app_context);
+    KiottyNetCode onDisconnected(KiottyNetHttpDisconnectedAction on_disconnected);
+    KiottyNetCode onError(KiottyNetHttpErrorAction on_error);
 
     KiottyNetCode serveDirectory(const char* url_prefix, const char* directory);
     KiottyNetCode serveFile(const char* url_path, const char* file_path);
     KiottyNetCode serveMemory(const char* url_path, KiottyNetHttpContentType type, KiottyNetSpan data);
 
-    KiottyNetCode run(const KiottyNetAddress& address);
-    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls);   // TLS
+    KiottyNetCode run(const KiottyNetAddress& address, KiottyNetAppContext app_context);
+    KiottyNetCode run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration& tls, KiottyNetAppContext app_context);   // TLS
     void          close();
     KiottyNetCode await(uint64_t timeout_milliseconds);
 };
@@ -1477,7 +1476,7 @@ server.get("/health", [](KiottyNetAppContext, const KiottyNetHttpRequest*, Kiott
 });
 
 // 긴 작업 : onRequest 에서 startWork, onWorkStarted 에서 worker 로 넘기고, worker 가 응답을 채워 finish
-server.get("/report", KiottyNet_makeHttpRoute(&app,
+server.get("/report", KiottyNet_makeHttpRoute(
     [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) {
         KiottyNet_HttpResponse(r).startWork();
     },
@@ -1493,7 +1492,7 @@ server.get("/report", KiottyNet_makeHttpRoute(&app,
     }));
 
 // 스트림 (SSE) : 헤더와 body 종류는 onRequest 에서 정한다. HEAD 면 이것만 나가고 Work 는 열리지 않는다
-server.get("/events", KiottyNet_makeHttpRoute(&app,
+server.get("/events", KiottyNet_makeHttpRoute(
     [](KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle r) {
         KiottyNet_HttpResponse response(r);
         response.header("Cache-Control", "no-cache");
@@ -1513,12 +1512,12 @@ server.get("/events", KiottyNet_makeHttpRoute(&app,
         });
     }));
 
-server.onDisconnected(onDisconnected, &app);                                    // 감사 로그 : info 와 끝난 이유
+server.onDisconnected(onDisconnected);                                          // 감사 로그 : info 와 끝난 이유
 server.serveDirectory("/", "./www/");                                           // 라우트 뒤에 등록한다 (등록 순서 = 매칭 순서)
 server.serveMemory("/app.wasm", KIOTTY_NET_HTTP_CONTENT_TYPE_WASM, wasm);
 KiottyNetAddress address;
 KiottyNet_initializeTcpAddress(&address, "0.0.0.0", 8080);
-std::thread io([&] { server.run(address); });                                   // TLS 면 server.run(address, tls)
+std::thread io([&] { server.run(address, &app); });                             // TLS 면 server.run(address, tls, &app)
 server.await(3000);
 ```
 
@@ -1862,7 +1861,7 @@ io.join();
 - (닫힘, 2026-11-11) WebSocket 의 Work 는 두지 않는다. 다른 thread 의 송신은 push lane 의 `send` 다 (설계 결정 3).
 - (닫힘, 2026-11-11) pool handle 의 소유자: handle 이 `{ owner, id }` 를 든다 (설계 결정 7).
 - (닫힘, 2026-11-11) WebSocketServer 는 없애고 HttpServer 의 Upgrade 경로 하나로 합쳤다 (설계 결정 1).
-- HttpServer 라우트에 capture 있는 람다 / functor 를 받는 template 오버로드. 얇은 래퍼 규칙 때문에 뺐다. 필요하면 `KiottyNetHttpRoute::app_context` 로 대신한다.
+- HttpServer 라우트에 capture 있는 람다 / functor 를 받는 template 오버로드. 얇은 래퍼 규칙 때문에 뺐다. 필요하면 run 의 app_context 로 대신한다.
 - HttpServer 에 간단한 CORS 설정 (허용 origin 목록 하나로 preflight 자동 응답 + 헤더 자동 추가) 을 둘지.
 - 조각을 합치지 않고 그대로 전달하는 streaming 모드 (`max_body_bytes` 보다 큰 메시지).
 - permessage-deflate 확장은 지원하지 않는다.
