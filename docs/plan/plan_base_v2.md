@@ -185,3 +185,7 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-13 WebSocket 사이클 W4 (`docs/progress/261113_progress_websocket_w4.md`): 클라이언트. EventClient 위의 WebSocketClient, Upgrade 요청 / 101 검사 행, 서버와 같은 frame 행 (역할 값은 site), push lane 의 mask (scratch 버퍼), await 는 onOpen 까지. integration 7 개 (W3 서버와 왕복, ws 뒤 wss, 거절 셋, mask, timeout, 재시도). 다음은 W5 (문서).
 
 2026-11-13 WebSocket 사이클 W5 (`docs/progress/261113_progress_websocket_w5.md`): 문서. requirement 10 / 11절을 판 v2 와 W3 / W4 의 구현으로, 구현 가이드 5절 (WebSocket), 테스트 계획 20절, user guide 와 설계에 W3 / W4 에서 정한 것. 설계 10절의 WebSocket 행은 끝. 쓰며 본 것 둘 (write lane close frame 의 순서, 그 mask key) 은 고치지 않았다.
+
+2026-11-13 WebSocket 설계 v1 (`docs/design/design_websocket_v1.html`): 등록을 HTTP 모양으로 (WebSocketRoute, 클라이언트의 on 등록), app_context 는 run 한 번 (HTTP 도), 클라이언트 subprotocol 과 bye. 사이클 B3, V1 ~ V4.
+
+2026-11-13 base 사이클 B3 (`docs/progress/261113_progress_base_b3.md`): `KiottyNet_thenCloseWith(data, reason)`, Connection 의 FLUSHING 단계 (push lane 은 버린다), HTTP 의 close 응답 마지막 조각과 WebSocket 의 close frame 이 이것을 쓴다. close frame 뒤에 데이터 frame 이 나가던 문제를 닫았다. 다음은 V1.
