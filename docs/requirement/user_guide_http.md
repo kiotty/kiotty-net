@@ -491,7 +491,7 @@ int main()
 
 ### 1.11 아직 없는 것
 
-- WebSocket Upgrade 경로 (`KiottyNet_addWebSocket(http_server, "/chat", handler, app_context)`) 는 `kiotty_net_websocket.h` 판 v2 (사이클 W1) 에서 들어온다. 그때까지 헤더에는 WebSocketServer 가 있다.
+- WebSocket Upgrade 경로는 `kiotty_net_websocket.h` 에 있다 (`KiottyNet_addWebSocket(http_server, "/chat")` 과 `KiottyNet_onWebSocket*`, C++ `KiottyNet_WebSocketRoute(server, "/chat")`). 이 헤더는 그것을 모른다. 사용법은 [user_guide_websocket.md](user_guide_websocket.md).
 - HttpClient 는 다음 판이다 (설계 결정 10).
 - JSON 은 라이브러리 밖이다. body 는 바이트이고 텍스트 계열이면 UTF-8 만 본다.
 - 간단한 CORS 설정, `:id` 파라미터 파싱, 응답 압축, Range 요청, 요청 body 스트리밍, sendfile 은 지원하지 않는다.

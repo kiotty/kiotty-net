@@ -195,3 +195,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-13 WebSocket 사이클 V2 (`docs/progress/261113_progress_websocket_v2.md`): 서버 등록을 `addWebSocket(server, path)` 의 route 와 `onWebSocketUpgrade / Open / Message / Close` 사슬로, C++ `KiottyNet_WebSocketRoute`. 콜백 app_context 는 run 의 것, Close 에 handle 없음, onMessage 없는 경로는 run 이 거절. 문서 개정은 V4. 다음은 V3 (클라이언트).
 
 2026-11-13 WebSocket 사이클 V3 (`docs/progress/261113_progress_websocket_v3.md`): 클라이언트를 `onWebSocketClientOpen / Message / Close / Error` 등록, `runWebSocketClient(client, address, path, tls, app_context)`, `setWebSocketClientProtocols`, `byeWebSocketClient` 로. `KiottyNetWebSocketHandler` 와 create 의 path 를 없앴다. onError 는 열리기 전에 한 번. close frame 의 mask key 도 공용 생성기. 다음은 V4 (문서).
+
+2026-11-13 WebSocket 사이클 V4 (`docs/progress/261113_progress_websocket_v4.md`): 문서. user guide WebSocket 을 판 v3 으로 다시 (받기 절, 요청 / 응답 예제), requirement 10 / 11절, 구현 가이드 5절, 테스트 계획 20절, 설계 v1 의 완료 기록. 설계 v1 의 사이클 (B3, V1 ~ V4) 은 모두 끝났다.

@@ -1525,12 +1525,13 @@ MCP Streamable HTTP 서버의 골격 (POST / GET / DELETE `/mcp`, 202, 404, 406,
 
 ### 10. WebSocket (HttpServer 의 Upgrade 경로)
 
-> 이 절은 `include/kiotty_net_websocket.h` 의 공개 API 판 v2 (cycle W1, 2026-11-12) 와 그 구현 (cycle W2 ~ W4, 2026-11-12 ~ 13) 을 적는다. 설계의 근거는 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 결정 1 ~ 13, 사용법은 [user_guide_websocket.md](user_guide_websocket.md), 안의 모양은 [implementation_guide_v0.md](implementation_guide_v0.md) 5절이다. 판 v1 의 `KiottyNet_WebSocketServer`, `KiottyNetWebSocketConfiguration` 과 그 builder 는 없다.
+> 이 절은 `include/kiotty_net_websocket.h` 의 공개 API 판 v3 (cycle V2 / V3, 2026-11-13) 과 그 구현을 적는다. 판 v2 (cycle W1 ~ W4) 의 모양은 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 결정 1 ~ 13, 등록을 HTTP 모양으로 바꾼 판 v3 은 [design_websocket_v1.html](../design/design_websocket_v1.html) 의 결정 1 ~ 15 다. 사용법은 [user_guide_websocket.md](user_guide_websocket.md), 안의 모양은 [implementation_guide_v0.md](implementation_guide_v0.md) 5절이다. 판 v1 의 `KiottyNet_WebSocketServer`, `KiottyNetWebSocketConfiguration` 과 판 v2 의 `KiottyNetWebSocketHandler` 는 없다.
 
 WebSocket (RFC 6455) 은 HTTP 연결에서 시작한다. 서버 쪽 WebSocket 은 따로 선 서버가 아니라 **HttpServer (9절) 에 등록한 Upgrade 경로**다. 한 HttpServer, 한 포트에 HTTP 라우트, 정적 경로, WebSocket 경로 여럿이 같이 있다. 클라이언트 쪽은 6절 EventClient 위의 WebSocketClient 다 (11절).
 
 - **include.** `kiotty_net_websocket.h` 가 `kiotty_net_http.h` 를 include 한다 (그 안에 base.h). 반대 방향은 없다. `kiotty_net_statemachine.h` 는 include 하지 않는다.
-- **등록.** `KiottyNet_addWebSocket(server, path, handler, app_context)`. run 전에만 되고 (run 중이면 `KIOTTY_NET_CODE_BUSY`) handler 는 값으로 복사해 고정한다. `app_context` 는 run 이 return 할 때까지 살아 있어야 한다. path 는 HTTP 라우트와 같은 규칙 (`/` 로 시작, `KIOTTY_NET_MAX_URL_LENGTH` 미만) 이고 WebSocket 경로는 그 path 의 모든 메서드를 차지한다. 같은 path 의 라우트나 WebSocket 경로가 있으면 `KIOTTY_NET_CODE_DUPLICATE_RULE`, 표가 차면 `KIOTTY_NET_CODE_TABLE_FULL` (`max_routes` 에 든다). handler 의 `onOpen` 이나 `onMessage` 가 NULL 이면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`.
+- **등록.** `KiottyNet_addWebSocket(server, path)` 이 `KiottyNetWebSocketRoute { code, server, index }` 를 돌려주고, `KiottyNet_onWebSocketUpgrade / Open / Message / Close(route, cb)` 가 그 경로에 콜백을 붙이고 route 를 다시 돌려준다 (경로는 한 번만 쓴다). `route.code` 에는 처음 실패가 남고, 실패한 route 를 받은 `on*` 는 아무것도 하지 않는다. 같은 이벤트를 다시 등록하면 바꾼다. 모두 run 전에만 되고 run 중이면 `KIOTTY_NET_CODE_BUSY`. path 는 HTTP 라우트와 같은 규칙 (`/` 로 시작, `KIOTTY_NET_MAX_URL_LENGTH` 미만) 이고 WebSocket 경로는 그 path 의 모든 메서드를 차지한다. 같은 path 의 라우트나 WebSocket 경로가 있으면 `KIOTTY_NET_CODE_DUPLICATE_RULE`, 표가 차면 `KIOTTY_NET_CODE_TABLE_FULL` (`max_routes` 에 든다). NULL server / 콜백, 이 서버의 것이 아닌 route 는 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. **onMessage 는 필수다.** onMessage 없는 경로가 있으면 `KiottyNet_runHttpServer` 가 열기 전에 `KIOTTY_NET_CODE_INVALID_ARGUMENT` 를 돌려준다. Upgrade 가 없으면 모두 허용, Open 이 없으면 websocket_context 는 NULL, Close 가 없으면 부르지 않는다.
+- **app_context** 는 `KiottyNet_runHttpServer(server, address, tls, app_context)` 의 것 하나다 (HTTP 라우트, 끊김 / 오류 action 과 같은 값). 서버의 WebSocket 에는 따로 오류 / 끊김 콜백이 없고 HttpServer 의 `onHttpError` / `onHttpDisconnected` 가 받는다.
 - **설정.** WebSocket 전용 설정 struct 는 없다. HttpServer 의 `KiottyNetHttpLimits` 한 벌을 쓴다. 메시지 상한은 `max_body_bytes`, 핸드셰이크는 `max_header_bytes` / `max_headers` / `header_timeout_milliseconds`, 타이머 셋은 `websocket_ping_interval_milliseconds` / `websocket_pong_timeout_milliseconds` / `websocket_close_timeout_milliseconds` 다 (`KiottyNet_configureHttpWebSocketTimers`). 경로마다 다른 값은 둘 수 없다. 타이머의 0 은 무한이다: ping 간격 0 은 ping 을 보내지 않고, pong timeout 0 은 ping 은 보내되 pong 을 검사하지 않으며, close timeout 0 은 상대의 close frame 을 끝없이 기다린다.
 - **Upgrade 요청의 처리.** 등록된 path 의 요청은 HTTP 헤더처럼 읽은 뒤 이렇게 갈린다. WebSocket 경로는 라우트 표에 GET 하나로 들어 있으므로 GET / HEAD 밖의 메서드는 9절의 자동 응답이다. HEAD 와 GET 의 거절 (405 / 400 / 426 / 403) 은 `Connection: close` 를 붙이고 닫는다.
 
@@ -1543,15 +1544,16 @@ WebSocket (RFC 6455) 은 HTTP 연결에서 시작한다. 서버 쪽 WebSocket �
 | `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Version: 13`, `Sec-WebSocket-Key` 중 하나가 없음 | 426, `Upgrade: websocket`, `Sec-WebSocket-Version: 13`. `onUpgrade` 는 부르지 않는다 |
 | `Sec-WebSocket-Key` 가 16 바이트의 base64 (24 글자) 가 아님 | 400 |
 | `onUpgrade` 가 0 | 403 |
-| `onUpgrade` 가 1 이거나 NULL | 101, `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Accept`, (골랐으면) `Sec-WebSocket-Protocol`. 송신이 끝나면 `onOpen` |
+| `onUpgrade` 가 1 이거나 등록하지 않음 | 101, `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Accept`, (골랐으면) `Sec-WebSocket-Protocol`. 송신이 끝나면 `onOpen` |
 
 - **101 뒤.** 같은 연결, 같은 HttpSession 이 WebSocket frame 행으로 넘어간다. 이 연결에 HTTP 는 다시 없다. 101 을 만들 때 Session 의 generation 을 올리므로 **`onUpgrade` 가 받은 handle 과 `onOpen` 이 받은 handle 은 다르다.** `onUpgrade` 의 handle 은 `onUpgrade` 안에서만 쓰고 (`findWebSocketUpgradeHeader`, `selectWebSocketProtocol`), 연결이 끝날 때까지 쓰는 것은 `onOpen` 의 handle 이다.
-- **context 는 둘이다** (5절과 같다). `KiottyNetAppContext` 는 `onUpgrade`, `onOpen`, `onClose` 가 받는다. `onOpen` 이 return 한 `KiottyNetWebSocketContext` 는 소켓에 묶여 `onMessage` 의 첫 인자와 `onClose` 로 돌아온다.
+- **context 는 둘이다** (5절과 같다). `KiottyNetAppContext` (run 의 것) 는 `onUpgrade`, `onOpen`, `onClose` 가 받는다. `onOpen` 이 return 한 `KiottyNetWebSocketContext` 는 소켓에 묶여 `onMessage` 의 첫 인자와 `onClose` 로 돌아온다. **`onClose` 에는 handle 이 없다** (끊긴 뒤라 쓸 곳이 없다. http 결정 19). 소켓을 앱의 목록에서 빼려면 Open 에서 handle 을 websocket_context 에 담아 둔다.
+- **receive 함수는 없다.** 메시지는 IO Thread 가 `onMessage` 로 준다. 앱 thread 가 답을 기다려야 하면 `onMessage` 가 앱의 큐에 복사하고 깨운다 (user guide 5.2, 8절).
 - **수신.** 조각 (fragment) 은 라이브러리가 합쳐서 `onMessage` 에 메시지 하나로 준다. 메시지는 body 의 Stage 에 모인다. frame payload 는 `receive_capacity` 단위로 나눠 읽으므로 메시지가 `receive_capacity` 보다 커도 된다. 합친 크기가 `max_body_bytes` 를 넘으면 1009, TEXT 가 UTF-8 이 아니면 1007, 그 밖의 잘못된 frame (예약 비트, 모르는 opcode, 앞 조각 없는 continuation, 서버가 받은 frame 에 mask 가 없음, 클라이언트가 받은 frame 에 mask 가 있음, 최소 표현이 아닌 길이, 잘못된 close payload) 은 1002 로 닫는다.
 - **ping / pong.** 라이브러리가 처리한다. 들어온 ping 에는 같은 payload 의 pong 을 보낸다 (닫는 중이면 보내지 않는다). 받은 frame 없이 `websocket_ping_interval_milliseconds` 가 지나면 ping 을 보내고, `websocket_pong_timeout_milliseconds` 안에 pong 이 없으면 1001 close frame 을 보내고 `websocket_close_timeout_milliseconds` 동안 상대의 close frame 을 기다린다.
-- **송신의 두 길.** 사용자의 `send` / `broadcast`, 라이브러리의 ping / pong, `closeWebSocket` 과 pong 늦음의 close frame 은 **push lane** 이다 (4절의 notify 와 같은 길). 그래서 `send` 는 아무 thread 에서나 부르고 완료 콜백이 없다. frame 머리와 payload 를 한 번에 넣고 전부 들어가지 않으면 아무것도 넣지 않는다 (`KIOTTY_NET_CODE_BUFFER_FULL`). frame 하나가 `push_capacity` 를 넘으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` 이고 조각으로 나눠 보내지 않는다. **write lane** 은 핸드셰이크 (서버의 101 / 403 / 426 / 405 / 400, 클라이언트의 Upgrade 요청) 와, frame 을 읽던 행이 닫을 때의 close frame (1002 / 1007 / 1009, 상대의 close 에 대한 답) 이다. 뒤의 것은 close frame 을 다 보낸 뒤에 연결을 닫아야 해서다 (close 는 push lane 의 남은 것을 보내지 않는다).
-- **mask.** 서버가 보내는 frame 은 mask 하지 않는다. 클라이언트가 보내는 frame 은 frame 마다 새 mask key 로 mask 한다 (11절).
-- **close.** `KiottyNet_closeWebSocket` 은 아무 thread 에서나 close handshake 를 시작한다. 소켓의 닫힘 플래그를 세우고 close frame 을 push lane 에 넣는다. 그 뒤의 `send` 는 `KIOTTY_NET_CODE_CLOSED`, 두 번째 close 는 `KIOTTY_NET_CODE_BUSY`, 그 사이에 온 데이터 frame 은 버린다. IO Thread 콜백 안에서 부르면 다음 read 부터 `close_timeout` 이 걸린다. 다른 thread 에서 부르면 IO Thread 를 깨우지 않으므로, 상대가 끝까지 답하지 않으면 걸려 있던 read 의 남은 시간 (최대 `websocket_ping_interval_milliseconds`) 뒤에 `TIMEOUT` 으로 끊긴다 (설계 결정 3, 9).
+- **송신의 두 길.** 사용자의 `send` / `broadcast`, 라이브러리의 ping / pong, `closeWebSocket` 과 pong 늦음의 close frame 은 **push lane** 이다 (4절의 notify 와 같은 길). 그래서 `send` 는 아무 thread 에서나 부르고 완료 콜백이 없다. frame 머리와 payload 를 한 번에 넣고 전부 들어가지 않으면 아무것도 넣지 않는다 (`KIOTTY_NET_CODE_BUFFER_FULL`). frame 하나가 `push_capacity` 를 넘으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` 이고 조각으로 나눠 보내지 않는다. **write lane** 은 핸드셰이크 (서버의 101 / 403 / 426 / 405 / 400, 클라이언트의 Upgrade 요청) 와, frame 을 읽던 행이 닫을 때의 close frame (1002 / 1007 / 1009, 상대의 close 에 대한 답) 이다. 뒤의 것은 5절의 `thenCloseWith` 로 close frame 만 보내고 닫는다. push lane 에 남은 frame 은 버리므로 close frame 뒤에 데이터가 나가지 않는다 (RFC 6455 5.5.1). 상대가 `send_timeout_milliseconds` 안에 읽지 않으면 `KIOTTY_NET_CODE_PEER_NOT_READING`.
+- **mask.** 서버가 보내는 frame 은 mask 하지 않는다. 클라이언트가 보내는 frame 은 frame 마다 예측할 수 없는 새 mask key 로 mask 한다 (11절).
+- **close.** `KiottyNet_closeWebSocket` (클라이언트는 `KiottyNet_byeWebSocketClient`) 은 아무 thread 에서나 close handshake 를 시작한다. 소켓의 닫힘 플래그를 세우고 close frame 을 push lane 에 넣는다. 그 뒤의 `send` 는 `KIOTTY_NET_CODE_CLOSED`, 두 번째 close 는 `KIOTTY_NET_CODE_BUSY`, 그 사이에 온 데이터 frame 은 버린다. IO Thread 콜백 안에서 부르면 다음 read 부터 `close_timeout` 이 걸린다. 다른 thread 에서 부르면 IO Thread 를 깨우지 않으므로, 상대가 끝까지 답하지 않으면 걸려 있던 read 의 남은 시간 (최대 `websocket_ping_interval_milliseconds`) 뒤에 `TIMEOUT` 으로 끊긴다 (설계 결정 3, 9).
 - **onClose.** 마지막 콜백이고 `onOpen` 이 나간 소켓에만 한 번 온다. `KiottyNetWebSocketClose` 의 `code` 는 끊긴 이유, `status` / `reason` 은 상대의 close frame 의 것이다. 아래 표.
 
 | `code` | `status` | 언제 |
@@ -1562,11 +1564,12 @@ WebSocket (RFC 6455) 은 HTTP 연결에서 시작한다. 서버 쪽 WebSocket �
 | `KIOTTY_NET_CODE_TIMEOUT` | 우리가 보낸 값 (pong 늦음이면 1001) | 우리 close frame 에 상대가 `close_timeout` 안에 답하지 않았다 |
 | `KIOTTY_NET_CODE_PROTOCOL_ERROR` | 우리가 보낸 1002 / 1007 | 받은 frame 이 잘못됐다 |
 | `KIOTTY_NET_CODE_REQUEST_TOO_LARGE` | 우리가 보낸 1009 | 메시지가 `max_body_bytes` 를 넘었다 |
+| `KIOTTY_NET_CODE_PEER_NOT_READING` | 우리가 보낸 값 | 라이브러리가 닫으며 보낸 close frame 을 상대가 `send_timeout_milliseconds` 안에 읽지 않았다 |
 | `KIOTTY_NET_CODE_CLOSED` | 1001 | 소유자의 close (`KiottyNet_closeHttpServer` / `KiottyNet_closeWebSocketClient`). close handshake 없이 끊는다 |
 
 - 상대가 close frame 을 보냈으면 `code` 가 무엇이든 `status` / `reason` 은 그 frame 의 것이다. HttpServer 에서는 `onClose` 뒤에 HttpServer 의 끊김 action (`onHttpDisconnected`) 도 온다.
 - **broadcast.** `KiottyNet_broadcastWebSocket(server, path, opcode, data)` 는 등록에 쓴 path 문자열로 그 경로의 열린 (`onOpen` 이 나갔고 닫는 중이 아닌) 소켓 전부에 `send` 한다. path 가 NULL 이면 그 서버의 모든 WebSocket 소켓. 등록되지 않은 path 는 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 여유 없는 소켓은 건너뛰고 끊지 않으며 하나라도 건너뛰면 `KIOTTY_NET_CODE_BUFFER_FULL`.
-- **subprotocol 은 서버만 고른다** (설계 결정 12). `onUpgrade` 안에서 `KiottyNet_selectWebSocketProtocol` 로 요청의 후보 중 하나를 고르면 101 에 실린다. 후보에 없으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `onUpgrade` 밖이면 `KIOTTY_NET_CODE_BUSY`.
+- **subprotocol.** 서버는 `onUpgrade` 안에서 `KiottyNet_selectWebSocketProtocol` 로 요청의 후보 중 하나를 고르면 101 에 실린다. 후보에 없으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `onUpgrade` 밖이면 `KIOTTY_NET_CODE_BUSY`. 클라이언트는 후보를 보낸다 (11절, v1 결정 9).
 - **두지 않는 것.** WebSocket 의 Work (긴 작업은 `onMessage` 에서 복사해 worker 로, 결과는 `send`), 큰 메시지의 조각 송신, 수신 메시지의 streaming 전달, permessage-deflate 등 확장, 경로마다 다른 상한 / 타이머.
 
 공용 타입
@@ -1624,12 +1627,17 @@ typedef struct KiottyNetWebSocketInfo {
     char                    protocol[KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH];   /* 고른 subprotocol. 없으면 빈 문자열 */
 } KiottyNetWebSocketInfo;
 
-typedef struct KiottyNetWebSocketHandler {  /* 함수 표만 담는다 */
-    KiottyNetBool             (*onUpgrade)(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade);   /* 서버만. 0 이면 403. NULL 이면 모두 허용 */
-    KiottyNetWebSocketContext (*onOpen)   (KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket);                                        /* 101 송신 완료 (서버) / 101 수신 (클라이언트). 필수 */
-    void                      (*onMessage)(KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketMessage message);   /* 필수 */
-    void                      (*onClose)  (KiottyNetAppContext app_context, KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketClose close);   /* 마지막 콜백. NULL 이어도 된다 */
-} KiottyNetWebSocketHandler;
+/* 서버 경로의 콜백. app_context 는 KiottyNet_runHttpServer 의 것 */
+typedef KiottyNetBool             (*KiottyNetWebSocketUpgradeAction)(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade);   /* 0 이면 403 */
+typedef KiottyNetWebSocketContext (*KiottyNetWebSocketOpenAction)   (KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket);                                        /* 101 송신 완료. 소켓마다의 context 를 돌려준다 */
+typedef void                      (*KiottyNetWebSocketMessageAction)(KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketMessage message);
+typedef void                      (*KiottyNetWebSocketCloseAction)  (KiottyNetAppContext app_context, KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketClose close);   /* 마지막 콜백. handle 없음 */
+
+typedef struct KiottyNetWebSocketRoute {    /* 등록에만 쓰는 값. code 는 처음 실패 */
+    KiottyNetCode             code;
+    KiottyNetHttpServerHandle server;
+    int32_t                   index;
+} KiottyNetWebSocketRoute;
 ```
 
 C 함수
@@ -1643,11 +1651,15 @@ KiottyNetCode KiottyNet_sendWebSocket(KiottyNetWebSocketHandle websocket, Kiotty
 KiottyNetCode KiottyNet_closeWebSocket(KiottyNetWebSocketHandle websocket, uint16_t status, const char* reason);           /* 아무 thread. status 는 보낼 수 있는 값 (1000 ~ 1014 중 1004 / 1005 / 1006 제외, 3000 ~ 4999). reason 은 NULL 이거나 124 미만의 UTF-8. 두 번째는 BUSY */
 
 /* 서버 : HttpServer 의 Upgrade 경로 */
-KiottyNetCode KiottyNet_addWebSocket(KiottyNetHttpServerHandle server, const char* path, KiottyNetWebSocketHandler handler, KiottyNetAppContext app_context);   /* run 전. handler 는 복사 */
+KiottyNetWebSocketRoute KiottyNet_addWebSocket(KiottyNetHttpServerHandle server, const char* path);                                     /* run 전 */
+KiottyNetWebSocketRoute KiottyNet_onWebSocketUpgrade(KiottyNetWebSocketRoute route, KiottyNetWebSocketUpgradeAction on_upgrade);   /* 선택. 없으면 모두 허용 */
+KiottyNetWebSocketRoute KiottyNet_onWebSocketOpen(KiottyNetWebSocketRoute route, KiottyNetWebSocketOpenAction on_open);            /* 선택. 없으면 websocket_context 는 NULL */
+KiottyNetWebSocketRoute KiottyNet_onWebSocketMessage(KiottyNetWebSocketRoute route, KiottyNetWebSocketMessageAction on_message);   /* 필수. 없으면 run 이 INVALID_ARGUMENT */
+KiottyNetWebSocketRoute KiottyNet_onWebSocketClose(KiottyNetWebSocketRoute route, KiottyNetWebSocketCloseAction on_close);         /* 선택 */
 KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server, const char* path, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);          /* 아무 thread. path NULL 이면 모든 경로 */
 ```
 
-run / close / await 는 HttpServer 의 것이다 (9절). WebSocketClient 의 함수는 11절.
+run / close / await 와 끊김 / 오류 action 은 HttpServer 의 것이다 (9절). WebSocketClient 의 함수는 11절.
 
 C++ 래퍼
 
@@ -1665,25 +1677,36 @@ public:
     bool operator!=(const KiottyNet_WebSocket& other) const;
     bool operator<(const KiottyNet_WebSocket& other) const;           // owner (std::less), 그 다음 id
 };
+
+class KiottyNet_WebSocketRoute {                     // KiottyNetWebSocketRoute 를 든 비소유 값 타입
+public:
+    KiottyNet_WebSocketRoute(KiottyNet_HttpServer& server, const char* path);
+    KiottyNet_WebSocketRoute(KiottyNetHttpServerHandle server, const char* path);
+    KiottyNet_WebSocketRoute& onUpgrade(KiottyNetWebSocketUpgradeAction on_upgrade);
+    KiottyNet_WebSocketRoute& onOpen(KiottyNetWebSocketOpenAction on_open);
+    KiottyNet_WebSocketRoute& onMessage(KiottyNetWebSocketMessageAction on_message);
+    KiottyNet_WebSocketRoute& onClose(KiottyNetWebSocketCloseAction on_close);
+    KiottyNetCode             build() const;          // route.code
+    KiottyNetWebSocketRoute   route() const;
+};
 ```
 
-`KiottyNet_HttpServer` 에는 WebSocket 메서드가 없다 (`kiotty_net_http.h` 는 이 헤더를 모른다). `KiottyNet_addWebSocket(server.handle(), ...)` 로 부른다.
+`KiottyNet_HttpServer` 에는 WebSocket 메서드가 없다 (`kiotty_net_http.h` 는 이 헤더를 모른다. v1 결정 10). 생성자가 `KiottyNet_HttpServer&` 를 받는 `KiottyNet_WebSocketRoute` 가 websocket.h 에 있다.
 
 사용 예
 
 ```cpp
 // IO Thread
-KiottyNetWebSocketContext onOpen(KiottyNetAppContext ctx, KiottyNetWebSocketHandle ws)                                         { static_cast<App*>(ctx)->clients.add(ws); return nullptr; }
-void onMessage(KiottyNetWebSocketContext, KiottyNetWebSocketHandle ws, KiottyNetWebSocketMessage message)                        { KiottyNet_WebSocket(ws).send(message.opcode, message.data); }   // echo
-void onClose(KiottyNetAppContext ctx, KiottyNetWebSocketContext, KiottyNetWebSocketHandle ws, KiottyNetWebSocketClose)          { static_cast<App*>(ctx)->clients.remove(ws); }
+KiottyNetWebSocketContext onOpen(KiottyNetAppContext ctx, KiottyNetWebSocketHandle ws)        { return static_cast<App*>(ctx)->clients.add(ws); }   // 자리 (handle 을 든다) 가 websocket_context
+void onMessage(KiottyNetWebSocketContext, KiottyNetWebSocketHandle ws, KiottyNetWebSocketMessage message)        { KiottyNet_WebSocket(ws).send(message.opcode, message.data); }   // echo
+void onClose(KiottyNetAppContext ctx, KiottyNetWebSocketContext slot, KiottyNetWebSocketClose)                   { static_cast<App*>(ctx)->clients.remove(slot); }
 
-static const KiottyNetWebSocketHandler CHAT = { nullptr, onOpen, onMessage, onClose };
 KiottyNetHttpLimits limits;
 KiottyNet_HttpLimitsBuilder(limits).bodyCapacity(16 * 1024).webSocketTimers(30000, 10000, 5000).build();
 KiottyNet_HttpServer server(context.handle(), config, limits);
-server.serveDirectory("/", "./www/");                                           // 같은 포트의 웹 UI
-KiottyNet_addWebSocket(server.handle(), "/chat", CHAT, &app);
-std::thread io([&] { server.run(address); });
+KiottyNet_WebSocketRoute(server, "/chat").onOpen(onOpen).onMessage(onMessage).onClose(onClose).build();
+server.serveDirectory("/", "./www/");                                           // 같은 포트의 웹 UI. 좁은 경로를 먼저 등록한다
+std::thread io([&] { server.run(address, &app); });                             // app 이 모든 콜백의 app_context
 
 // 앱 thread : 아무 thread 에서나
 KiottyNet_broadcastWebSocket(server.handle(), "/chat", KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.span());
@@ -1790,16 +1813,19 @@ KiottyNetHttpReply allow = client.options("/api/devices", 3000);
 if (allow.code == KIOTTY_NET_CODE_SUCCESS && (KiottyNet_getHttpAllowedMethods(&allow) & KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_PATCH))) { /* PATCH 지원 */ }
 ```
 
-**WebSocketClient.** 6절 EventClient 위에 Upgrade 요청 / 101 검사 행과 10절의 WebSocket 행을 얹은 것이다 (cycle W4, 2026-11-13). 서버와 같은 `KiottyNetWebSocketHandler` 를 쓰므로 콜백을 그대로 옮길 수 있다. 선언은 `kiotty_net_websocket.h` 에 있고, 사용법은 [user_guide_websocket.md](user_guide_websocket.md) 7절이다.
+**WebSocketClient.** 6절 EventClient 위에 Upgrade 요청 / 101 검사 행과 10절의 WebSocket 행을 얹은 것이다 (cycle W4, 등록 모양은 cycle V3, 2026-11-13). 선언은 `kiotty_net_websocket.h` 에 있고, 사용법은 [user_guide_websocket.md](user_guide_websocket.md) 6, 8절이다.
 
-- **create** 는 `(context, configuration, limits, path)` 이고 `KiottyNetWebSocketClientResult { code, handle }` 을 돌려준다. `limits` 가 NULL 이면 `KiottyNet_initializeHttpLimits` 의 기본값이다. 쓰는 필드는 `max_body_bytes` (메시지 상한), `max_header_bytes` / `max_headers` / `header_timeout_milliseconds` (101 응답), 타이머 셋이다. `path` 는 요청 경로 (query 를 붙여도 된다) 이고 `/` 로 시작하는 보이는 ASCII 글자 (`KIOTTY_NET_MAX_URL_LENGTH` 미만) 여야 한다. 초기화하지 않은 limits, NULL 설정, 잘못된 path 는 `{ KIOTTY_NET_CODE_INVALID_ARGUMENT, NULL }`.
-- **run** 은 `(client, address, tls, handler, app_context)` 이다. 연결 (6절의 재시도), Upgrade 요청, 101 검사, frame loop 를 모두 한다. `tls` 가 NULL 이면 ws, 아니면 wss 이고 한 클라이언트로 ws 와 wss 에 차례로 붙을 수 있다. handler 의 `onOpen` 이나 `onMessage` 가 NULL 이거나 이미 돌고 있으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. `onUpgrade` 는 부르지 않는다 (NULL 로 둔다). handler 와 address 는 run 이 복사한다.
-- **Upgrade 요청.** `GET <path> HTTP/1.1`, `Host`, `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Key` (run 마다 새 16 바이트 난수의 base64), `Sec-WebSocket-Version: 13`. `Sec-WebSocket-Protocol` 은 보내지 않는다 (설계 결정 12). **Host 와 TLS SNI 는 run 의 address 의 host** 다 (설계 결정 6). IPv6 literal 이면 `[...]` 로 감싸고, 포트가 ws 의 80 / wss 의 443 이 아니면 `:port` 를 붙인다. 요청은 write lane 으로 나간다.
-- **101 검사.** 상태줄이 `HTTP/1.1 101` 이고, `Upgrade` 에 `websocket`, `Connection` 에 `upgrade` (대소문자 무시), `Sec-WebSocket-Accept` 가 보낸 키의 값, `Sec-WebSocket-Protocol` 이 없어야 한다 (RFC 6455 4.1). 아니면 `onOpen` 없이 끊고 run 은 `KIOTTY_NET_CODE_PROTOCOL_ERROR`. 101 이 `header_timeout_milliseconds` 안에 다 오지 않으면 `KIOTTY_NET_CODE_TIMEOUT`.
-- **mask.** 보내는 frame 은 모두 frame 마다 새 mask key 로 mask 한다 (`send`, ping, pong, close). 받은 frame 에 mask 가 있으면 1002 로 닫는다. 나머지 규칙 (조각 합치기, ping / pong, close handshake, onClose 의 표) 은 10절과 같다.
+- **create** 는 `(context, configuration, limits)` 이고 `KiottyNetWebSocketClientResult { code, handle }` 을 돌려준다. `limits` 가 NULL 이면 `KiottyNet_initializeHttpLimits` 의 기본값이다. 쓰는 필드는 `max_body_bytes` (메시지 상한), `max_header_bytes` / `max_headers` / `header_timeout_milliseconds` (101 응답), 타이머 셋이다. 초기화하지 않은 limits, NULL 설정은 `{ KIOTTY_NET_CODE_INVALID_ARGUMENT, NULL }`.
+- **등록** 은 `KiottyNet_onWebSocketClientOpen / Message / Close / Error(client, cb)` 이고 run 전에만 (run 중이면 `KIOTTY_NET_CODE_BUSY`). NULL 콜백 / client 는 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 다시 부르면 바꾸고 다음 run 에도 남는다. 콜백에는 소켓 handle 이 없고 (소켓이 하나이고 보내기와 닫기도 client 로 한다) app_context 는 run 의 것이다. Message 는 필수다.
+- **Open** 은 101 을 받고 검사를 지났을 때, **Close** 는 Open 뒤 끝날 때 한 번 (표는 10절), **Error** 는 **Open 전에** 실패했을 때 한 번이다: 연결 재시도 포기 (run 의 실패 코드, info 는 빈 값), TLS handshake 실패, 101 아님 / Accept 틀림 / subprotocol 이 후보 밖 (`PROTOCOL_ERROR`), 101 timeout (`TIMEOUT`), 101 전에 서버가 끊음 (`PEER_CLOSED`). 앱의 멈추기 (`CLOSED`) 와 잘못된 인자 (`INVALID_ARGUMENT`) 는 Error 로 오지 않는다. Error 와 Close 는 둘 중 하나만 온다.
+- **subprotocol 후보.** `KiottyNet_setWebSocketClientProtocols(client, "ocpp1.6, ocpp2.0.1")`. 쉼표로 나눈 token 목록, 127 바이트까지. 빈 항목이나 token 이 아닌 항목은 `KIOTTY_NET_CODE_INVALID_ARGUMENT`, NULL / 빈 문자열은 지운다, run 중이면 `BUSY`. 요청에 `Sec-WebSocket-Protocol` 로 그대로 실린다. 101 의 값이 후보 중 하나면 통과하고 `getWebSocketInfo(...).protocol` 이 그 값, 101 에 없으면 **통과** (빈 문자열. JavaScript 와 같다), 후보 밖이거나 후보를 보내지 않았는데 오면 `PROTOCOL_ERROR` (v1 결정 9).
+- **run** 은 `(client, address, path, tls, app_context)` 이다. 연결 (6절의 재시도), Upgrade 요청, 101 검사, frame loop 를 모두 한다. `path` 는 요청 경로 (query 를 붙여도 된다) 이고 `/` 로 시작하는 보이는 ASCII 글자 (`KIOTTY_NET_MAX_URL_LENGTH` 미만) 여야 한다. `tls` 가 NULL 이면 ws, 아니면 wss 이고 한 클라이언트로 ws 와 wss, 다른 경로에 차례로 붙을 수 있다. address 와 path 는 run 이 복사한다.
+- **Upgrade 요청.** `GET <path> HTTP/1.1`, `Host`, `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Key` (run 마다 새 16 바이트 난수의 base64), `Sec-WebSocket-Version: 13`, (후보가 있으면) `Sec-WebSocket-Protocol`. **Host 와 TLS SNI 는 run 의 address 의 host** 다 (v0 결정 6). IPv6 literal 이면 `[...]` 로 감싸고, 포트가 ws 의 80 / wss 의 443 이 아니면 `:port` 를 붙인다. 요청은 write lane 으로 나가고 1024 바이트에 들어야 한다.
+- **101 검사.** 상태줄이 `HTTP/1.1 101` 이고, `Upgrade` 에 `websocket`, `Connection` 에 `upgrade` (대소문자 무시), `Sec-WebSocket-Accept` 가 보낸 키의 값, `Sec-WebSocket-Protocol` 은 없거나 후보 중 하나여야 한다 (RFC 6455 4.1). 아니면 `onOpen` 없이 끊고 run 은 `KIOTTY_NET_CODE_PROTOCOL_ERROR`. 101 이 `header_timeout_milliseconds` 안에 다 오지 않으면 `KIOTTY_NET_CODE_TIMEOUT`.
+- **mask.** 보내는 frame 은 모두 frame 마다 새 mask key 로 mask 한다 (`send`, ping, pong, close). key 는 `std::random_device` 로 seed 한 splitmix64 하나에서 뽑고, 라이브러리가 write lane 으로 보내는 close frame 도 같은 생성기를 쓴다 (RFC 6455 10.3, v1 결정 15). 받은 frame 에 mask 가 있으면 1002 로 닫는다. 나머지 규칙 (조각 합치기, ping / pong, close handshake, onClose 의 표) 은 10절과 같다.
 - **await** 는 `onOpen` 이 나가면 `KIOTTY_NET_CODE_SUCCESS`, 그 전에 run 이 끝났으면 run 의 반환값, 시간이 지나면 `KIOTTY_NET_CODE_TIMEOUT` 이다 (7절의 "loop 가 돌기 시작" 대신 "소켓이 열림"). 끝난 run 의 결과는 다음 run 이 시작할 때까지 남으므로 같은 클라이언트로 다시 run 한 직후의 await 는 앞 run 의 결과를 볼 수 있다 (7절과 같은 주의).
-- **close** 는 close handshake 없이 끊는다 (`onClose(KIOTTY_NET_CODE_CLOSED, 1001)`). 정상 종료는 `KiottyNet_closeWebSocket(KiottyNet_getWebSocketClientSocket(client), ...)` 로 handshake 를 하면 상대가 끊고 run 이 `KIOTTY_NET_CODE_PEER_CLOSED` 로 돌아온다.
-- 앱 thread 에서 보내려면 서버와 같이 `KiottyNet_sendWebSocket(ws, opcode, data)` 를 부른다. `KiottyNet_sendWebSocketClient(client, opcode, data)` 는 그 소켓 하나의 `sendWebSocket` 이다 (`notifyEventClient` 와 같은 관계). `KiottyNet_getWebSocketClientSocket` 은 `onOpen` 전과 `onClose` 뒤에 `{ NULL, 0 }` 이고 그때의 `sendWebSocketClient` 는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
+- **닫기 둘** (v1 결정 12). `KiottyNet_byeWebSocketClient(client, status, reason)` 은 close handshake 를 시작한다 (규칙과 코드는 `KiottyNet_closeWebSocket` 과 같고 열린 소켓이 없으면 `PEER_CLOSED`). 상대가 답하고 끊으면 `onClose(SUCCESS, ...)` 뒤 run 이 `KIOTTY_NET_CODE_PEER_CLOSED` 로 돌아온다. `KiottyNet_closeWebSocketClient(client)` 는 base 규칙대로 멈추기다. 연결 중 재시도도 멈추고, 열린 소켓은 handshake 없이 끊는다 (`onClose(KIOTTY_NET_CODE_CLOSED, 1001)`, run 은 `CLOSED`).
+- 앱 thread 에서 보내려면 `KiottyNet_sendWebSocketClient(client, opcode, data)` 다. 그 소켓 하나의 `sendWebSocket` 이다 (`notifyEventClient` 와 같은 관계). `KiottyNet_getWebSocketClientSocket` 은 `onOpen` 전과 `onClose` 뒤에 `{ NULL, 0 }` 이고 그때의 `sendWebSocketClient` 는 `KIOTTY_NET_CODE_PEER_CLOSED` 다. 서버 코드와 같은 함수 (`getWebSocketInfo` 등) 를 쓰고 싶을 때 소켓 handle 을 얻는다.
 
 run 의 반환값
 
@@ -1807,19 +1833,30 @@ run 의 반환값
 |---|---|
 | `KIOTTY_NET_CODE_CLOSED` | `KiottyNet_closeWebSocketClient` 로 끝났다 |
 | `KIOTTY_NET_CODE_PEER_CLOSED` | 서버가 끊었다. close handshake 를 마친 정상 종료도 이것이다 (끝난 모양은 `onClose` 의 `code` 가 말한다) |
-| `KIOTTY_NET_CODE_PROTOCOL_ERROR` | 101 이 아닌 응답, `Sec-WebSocket-Accept` 가 틀림, 요청하지 않은 `Sec-WebSocket-Protocol` |
+| `KIOTTY_NET_CODE_PROTOCOL_ERROR` | 101 이 아닌 응답, `Sec-WebSocket-Accept` 가 틀림, `Sec-WebSocket-Protocol` 이 후보 밖 |
 | `KIOTTY_NET_CODE_TIMEOUT` | 101 이 `header_timeout_milliseconds` 안에 오지 않았다 |
-| `KIOTTY_NET_CODE_INVALID_ARGUMENT` | handler / address 가 NULL, `onOpen` / `onMessage` 가 NULL, 이미 돌고 있음, Upgrade 요청이 768 바이트에 들지 않음 (path + host) |
+| `KIOTTY_NET_CODE_INVALID_ARGUMENT` | address 가 NULL, path 가 틀림, Message 콜백이 없음, 이미 돌고 있음, Upgrade 요청이 1024 바이트에 들지 않음 (path + Host + 후보) |
 | 그 밖 | 6절 EventClient 의 run 과 같다 (연결 재시도 실패, `SOCKET_ERROR`, TLS 실패 등) |
 
 ```c
 typedef struct KiottyNetWebSocketClient* KiottyNetWebSocketClientHandle;
 typedef struct KiottyNetWebSocketClientResult { KiottyNetCode code; KiottyNetWebSocketClientHandle handle; } KiottyNetWebSocketClientResult;
 
-KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetHttpLimits* limits /* NULL = 기본값 */, const char* path);
+typedef void (*KiottyNetWebSocketClientOpenAction)(KiottyNetAppContext app_context);
+typedef void (*KiottyNetWebSocketClientMessageAction)(KiottyNetAppContext app_context, KiottyNetWebSocketMessage message);
+typedef void (*KiottyNetWebSocketClientCloseAction)(KiottyNetAppContext app_context, KiottyNetWebSocketClose close);
+typedef void (*KiottyNetWebSocketClientErrorAction)(KiottyNetAppContext app_context, KiottyNetConnectionInfo info, KiottyNetCode code, const char* message);   /* KiottyNetHttpErrorAction 과 같은 모양 */
+
+KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetHttpLimits* limits /* NULL = 기본값 */);
 void          KiottyNet_destroyWebSocketClient(KiottyNetContext context, KiottyNetWebSocketClientHandle client);
-KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls /* NULL = ws */, const KiottyNetWebSocketHandler* handler, KiottyNetAppContext app_context);
-void          KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client);                     /* close handshake 없이 끊는다 */
+KiottyNetCode KiottyNet_setWebSocketClientProtocols(KiottyNetWebSocketClientHandle client, const char* protocols);     /* run 전. NULL 이면 지운다 */
+KiottyNetCode KiottyNet_onWebSocketClientOpen(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketClientOpenAction on_open);
+KiottyNetCode KiottyNet_onWebSocketClientMessage(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketClientMessageAction on_message);   /* 필수 */
+KiottyNetCode KiottyNet_onWebSocketClientClose(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketClientCloseAction on_close);
+KiottyNetCode KiottyNet_onWebSocketClientError(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketClientErrorAction on_error);
+KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client, const KiottyNetAddress* address, const char* path, const KiottyNetTlsClientConfiguration* tls /* NULL = ws */, KiottyNetAppContext app_context);
+void          KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client);                     /* 멈추기. close handshake 없이 끊는다 */
+KiottyNetCode KiottyNet_byeWebSocketClient(KiottyNetWebSocketClientHandle client, uint16_t status, const char* reason);   /* close handshake. 열린 소켓이 없으면 PEER_CLOSED */
 KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle client, uint64_t timeout_milliseconds);   /* onOpen 이 나가면 SUCCESS */
 KiottyNetWebSocketHandle KiottyNet_getWebSocketClientSocket(KiottyNetWebSocketClientHandle client);    /* 열린 소켓이 없으면 { NULL, 0 } */
 KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle client, KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);   /* 열린 소켓이 없으면 PEER_CLOSED */
@@ -1828,13 +1865,19 @@ KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle clien
 ```cpp
 class KiottyNet_WebSocketClient {
 public:
-    KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetHttpLimits* limits, const char* path);
+    KiottyNet_WebSocketClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetHttpLimits* limits);
     explicit operator bool() const;                  // create 가 실패하면 false
     KiottyNetCode                  code() const;     // create 의 이유
     KiottyNetWebSocketClientHandle handle() const;
-    KiottyNetCode            run(const KiottyNetAddress& address, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);
-    KiottyNetCode            run(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls, const KiottyNetWebSocketHandler& handler, KiottyNetAppContext app_context);   // wss
-    void                     close();
+    KiottyNetCode            protocols(const char* protocols);
+    KiottyNetCode            onOpen(KiottyNetWebSocketClientOpenAction on_open);
+    KiottyNetCode            onMessage(KiottyNetWebSocketClientMessageAction on_message);
+    KiottyNetCode            onClose(KiottyNetWebSocketClientCloseAction on_close);
+    KiottyNetCode            onError(KiottyNetWebSocketClientErrorAction on_error);
+    KiottyNetCode            run(const KiottyNetAddress& address, const char* path, KiottyNetAppContext app_context);
+    KiottyNetCode            run(const KiottyNetAddress& address, const char* path, const KiottyNetTlsClientConfiguration& tls, KiottyNetAppContext app_context);   // wss
+    KiottyNetCode            bye(uint16_t status = KIOTTY_NET_WEB_SOCKET_STATUS_NORMAL_CLOSURE, const char* reason = nullptr);   // close handshake
+    void                     close();                // 멈추기
     KiottyNetCode            await(uint64_t timeout_milliseconds);
     KiottyNetWebSocketHandle socket() const;
     KiottyNetCode            send(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
@@ -1842,16 +1885,21 @@ public:
 ```
 
 ```cpp
-KiottyNet_WebSocketClient client(context.handle(), configuration, nullptr, "/chat");
-std::thread io([&] { client.run(address, tls, HANDLER, &session); });   // 연결 + Upgrade + loop
+KiottyNet_WebSocketClient client(context.handle(), configuration, nullptr);
+client.protocols("ocpp1.6");                                             // 선택
+client.onOpen(onOpen);
+client.onMessage(onMessage);                                             // 필수. 받기는 여기로만 온다 (receive 함수는 없다)
+client.onClose(onClose);
+client.onError(onError);                                                 // 열리기 전 실패
+std::thread io([&] { client.run(address, "/ocpp/CP001", tls, &app); });  // 연결 + Upgrade + loop
 if (client.await(5000) == KIOTTY_NET_CODE_SUCCESS) client.send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, hello);
-KiottyNet_WebSocket(client.socket()).close();                            // close handshake. 서버가 답하고 끊으면 run 이 PEER_CLOSED
+client.bye();                                                            // close handshake. 서버가 답하고 끊으면 run 이 PEER_CLOSED
 io.join();
 ```
 
 열린 질문
 
-1. (닫힘, 2026-11-11) 동기 WebSocketClient 는 두지 않는다. 서버 push 를 받으려면 결국 loop 가 필요하다 (user_guide_websocket 10절).
+1. (닫힘, 2026-11-11) 동기 WebSocketClient 는 두지 않는다. 서버 push 를 받으려면 결국 loop 가 필요하다 (user_guide_websocket 11절). 요청 / 응답 모양은 앱이 onMessage 와 큐로 놓는다 (user guide 8절).
 2. HttpClient 의 응답 이름. 서버의 `HttpResponse` (사용자가 채우는 것) 와 구분하려고 `HttpReply` (사용자가 읽는 것) 로 두었다.
 3. HttpClient 에 비동기 버전(EventClient 위, 콜백으로 응답)이 필요한지. 동기 버전만으로 시작하는 것을 제안한다.
 4. `request_bytes` 버퍼 없이 요청 헤더를 바로 write lane 에 쓰면 버퍼 하나가 준다. 대신 ClientConfig 의 `send_capacity` 가 요청 크기 상한이 된다.
@@ -1861,6 +1909,7 @@ io.join();
 - (닫힘, 2026-11-11) WebSocket 의 Work 는 두지 않는다. 다른 thread 의 송신은 push lane 의 `send` 다 (설계 결정 3).
 - (닫힘, 2026-11-11) pool handle 의 소유자: handle 이 `{ owner, id }` 를 든다 (설계 결정 7).
 - (닫힘, 2026-11-11) WebSocketServer 는 없애고 HttpServer 의 Upgrade 경로 하나로 합쳤다 (설계 결정 1).
+- (닫힘, 2026-11-13) WebSocket 의 등록을 HTTP 모양으로 (route 사슬, 클라이언트의 on 등록), app_context 는 run 에 한 번 (HTTP 도), 클라이언트의 subprotocol 후보와 bye (design_websocket_v1 결정 1 ~ 15).
 - HttpServer 라우트에 capture 있는 람다 / functor 를 받는 template 오버로드. 얇은 래퍼 규칙 때문에 뺐다. 필요하면 run 의 app_context 로 대신한다.
 - HttpServer 에 간단한 CORS 설정 (허용 origin 목록 하나로 preflight 자동 응답 + 헤더 자동 추가) 을 둘지.
 - 조각을 합치지 않고 그대로 전달하는 streaming 모드 (`max_body_bytes` 보다 큰 메시지).

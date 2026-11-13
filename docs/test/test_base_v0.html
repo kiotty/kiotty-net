@@ -987,7 +987,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <h3>20.1 헤더 (W1 unit, <code>kiotty_test_headers_c.c</code>, <code>kiotty_test_headers_cpp.cpp</code>)</h3>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>Headers</td><td>(기존 struct 비교에 더함)</td><td><span class="tag ok">정상</span></td><td><code>KiottyNetWebSocketHandle</code> 의 크기와 id offset, <code>KiottyNetWebSocketClientResult</code>, <code>KiottyNetWebSocketHandler</code> 의 C / C++ 크기가 같다. <code>KiottyNet_WebSocketClient</code> 는 explicit bool</td></tr>
+  <tr><td>Headers</td><td>(기존 struct 비교에 더함)</td><td><span class="tag ok">정상</span></td><td><code>KiottyNetWebSocketHandle</code> 의 크기와 id offset, <code>KiottyNetWebSocketClientResult</code>, <code>KiottyNetWebSocketRoute</code> (V2, handler 대신) 의 C / C++ 크기가 같다. <code>KiottyNet_WebSocketClient</code> 는 explicit bool</td></tr>
   <tr><td>Headers</td><td>WebSocketHandlesOrderByOwnerThenId</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_WebSocket</code> 의 <code>==</code>, <code>!=</code>, <code>&lt;</code> (owner 를 <code>std::less</code> 로, 그 다음 id)</td></tr>
 </table>
 
@@ -1017,8 +1017,8 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>WebSocketServer</td><td>CloseInsideOnMessageWaitsForThePeerCloseUntilTheTimeout</td><td><span class="tag edge">엣지</span></td><td>onMessage 안의 close → close frame, 답 없음 → <code>close_timeout</code> 200 ms 뒤 <code>TIMEOUT</code></td></tr>
   <tr><td>WebSocketServer</td><td>RefusesWrongMethodMissingHeadersBadKeyAndForbiddenUpgrade</td><td><span class="tag misuse">오용</span></td><td>POST / HEAD 405, 헤더 없음 / Version 8 은 426, 깨진 키 / body 는 400, onUpgrade 0 은 403 + <code>Connection: close</code>, 허용은 101</td></tr>
   <tr><td>WebSocketServer</td><td>SubprotocolIsChosenOnlyInsideOnUpgrade</td><td><span class="tag ok">정상</span></td><td>후보에 없는 값 INVALID_ARGUMENT, <code>mqtt</code> 선택 → 101 의 헤더와 onOpen 의 info, onOpen 안의 select 는 BUSY</td></tr>
-  <tr><td>WebSocketServer</td><td>HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcastByPath</td><td><span class="tag ok">정상</span></td><td>HTTP 라우트 + <code>/chat</code> + <code>/telemetry</code> 한 서버, 경로별 broadcast, NULL 은 전부, 모르는 경로 INVALID_ARGUMENT, 메시지가 경로의 app_context 로</td></tr>
-  <tr><td>WebSocketServer</td><td>RegistrationRulesAndServerCloseGivesClosed1001</td><td><span class="tag misuse">오용</span></td><td>같은 path, 같은 path 의 라우트는 DUPLICATE_RULE, onMessage NULL / 상대 경로 / NULL 서버는 INVALID_ARGUMENT, run 뒤 BUSY, <code>{ NULL, 0 }</code> handle, 빈 data, 서버 close → <code>onClose(CLOSED, 1001)</code>, onClose 안의 send PEER_CLOSED</td></tr>
+  <tr><td>WebSocketServer</td><td>HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcastByPath</td><td><span class="tag ok">정상</span></td><td>HTTP 라우트 + <code>/chat</code> + <code>/telemetry</code> 한 서버, 경로별 broadcast, NULL 은 전부, 모르는 경로 INVALID_ARGUMENT, 메시지가 경로의 websocket_context 로 (V2 부터 app_context 는 run 의 것 하나, 경로는 Open 이 돌려준 context 로 가른다)</td></tr>
+  <tr><td>WebSocketServer</td><td>RegistrationRulesAndServerCloseGivesClosed1001</td><td><span class="tag misuse">오용</span></td><td>같은 path, 같은 path 의 라우트는 DUPLICATE_RULE, 상대 경로 / NULL 서버는 INVALID_ARGUMENT, run 뒤 BUSY, <code>{ NULL, 0 }</code> handle, 빈 data, 서버 close → <code>onClose(CLOSED, 1001)</code>, 닫힌 소켓의 send PEER_CLOSED (V2 의 route 규칙은 23절)</td></tr>
 </table>
 
 <h3>20.4 클라이언트 (W4 integration, <code>kiotty_test_websocket_client.cpp</code>)</h3>
@@ -1026,11 +1026,11 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>WebSocketClient</td><td>RoundTripsWithTheServerThenClosesFromTheClient</td><td><span class="tag ok">정상</span></td><td>W3 서버와 왕복. 연결 전 socket <code>{ NULL, 0 }</code> / send PEER_CLOSED, await SUCCESS, info 의 port, 텍스트와 12000 바이트 echo, 클라이언트의 close 1000 "bye" → 양쪽 onClose, run PEER_CLOSED</td></tr>
   <tr><td>WebSocketClient</td><td>OneClientRunsPlainThenSecure</td><td><span class="tag ok">정상</span></td><td>한 클라이언트가 ws 뒤 wss (CA 로 검증, SNI 127.0.0.1). close → run CLOSED, <code>onClose(CLOSED, 1001)</code>. TLS 빌드에서만</td></tr>
-  <tr><td>WebSocketClient</td><td>SendsAWellFormedUpgradeAndRejectsWrongAnswers</td><td><span class="tag misuse">오용</span></td><td>가짜 서버가 본 요청 (<code>GET /chat?room=1</code>, Host <code>127.0.0.1:port</code>, Upgrade, Connection, Version 13, 24 글자 키, Protocol 없음). 200, 틀린 Accept, Protocol 있음 → run 과 await 모두 PROTOCOL_ERROR, onOpen / onClose 없음</td></tr>
+  <tr><td>WebSocketClient</td><td>SendsAWellFormedUpgradeAndRejectsWrongAnswers</td><td><span class="tag misuse">오용</span></td><td>가짜 서버가 본 요청 (<code>GET /chat?room=1</code>, Host <code>127.0.0.1:port</code>, Upgrade, Connection, Version 13, 24 글자 키, 후보가 없으면 Protocol 없음). 200, 틀린 Accept, 후보 없이 온 Protocol → run 과 await 모두 PROTOCOL_ERROR, onOpen / onClose 없음 (V3 부터 onError 한 번씩)</td></tr>
   <tr><td>WebSocketClient</td><td>MasksOutgoingFramesAndRejectsAMaskedServerFrame</td><td><span class="tag edge">엣지</span></td><td>보낸 TEXT 의 MASK 비트와 unmask 결과. mask 된 서버 frame → mask 된 close 1002, <code>onClose(PROTOCOL_ERROR, 1002)</code></td></tr>
   <tr><td>WebSocketClient</td><td>SilentServerEndsTheHandshakeWithTimeout</td><td><span class="tag edge">엣지</span></td><td>101 이 오지 않음 (<code>header_timeout</code> 200 ms) → TIMEOUT</td></tr>
   <tr><td>WebSocketClient</td><td>RetriesUntilTheServerListens</td><td><span class="tag edge">엣지</span></td><td>서버가 300 ms 늦게 뜸 → 재시도 뒤 왕복</td></tr>
-  <tr><td>WebSocketClient</td><td>CreateRejectsBadArgumentsAndRunRejectsAMissingHandler</td><td><span class="tag misuse">오용</span></td><td>create 의 상대 path, 공백 있는 path, NULL 설정은 <code>{ INVALID_ARGUMENT, NULL }</code>. run 의 handler NULL / onMessage NULL 은 INVALID_ARGUMENT. run 전 await TIMEOUT</td></tr>
+  <tr><td>WebSocketClient</td><td>RegistrationAndRunRejectBadArguments (W4 의 CreateRejectsBadArgumentsAndRunRejectsAMissingHandler)</td><td><span class="tag misuse">오용</span></td><td>V3 부터 path 는 run 이 받으므로 상대 / 공백 path 는 run 의 INVALID_ARGUMENT. NULL 설정의 create, Message 없는 run 도 INVALID_ARGUMENT. run 전 await TIMEOUT. 자세히는 24절</td></tr>
 </table>
 <p>하지 않은 것: 외부 클라이언트 (Python websockets, 브라우저) 와의 왕복 (WSL 에 <code>websockets</code> 와 pip 가 없다. 설계 10절의 W3 완료 조건 하나). push lane 이 찬 send 의 BUFFER_FULL, broadcast 의 건너뜀, pong timeout 0 / close timeout 0 (무한) 은 integration 으로 재현하지 않았다. WebSocket benchmark 는 없다.</p>
 

@@ -369,5 +369,12 @@ IO thread : 서버의 close frame → onClose(&amp;app, { SUCCESS, 1000, 서버�
 </table>
 <p>W5 progress 에 남긴 두 문제: close frame 뒤의 push lane 데이터는 B3 (결정 14), close frame 의 mask key 는 V3 (결정 15) 에서 고친다.</p>
 
+<p><b>모두 끝났다 (2026-11-13).</b> B3 <code>d0d6c58</code>, V1 <code>1308168</code>, V2 <code>1a0e53e</code>, V3 <code>a87af46</code>, V4 (이 문서 판의 user guide, requirement, 구현 가이드). progress 는 <code>261113_progress_base_b3.md</code>, <code>261113_progress_websocket_v1.md</code> ~ <code>v4.md</code>. 구현에서 정한 것:</p>
+<ul>
+  <li>V1: C++ <code>run(address, [tls,] app_context)</code> 의 app_context 는 기본값 없이 필수 (base 의 <code>KiottyNet_Server::run</code> 과 같다).</li>
+  <li>V2: <code>HttpRegistry</code> 의 public 함수 수를 늘리지 않으려고 route 의 칸은 <code>find(index)</code> 오버로드로 받는다. onMessage 검사는 <code>HttpServer::run</code> 의 첫 줄.</li>
+  <li>V3: 클라이언트 콜백의 NULL 은 <code>INVALID_ARGUMENT</code> (서버 route 와 같다). onError 는 base 의 오류 보고와 run 끝의 결과 둘 중 먼저 온 것 한 번 (<code>has_opened</code> / <code>has_failed</code>). <code>CLOSED</code>, <code>INVALID_ARGUMENT</code> 는 알리지 않는다. Upgrade 요청 버퍼 768 → 1024 바이트.</li>
+</ul>
+
 </body>
 </html>
