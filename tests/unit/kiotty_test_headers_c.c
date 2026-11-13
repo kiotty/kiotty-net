@@ -44,6 +44,8 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.websocket_handle_id_offset = offsetof(KiottyNetWebSocketHandle, id);
     layout.websocket_client_result    = sizeof(KiottyNetWebSocketClientResult);
     layout.websocket_handler          = sizeof(KiottyNetWebSocketHandler);
+    layout.websocket_route            = sizeof(KiottyNetWebSocketRoute);
+    layout.websocket_route_index_offset = offsetof(KiottyNetWebSocketRoute, index);
     layout.http_request_keep_alive = offsetof(KiottyNetHttpRequest, keep_alive);
     layout.rule_next_count      = RULES[0].next.count;
     layout.rule_second_next     = RULES[0].next.at[1];

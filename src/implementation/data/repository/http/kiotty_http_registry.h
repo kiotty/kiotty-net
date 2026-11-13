@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kiotty_fixed_string.h"
+#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "data/repository/websocket/kiotty_websocket_socket.h"
 #include "domain/usecases/http/kiotty_http_route_path.h"
@@ -56,6 +57,9 @@ namespace kiotty::net::implementation
         StaticKind               kind;
     };
 
+    using SocketIndexResult = Result<int32_t, KiottyNetCode>;
+    using SocketTargetResult = Result<WebSocketTarget&, KiottyNetCode>;
+
     class HttpRegistry
     {
     public:
@@ -65,9 +69,7 @@ namespace kiotty::net::implementation
         KiottyNetCode addRoute(KiottyNetHttpMethod method,
                                const char* path,
                                KiottyNetHttpRoute route);
-        KiottyNetCode addRoute(const char* path,
-                               const KiottyNetWebSocketHandler& handler,
-                               KiottyNetAppContext app_context);
+        SocketIndexResult  addRoute(const char* path);
         KiottyNetCode setNotFound(KiottyNetHttpRoute route);
         KiottyNetCode addDirectory(const char* url_prefix, const char* directory);
         KiottyNetCode addFile(const char* url_path, const char* file_path);
@@ -76,6 +78,7 @@ namespace kiotty::net::implementation
                                 KiottyNetSpan data);
         RouteMatch    find(KiottyNetHttpMethod method, Span<const char> path) const;
         int32_t       find(Span<const char> socket_path) const;
+        SocketTargetResult find(int32_t index);
 
     private:
         using Location = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;

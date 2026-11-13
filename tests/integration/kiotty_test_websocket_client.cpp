@@ -94,7 +94,6 @@ namespace
 
     void onClose(KiottyNetAppContext app_context,
                  KiottyNetWebSocketContext,
-                 KiottyNetWebSocketHandle,
                  KiottyNetWebSocketClose close)
     {
         Side& side = sideOf(app_context);
@@ -188,10 +187,11 @@ namespace
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             server = created.handle;
             server_side.is_echo = true;
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addWebSocket(server, "/chat", HANDLER, &server_side));
+            const KiottyNetCode added = KiottyNet_WebSocketRoute(server, "/chat").onOpen(onOpen).onMessage(onMessage).onClose(onClose).build();
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, added);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_server_address, LOOPBACK_HOST, port));
             const KiottyNetTlsServerConfiguration* copied = tls;
-            _server_thread = std::thread([this, copied]() { (void)KiottyNet_runHttpServer(server, &_server_address, copied, nullptr); });
+            _server_thread = std::thread([this, copied]() { (void)KiottyNet_runHttpServer(server, &_server_address, copied, &server_side); });
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 

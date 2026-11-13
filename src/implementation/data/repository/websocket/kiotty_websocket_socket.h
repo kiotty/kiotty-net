@@ -24,9 +24,11 @@ namespace kiotty::net::implementation
 
     struct WebSocketTarget
     {
-        KiottyNetWebSocketHandler handler;
-        KiottyNetAppContext       app_context;
-        int32_t                   path;
+        KiottyNetWebSocketUpgradeAction on_upgrade;
+        KiottyNetWebSocketOpenAction    on_open;
+        KiottyNetWebSocketMessageAction on_message;
+        KiottyNetWebSocketCloseAction   on_close;
+        int32_t                         path;
     };
 
     struct SocketLink

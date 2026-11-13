@@ -68,15 +68,71 @@ KiottyNetCode KiottyNet_closeWebSocket(KiottyNetWebSocketHandle websocket,
     return websocket.owner->closeSocket(websocket.id, status, text.value);
 }
 
-KiottyNetCode KiottyNet_addWebSocket(KiottyNetHttpServerHandle server,
-                                     const char* path,
-                                     KiottyNetWebSocketHandler handler,
-                                     KiottyNetAppContext app_context)
+namespace
 {
-    if (server == nullptr) { return INVALID; }
+    KiottyNetWebSocketRoute failedRoute(KiottyNetWebSocketRoute route, KiottyNetCode code)
+    {
+        route.code = code;
+        return route;
+    }
+
+    net::SocketTargetResult targetOf(KiottyNetWebSocketRoute route, bool has_action)
+    {
+        using TargetResult = net::SocketTargetResult;
+        if (route.code != KIOTTY_NET_CODE_SUCCESS) { return TargetResult::failure(route.code); }
+        if (route.server == nullptr || !has_action) { return TargetResult::failure(INVALID); }
+        const net::RegistryResult registry = route.server->registry();
+        if (!registry) { return TargetResult::failure(registry.code); }
+        return registry.value().find(route.index);
+    }
+}
+
+KiottyNetWebSocketRoute KiottyNet_addWebSocket(KiottyNetHttpServerHandle server, const char* path)
+{
+    const KiottyNetWebSocketRoute route = { INVALID, server, net::NO_SOCKET_PATH };
+    if (server == nullptr) { return route; }
     const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().addRoute(path, handler, app_context);
+    if (!registry) { return failedRoute(route, registry.code); }
+    const net::SocketIndexResult added = registry.value().addRoute(path);
+    if (!added) { return failedRoute(route, added.code); }
+    const KiottyNetWebSocketRoute made = { KIOTTY_NET_CODE_SUCCESS, server, added.value };
+    return made;
+}
+
+KiottyNetWebSocketRoute KiottyNet_onWebSocketUpgrade(KiottyNetWebSocketRoute route,
+                                                     KiottyNetWebSocketUpgradeAction on_upgrade)
+{
+    const net::SocketTargetResult target = targetOf(route, on_upgrade != nullptr);
+    if (!target) { return failedRoute(route, target.code); }
+    target.value().on_upgrade = on_upgrade;
+    return route;
+}
+
+KiottyNetWebSocketRoute KiottyNet_onWebSocketOpen(KiottyNetWebSocketRoute route,
+                                                  KiottyNetWebSocketOpenAction on_open)
+{
+    const net::SocketTargetResult target = targetOf(route, on_open != nullptr);
+    if (!target) { return failedRoute(route, target.code); }
+    target.value().on_open = on_open;
+    return route;
+}
+
+KiottyNetWebSocketRoute KiottyNet_onWebSocketMessage(KiottyNetWebSocketRoute route,
+                                                     KiottyNetWebSocketMessageAction on_message)
+{
+    const net::SocketTargetResult target = targetOf(route, on_message != nullptr);
+    if (!target) { return failedRoute(route, target.code); }
+    target.value().on_message = on_message;
+    return route;
+}
+
+KiottyNetWebSocketRoute KiottyNet_onWebSocketClose(KiottyNetWebSocketRoute route,
+                                                   KiottyNetWebSocketCloseAction on_close)
+{
+    const net::SocketTargetResult target = targetOf(route, on_close != nullptr);
+    if (!target) { return failedRoute(route, target.code); }
+    target.value().on_close = on_close;
+    return route;
 }
 
 KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server,

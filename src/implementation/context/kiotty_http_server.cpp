@@ -12,6 +12,7 @@ namespace kiotty::net::implementation
         constexpr size_t MIN_RESPONSE_BYTES = RESPONSE_PREFIX_BYTES + 2;
 
         bool areLimitsUsable(const KiottyNetHttpLimits& limits);
+        bool hasEverySocketMessage(HttpRegistry& registry);
     }
 
     HttpServer::HttpServer()
@@ -41,6 +42,7 @@ namespace kiotty::net::implementation
                                   const KiottyNetTlsServerConfiguration* tls,
                                   KiottyNetAppContext app_context)
     {
+        if (!hasEverySocketMessage(_site.registry)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _runs.fetch_add(1);
         _site.is_closing.store(false);
         _site.app_context = app_context;
@@ -137,6 +139,16 @@ namespace kiotty::net::implementation
             const bool has_headers = limits.max_headers > 0 && limits.max_header_bytes > 0;
             const bool has_response = limits.response_bytes >= MIN_RESPONSE_BYTES;
             return has_routes && has_headers && has_response;
+        }
+
+        bool hasEverySocketMessage(HttpRegistry& registry)
+        {
+            for (int32_t index = 0;; ++index)
+            {
+                const SocketTargetResult target = registry.find(index);
+                if (!target) { return true; }
+                if (target.value().on_message == nullptr) { return false; }
+            }
         }
     }
 }

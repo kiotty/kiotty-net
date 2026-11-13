@@ -69,25 +69,36 @@ typedef struct KiottyNetWebSocketInfo
     char                    protocol[KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH];
 } KiottyNetWebSocketInfo;
 
+typedef KiottyNetBool (*KiottyNetWebSocketUpgradeAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetWebSocketHandle websocket,
+    KiottyNetWebSocketUpgrade upgrade);
+typedef KiottyNetWebSocketContext (*KiottyNetWebSocketOpenAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetWebSocketHandle websocket);
+typedef void (*KiottyNetWebSocketMessageAction)(
+    KiottyNetWebSocketContext websocket_context,
+    KiottyNetWebSocketHandle websocket,
+    KiottyNetWebSocketMessage message);
+typedef void (*KiottyNetWebSocketCloseAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetWebSocketContext websocket_context,
+    KiottyNetWebSocketClose close);
+
 typedef struct KiottyNetWebSocketHandler
 {
-    KiottyNetBool (*onUpgrade)(
-        KiottyNetAppContext app_context,
-        KiottyNetWebSocketHandle websocket,
-        KiottyNetWebSocketUpgrade upgrade);
-    KiottyNetWebSocketContext (*onOpen)(
-        KiottyNetAppContext app_context,
-        KiottyNetWebSocketHandle websocket);
-    void (*onMessage)(
-        KiottyNetWebSocketContext websocket_context,
-        KiottyNetWebSocketHandle websocket,
-        KiottyNetWebSocketMessage message);
-    void (*onClose)(
-        KiottyNetAppContext app_context,
-        KiottyNetWebSocketContext websocket_context,
-        KiottyNetWebSocketHandle websocket,
-        KiottyNetWebSocketClose close);
+    KiottyNetWebSocketUpgradeAction onUpgrade;
+    KiottyNetWebSocketOpenAction    onOpen;
+    KiottyNetWebSocketMessageAction onMessage;
+    KiottyNetWebSocketCloseAction   onClose;
 } KiottyNetWebSocketHandler;
+
+typedef struct KiottyNetWebSocketRoute
+{
+    KiottyNetCode             code;
+    KiottyNetHttpServerHandle server;
+    int32_t                   index;
+} KiottyNetWebSocketRoute;
 
 KIOTTY_NET_API KiottyNetWebSocketInfo KiottyNet_getWebSocketInfo(KiottyNetWebSocketHandle websocket);
 KIOTTY_NET_API KiottyNetSpan          KiottyNet_findWebSocketUpgradeHeader(
@@ -105,11 +116,21 @@ KIOTTY_NET_API KiottyNetCode          KiottyNet_closeWebSocket(
     uint16_t status,
     const char* reason);
 
-KIOTTY_NET_API KiottyNetCode KiottyNet_addWebSocket(
+KIOTTY_NET_API KiottyNetWebSocketRoute KiottyNet_addWebSocket(
     KiottyNetHttpServerHandle server,
-    const char* path,
-    KiottyNetWebSocketHandler handler,
-    KiottyNetAppContext app_context);
+    const char* path);
+KIOTTY_NET_API KiottyNetWebSocketRoute KiottyNet_onWebSocketUpgrade(
+    KiottyNetWebSocketRoute route,
+    KiottyNetWebSocketUpgradeAction on_upgrade);
+KIOTTY_NET_API KiottyNetWebSocketRoute KiottyNet_onWebSocketOpen(
+    KiottyNetWebSocketRoute route,
+    KiottyNetWebSocketOpenAction on_open);
+KIOTTY_NET_API KiottyNetWebSocketRoute KiottyNet_onWebSocketMessage(
+    KiottyNetWebSocketRoute route,
+    KiottyNetWebSocketMessageAction on_message);
+KIOTTY_NET_API KiottyNetWebSocketRoute KiottyNet_onWebSocketClose(
+    KiottyNetWebSocketRoute route,
+    KiottyNetWebSocketCloseAction on_close);
 KIOTTY_NET_API KiottyNetCode KiottyNet_broadcastWebSocket(
     KiottyNetHttpServerHandle server,
     const char* path,
@@ -173,6 +194,23 @@ public:
 
 private:
     KiottyNetWebSocketHandle _handle;
+};
+
+class KiottyNet_WebSocketRoute
+{
+public:
+    KiottyNet_WebSocketRoute(KiottyNet_HttpServer& server, const char* path);
+    KiottyNet_WebSocketRoute(KiottyNetHttpServerHandle server, const char* path);
+
+    KiottyNet_WebSocketRoute& onUpgrade(KiottyNetWebSocketUpgradeAction on_upgrade);
+    KiottyNet_WebSocketRoute& onOpen(KiottyNetWebSocketOpenAction on_open);
+    KiottyNet_WebSocketRoute& onMessage(KiottyNetWebSocketMessageAction on_message);
+    KiottyNet_WebSocketRoute& onClose(KiottyNetWebSocketCloseAction on_close);
+    KiottyNetCode             build() const;
+    KiottyNetWebSocketRoute   route() const;
+
+private:
+    KiottyNetWebSocketRoute _route;
 };
 
 class KiottyNet_WebSocketClient
@@ -268,6 +306,58 @@ inline bool KiottyNet_WebSocket::operator<(const KiottyNet_WebSocket& other) con
         return false;
     }
     return _handle.id < other._handle.id;
+}
+
+inline KiottyNet_WebSocketRoute::KiottyNet_WebSocketRoute(
+    KiottyNet_HttpServer& server,
+    const char* path)
+    : _route(KiottyNet_addWebSocket(server.handle(), path))
+{
+}
+
+inline KiottyNet_WebSocketRoute::KiottyNet_WebSocketRoute(
+    KiottyNetHttpServerHandle server,
+    const char* path)
+    : _route(KiottyNet_addWebSocket(server, path))
+{
+}
+
+inline KiottyNet_WebSocketRoute& KiottyNet_WebSocketRoute::onUpgrade(
+    KiottyNetWebSocketUpgradeAction on_upgrade)
+{
+    _route = KiottyNet_onWebSocketUpgrade(_route, on_upgrade);
+    return *this;
+}
+
+inline KiottyNet_WebSocketRoute& KiottyNet_WebSocketRoute::onOpen(
+    KiottyNetWebSocketOpenAction on_open)
+{
+    _route = KiottyNet_onWebSocketOpen(_route, on_open);
+    return *this;
+}
+
+inline KiottyNet_WebSocketRoute& KiottyNet_WebSocketRoute::onMessage(
+    KiottyNetWebSocketMessageAction on_message)
+{
+    _route = KiottyNet_onWebSocketMessage(_route, on_message);
+    return *this;
+}
+
+inline KiottyNet_WebSocketRoute& KiottyNet_WebSocketRoute::onClose(
+    KiottyNetWebSocketCloseAction on_close)
+{
+    _route = KiottyNet_onWebSocketClose(_route, on_close);
+    return *this;
+}
+
+inline KiottyNetCode KiottyNet_WebSocketRoute::build() const
+{
+    return _route.code;
+}
+
+inline KiottyNetWebSocketRoute KiottyNet_WebSocketRoute::route() const
+{
+    return _route;
 }
 
 inline KiottyNet_WebSocketClient::KiottyNet_WebSocketClient(

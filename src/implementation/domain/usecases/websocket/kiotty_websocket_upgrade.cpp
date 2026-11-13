@@ -166,7 +166,7 @@ namespace kiotty::net::implementation
         bool callUpgrade(HttpSession& session)
         {
             const WebSocketTarget& target = session.socket.target;
-            if (target.handler.onUpgrade == nullptr) { return true; }
+            if (target.on_upgrade == nullptr) { return true; }
             const KiottyNetHttpRequest& request = session.request.request();
             const KiottyNetWebSocketUpgrade upgrade{
                 request.path,
@@ -176,7 +176,7 @@ namespace kiotty::net::implementation
                 publicSpanOf(headerNamed(request, "Sec-WebSocket-Protocol")),
             };
             const KiottyNetBool allowed =
-                target.handler.onUpgrade(target.app_context, socketHandleOf(session), upgrade);
+                target.on_upgrade(session.site.app_context, socketHandleOf(session), upgrade);
             return allowed != 0;
         }
 

@@ -68,18 +68,14 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode HttpRegistry::addRoute(const char* path,
-                                         const KiottyNetWebSocketHandler& handler,
-                                         KiottyNetAppContext app_context)
+    SocketIndexResult HttpRegistry::addRoute(const char* path)
     {
-        const bool has_handler = handler.onOpen != nullptr && handler.onMessage != nullptr;
-        if (!has_handler) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const RoutePathResult parsed = parseRoutePath(path);
-        if (!parsed) { return parsed.code; }
+        if (!parsed) { return SocketIndexResult::failure(parsed.code); }
         const KiottyNetCode admitted = admit(parsed.value, ALL_METHODS);
-        if (admitted != KIOTTY_NET_CODE_SUCCESS) { return admitted; }
+        if (admitted != KIOTTY_NET_CODE_SUCCESS) { return SocketIndexResult::failure(admitted); }
         const int32_t index = static_cast<int32_t>(_sockets.size());
-        _sockets.push_back(WebSocketTarget{ handler, app_context, index });
+        _sockets.push_back(WebSocketTarget{ nullptr, nullptr, nullptr, nullptr, index });
         RouteEntry entry{};
         (void)entry.path.assign(parsed.value.text);
         entry.methods = GET_BIT;
@@ -87,8 +83,16 @@ namespace kiotty::net::implementation
         entry.kind = parsed.value.kind;
         entry.source = StaticKind::NONE;
         _entries.push_back(entry);
-        return KIOTTY_NET_CODE_SUCCESS;
+        return SocketIndexResult::success(index);
     }
+
+    SocketTargetResult HttpRegistry::find(int32_t index)
+    {
+        const bool is_inside = index >= 0 && static_cast<size_t>(index) < _sockets.size();
+        if (!is_inside) { return SocketTargetResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+        return SocketTargetResult::success(_sockets[static_cast<size_t>(index)]);
+    }
+
 
     KiottyNetCode HttpRegistry::setNotFound(KiottyNetHttpRoute route)
     {
@@ -216,7 +220,7 @@ namespace kiotty::net::implementation
         const StaticTarget target{
             prefix, entry.location.span(), entry.memory, entry.type, entry.source,
         };
-        const WebSocketTarget no_socket{ KiottyNetWebSocketHandler{}, nullptr, NO_SOCKET_PATH };
+        const WebSocketTarget no_socket{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
         RouteMatch match{ entry.route, target, no_socket, allowed, MatchKind::ROUTE };
         if (entry.source != StaticKind::NONE) { match.kind = MatchKind::STATIC; }
         if (entry.socket == NO_SOCKET_PATH) { return match; }
@@ -303,7 +307,7 @@ namespace kiotty::net::implementation
                 KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,
                 StaticKind::NONE,
             };
-            const WebSocketTarget no_socket{ KiottyNetWebSocketHandler{}, nullptr, NO_SOCKET_PATH };
+            const WebSocketTarget no_socket{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
             return RouteMatch{ KiottyNetHttpRoute{}, none, no_socket, allowed, kind };
         }
 

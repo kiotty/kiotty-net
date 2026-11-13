@@ -59,10 +59,14 @@ namespace
         int        path;
     };
 
+    PathContext& pathOf(KiottyNetWebSocketContext context);
+
     struct SocketApp
     {
         SocketApp()
-            : mutex()
+            : chat{ this, 1 }
+            , telemetry{ this, 2 }
+            , mutex()
             , sockets()
             , messages()
             , closes()
@@ -100,6 +104,8 @@ namespace
             return sockets.at(index);
         }
 
+        PathContext                           chat;
+        PathContext                           telemetry;
         std::mutex                            mutex;
         std::vector<KiottyNetWebSocketHandle> sockets;
         std::vector<Received>                 messages;
@@ -112,9 +118,14 @@ namespace
         bool                                  is_echo;
     };
 
-    PathContext& pathOf(KiottyNetAppContext context)
+    PathContext& pathOf(KiottyNetWebSocketContext context)
     {
         return *static_cast<PathContext*>(context);
+    }
+
+    SocketApp& appOf(KiottyNetAppContext context)
+    {
+        return *static_cast<SocketApp*>(context);
     }
 
     KiottyNetSpan spanOf(const std::string& text)
@@ -132,7 +143,7 @@ namespace
                             KiottyNetWebSocketHandle websocket,
                             KiottyNetWebSocketUpgrade upgrade)
     {
-        SocketApp& app = *pathOf(app_context).app;
+        SocketApp& app = appOf(app_context);
         const std::string token = textOf(KiottyNet_findWebSocketUpgradeHeader(websocket, "X-Token"));
         const std::lock_guard<std::mutex> lock(app.mutex);
         app.tokens.push_back(token);
@@ -146,9 +157,8 @@ namespace
         return is_allowed ? 1 : 0;
     }
 
-    KiottyNetWebSocketContext onOpen(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket)
+    KiottyNetWebSocketContext openPath(PathContext& path, KiottyNetWebSocketHandle websocket)
     {
-        PathContext& path = pathOf(app_context);
         SocketApp& app = *path.app;
         const KiottyNetWebSocketInfo info = KiottyNet_getWebSocketInfo(websocket);
         const std::lock_guard<std::mutex> lock(app.mutex);
@@ -158,11 +168,21 @@ namespace
         return &path;
     }
 
+    KiottyNetWebSocketContext onChatOpen(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket)
+    {
+        return openPath(appOf(app_context).chat, websocket);
+    }
+
+    KiottyNetWebSocketContext onTelemetryOpen(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket)
+    {
+        return openPath(appOf(app_context).telemetry, websocket);
+    }
+
     void onMessage(KiottyNetWebSocketContext websocket_context,
                    KiottyNetWebSocketHandle websocket,
                    KiottyNetWebSocketMessage message)
     {
-        PathContext& path = *static_cast<PathContext*>(websocket_context);
+        PathContext& path = pathOf(websocket_context);
         SocketApp& app = *path.app;
         const std::string data = textOf(message.data);
         bool is_echo = false;
@@ -177,18 +197,34 @@ namespace
 
     void onClose(KiottyNetAppContext app_context,
                  KiottyNetWebSocketContext websocket_context,
-                 KiottyNetWebSocketHandle websocket,
                  KiottyNetWebSocketClose close)
     {
-        SocketApp& app = *pathOf(app_context).app;
-        const KiottyNetSpan data = { "late", 4 };
-        const KiottyNetCode late = KiottyNet_sendWebSocket(websocket, KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, data);
+        SocketApp& app = appOf(app_context);
+        const bool is_own = pathOf(websocket_context).app == &app;
         const std::lock_guard<std::mutex> lock(app.mutex);
         app.closes.push_back(Closed{ close.code, close.status, textOf(close.reason) });
-        app.codes.push_back(websocket_context == app_context ? late : KIOTTY_NET_CODE_INVALID_ARGUMENT);
+        app.codes.push_back(is_own ? KIOTTY_NET_CODE_SUCCESS : KIOTTY_NET_CODE_INVALID_ARGUMENT);
     }
 
-    const KiottyNetWebSocketHandler HANDLER = { onUpgrade, onOpen, onMessage, onClose };
+    void onBareMessage(KiottyNetWebSocketContext websocket_context,
+                       KiottyNetWebSocketHandle websocket,
+                       KiottyNetWebSocketMessage)
+    {
+        const KiottyNetSpan none = { "no context", 10 };
+        const KiottyNetSpan some = { "context", 7 };
+        const KiottyNetSpan answer = websocket_context == nullptr ? none : some;
+        (void)KiottyNet_sendWebSocket(websocket, KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, answer);
+    }
+
+    KiottyNetCode addChat(KiottyNetHttpServerHandle server, const char* path)
+    {
+        KiottyNetWebSocketRoute route = KiottyNet_addWebSocket(server, path);
+        route = KiottyNet_onWebSocketUpgrade(route, onUpgrade);
+        route = KiottyNet_onWebSocketOpen(route, onChatOpen);
+        route = KiottyNet_onWebSocketMessage(route, onMessage);
+        route = KiottyNet_onWebSocketClose(route, onClose);
+        return route.code;
+    }
 
     std::string frameOf(uint8_t opcode, const std::string& payload, bool fin, bool masked)
     {
@@ -306,8 +342,6 @@ namespace
             , server(nullptr)
             , port(0)
             , app()
-            , chat{ &app, 1 }
-            , telemetry{ &app, 2 }
             , limits()
             , configuration()
             , _address()
@@ -340,7 +374,7 @@ namespace
             server = created.handle;
             const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(onHealth, nullptr);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_GET, "/health", health));
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addWebSocket(server, "/chat", HANDLER, &chat));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, addChat(server, "/chat"));
         }
 
         void start()
@@ -416,8 +450,6 @@ namespace
         KiottyNetHttpServerHandle    server;
         uint16_t                     port;
         SocketApp                    app;
-        PathContext                  chat;
-        PathContext                  telemetry;
         KiottyNetHttpLimits          limits;
         KiottyNetServerConfiguration configuration;
 
@@ -621,7 +653,13 @@ TEST_F(WebSocketServerTest, SubprotocolIsChosenOnlyInsideOnUpgrade)
 TEST_F(WebSocketServerTest, HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcastByPath)
 {
     create();
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_addWebSocket(server, "/telemetry", HANDLER, &telemetry));
+    const KiottyNetCode telemetry = KiottyNet_WebSocketRoute(server, "/telemetry")
+                                        .onUpgrade(onUpgrade)
+                                        .onOpen(onTelemetryOpen)
+                                        .onMessage(onMessage)
+                                        .onClose(onClose)
+                                        .build();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, telemetry);
     app.is_echo = false;
     start();
     kiotty_test::LoopbackPeer web;
@@ -657,16 +695,25 @@ TEST_F(WebSocketServerTest, HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcas
 TEST_F(WebSocketServerTest, RegistrationRulesAndServerCloseGivesClosed1001)
 {
     create();
-    const KiottyNetWebSocketHandler no_message = { nullptr, onOpen, nullptr, nullptr };
     const KiottyNetHttpRoute health = KiottyNet_makeHttpRoute(onHealth, nullptr);
-    EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addWebSocket(server, "/chat", HANDLER, &chat));
+    EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, addChat(server, "/chat"));
     EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addHttpRoute(server, KIOTTY_NET_HTTP_METHOD_POST, "/chat", health));
-    EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, KiottyNet_addWebSocket(server, "/health", HANDLER, &chat));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_addWebSocket(server, "/other", no_message, &chat));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_addWebSocket(server, "chat", HANDLER, &chat));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_addWebSocket(nullptr, "/other", HANDLER, &chat));
+    EXPECT_EQ(KIOTTY_NET_CODE_DUPLICATE_RULE, addChat(server, "/health"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, addChat(server, "chat"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, addChat(nullptr, "/other"));
+    const KiottyNetWebSocketRoute stranger = { KIOTTY_NET_CODE_SUCCESS, server, 99 };
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_onWebSocketMessage(stranger, onMessage).code);
+    KiottyNetWebSocketRoute spare = KiottyNet_addWebSocket(server, "/spare");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, spare.code);
+    const KiottyNetWebSocketRoute missing = KiottyNet_onWebSocketMessage(spare, nullptr);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, missing.code);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_onWebSocketMessage(missing, onMessage).code);
+    spare = KiottyNet_onWebSocketMessage(spare, onMessage);
+    spare = KiottyNet_onWebSocketMessage(spare, onMessage);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, spare.code);
     start();
-    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_addWebSocket(server, "/late", HANDLER, &chat));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, addChat(server, "/late"));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_onWebSocketClose(spare, onClose).code);
     kiotty_test::LoopbackPeer peer;
     open(peer, "/chat");
     const KiottyNetWebSocketHandle socket = app.socketAt(0);
@@ -683,7 +730,31 @@ TEST_F(WebSocketServerTest, RegistrationRulesAndServerCloseGivesClosed1001)
     EXPECT_EQ(1001, closed.status);
     const std::vector<KiottyNetCode> codes = app.copyOf(app.codes);
     ASSERT_FALSE(codes.empty());
-    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, codes.back());
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, codes.back());
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, KiottyNet_sendWebSocket(socket, KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, spanOf("late")));
+}
+
+TEST_F(WebSocketServerTest, RunRefusesASocketPathWithoutOnMessageAndOnlyMessageIsNeeded)
+{
+    create();
+    const KiottyNetWebSocketRoute silent = KiottyNet_onWebSocketOpen(KiottyNet_addWebSocket(server, "/silent"), onChatOpen);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, silent.code);
+    port = kiotty_test::unusedPort();
+    KiottyNetAddress address;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runHttpServer(server, &address, nullptr, &app));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketMessage(silent, onMessage).code);
+    const KiottyNetWebSocketRoute bare = KiottyNet_onWebSocketMessage(KiottyNet_addWebSocket(server, "/bare"), onBareMessage);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, bare.code);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    ASSERT_TRUE(peer.connectTcp(port));
+    send(peer, upgradeRequest("/bare", ""));
+    std::string head;
+    ASSERT_TRUE(readHead(peer, head));
+    ASSERT_EQ(101, statusOf(head));
+    send(peer, clientFrame(TEXT, "who"));
+    expectFrame(peer, TEXT, "no context");
 }
 
 #endif

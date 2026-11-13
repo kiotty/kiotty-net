@@ -191,3 +191,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-13 base 사이클 B3 (`docs/progress/261113_progress_base_b3.md`): `KiottyNet_thenCloseWith(data, reason)`, Connection 의 FLUSHING 단계 (push lane 은 버린다), HTTP 의 close 응답 마지막 조각과 WebSocket 의 close frame 이 이것을 쓴다. close frame 뒤에 데이터 frame 이 나가던 문제를 닫았다. 다음은 V1.
 
 2026-11-13 WebSocket 사이클 V1 (`docs/progress/261113_progress_websocket_v1.md`): HTTP 의 app_context 를 `runHttpServer(server, address, tls, app_context)` 한 번으로. `KiottyNetHttpRoute` 와 끊김 / 오류 등록에서 app_context 를 뺐다 (C++ 도). 다음은 V2 (서버 WebSocketRoute).
+
+2026-11-13 WebSocket 사이클 V2 (`docs/progress/261113_progress_websocket_v2.md`): 서버 등록을 `addWebSocket(server, path)` 의 route 와 `onWebSocketUpgrade / Open / Message / Close` 사슬로, C++ `KiottyNet_WebSocketRoute`. 콜백 app_context 는 run 의 것, Close 에 handle 없음, onMessage 없는 경로는 run 이 거절. 문서 개정은 V4. 다음은 V3 (클라이언트).

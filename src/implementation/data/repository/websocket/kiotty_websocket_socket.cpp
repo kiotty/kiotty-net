@@ -30,7 +30,7 @@ namespace kiotty::net::implementation
 
     void SocketState::reset()
     {
-        target = WebSocketTarget{ KiottyNetWebSocketHandler{}, nullptr, NO_SOCKET_PATH };
+        target = WebSocketTarget{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
         context = nullptr;
         protocol.clear();
         frame = SocketFrame{};

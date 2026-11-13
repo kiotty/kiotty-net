@@ -195,7 +195,12 @@ namespace kiotty::net::implementation
         const bool is_secure = request.tls != nullptr;
         const KiottyNetCode prepared = prepareUpgrade(request.address, is_secure);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
-        const WebSocketTarget target{ request.handler, request.app_context, NO_SOCKET_PATH };
+        const KiottyNetWebSocketHandler& callbacks = request.handler;
+        const WebSocketTarget target{
+            callbacks.onUpgrade, callbacks.onOpen, callbacks.onMessage, callbacks.onClose,
+            NO_SOCKET_PATH,
+        };
+        _site.app_context = request.app_context;
         _site.upgrade.target = target;
         _site.upgrade.opened = &_opened;
         _site.upgrade.failure = KIOTTY_NET_CODE_SUCCESS;

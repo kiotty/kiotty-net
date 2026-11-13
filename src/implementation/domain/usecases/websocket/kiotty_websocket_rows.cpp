@@ -140,7 +140,11 @@ namespace kiotty::net::implementation
         session.link.closing.store(0);
         session.link.socket.store(session.id.value());
         const KiottyNetWebSocketHandle handle = socketHandleOf(session);
-        session.socket.context = target.handler.onOpen(target.app_context, handle);
+        session.socket.context = nullptr;
+        if (target.on_open != nullptr)
+        {
+            session.socket.context = target.on_open(session.site.app_context, handle);
+        }
         Parker* opened = session.site.upgrade.opened;
         const auto wake = []() {};
         if (opened != nullptr) { opened->unpark(wake); }
@@ -154,10 +158,9 @@ namespace kiotty::net::implementation
         session.link.socket.store(0);
         const KiottyNetWebSocketClose close = closeOf(session, reason);
         const WebSocketTarget& target = session.socket.target;
-        const KiottyNetWebSocketHandle handle = socketHandleOf(session);
-        if (target.handler.onClose != nullptr)
+        if (target.on_close != nullptr)
         {
-            target.handler.onClose(target.app_context, session.socket.context, handle, close);
+            target.on_close(session.site.app_context, session.socket.context, close);
         }
         session.link.path.store(NO_SOCKET_PATH);
     }
@@ -344,7 +347,7 @@ namespace kiotty::net::implementation
                 is_text ? KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT : KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY;
             const KiottyNetWebSocketMessage message{ kind, data };
             const WebSocketTarget& target = session.socket.target;
-            target.handler.onMessage(session.socket.context, socketHandleOf(session), message);
+            target.on_message(session.socket.context, socketHandleOf(session), message);
         }
     }
 }
