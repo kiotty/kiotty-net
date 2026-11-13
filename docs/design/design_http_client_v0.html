@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HttpClient 설계 v0 (초안)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .keep { background: var(--agree); }
+  .new { background: var(--partial); }
+  .drop { background: var(--concern); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>HttpClient 설계 v0 (초안)</h1>
+<p class="sub">2026-11-13 초안. <code>requirement_v0.md</code> 11절의 HttpClient 초안 (2026-11-09 전후) 을 지금의 규약에 맞춰 다시 세운다: create 는 자원만 잡고 주소와 TLS 는 connect 가 받는다 (base B2), 결과는 <code>{ code, ... }</code> 값, 설정은 새 struct 대신 <code>KiottyNetHttpLimits</code>, body 종류는 서버와 같은 <code>KiottyNetHttpContentType</code>. 그리고 <code>design_http_v0.html</code> 결정 10 이 다음 판으로 미룬 것, 곧 <b>끝나지 않는 body (SSE) 를 받은 만큼 꺼내는 read</b> 를 넣는다. 공개 인터페이스가 중심이고 10절에 정할 것을 모았다.</p>
+
+<ul class="toc">
+  <li><a href="#s0">0. 한눈에</a></li>
+  <li><a href="#s1">1. 결정 (제안)</a></li>
+  <li><a href="#s2">2. 누가 쓰나</a></li>
+  <li><a href="#s3">3. 연결과 수명</a></li>
+  <li><a href="#s4">4. 한 번에 받는 요청</a></li>
+  <li><a href="#s5">5. 받은 만큼 꺼내는 요청 (스트림)</a></li>
+  <li><a href="#s6">6. 응답을 읽는 규칙</a></li>
+  <li><a href="#s7">7. 헤더 초안 (C) 과 C++</a></li>
+  <li><a href="#s8">8. 장면별 흐름</a></li>
+  <li><a href="#s9">9. 안에서</a></li>
+  <li><a href="#s10">10. 정할 것</a></li>
+  <li><a href="#s11">11. 사이클</a></li>
+</ul>
+
+<h2 id="s0">0. 한눈에</h2>
+<pre><code>KiottyNetHttpClientResult created = KiottyNet_createHttpClient(context, &amp;configuration, &amp;limits);   /* 자원만 */
+KiottyNetHttpClientHandle client  = created.handle;
+KiottyNet_setHttpClientHeader(client, "Authorization", "Bearer abc");                              /* 모든 요청에 */
+KiottyNet_connectHttpClient(client, &amp;address, &amp;tls);                                               /* 대상과 첫 연결. tls NULL 이면 http */
+
+KiottyNetHttpReply reply = KiottyNet_getHttp(client, "/api/status", 3000);                         /* 호출한 thread 에서 보내고 기다린다 */
+if (reply.code == KIOTTY_NET_CODE_SUCCESS &amp;&amp; reply.status == 200) { parse(reply.body); }          /* 다음 호출까지 유효 */
+
+reply = KiottyNet_postHttp(client, "/mcp", KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, request, 3000);
+
+/* SSE : 머리만 받고 body 는 받은 만큼 */
+reply = KiottyNet_openHttpStream(client, KIOTTY_NET_HTTP_METHOD_GET, "/mcp", NULL, 0, KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM, NO_BODY, 3000);
+for (;;) {
+    KiottyNetResult got = KiottyNet_readHttpStream(client, buffer, sizeof(buffer), 30000);   /* chunk 를 벗긴 바이트 */
+    if (got.code != KIOTTY_NET_CODE_SUCCESS || got.bytes == 0) { break; }                   /* 0 바이트 SUCCESS = body 끝 */
+    feed_sse_parser(buffer, got.bytes);
+}
+KiottyNet_closeHttpStream(client);</code></pre>
+
+<table>
+  <tr><th>것</th><th>무엇</th></tr>
+  <tr><td>모양</td><td><b>동기.</b> base 6절 StreamClient 위. IO Thread 가 없고 호출한 thread 가 보내고 기다린다. 콜백 없음</td></tr>
+  <tr><td>연결</td><td>client 하나 = 연결 하나 = keep-alive. 서버가 닫은 keep-alive 는 다음 요청이 조용히 다시 연다 (3절)</td></tr>
+  <tr><td>설정</td><td><code>KiottyNetClientConfiguration</code> (버퍼, 재시도) + <code>KiottyNetHttpLimits</code> (응답 헤더 / body 상한). 새 설정 struct 는 없다</td></tr>
+  <tr><td>응답</td><td><code>KiottyNetHttpReply { code, status, headers, header_count, body }</code>. client 안의 버퍼를 가리키고 다음 호출까지 유효</td></tr>
+  <tr><td>스트림</td><td><code>openHttpStream</code> → <code>readHttpStream</code> 여러 번 → <code>closeHttpStream</code>. MCP 의 GET / POST 의 SSE 응답</td></tr>
+  <tr><td>thread</td><td>client 하나는 한 번에 한 thread. 동시 호출은 <code>BUSY</code>. MCP 처럼 스트림과 요청을 같이 하면 client 둘 (결정 10 의 전제)</td></tr>
+</table>
+
+<h2 id="s1">1. 결정 (제안)</h2>
+<table>
+  <tr><th>#</th><th>제안</th><th>이유</th></tr>
+  <tr><td>1</td><td><b>동기 API 하나로 시작한다.</b> StreamClient 위에 얹고 IO Thread 를 두지 않는다. 비동기 판 (EventClient 위, 콜백으로 응답) 은 두지 않는다</td><td>장비가 클라우드 REST 를 부르는 장면은 "보내고 답을 기다린다" 가 전부다. 동시에 여러 요청이 필요하면 client 를 여럿 만들고 thread 를 나눈다. requirement 11절 열린 질문 3 의 제안 그대로</td></tr>
+  <tr><td>2</td><td><b>create 는 자원만, 대상은 connect.</b> <code>createHttpClient(context, configuration, limits)</code>, <code>connectHttpClient(client, address, tls)</code>. Host 헤더와 SNI 는 address 의 host</td><td>base B2 의 규약 (StreamClient connect, WebSocketClient run) 과 같다. 11절 초안은 create 가 tls 를 받았다</td></tr>
+  <tr><td>3</td><td><b>설정은 <code>KiottyNetHttpLimits</code></b>. 쓰는 필드는 <code>max_header_bytes</code> / <code>max_headers</code> (응답 머리, 그리고 보내는 머리 전체), <code>max_body_bytes</code> (한 번에 받는 응답 body). 11절 초안의 <code>KiottyNetHttpClientLimits</code> 는 두지 않는다</td><td>WebSocketClient 도 같은 struct 를 쓴다. 새 개념을 늘리지 않는다 (설계 피드백). 서버 전용 필드 (<code>max_routes</code>, <code>response_bytes</code>, keep-alive, WebSocket 타이머) 는 읽지 않는다</td></tr>
+  <tr><td>4</td><td><b>body 종류는 <code>KiottyNetHttpContentType</code></b>. 11절 초안의 <code>const char* content_type</code> 대신. <code>CUSTOM</code> 이면 앱이 헤더 배열에 <code>Content-Type</code> 을 넣는다</td><td>서버의 <code>setHttpBody(response, type, data)</code> 와 같은 모양. 문자열 오타가 없다. 텍스트 계열이면 서버처럼 UTF-8 을 본다</td></tr>
+  <tr><td>5</td><td><b>응답은 값 + code, 다음 호출까지 유효.</b> <code>KiottyNetHttpReply</code> 는 client 안의 버퍼를 가리킨다</td><td>11절 초안 그대로. 할당 없이 버퍼 하나로 끝난다 (메모리 원칙)</td></tr>
+  <tr><td>6</td><td><b>받은 만큼 꺼내는 read 를 넣는다.</b> <code>openHttpStream</code> 이 머리만 받아 돌려주고, <code>readHttpStream</code> 이 chunk 를 벗긴 body 를 받은 만큼 준다. SSE 이벤트를 나누는 일은 앱 (JSON 이 라이브러리 밖인 것과 같다)</td><td>http 설계 결정 10. SSE 응답은 끝나지 않는 body 하나라 통째로 돌려주는 API 로는 받을 수 없다. <code>max_body_bytes</code> 보다 큰 다운로드도 이 길이다</td></tr>
+  <tr><td>7</td><td><b>메서드별 함수 일곱 + 일반 하나.</b> GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS 와 <code>requestHttp</code> (헤더 배열을 받는 것)</td><td>11절 초안 그대로. HTTP 서버의 <code>get / post ...</code> 와 짝이다</td></tr>
+  <tr><td>8</td><td><b>요청 body 는 복사하지 않는다.</b> 머리는 client 버퍼에 만들고, body 는 사용자 버퍼에서 바로 보낸다. 언제나 <code>Content-Length</code></td><td>StreamClient 의 write 는 사용자 버퍼에서 바로 보낸다 (TLS 는 <code>send_capacity</code> 씩 암호화). 요청을 chunked 로 올리는 일은 장비에 드물다</td></tr>
+  <tr><td>9</td><td><b>하지 않는 것.</b> redirect 따라가기, 쿠키, 압축 (gzip), 인증 흐름, 프록시, HTTP/2. 3xx 는 그대로 돌려준다</td><td>11절 초안 그대로. 필요한 헤더는 앱이 넣는다</td></tr>
+  <tr><td>10</td><td><b>선언은 <code>kiotty_net_http.h</code></b> 에 둔다 (서버와 같은 헤더)</td><td>Method, Header, Limits, ContentType 을 같이 쓴다. 정할 것 1</td></tr>
+</table>
+
+<h2 id="s2">2. 누가 쓰나</h2>
+<table>
+  <tr><th>장면</th><th>쓰는 것</th></tr>
+  <tr><td>장비가 클라우드 REST 를 부른다 (상태 보고, 설정 받기)</td><td><code>getHttp</code>, <code>postHttp</code>, <code>putHttp</code>. client 하나, keep-alive</td></tr>
+  <tr><td>MCP 클라이언트 (Streamable HTTP)</td><td>요청용 client 하나 (<code>postHttp</code>, 응답이 SSE 면 <code>openHttpStream</code>) + 알림용 client 하나 (<code>GET /mcp</code> 를 <code>openHttpStream</code> 으로 열어 두고 worker 가 read)</td></tr>
+  <tr><td>펌웨어 / 파일 받기</td><td><code>openHttpStream</code> + <code>readHttpStream</code> 으로 받은 만큼 파일에. <code>max_body_bytes</code> 와 상관없다</td></tr>
+  <tr><td>health check, 기능 확인</td><td><code>headHttp</code>, <code>optionsHttp</code> + <code>getHttpAllowedMethods</code></td></tr>
+</table>
+
+<h2 id="s3">3. 연결과 수명</h2>
+<ul>
+  <li><b>connect</b> 가 대상 (address, tls) 을 기억하고 연결한다 (StreamClient 의 재시도 설정을 따른다). 실패하면 그 code 이고 대상은 남는다. 다시 connect 하면 대상을 바꾼다.</li>
+  <li><b>요청</b> 은 기억한 대상으로 간다. 연결이 없으면 (처음, 끊긴 뒤) 그 자리에서 연결한다. connect 를 한 번도 하지 않았으면 <code>INVALID_ARGUMENT</code>.</li>
+  <li><b>keep-alive 가 서버에서 닫혀 있었으면</b> 다시 연결해 한 번 더 보낸다. 조건은 셋 다: 다시 쓴 (재사용한) 연결이었고, 응답 바이트를 하나도 받지 못했고, 메서드가 멱등 (GET, HEAD, PUT, DELETE, OPTIONS). POST / PATCH 는 다시 보내지 않고 <code>PEER_CLOSED</code> (서버가 이미 처리했을 수 있다). 정할 것 2.</li>
+  <li>응답이 <code>Connection: close</code> 거나 HTTP/1.0 이면 응답을 다 읽은 뒤 닫는다. 다음 요청이 다시 연다.</li>
+  <li><b>disconnect</b> 는 연결만 닫는다. 대상은 남아 다음 요청이 다시 연다.</li>
+  <li><b>timeout</b> 은 호출마다 하나다. 한 번에 받는 요청은 (다시) 연결 + 송신 + 응답 전체, 스트림은 open 이 머리까지, read 는 한 번의 read 마다.</li>
+  <li>client 하나는 한 번에 한 thread 가 쓴다. 다른 thread 가 동시에 부르면 <code>BUSY</code> (atomic 플래그). 다른 thread 가 걸린 호출을 깨우는 길은 정할 것 3.</li>
+</ul>
+
+<h2 id="s4">4. 한 번에 받는 요청</h2>
+<pre><code>KiottyNetHttpReply KiottyNet_requestHttp(KiottyNetHttpClientHandle client, KiottyNetHttpMethod method, const char* path,
+                                         const KiottyNetHttpHeader* headers, size_t header_count,
+                                         KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_getHttp(client, path, timeout);                 /* body 없음 */
+KiottyNetHttpReply KiottyNet_postHttp(client, path, type, body, timeout);
+KiottyNetHttpReply KiottyNet_putHttp(client, path, type, body, timeout);
+KiottyNetHttpReply KiottyNet_deleteHttp(client, path, timeout);
+KiottyNetHttpReply KiottyNet_patchHttp(client, path, type, body, timeout);
+KiottyNetHttpReply KiottyNet_headHttp(client, path, timeout);                /* body 는 언제나 길이 0 */
+KiottyNetHttpReply KiottyNet_optionsHttp(client, path, timeout);             /* path "*" 는 서버 전체 */</code></pre>
+
+<ul>
+  <li><b>보내는 머리.</b> <code>METHOD path HTTP/1.1</code>, <code>Host</code> (address 의 host, 기본 포트가 아니면 <code>:port</code>, IPv6 literal 은 <code>[...]</code>), <code>setHttpClientHeader</code> 로 등록한 헤더, 호출의 헤더 배열, body 가 있으면 <code>Content-Type</code> 과 <code>Content-Length</code>. 전부 <code>max_header_bytes</code> 안이어야 하고 넘으면 <code>REQUEST_TOO_LARGE</code> (아무것도 보내지 않는다).</li>
+  <li><code>Host</code>, <code>Content-Length</code>, <code>Transfer-Encoding</code>, <code>Connection</code> 은 라이브러리가 쓴다. 헤더 배열이나 등록에 있으면 <code>INVALID_ARGUMENT</code>.</li>
+  <li>path 는 <code>/</code> 로 시작하는 보이는 ASCII (query 포함) 이거나 OPTIONS 의 <code>*</code>.</li>
+  <li><b>등록 헤더.</b> <code>setHttpClientHeader(client, name, value)</code>. 같은 name 은 바꾸고 value NULL 은 지운다. 저장은 client 의 머리 버퍼 앞쪽이고 등록 헤더의 합도 <code>max_header_bytes</code> 에 든다 (넘으면 <code>BUFFER_FULL</code>).</li>
+  <li><b>응답 body</b> 는 <code>max_body_bytes</code> 까지 client 버퍼에 모은다. 넘으면 <code>BUFFER_FULL</code> 이고 연결을 닫는다 (남은 body 를 버릴 수 없어서). 큰 body 는 5절.</li>
+</ul>
+
+<p>Reply 의 code</p>
+<table>
+  <tr><th>code</th><th>뜻</th><th>status / body</th></tr>
+  <tr><td><code>SUCCESS</code></td><td>응답을 다 받았다. 4xx / 5xx 도 SUCCESS 다 (HTTP 의 실패는 status 로 본다)</td><td>있음</td></tr>
+  <tr><td><code>TIMEOUT</code></td><td>timeout 안에 끝나지 않았다. 연결은 닫는다</td><td>0</td></tr>
+  <tr><td><code>PEER_CLOSED</code></td><td>응답 중 서버가 끊었다. 다시 보내지 않은 POST / PATCH 도 (3절)</td><td>0</td></tr>
+  <tr><td><code>PROTOCOL_ERROR</code></td><td>응답의 상태줄 / 헤더 / chunk 가 깨졌다. 연결은 닫는다</td><td>0</td></tr>
+  <tr><td><code>BUFFER_FULL</code></td><td>응답 머리가 <code>max_header_bytes</code> / <code>max_headers</code> 를, body 가 <code>max_body_bytes</code> 를 넘었다. 등록 헤더가 찼다</td><td>0</td></tr>
+  <tr><td><code>REQUEST_TOO_LARGE</code></td><td>보낼 머리가 <code>max_header_bytes</code> 를 넘는다</td><td>0</td></tr>
+  <tr><td><code>INVALID_ARGUMENT</code></td><td>NULL, 잘못된 path / 헤더, connect 한 적 없음, 텍스트 body 가 UTF-8 아님은 <code>INVALID_ENCODING</code></td><td>0</td></tr>
+  <tr><td><code>BUSY</code></td><td>다른 thread 가 쓰는 중, 스트림이 열려 있다</td><td>0</td></tr>
+  <tr><td><code>SOCKET_ERROR</code>, <code>TLS_*</code></td><td>(다시) 연결 실패. connect 와 같다</td><td>0</td></tr>
+</table>
+
+<h2 id="s5">5. 받은 만큼 꺼내는 요청 (스트림)</h2>
+<pre><code>KiottyNetHttpReply KiottyNet_openHttpStream(KiottyNetHttpClientHandle client, KiottyNetHttpMethod method, const char* path,
+                                            const KiottyNetHttpHeader* headers, size_t header_count,
+                                            KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);   /* 머리까지. body 는 길이 0 */
+KiottyNetResult    KiottyNet_readHttpStream(KiottyNetHttpClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);
+void               KiottyNet_closeHttpStream(KiottyNetHttpClientHandle client);</code></pre>
+
+<ul>
+  <li><b>open</b> 은 4절과 같이 보내고 응답의 머리 (상태줄, 헤더) 까지만 받는다. Reply 의 headers 는 스트림이 닫힐 때까지 유효하다. 2xx 가 아니어도 스트림은 열린다 (오류 body 를 읽을 수 있게).</li>
+  <li><b>read</b> 는 body 를 chunk 를 벗긴 바이트로, 받은 만큼 (최대 length) 준다. 수신 Stage 에 남은 것을 먼저 주고 비면 socket 에서 기다린다 (StreamClient 의 read 와 같다). body 가 끝나면 <code>{ 0, SUCCESS }</code> 이고 그 뒤로도 같다. 텍스트 계열이어도 UTF-8 을 보지 않는다 (글자 하나가 read 둘에 나뉠 수 있다).</li>
+  <li><b>close</b> 는 스트림을 끝낸다. body 를 끝까지 읽었고 keep-alive 면 연결을 남기고, 아니면 연결을 닫는다 (남은 body 를 버릴 길이 없다). 열린 스트림이 없으면 아무것도 하지 않는다.</li>
+  <li>스트림이 열려 있는 동안 같은 client 의 다른 요청은 <code>BUSY</code>. read timeout 은 연결을 닫지 않는다 (SSE 는 조용한 시간이 길다). 다시 read 하면 된다.</li>
+  <li>body 의 끝을 정하는 규칙은 6절과 같다. 끝이 연결 닫힘인 응답 (length 도 chunked 도 없음) 은 서버가 닫으면 <code>{ 0, SUCCESS }</code>.</li>
+</ul>
+
+<p>SSE 를 이벤트로 나누는 일 (<code>data:</code> 줄, 빈 줄, <code>id:</code>, <code>retry:</code>) 은 앱이다. JSON 이 라이브러리 밖인 것과 같은 선이다 (http 설계 결정 5). 줄 단위 분해 도우미를 둘지는 정할 것 4.</p>
+
+<h2 id="s6">6. 응답을 읽는 규칙</h2>
+<table>
+  <tr><th>것</th><th>규칙</th></tr>
+  <tr><td>상태줄</td><td><code>HTTP/1.1 NNN</code> 또는 <code>HTTP/1.0 NNN</code>. reason phrase 는 버린다. 아니면 <code>PROTOCOL_ERROR</code></td></tr>
+  <tr><td>1xx</td><td><code>100 Continue</code> 와 다른 1xx 는 건너뛰고 다음 응답을 읽는다 (우리는 <code>Expect</code> 를 보내지 않지만 서버가 보낼 수 있다). 101 은 <code>PROTOCOL_ERROR</code> (Upgrade 는 WebSocketClient 의 일)</td></tr>
+  <tr><td>body 의 끝</td><td>HEAD 의 응답, 204, 304 는 body 없음. <code>Transfer-Encoding: chunked</code> 면 chunk (trailer 는 버린다), 아니면 <code>Content-Length</code>, 둘 다 없으면 연결이 닫힐 때까지. 서버의 요청 파서와 같은 <code>selectBodyFraming</code> / <code>parseChunkSize</code> 를 쓴다</td></tr>
+  <tr><td>keep-alive</td><td>HTTP/1.1 이고 <code>Connection: close</code> 가 없으면 남긴다. 서버의 <code>decidePersistence</code> 와 같다</td></tr>
+  <tr><td>헤더</td><td>서버와 같은 줄 파서. 이름은 대소문자 무시로 찾는다 (<code>findHttpReplyHeader</code>). 같은 이름 여럿은 배열에 그대로</td></tr>
+  <tr><td>텍스트 body 의 UTF-8</td><td>한 번에 받는 요청에서 <code>Content-Type</code> 이 텍스트 계열이면 본다? 정할 것 5</td></tr>
+</table>
+
+<h2 id="s7">7. 헤더 초안 (C) 과 C++</h2>
+<pre><code>typedef struct KiottyNetHttpClient* KiottyNetHttpClientHandle;
+typedef struct KiottyNetHttpClientResult { KiottyNetCode code; KiottyNetHttpClientHandle handle; } KiottyNetHttpClientResult;
+
+typedef struct KiottyNetHttpReply {
+    KiottyNetCode              code;
+    int32_t                    status;
+    const KiottyNetHttpHeader* headers;
+    size_t                     header_count;
+    KiottyNetSpan              body;          /* 다음 호출까지 유효. 스트림이면 길이 0 */
+} KiottyNetHttpReply;
+
+KiottyNetHttpClientResult KiottyNet_createHttpClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetHttpLimits* limits /* NULL = 기본값 */);
+void          KiottyNet_destroyHttpClient(KiottyNetContext context, KiottyNetHttpClientHandle client);
+KiottyNetCode KiottyNet_connectHttpClient(KiottyNetHttpClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls /* NULL = http */);
+void          KiottyNet_disconnectHttpClient(KiottyNetHttpClientHandle client);
+KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle client, const char* name, const char* value /* NULL = 지움 */);
+
+/* 4절의 여덟, 5절의 셋 */
+
+KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */
+uint32_t      KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);                   /* Allow 를 KIOTTY_NET_HTTP_METHOD_BIT 의 합으로 */</code></pre>
+
+<pre><code>class KiottyNet_HttpClient {
+public:
+    KiottyNet_HttpClient(KiottyNetContext context, const KiottyNetClientConfiguration&amp; configuration, const KiottyNetHttpLimits* limits);
+    explicit operator bool() const;
+    KiottyNetCode             code() const;
+    KiottyNetHttpClientHandle handle() const;
+
+    KiottyNetCode connect(const KiottyNetAddress&amp; address);
+    KiottyNetCode connect(const KiottyNetAddress&amp; address, const KiottyNetTlsClientConfiguration&amp; tls);
+    void          disconnect();
+    KiottyNetCode header(const char* name, const char* value);
+
+    KiottyNetHttpReply request(KiottyNetHttpMethod method, const char* path, const KiottyNetHttpHeader* headers, size_t header_count,
+                               KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply get(const char* path, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply post(const char* path, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply put(...);  KiottyNetHttpReply del(...);  KiottyNetHttpReply patch(...);  KiottyNetHttpReply head(...);  KiottyNetHttpReply options(...);
+
+    KiottyNetHttpReply openStream(KiottyNetHttpMethod method, const char* path, const KiottyNetHttpHeader* headers, size_t header_count,
+                                  KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+    KiottyNetResult    readStream(void* buffer, size_t length, uint32_t timeout_milliseconds);
+    void               closeStream();
+};</code></pre>
+<p>C++ 의 소멸자는 <code>destroyHttpClient</code> (열린 스트림과 연결도 닫힌다). 스트림을 RAII 로 닫는 별도 타입은 두지 않는다 (정할 것 6).</p>
+
+<h2 id="s8">8. 장면별 흐름</h2>
+
+<h3>8.1 장비가 상태를 보고한다</h3>
+<div class="flow">시작   : client = create(context, configuration, NULL);  header(client, "Authorization", token);  connect(client, cloud, &amp;tls)
+1 분마다: reply = post(client, "/v1/devices/7/status", JSON, status, 3000)
+          code SUCCESS, status 204                      → 끝
+          code PEER_CLOSED (keep-alive 가 닫혀 있었음)   → POST 라 다시 보내지 않는다. 앱이 다음 주기에 다시
+          code TIMEOUT                                  → 연결은 닫혔다. 다음 요청이 다시 연다</div>
+
+<h3>8.2 MCP 클라이언트</h3>
+<div class="flow">client 둘 : requests, events. 같은 address, 같은 tls
+초기화     : reply = post(requests, "/mcp", JSON, initialize, 5000)
+             session = findHttpReplyHeader(&amp;reply, "Mcp-Session-Id") 를 복사; header(requests, "Mcp-Session-Id", session); header(events, ...)
+알림 thread: openStream(events, GET, "/mcp", [Accept: text/event-stream], ..., 5000)
+             loop: readStream(events, buffer, 4096, 30000) → SSE 파서 → 앱 큐   (TIMEOUT 이면 다시 read, { 0, SUCCESS } 면 다시 open)
+요청       : reply = openStream(requests, POST, "/mcp", [Accept: application/json, text/event-stream], JSON, call, 5000)
+             Content-Type 이 application/json 이면 readStream 으로 body 를 다 모은다 (또는 정할 것 7)
+             text/event-stream 이면 응답 이벤트가 올 때까지 readStream
+             closeStream(requests)
+끝         : events 를 깨우는 길 (정할 것 3), destroy 둘</div>
+
+<h3>8.3 큰 파일 받기</h3>
+<div class="flow">reply = openStream(client, GET, "/firmware/1.2.bin", NULL, 0, OCTET_STREAM, {NULL,0}, 5000)
+length = findHttpReplyHeader(&amp;reply, "Content-Length")
+loop  : got = readStream(client, chunk, 16384, 10000) → file.write(chunk, got.bytes) 까지 { 0, SUCCESS }
+closeStream(client)</div>
+
+<h2 id="s9">9. 안에서</h2>
+<ul>
+  <li><b>HttpClient = StreamClient + 버퍼 셋.</b> 머리 버퍼 (<code>max_header_bytes</code>: 앞쪽은 등록 헤더, 뒤쪽은 요청마다 만드는 머리), 응답 저장소 (서버의 요청 저장소와 같은 것: 응답 머리 <code>max_header_bytes</code> / <code>max_headers</code>, body Stage <code>max_body_bytes</code>), 대상 (address, tls 를 가리키는 값 — tls 는 connect 가 프로파일로 만든다). 모두 create 때 잡는다.</li>
+  <li><b>파서는 서버 것을 쓴다.</b> 헤더 줄 (<code>takeHeader</code>), body 의 끝 (<code>selectBodyFraming</code>), chunk 크기 (<code>parseChunkSize</code>), keep-alive (<code>decidePersistence</code>). WebSocketClient 가 101 을 읽을 때 요청 저장소를 다시 쓰는 것과 같다. 상태줄 파서만 새로 (WebSocketClient 의 <code>isSwitchingLine</code> 을 넓힌다).</li>
+  <li><b>StateMachine 은 쓰지 않는다.</b> 동기 호출 하나가 "보내기 → 상태줄 → 헤더 → body" 를 순서대로 부르는 함수다. IO Thread 가 없으므로 표를 둘 이유가 없다.</li>
+  <li><b>줄 읽기.</b> StreamClient 의 read 는 받은 만큼 주므로 줄은 HttpClient 가 수신 Stage 위에서 자른다 (StreamClient 에 "Stage 를 보고 줄까지" 를 더할지, HttpClient 가 자기 버퍼로 할지는 C1 에서).</li>
+  <li><b>keep-alive 재사용의 재시도</b> 는 "이 연결로 응답을 받은 적이 있다" 플래그 하나와 "이번 응답 바이트 수" 로 판단한다 (3절).</li>
+</ul>
+
+<h2 id="s10">10. 정할 것</h2>
+<ol>
+  <li><b>헤더 파일.</b> <code>kiotty_net_http.h</code> 에 같이 (제안) / <code>kiotty_net_http_client.h</code> 를 따로 (websocket.h 처럼 http.h 를 include). 서버만 쓰는 장비가 클라이언트 선언까지 보게 되는 것이 싫으면 따로.</li>
+  <li><b>keep-alive 가 닫혀 있을 때 다시 보내기.</b> 멱등 메서드만 한 번 (제안) / 모두 한 번 (curl 과 같음. POST 가 두 번 처리될 수 있다) / 다시 보내지 않음 (앱이 매번 <code>PEER_CLOSED</code> 를 처리).</li>
+  <li><b>다른 thread 에서 걸린 호출 깨우기.</b> MCP 의 알림 thread 는 끝없이 read 한다. 끝낼 때 (a) read timeout 을 짧게 잡고 앱이 플래그를 본다 (라이브러리 변경 없음) / (b) <code>KiottyNet_closeHttpClient(client)</code> 를 두어 걸린 호출이 <code>CLOSED</code> 로 돌아오게 한다 (base 의 "close 는 멈추기" 와 같은 이름. StreamClient 의 socket 을 다른 thread 에서 닫아도 되는지 base 에서 확인이 필요하다). (b) 를 제안한다.</li>
+  <li><b>SSE 도우미.</b> 두지 않는다 (제안. 앱의 몫) / <code>readHttpStreamLine</code> 처럼 줄 하나씩 주는 read 를 둔다 (SSE 는 줄 단위라 앱 코드가 많이 준다).</li>
+  <li><b>응답 body 의 UTF-8 검사.</b> 하지 않는다 (제안. 받은 것을 그대로 주고 판단은 앱) / 서버처럼 텍스트 계열이면 본다.</li>
+  <li><b>C++ 스트림 RAII.</b> <code>closeStream</code> 을 부르게 둔다 (제안) / <code>KiottyNet_HttpStream</code> 이동 전용 타입이 소멸자에서 닫는다 (HttpWork, ConnectionStream 과 같은 모양).</li>
+  <li><b>스트림의 body 를 한 번에 모으는 함수.</b> MCP 의 POST 는 응답이 JSON 일지 SSE 일지 머리를 봐야 안다. <code>readHttpStreamAll(client, timeout)</code> (남은 body 를 <code>max_body_bytes</code> 까지 모아 Reply 로) 를 둘지.</li>
+  <li><b>요청 body 를 조각으로 올리기</b> (chunked 요청, 파일 업로드). 두지 않는다 (제안).</li>
+  <li><b>응답 이름.</b> 서버의 <code>HttpResponse</code> (앱이 채우는 것) 와 구분하는 <code>HttpReply</code> (앱이 읽는 것) 그대로 (11절 열린 질문 2).</li>
+</ol>
+
+<h2 id="s11">11. 사이클 (정할 것에 답이 오면)</h2>
+<table>
+  <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>C1 한 번에 받는 요청</td><td>create / connect / disconnect / 등록 헤더, 메서드 여덟, 응답 파서 (상태줄, 1xx, length / chunked / close), keep-alive 재사용과 다시 보내기</td><td>integration: 우리 HttpServer 와 왕복 (메서드별, chunked, Connection: close, 413 / 404 의 status, 큰 body 의 BUFFER_FULL, timeout, keep-alive 가 닫힌 뒤의 GET 재시도와 POST 의 PEER_CLOSED), TLS 한 벌</td></tr>
+  <tr><td>C2 스트림</td><td>open / read / close, (정할 것 3 의 close)</td><td>integration: 우리 HttpServer 의 Work 스트림 (SSE) 을 받은 만큼 읽기, 큰 Content-Length 를 조각으로, 중간 close 뒤 연결 닫힘, 다른 thread 의 close. MCP 예제 (H6) 의 클라이언트 쪽</td></tr>
+  <tr><td>C3 문서</td><td>user guide HTTP 에 클라이언트 절, requirement 11절, 구현 가이드, 테스트 계획</td><td>문서</td></tr>
+</table>
+
+</body>
+</html>
