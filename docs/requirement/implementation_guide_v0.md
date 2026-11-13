@@ -9,7 +9,8 @@
 2. StateMachine (Handler, Connection 이 기억하는 것, 표 찾기와 검사, dispatch, admit 과 CLOSED, HTTP / WebSocket 이 얹히는 방법)
 3. 예제 : Echo (프로토콜, EchoServer, EchoClient 두 가지, C 판)
 4. HttpServer : Connection 별 Request / Response 공급 (HttpSession, 줄 단위 헤더 읽기, 응답 버퍼 배치, handle, Work, 조각 송신과 파일, run, Work 스트림, content type)
-5. 미결
+5. WebSocket : HttpSession 위의 frame 행 (Session 에 더한 것, handle, Upgrade, frame 읽기, 타이머, 송신의 두 길, close 의 갈래, 클라이언트, 다른 thread)
+6. 미결
 
 ---
 
@@ -1481,9 +1482,268 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 
 ---
 
-## 5. 미결
+## 5. WebSocket : HttpSession 위의 frame 행
+
+[requirement_v0.md](requirement_v0.md) 10, 11절과 [design_websocket_v0.html](../design/design_websocket_v0.html) 6, 7절을 코드로 옮긴 것이다 (cycle W2 ~ W4). 새 Session 종류도 새 버퍼 묶음도 없다. 4절의 HttpSession 이 Upgrade 뒤에 frame 상태를 들고, HTTP 표에 frame 행을 더한다. 서버와 클라이언트가 같은 frame 행을 쓰고 차이는 `HttpSite::role` 하나다.
+
+### 5.1 어디에 무엇이 있나
+
+| 층 | 파일 | 하는 일 |
+|---|---|---|
+| core | `kiotty_sha1`, `kiotty_base64` | `Sec-WebSocket-Accept` 와 키. 할당 없음 |
+| domain/usecases/websocket | `kiotty_websocket_frame` | frame 머리 파싱 / 만들기 (최대 14 바이트), `applyMask(span, key, offset)` |
+| | `kiotty_websocket_close` | close payload 파싱 / 만들기, 보낼 수 있는 status |
+| | `kiotty_websocket_handshake` | `isWebSocketKey`, `acceptOf` |
+| | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse`), subprotocol 선택 |
+| | `kiotty_websocket_rows` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onCloseWritten`), `openSocket`, `endSocket` |
+| | `kiotty_websocket_timing` | 다음 read 의 timeout, `onClose` 의 `{ code, status, reason }` |
+| | `kiotty_websocket_lane` | push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
+| | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast) |
+| | `kiotty_websocket_client_machine` | 클라이언트의 표 (Upgrade 요청 → 상태줄 → 헤더 줄 → frame 행) |
+| repository/websocket | `kiotty_websocket_socket` | `SocketState` (IO thread 만), `SocketLink` (다른 thread 도), `WebSocketTarget`, `ClientUpgrade`, `PushLane` |
+| context | `KiottyNetWebSocketEndpoint` | handle 의 owner. 소켓 함수 다섯의 가상 함수. HttpServer 와 WebSocketClient 가 상속 |
+| context | `WebSocketClient` | `EventClient` + `PushLane` + `KiottyNetWebSocketEndpoint` |
+
+Session 에 더한 것은 셋이다. 메모리는 모두 create 때 Session 과 같이 잡힌다.
+
+```cpp
+struct HttpSession {
+    // 4.2 의 필드들
+    SocketLink&  link;      // pool 의 links 배열의 한 칸. 다른 thread 가 atomic 으로 읽는다
+    SocketState  socket;    // IO thread 만 읽고 쓴다
+    SessionPhase phase;     // UPGRADING (onUpgrade 안), SOCKET (onOpen 뒤) 을 더했다
+};
+
+struct SocketLink {                      // 다른 thread 의 send / close / broadcast 가 보는 것
+    std::atomic<int64_t>  socket;        // 열린 소켓의 handle id. 0 이면 열려 있지 않다
+    std::atomic<int64_t>  connection;    // base 의 connection id (push lane 의 주소)
+    std::atomic<int32_t>  path;          // 등록 경로 번호 (broadcast). 클라이언트는 NO_SOCKET_PATH
+    std::atomic<uint16_t> closing;       // 닫힘 플래그. 0 이면 열림, 아니면 우리가 보낸 status
+};
+```
+
+`SocketState` 는 frame 상태 (`remaining`, `offset`, `key`, opcode, FIN, MASK), 조각 중인 메시지의 opcode, 마지막 read (길이와 상태. TIMEOUT 뒤 같은 read 를 다시 걸 때), ping / close deadline, control payload 버퍼 (125), write lane 으로 보낼 close frame 버퍼 (`CLOSE_FRAME_BYTES` = 머리 2 + mask key 4 + payload 125), 고른 subprotocol, 상대 close 의 status, `is_open` 이다. 메시지 자체는 4.3 의 body Stage 에 모인다.
+
+### 5.2 handle
+
+handle 은 `{ site.socket_owner, session.id.value() }` 다. id 는 4.5 와 같이 generation + index 이고, generation 은 두 번 오른다.
+
+- 서버: Upgrade 를 받아들여 101 을 만들 때 (`acceptUpgrade`). 그래서 `onUpgrade` 의 handle 과 `onOpen` 의 handle 이 다르다. 그 전의 HTTP 요청에 쓴 handle 로도 소켓을 만질 수 없다.
+- 클라이언트: 연결마다 (`onConnected`). 서버의 요청마다 오르는 것과 같은 자리다. 처음 연결의 generation 이 0 이면 id 가 0 (무효) 이 되기 때문이기도 하다.
+
+다른 thread 의 함수는 Session 을 보지 않고 `SocketLink` 만 본다.
+
+```cpp
+WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
+{
+    const PoolHandle handle = PoolHandle::fromValue(id);
+    const Span<SocketLink> links = _site.sessions.links();
+    const size_t index = static_cast<size_t>(handle.index);
+    const bool is_inside = handle.index >= 0 && index < links.length;
+    if (!is_inside) { return LinkResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
+    SocketLink& link = links[index];
+    if (!isOpenSocket(link, id)) { return LinkResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
+    return LinkResult::success(link);
+}
+```
+
+`openSocket` (IO thread) 이 `connection`, `path`, `closing = 0` 을 쓰고 마지막에 `socket` 을 쓴다. `endSocket` 은 `onClose` 전에 `socket` 을 0 으로 둔다. 그래서 `onClose` 안의 `send` 는 `PEER_CLOSED` 다. `onUpgrade` 안에서만 되는 둘 (`findWebSocketUpgradeHeader`, `selectWebSocketProtocol`) 은 `sessions.find(id)` 로 Session 을 찾고 `phase == UPGRADING` 이 아니면 `BUSY` 다 (IO thread 의 콜백 안에서만 부르는 함수라 Session 을 직접 본다).
+
+### 5.3 Upgrade (서버)
+
+라우트 표 (4.1) 의 WebSocket 항목은 path 의 모든 메서드를 차지하고 (`DUPLICATE_RULE` 검사) 매칭에는 GET 비트 하나로 든다. 그래서 OPTIONS 와 다른 메서드는 4절의 자동 응답 (204 / 405) 이고, GET 과 HEAD 만 `MatchKind::SOCKET` 으로 `answerUpgrade` 에 온다.
+
+```
+answerUpgrade(session, target)
+    GET 아님 (HEAD)                         → 405 + Allow: GET, Connection: close
+    has_body                                → 400
+    Upgrade / Connection / Version 13 / Key 중 없음 → 426 + Upgrade: websocket + Sec-WebSocket-Version: 13
+    Key 가 16 바이트의 base64 아님          → 400
+    socket.reset(), socket.target = target, phase = UPGRADING
+    onUpgrade 가 0                          → 403
+    101 + Upgrade + Sec-WebSocket-Accept (+ 고른 Protocol), persistence = UPGRADE (Connection: Upgrade)
+    generation 을 올린다
+    → { SOCKET_OPENING, thenWrite(101) }
+```
+
+응답은 4.4 의 응답 버퍼에서 4.7 의 조각으로 나간다. `SOCKET_OPENING` 의 WRITTEN 행 (`onSocketWritten`) 이 남은 조각을 보내고, 다 보냈으면 `openSocket` 이다.
+
+```cpp
+KiottyNetTransition openSocket(HttpSession& session)
+{
+    const KiottyNetConnectionHandle connection = session.request.request().connection;
+    session.request.begin(connection);                 // body Stage 를 메시지 버퍼로 비운다
+    session.phase = SessionPhase::SOCKET;
+    session.socket.is_open = true;
+    const WebSocketTarget& target = session.socket.target;
+    session.link.connection.store(connection.id);
+    session.link.path.store(target.path);
+    session.link.closing.store(0);
+    session.link.socket.store(session.id.value());     // 이때부터 다른 thread 가 보낼 수 있다
+    const KiottyNetWebSocketHandle handle = socketHandleOf(session);
+    session.socket.context = target.handler.onOpen(target.app_context, handle);
+    Parker* opened = session.site.upgrade.opened;      // 클라이언트의 await (5.8). 서버는 NULL
+    const auto wake = []() {};
+    if (opened != nullptr) { opened->unpark(wake); }
+    return nextFrame(session);
+}
+```
+
+### 5.4 frame 읽기
+
+상태는 `FRAME_START` (2 바이트), `FRAME_LENGTH` (2 또는 8), `FRAME_MASK` (4), `FRAME_PAYLOAD`, `SOCKET_CLOSING` 다. 닫는 중에 상대 close 를 기다리는 따로 된 상태는 없다. 닫힘 플래그가 서 있으면 같은 `FRAME_*` 상태에서 read 의 timeout 만 `close_timeout` 이 된다 (5.5).
+
+| 행 | 하는 일 |
+|---|---|
+| `onFrameStart` | `parseFrameStart` (FIN, RSV 0, 아는 opcode, 제어 frame 은 FIN 이고 125 이하). MASK 비트가 역할과 맞는지 (서버는 있어야, 클라이언트는 없어야), 조각 순서 (`isInOrder`: 메시지 중이면 continuation 만, 아니면 continuation 이 아닌 것만. 제어 frame 은 언제나). 아니면 1002 |
+| `onFrameLength` | 확장 길이. 최소 표현이 아니거나 최상위 비트가 서면 1002 |
+| `afterLength` | 데이터 frame 이면 지금까지 모인 body 에 더해 `max_body_bytes` 를 넘는지 먼저 본다 (넘으면 payload 를 읽기 전에 1009) |
+| `onFrameMask` | mask key |
+| `onFramePayload` | `min(남은 길이, receive_capacity)` 씩 읽는다. 데이터 frame 은 `appendBody(piece, key, offset)` 가 body Stage 로 복사하며 unmask 하고, 제어 frame 은 `socket.control` 로. offset 이 조각마다 이어진다 |
+| `finishControl` | ping → pong (닫는 중이면 보내지 않는다), pong → `ping_deadline = 0`, close → `answerClose` (5.7) |
+| `finishData` | FIN 이 아니면 다음 frame. FIN 이면 TEXT 의 UTF-8 검사 (아니면 1007), 닫는 중이 아니면 `onMessage(context, handle, { opcode, body })`, body Stage 를 비운다 |
+
+모든 read 는 `readNext` 하나로 건다. 마지막 read 의 길이와 상태를 `socket.read` 에 적어 두어 TIMEOUT 행이 같은 read 를 다시 걸 수 있게 한다.
+
+```cpp
+KiottyNetTransition readNext(HttpSession& session, HttpState state, size_t length)
+{
+    session.socket.read = SocketRead{ length, static_cast<int32_t>(state) };
+    const uint32_t timeout = readTimeoutOf(session);
+    return Next::moveToNextState(state, thenRead(length, timeout));
+}
+```
+
+### 5.5 타이머
+
+ping, pong, close 세 타이머는 따로 된 timer 가 아니라 다음 read 의 `timeout_milliseconds` 하나다 (8절의 entry action). 0 은 무한이다.
+
+```cpp
+uint32_t readTimeoutOf(HttpSession& session)
+{
+    if (isClosing(session)) { return closeTimeOf(session); }          // 처음 부를 때 close_deadline 을 잡고 남은 시간
+    const uint64_t ping_deadline = session.socket.ping_deadline;
+    if (ping_deadline != 0) { return timeLeft(ping_deadline); }       // ping 을 보냈다. pong 까지 남은 시간
+    return session.site.limits.websocket_ping_interval_milliseconds;  // 받은 frame 이 없으면 이 뒤에 ping
+}
+```
+
+`onSocketTimeout` 이 TIMEOUT 을 가른다.
+
+| 그때 | 하는 일 |
+|---|---|
+| 닫힘 플래그가 서 있다 | `closeWith(TIMEOUT)` |
+| `ping_deadline != 0` (pong 늦음) | `pushClose(1001)`. 플래그가 서므로 같은 read 를 다시 걸 때 timeout 이 `close_timeout` 이 된다. 상대가 close 로 답하면 `SUCCESS`, 아니면 다음 TIMEOUT 에 `TIMEOUT` |
+| 그 밖 (ping 차례) | push lane 에 ping, `ping_deadline = now + pong_timeout`, 같은 read 를 다시 |
+
+pong 늦음의 close frame 이 write lane 이 아니라 push lane 인 까닭: TIMEOUT 행 안에서는 read 가 걸려 있고 그 read 를 다시 걸어야 상대의 close 를 받는다. 그 자리에서 write 를 걸면 base 가 `BUSY` 로 거절한다 (read 와 write 는 한 번에 하나). pong timeout 이 0 이면 `ping_deadline` 이 0 으로 남아 pong 을 검사하지 않고 ping 간격마다 ping 만 보낸다.
+
+frame 이 오면 timeout 이 매번 다시 계산되므로 ping 은 "마지막 frame 뒤 ping 간격" 에 나간다. 다른 thread 의 close 는 걸려 있던 read 의 timeout 을 바꾸지 못한다. 그래서 상대가 아무것도 보내지 않으면 끊기기까지 `close_timeout` 이 아니라 그 read 의 남은 시간 (최대 ping 간격) 이 걸린다 (설계 결정 9).
+
+### 5.6 송신의 두 길
+
+**push lane.** `PushLane::push(connection, opcode, payload)` 하나다. 소유자가 구현한다.
+
+```cpp
+KiottyNetCode HttpServer::push(int64_t connection, FrameOpcode opcode, Span<const char> payload)
+{
+    const FrameHead head = buildFrameHead(opcode, payload.length);
+    const KiottyNetSpan pieces[] = {
+        KiottyNetSpan{ head.bytes, head.length },
+        KiottyNetSpan{ payload.data, payload.length },
+    };
+    return Server::notify(connection, Span<const KiottyNetSpan>{ pieces, 2 });   // 조각 둘을 한 lock 안에서 이어 복사 (1.6, B1)
+}
+
+KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span<const char> payload)
+{
+    const std::lock_guard<std::mutex> lock(_push_mutex);
+    const MaskKey key = nextMaskKey();
+    const FrameHead head = buildMaskedFrameHead(opcode, payload.length, key);
+    const size_t total = head.length + payload.length;
+    if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+    const Span<char> frame{ _scratch.data(), total };
+    (void)frame.copyFrom(head.span());
+    const Span<char> body = frame.skip(head.length);
+    (void)body.copyFrom(payload);
+    applyMask(body, key, 0);
+    return EventClient::notify(connection, KiottyNetSpan{ frame.data, frame.length });
+}
+```
+
+base 의 NotificationDesk 는 조각을 그대로 복사하므로 mask 는 그 앞에서 씌운다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼를 initialize 때 한 번 잡고 mutex 하나로 지킨다 (send 는 아무 thread 에서나 오므로). push lane 보다 큰 frame 은 들어갈 수 없으니 scratch 도 그 크기면 된다. base 는 바뀌지 않았다.
+
+**write lane.** frame 행 안에서 우리가 연결을 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 는 close frame 을 `socket.outgoing` 에 만들어 write lane 으로 보내고 (`SOCKET_CLOSING`, timeout `close_timeout`), WRITTEN 에서 `closeWith(close_code)` 한다. push lane 에 넣고 바로 close 하면 base 가 소켓을 shutdown 하면서 push lane 의 남은 것을 보내지 않기 때문이다. READ 행이므로 걸린 read 가 없어 write 를 걸 수 있다.
+
+### 5.7 close 의 갈래
+
+닫힘 플래그 (`SocketLink::closing`) 는 CAS 로 한 번만 선다. 먼저 세운 쪽이 close frame 을 보내고, 늦은 쪽은 보내지 않는다.
+
+| 누가 | 어디서 | 플래그를 세웠으면 | 이미 서 있었으면 |
+|---|---|---|---|
+| `closeWebSocket` | 아무 thread | push lane 에 close frame | `BUSY` |
+| pong 늦음 | TIMEOUT 행 | push lane 에 1001 | (닫는 중이면 TIMEOUT 행이 먼저 끝낸다) |
+| `failSocket` (1002 / 1007 / 1009) | READ 행 | write lane 에 그 status, WRITTEN 뒤 그 코드로 close | 바로 그 코드로 close |
+| `answerClose` (상대 close) | READ 행 | write lane 에 상대 status 를 그대로 (reason 없이, 1005 면 빈 payload), WRITTEN 뒤 `SUCCESS` | 우리가 시작한 close 의 답이다. 바로 `SUCCESS` |
+
+`onClose` 는 CLOSED 행의 `endSocket` 이 한 번 부른다. `{ code, status, reason }` 은 `closeOf` 가 만든다.
+
+```cpp
+KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason)
+{
+    KiottyNetWebSocketClose close{ reason, ABNORMAL, KiottyNetSpan{ nullptr, 0 } };   // 1006
+    if (session.socket.has_peer_close)                                                 // 상대 close 를 받았으면 그 status / reason
+    {
+        close.status = session.socket.peer_status;
+        close.reason = peerReasonOf(session);
+        return close;
+    }
+    const bool is_dropped = reason == KIOTTY_NET_CODE_PEER_CLOSED
+                            || reason == KIOTTY_NET_CODE_SOCKET_ERROR;
+    if (is_dropped) { return close; }
+    const uint16_t sent = session.link.closing.load();
+    const bool is_owner_close = reason == KIOTTY_NET_CODE_CLOSED || sent == 0;
+    close.status = is_owner_close ? GOING_AWAY : sent;                                 // 소유자 close 는 1001, 아니면 우리가 보낸 값
+    return close;
+}
+```
+
+### 5.8 클라이언트
+
+`WebSocketClient` 는 `EventClient` 에 HttpSite 하나 (Session 하나, 라우트 표 1 칸, `role = CLIENT`) 를 든 것이다. create 때 잡는 것: Session 의 버퍼 (4.2 와 같은 limits), Upgrade 요청 버퍼 (768 바이트), Accept 값, push scratch, mask 상태.
+
+| 상태 | 사건 | 행 |
+|---|---|---|
+| (어디서나) | CONNECTED | generation 을 올리고 Session 을 비운다. `header_deadline` 을 잡고 Upgrade 요청을 write lane 으로 (timeout `header_timeout`) |
+| SENDING | WRITTEN | 남았으면 이어서, 다 보냈으면 상태줄 read (남은 header 시간) |
+| REQUEST_LINE (상태줄) | READ | `HTTP/1.1 101` 다음이 끝이거나 공백이 아니면 `PROTOCOL_ERROR` |
+| HEADER_LINE | READ | 4.3 의 `takeHeader` 로 요청 저장소에 (`max_header_bytes`, `max_headers`). 빈 줄이면 `isUpgradeResponse` 를 보고 `openSocket` |
+| FRAME_* , SOCKET_CLOSING | | 5.4 ~ 5.7 그대로 |
+| (어디서나) | TIMEOUT | `TIMEOUT` (frame 행의 TIMEOUT 은 위의 `onSocketTimeout` 이 먼저 잡는다) |
+| (어디서나) | CLOSED | 열리기 전이면 끊긴 이유를 `upgrade.failure` 에 적는다. `endSocket` |
+
+- **요청.** `prepareUpgrade` 가 run 마다 만든다. 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`.
+- **run 의 반환값.** `EventClient::run` 의 반환값을 그대로 쓰되, 열리기 전에 우리가 `PROTOCOL_ERROR` / `TIMEOUT` 으로 닫았으면 base 는 `PEER_CLOSED` 를 돌려주므로 `upgrade.failure` 로 바꾼다.
+- **await.** `Parker` 하나다. `openSocket` 이 깨우고 (그때 `SocketLink::socket` 이 0 이 아니다), run 이 끝날 때 결과를 적고 깨운다. await 는 "소켓이 열렸으면 `SUCCESS`, run 이 끝났으면 그 결과" 가 될 때까지 기다린다. run 의 시작에서 결과를 지우므로 그 전의 짧은 동안은 앞 run 의 결과가 보인다.
+- **mask key.** `nextMaskKey` 는 splitmix64 다. 상태는 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). write lane 의 close frame (5.6) 은 IO thread 에서 단조 시계로 만든 key 다. RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
+
+### 5.9 다른 thread 에서 오는 것
+
+`WebSocketAccess` 가 공개 함수의 몸이다. 소유자 (HttpServer, WebSocketClient) 는 `KiottyNetWebSocketEndpoint` 의 가상 함수에서 `WebSocketAccess(_site)` 를 만들어 넘긴다.
+
+- `send`: 인자 검사 (빈 data, 모르는 opcode) → `openLink` → 플래그가 서 있으면 `CLOSED` → `pushFrame`.
+- `close`: `openLink` → `pushClose` (status 와 reason 검사, CAS, push lane).
+- `broadcast`: path 를 라우트 표에서 경로 번호로 찾고 (없으면 `INVALID_ARGUMENT`, NULL 이면 전부) `links()` 를 돌며 열려 있고 닫는 중이 아니고 경로가 같은 칸에 `pushFrame`. 하나라도 `BUFFER_FULL` 이면 그것을 돌려준다.
+
+IO thread 는 깨우지 않는다. push lane 의 drain 은 base 의 notify 가 IO thread 에 알린다 (1.6). 닫힘 플래그는 그 연결의 다음 READ / TIMEOUT 행이 본다.
+
+---
+
+## 6. 미결
 
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
 - (닫힘, 2026-11-09) WebSocket upgrade 뒤의 표: HTTP 와 WebSocket 은 한 표, 한 Session 이다 (`design_statemachine_v0.md` 11절, 14절 7, 8).
 - (닫힘, 2026-11-09) HttpResponse / HttpWork handle 의 소유자: handle 이 `{ server, id }` 라 `ownerOf` 가 필요 없다 (4.5, 공개 API 판 v1).
 - (닫힘, 2026-11-10) 정적 파일의 `sendfile` / `TransmitFile`: 쓰지 않고 4.7 의 응답 버퍼 조각으로 보낸다 (`design_http_v0.html` 1절 결정 6, H5 에서 구현).
+- (닫힘, 2026-11-13) WebSocket 의 다른 thread close 를 drain 뒤 훅으로 할지: 두지 않는다. 닫힘 플래그를 READ / TIMEOUT 행이 본다 (5.5, 5.7, 설계 결정 3).
+- (닫힘, 2026-11-13) 클라이언트의 mask 를 어디서 씌울지: base 를 바꾸지 않고 클라이언트의 push 가 scratch 버퍼에서 씌운다 (5.6).

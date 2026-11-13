@@ -82,6 +82,7 @@
   <li><a href="#s17">케이스 : base 송신 (B1)</a></li>
   <li><a href="#s18">케이스 : 주소와 TLS 는 run / connect 때 (B2)</a></li>
   <li><a href="#s19">케이스 : HttpServer (H2 ~ H6)</a></li>
+  <li><a href="#s20">케이스 : WebSocket (W1 ~ W4)</a></li>
 </ol>
 
 <h2 id="s1">1. 세 질문과 테스트의 층</h2>
@@ -978,6 +979,59 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>HttpMcp</td><td>(작성 중)</td><td><span class="tag ok">정상</span></td><td>MCP 서버 골격: initialize 와 세션 헤더, 406, 없는 세션 404, 알림 202, tools/call 의 SSE 진행 알림 뒤 최종 응답, GET 스트림에 앱이 넣은 이벤트, DELETE 로 스트림의 끝 chunk, HEAD 는 Work 없이 헤더만, 라우트 뒤의 정적 디렉토리</td></tr>
 </table>
 <p>하지 않은 것: 연결 수 초과의 <code>onError(TABLE_FULL)</code> 는 재현하지 않는다 (base 가 accept 를 멈추므로 경합 때만 난다. 대신 19.2 의 <code>ConnectionOverMaxClientsWaitsUntilASlotFrees</code>). 설계 11절의 benchmark 둘 (Work 스트림의 chunk 1 KiB × 1000 latency, 큰 파일) 은 아직 없다.</p>
+
+<h2 id="s20">20. 케이스 : WebSocket (W1 ~ W4)</h2>
+<p><code>docs/design/design_websocket_v0.html</code> 10절의 W1 ~ W4 사이클 (2026-11-12 ~ 13) 의 테스트다. 설계는 이것을 "테스트 계획 18절" 이라 했지만 17 / 18절이 B1 / B2, 19절이 HttpServer 라서 20절이다. progress 는 <code>261112_progress_websocket_w1 / w2 / w3.md</code>, <code>261113_progress_websocket_w4.md</code>. codec 은 unit, 나머지는 integration 이고 integration 은 공개 C API (<code>kiotty_net_websocket.h</code>) 만 쓴다. 서버 테스트의 상대는 mask 한 frame 을 손으로 만드는 raw socket 클라이언트, 클라이언트 테스트의 상대는 W3 의 HttpServer 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (wss 케이스 하나는 TLS 빌드에서만).</p>
+
+<h3>20.1 헤더 (W1 unit, <code>kiotty_test_headers_c.c</code>, <code>kiotty_test_headers_cpp.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Headers</td><td>(기존 struct 비교에 더함)</td><td><span class="tag ok">정상</span></td><td><code>KiottyNetWebSocketHandle</code> 의 크기와 id offset, <code>KiottyNetWebSocketClientResult</code>, <code>KiottyNetWebSocketHandler</code> 의 C / C++ 크기가 같다. <code>KiottyNet_WebSocketClient</code> 는 explicit bool</td></tr>
+  <tr><td>Headers</td><td>WebSocketHandlesOrderByOwnerThenId</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_WebSocket</code> 의 <code>==</code>, <code>!=</code>, <code>&lt;</code> (owner 를 <code>std::less</code> 로, 그 다음 id)</td></tr>
+</table>
+
+<h3>20.2 frame codec (W2 unit, <code>kiotty_test_websocket_codec.cpp</code>)</h3>
+<p>RFC 6455 의 예제 frame 과 FIPS / RFC 4648 의 벡터. 할당은 없다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Sha1</td><td>MatchesTheStandardVectors</td><td><span class="tag ok">정상</span></td><td>빈 입력, <code>abc</code> (한 조각과 두 조각), 두 블록 벡터, <code>a</code> 백만 개</td></tr>
+  <tr><td>Base64</td><td>MatchesTheStandardVectorsAndChecksText</td><td><span class="tag edge">엣지</span></td><td>RFC 4648 의 벡터, 목적지 부족은 BUFFER_FULL, 텍스트 검사 (길이, <code>=</code> 뒤 글자, 알파벳 밖, <code>=</code> 셋)</td></tr>
+  <tr><td>WebSocketHandshake</td><td>AcceptIsTheRfcExample</td><td><span class="tag edge">엣지</span></td><td>RFC 의 키 → <code>s3pPLMBiTxaQ9kYGzzhZRbK+xOo=</code>. 빈 키, 23 / 25 글자, <code>==</code> 아님, 가운데 NUL 은 키가 아니다</td></tr>
+  <tr><td>WebSocketFrame</td><td>ParsesTheRfcExampleStarts, BuildsTheRfcExampleHeads</td><td><span class="tag ok">정상</span></td><td>RFC 5.7 의 예 (<code>Hello</code> 평문 / mask, 조각 둘, ping, mask 된 pong, 256 바이트, 64 KiB) 의 머리 파싱과 만들기</td></tr>
+  <tr><td>WebSocketFrame</td><td>RefusesBrokenStartsWithProtocolError</td><td><span class="tag misuse">오용</span></td><td>빈 입력, 1 / 3 바이트, RSV, 모르는 opcode 둘, 조각난 제어 frame, 126 길이의 제어 frame 은 1002</td></tr>
+  <tr><td>WebSocketFrame</td><td>ExtendedLengthsAreMinimalAndBelowTheTopBit</td><td><span class="tag edge">엣지</span></td><td>125, 126, 65535, 65536 경계. 최소 표현이 아닌 길이, 최상위 비트는 1002</td></tr>
+  <tr><td>WebSocketFrame</td><td>MaskingIsTheRfcExampleAndHonoursTheOffset</td><td><span class="tag edge">엣지</span></td><td>RFC 의 mask 결과, 조각마다 offset 을 이어 쓴 결과가 한 번에 한 것과 같다</td></tr>
+  <tr><td>WebSocketClose</td><td>ParsesStatusAndReason, RefusesBrokenPayloads</td><td><span class="tag edge">엣지</span></td><td>빈 payload 는 1005, status + 이유, 사설 status, 가운데 NUL 이 있는 이유. 1 바이트, 1005 / 1006 / 1004 / 0 / 5000, 125 초과, 깨진 UTF-8 (1007)</td></tr>
+  <tr><td>WebSocketClose</td><td>BuildsPayloadsWithinTheControlLimit</td><td><span class="tag misuse">오용</span></td><td>이유 상한, 보낼 수 없는 status, 깨진 UTF-8 은 INVALID_ARGUMENT / INVALID_ENCODING</td></tr>
+</table>
+
+<h3>20.3 서버 (W3 integration, <code>kiotty_test_websocket_server.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>WebSocketServer</td><td>EchoesTextBinaryAndFragmentsThenAnswersTheClientClose</td><td><span class="tag ok">정상</span></td><td>텍스트 / 바이너리 echo, 조각 둘 사이의 ping 에 pong 이 먼저, 12000 바이트 (126 길이, <code>receive_capacity</code> 4096 조각 읽기), 클라이언트 close 에 같은 status 로 답하고 <code>onClose(SUCCESS, 1000, "done")</code></td></tr>
+  <tr><td>WebSocketServer</td><td>MessageLargerThanTheBodyCapacityClosesWith1009</td><td><span class="tag edge">엣지</span></td><td>조각 합 1200 &gt; <code>max_body_bytes</code> 1024 → close 1009, <code>onClose(REQUEST_TOO_LARGE)</code></td></tr>
+  <tr><td>WebSocketServer</td><td>BrokenFramesCloseWithProtocolErrorOrInvalidPayload</td><td><span class="tag misuse">오용</span></td><td>mask 없는 frame → 1002, 깨진 UTF-8 TEXT → 1007, 앞 조각 없는 continuation → 1002. close frame 은 write lane 으로 나간 뒤 끊긴다</td></tr>
+  <tr><td>WebSocketServer</td><td>PingTimerSendsPingsAndClosesWithoutAPong</td><td><span class="tag edge">엣지</span></td><td>ping 100 ms / pong 300 ms: ping, pong, ping, 답 없음 → push lane 의 close 1001, <code>onClose(TIMEOUT, 1001)</code></td></tr>
+  <tr><td>WebSocketServer</td><td>CloseFromAnotherThreadEndsWhenThePeerAnswers</td><td><span class="tag ok">정상</span></td><td>다른 thread 의 close (4000, "bye"): 두 번째 close BUSY, 그 뒤 send CLOSED, 1005 는 INVALID_ARGUMENT, 그 사이 온 데이터는 버림, 상대 답 → <code>SUCCESS</code>, 닫힌 뒤 send PEER_CLOSED</td></tr>
+  <tr><td>WebSocketServer</td><td>CloseInsideOnMessageWaitsForThePeerCloseUntilTheTimeout</td><td><span class="tag edge">엣지</span></td><td>onMessage 안의 close → close frame, 답 없음 → <code>close_timeout</code> 200 ms 뒤 <code>TIMEOUT</code></td></tr>
+  <tr><td>WebSocketServer</td><td>RefusesWrongMethodMissingHeadersBadKeyAndForbiddenUpgrade</td><td><span class="tag misuse">오용</span></td><td>POST / HEAD 405, 헤더 없음 / Version 8 은 426, 깨진 키 / body 는 400, onUpgrade 0 은 403 + <code>Connection: close</code>, 허용은 101</td></tr>
+  <tr><td>WebSocketServer</td><td>SubprotocolIsChosenOnlyInsideOnUpgrade</td><td><span class="tag ok">정상</span></td><td>후보에 없는 값 INVALID_ARGUMENT, <code>mqtt</code> 선택 → 101 의 헤더와 onOpen 의 info, onOpen 안의 select 는 BUSY</td></tr>
+  <tr><td>WebSocketServer</td><td>HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcastByPath</td><td><span class="tag ok">정상</span></td><td>HTTP 라우트 + <code>/chat</code> + <code>/telemetry</code> 한 서버, 경로별 broadcast, NULL 은 전부, 모르는 경로 INVALID_ARGUMENT, 메시지가 경로의 app_context 로</td></tr>
+  <tr><td>WebSocketServer</td><td>RegistrationRulesAndServerCloseGivesClosed1001</td><td><span class="tag misuse">오용</span></td><td>같은 path, 같은 path 의 라우트는 DUPLICATE_RULE, onMessage NULL / 상대 경로 / NULL 서버는 INVALID_ARGUMENT, run 뒤 BUSY, <code>{ NULL, 0 }</code> handle, 빈 data, 서버 close → <code>onClose(CLOSED, 1001)</code>, onClose 안의 send PEER_CLOSED</td></tr>
+</table>
+
+<h3>20.4 클라이언트 (W4 integration, <code>kiotty_test_websocket_client.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>WebSocketClient</td><td>RoundTripsWithTheServerThenClosesFromTheClient</td><td><span class="tag ok">정상</span></td><td>W3 서버와 왕복. 연결 전 socket <code>{ NULL, 0 }</code> / send PEER_CLOSED, await SUCCESS, info 의 port, 텍스트와 12000 바이트 echo, 클라이언트의 close 1000 "bye" → 양쪽 onClose, run PEER_CLOSED</td></tr>
+  <tr><td>WebSocketClient</td><td>OneClientRunsPlainThenSecure</td><td><span class="tag ok">정상</span></td><td>한 클라이언트가 ws 뒤 wss (CA 로 검증, SNI 127.0.0.1). close → run CLOSED, <code>onClose(CLOSED, 1001)</code>. TLS 빌드에서만</td></tr>
+  <tr><td>WebSocketClient</td><td>SendsAWellFormedUpgradeAndRejectsWrongAnswers</td><td><span class="tag misuse">오용</span></td><td>가짜 서버가 본 요청 (<code>GET /chat?room=1</code>, Host <code>127.0.0.1:port</code>, Upgrade, Connection, Version 13, 24 글자 키, Protocol 없음). 200, 틀린 Accept, Protocol 있음 → run 과 await 모두 PROTOCOL_ERROR, onOpen / onClose 없음</td></tr>
+  <tr><td>WebSocketClient</td><td>MasksOutgoingFramesAndRejectsAMaskedServerFrame</td><td><span class="tag edge">엣지</span></td><td>보낸 TEXT 의 MASK 비트와 unmask 결과. mask 된 서버 frame → mask 된 close 1002, <code>onClose(PROTOCOL_ERROR, 1002)</code></td></tr>
+  <tr><td>WebSocketClient</td><td>SilentServerEndsTheHandshakeWithTimeout</td><td><span class="tag edge">엣지</span></td><td>101 이 오지 않음 (<code>header_timeout</code> 200 ms) → TIMEOUT</td></tr>
+  <tr><td>WebSocketClient</td><td>RetriesUntilTheServerListens</td><td><span class="tag edge">엣지</span></td><td>서버가 300 ms 늦게 뜸 → 재시도 뒤 왕복</td></tr>
+  <tr><td>WebSocketClient</td><td>CreateRejectsBadArgumentsAndRunRejectsAMissingHandler</td><td><span class="tag misuse">오용</span></td><td>create 의 상대 path, 공백 있는 path, NULL 설정은 <code>{ INVALID_ARGUMENT, NULL }</code>. run 의 handler NULL / onMessage NULL 은 INVALID_ARGUMENT. run 전 await TIMEOUT</td></tr>
+</table>
+<p>하지 않은 것: 외부 클라이언트 (Python websockets, 브라우저) 와의 왕복 (WSL 에 <code>websockets</code> 와 pip 가 없다. 설계 10절의 W3 완료 조건 하나). push lane 이 찬 send 의 BUFFER_FULL, broadcast 의 건너뜀, pong timeout 0 / close timeout 0 (무한) 은 integration 으로 재현하지 않았다. WebSocket benchmark 는 없다.</p>
 
 </body>
 </html>

@@ -183,3 +183,5 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-12 WebSocket 사이클 W3 (`docs/progress/261112_progress_websocket_w3.md`): 서버. HTTP 표에 WebSocket 행, 라우트 표의 WebSocket 경로, 405 / 426 / 400 / 403 / 101, onUpgrade / onOpen / onMessage / onClose, ping / pong / close 타이머, 다른 thread 의 send / close (atomic 플래그 + push lane), broadcastWebSocket. integration 10 개. 다음은 W4 (클라이언트).
 
 2026-11-13 WebSocket 사이클 W4 (`docs/progress/261113_progress_websocket_w4.md`): 클라이언트. EventClient 위의 WebSocketClient, Upgrade 요청 / 101 검사 행, 서버와 같은 frame 행 (역할 값은 site), push lane 의 mask (scratch 버퍼), await 는 onOpen 까지. integration 7 개 (W3 서버와 왕복, ws 뒤 wss, 거절 셋, mask, timeout, 재시도). 다음은 W5 (문서).
+
+2026-11-13 WebSocket 사이클 W5 (`docs/progress/261113_progress_websocket_w5.md`): 문서. requirement 10 / 11절을 판 v2 와 W3 / W4 의 구현으로, 구현 가이드 5절 (WebSocket), 테스트 계획 20절, user guide 와 설계에 W3 / W4 에서 정한 것. 설계 10절의 WebSocket 행은 끝. 쓰며 본 것 둘 (write lane close frame 의 순서, 그 mask key) 은 고치지 않았다.
