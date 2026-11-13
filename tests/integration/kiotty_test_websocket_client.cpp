@@ -34,6 +34,7 @@ namespace
             : mutex()
             , messages()
             , closes()
+            , errors()
             , opened(0)
             , is_echo(false)
         {
@@ -51,9 +52,16 @@ namespace
             return closes;
         }
 
-        std::mutex               mutex;
-        std::vector<std::string> messages;
-        std::vector<Closed>      closes;
+        std::vector<KiottyNetCode> errorList()
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            return errors;
+        }
+
+        std::mutex                 mutex;
+        std::vector<std::string>   messages;
+        std::vector<Closed>        closes;
+        std::vector<KiottyNetCode> errors;
         std::atomic<int>         opened;
         bool                     is_echo;
     };
@@ -101,7 +109,31 @@ namespace
         side.closes.push_back(Closed{ close.code, close.status, textOf(close.reason) });
     }
 
-    const KiottyNetWebSocketHandler HANDLER = { nullptr, onOpen, onMessage, onClose };
+    void onClientOpen(KiottyNetAppContext app_context)
+    {
+        sideOf(app_context).opened.fetch_add(1);
+    }
+
+    void onClientMessage(KiottyNetAppContext app_context, KiottyNetWebSocketMessage message)
+    {
+        Side& side = sideOf(app_context);
+        const std::lock_guard<std::mutex> lock(side.mutex);
+        side.messages.push_back(textOf(message.data));
+    }
+
+    void onClientClose(KiottyNetAppContext app_context, KiottyNetWebSocketClose close)
+    {
+        Side& side = sideOf(app_context);
+        const std::lock_guard<std::mutex> lock(side.mutex);
+        side.closes.push_back(Closed{ close.code, close.status, textOf(close.reason) });
+    }
+
+    void onClientError(KiottyNetAppContext app_context, KiottyNetConnectionInfo, KiottyNetCode code, const char* message)
+    {
+        Side& side = sideOf(app_context);
+        const std::lock_guard<std::mutex> lock(side.mutex);
+        side.errors.push_back(message == nullptr ? KIOTTY_NET_CODE_INVALID_ARGUMENT : code);
+    }
 
     std::string certPath(const char* name)
     {
@@ -151,6 +183,7 @@ namespace
             , run_code(KIOTTY_NET_CODE_SUCCESS)
             , _server_address()
             , _client_address()
+            , _client_path()
             , _server_thread()
             , _client_thread()
         {
@@ -195,23 +228,28 @@ namespace
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitHttpServer(server, WAIT_MS));
         }
 
-        void createClient(const char* path = "/chat")
+        void createClient()
         {
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS,
                       KiottyNet_configureClientBufferCapacity(&client_configuration, 4096, 4096, 16384));
             const KiottyNetWebSocketClientResult created =
-                KiottyNet_createWebSocketClient(context, &client_configuration, &limits, path);
+                KiottyNet_createWebSocketClient(context, &client_configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             client = created.handle;
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketClientOpen(client, onClientOpen));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketClientMessage(client, onClientMessage));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketClientClose(client, onClientClose));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketClientError(client, onClientError));
         }
 
-        void startClient(const KiottyNetTlsClientConfiguration* tls)
+        void startClient(const KiottyNetTlsClientConfiguration* tls, const std::string& path = "/chat")
         {
             if (_client_thread.joinable()) { _client_thread.join(); }
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_client_address, LOOPBACK_HOST, port));
             run_code.store(KIOTTY_NET_CODE_SUCCESS);
+            _client_path = path;
             _client_thread = std::thread([this, tls]() {
-                run_code.store(KiottyNet_runWebSocketClient(client, &_client_address, tls, &HANDLER, &client_side));
+                run_code.store(KiottyNet_runWebSocketClient(client, &_client_address, _client_path.c_str(), tls, &client_side));
             });
         }
 
@@ -244,8 +282,7 @@ namespace
 
         void closeFromClient(uint16_t status)
         {
-            const KiottyNetWebSocketHandle socket = KiottyNet_getWebSocketClientSocket(client);
-            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_closeWebSocket(socket, status, "bye"));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_byeWebSocketClient(client, status, "bye"));
         }
 
         KiottyNetContext               context;
@@ -261,6 +298,7 @@ namespace
     private:
         KiottyNetAddress _server_address;
         KiottyNetAddress _client_address;
+        std::string      _client_path;
         std::thread      _server_thread;
         std::thread      _client_thread;
     };
@@ -314,11 +352,15 @@ TEST_F(WebSocketClientTest, RoundTripsWithTheServerThenClosesFromTheClient)
     EXPECT_EQ(nullptr, KiottyNet_getWebSocketClientSocket(client).owner);
     EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED,
               KiottyNet_sendWebSocketClient(client, KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, spanOf("early")));
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, KiottyNet_byeWebSocketClient(client, 1000, nullptr));
     startClient(nullptr);
     const KiottyNetCode awaited = KiottyNet_awaitWebSocketClient(client, WAIT_MS);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, awaited) << "server opened " << server_side.opened.load()
                                                 << " client opened " << client_side.opened.load();
     EXPECT_EQ(1, client_side.opened.load());
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_onWebSocketClientOpen(client, onClientOpen));
+    EXPECT_EQ(KIOTTY_NET_CODE_BUSY, KiottyNet_setWebSocketClientProtocols(client, "chat"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_byeWebSocketClient(client, 1005, nullptr));
     const KiottyNetWebSocketInfo info = KiottyNet_getWebSocketInfo(KiottyNet_getWebSocketClientSocket(client));
     EXPECT_EQ(static_cast<int32_t>(port), info.connection.port);
     roundTrip("hello");
@@ -333,6 +375,7 @@ TEST_F(WebSocketClientTest, RoundTripsWithTheServerThenClosesFromTheClient)
     EXPECT_EQ(1000, server_side.closeList()[0].status);
     EXPECT_EQ("bye", server_side.closeList()[0].reason);
     EXPECT_EQ(2u, server_side.messageList().size());
+    EXPECT_TRUE(client_side.errorList().empty());
 }
 
 TEST_F(WebSocketClientTest, OneClientRunsPlainThenSecure)
@@ -370,14 +413,14 @@ TEST_F(WebSocketClientTest, OneClientRunsPlainThenSecure)
 
 TEST_F(WebSocketClientTest, SendsAWellFormedUpgradeAndRejectsWrongAnswers)
 {
-    createClient("/chat?room=1");
+    createClient();
     const char* answers[] = { "status", "accept", "protocol" };
     for (const char* answer : answers)
     {
         port = kiotty_test::unusedPort();
         FakeServer fake(port);
         ASSERT_TRUE(fake.isListening());
-        startClient(nullptr);
+        startClient(nullptr, "/chat?room=1");
         std::string head;
         ASSERT_TRUE(fake.acceptUpgrade(head));
         EXPECT_EQ(0u, head.find("GET /chat?room=1 HTTP/1.1\r\n"));
@@ -397,6 +440,45 @@ TEST_F(WebSocketClientTest, SendsAWellFormedUpgradeAndRejectsWrongAnswers)
     }
     EXPECT_EQ(0, client_side.opened.load());
     EXPECT_TRUE(client_side.closeList().empty());
+    const std::vector<KiottyNetCode> expected_errors(3, KIOTTY_NET_CODE_PROTOCOL_ERROR);
+    EXPECT_EQ(expected_errors, client_side.errorList());
+}
+
+TEST_F(WebSocketClientTest, OffersSubprotocolsAndAcceptsOneOfThemOrNone)
+{
+    createClient();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setWebSocketClientProtocols(client, "ocpp1.6, ocpp2.0.1"));
+    const char* answers[] = { "ocpp2.0.1", "", "mqtt" };
+    for (const char* answer : answers)
+    {
+        const std::string answer_text = answer;
+        port = kiotty_test::unusedPort();
+        FakeServer fake(port);
+        ASSERT_TRUE(fake.isListening());
+        startClient(nullptr);
+        std::string head;
+        ASSERT_TRUE(fake.acceptUpgrade(head));
+        EXPECT_EQ("ocpp1.6, ocpp2.0.1", fieldOf(head, "Sec-WebSocket-Protocol"));
+        const std::string extra = answer_text.empty() ? "" : "Sec-WebSocket-Protocol: " + answer_text + "\r\n";
+        ASSERT_TRUE(fake.send(switchingResponse(acceptFor(fieldOf(head, "Sec-WebSocket-Key")), extra)));
+        if (answer_text == "mqtt")
+        {
+            EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, finishClient());
+            continue;
+        }
+        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitWebSocketClient(client, WAIT_MS)) << answer;
+        const KiottyNetWebSocketInfo info = KiottyNet_getWebSocketInfo(KiottyNet_getWebSocketClientSocket(client));
+        EXPECT_EQ(answer_text, std::string(info.protocol));
+        KiottyNet_closeWebSocketClient(client);
+        EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, finishClient());
+    }
+    EXPECT_EQ(2, client_side.opened.load());
+    const std::vector<Closed> closes = client_side.closeList();
+    ASSERT_EQ(2u, closes.size());
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, closes[1].code);
+    EXPECT_EQ(1001, closes[1].status);
+    const std::vector<KiottyNetCode> expected_errors = { KIOTTY_NET_CODE_PROTOCOL_ERROR };
+    EXPECT_EQ(expected_errors, client_side.errorList());
 }
 
 TEST_F(WebSocketClientTest, MasksOutgoingFramesAndRejectsAMaskedServerFrame)
@@ -425,11 +507,13 @@ TEST_F(WebSocketClientTest, MasksOutgoingFramesAndRejectsAMaskedServerFrame)
     EXPECT_EQ(static_cast<char>(0x82), close[1]);
     const uint16_t status = static_cast<uint16_t>(((close[6] ^ close[2]) & 0xFF) << 8 | ((close[7] ^ close[3]) & 0xFF));
     EXPECT_EQ(1002, status);
+    EXPECT_NE(frame.substr(2, 4), close.substr(2, 4));
     EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, finishClient());
     const std::vector<Closed> closes = client_side.closeList();
     ASSERT_EQ(1u, closes.size());
     EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, closes[0].code);
     EXPECT_EQ(1002, closes[0].status);
+    EXPECT_TRUE(client_side.errorList().empty());
 }
 
 TEST_F(WebSocketClientTest, SilentServerEndsTheHandshakeWithTimeout)
@@ -442,6 +526,49 @@ TEST_F(WebSocketClientTest, SilentServerEndsTheHandshakeWithTimeout)
     std::string head;
     ASSERT_TRUE(fake.acceptUpgrade(head));
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, finishClient());
+    const std::vector<KiottyNetCode> expected_errors = { KIOTTY_NET_CODE_TIMEOUT };
+    EXPECT_EQ(expected_errors, client_side.errorList());
+}
+
+TEST_F(WebSocketClientTest, GivingUpOnConnectingIsReportedOnceThroughOnError)
+{
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 2, 50));
+    createClient();
+    startClient(nullptr);
+    const KiottyNetCode code = finishClient();
+    EXPECT_NE(KIOTTY_NET_CODE_SUCCESS, code);
+    EXPECT_NE(KIOTTY_NET_CODE_CLOSED, code);
+    const std::vector<KiottyNetCode> expected_errors = { code };
+    EXPECT_EQ(expected_errors, client_side.errorList());
+    EXPECT_EQ(0, client_side.opened.load());
+    EXPECT_TRUE(client_side.closeList().empty());
+}
+
+TEST_F(WebSocketClientTest, CppClientRegistersRunsSendsAndSaysBye)
+{
+    startServer(nullptr);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientBufferCapacity(&client_configuration, 4096, 4096, 16384));
+    KiottyNet_WebSocketClient cpp(context, client_configuration, &limits);
+    ASSERT_TRUE(static_cast<bool>(cpp));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.protocols(nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.onOpen(onClientOpen));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.onMessage(onClientMessage));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.onClose(onClientClose));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.onError(onClientError));
+    KiottyNetAddress address;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
+    std::atomic<KiottyNetCode> code(KIOTTY_NET_CODE_SUCCESS);
+    std::thread io([&]() { code.store(cpp.run(address, "/chat", &client_side)); });
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.await(WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, spanOf("cpp")));
+    ASSERT_TRUE(waitClientMessages(1));
+    EXPECT_EQ("cpp", client_side.messageList().back());
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, cpp.bye());
+    io.join();
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, code.load());
+    const std::vector<Closed> closes = client_side.closeList();
+    ASSERT_EQ(1u, closes.size());
+    EXPECT_EQ(1000, closes[0].status);
 }
 
 TEST_F(WebSocketClientTest, RetriesUntilTheServerListens)
@@ -455,23 +582,30 @@ TEST_F(WebSocketClientTest, RetriesUntilTheServerListens)
     roundTrip("late");
 }
 
-TEST_F(WebSocketClientTest, CreateRejectsBadArgumentsAndRunRejectsAMissingHandler)
+TEST_F(WebSocketClientTest, RegistrationAndRunRejectBadArguments)
 {
-    const KiottyNetWebSocketClientResult relative = KiottyNet_createWebSocketClient(context, &client_configuration, nullptr, "chat");
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, relative.code);
-    EXPECT_EQ(nullptr, relative.handle);
-    const KiottyNetWebSocketClientResult spaced = KiottyNet_createWebSocketClient(context, &client_configuration, nullptr, "/a b");
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, spaced.code);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_createWebSocketClient(context, nullptr, nullptr, "/chat").code);
-    const KiottyNetWebSocketClientResult defaults = KiottyNet_createWebSocketClient(context, &client_configuration, nullptr, "/chat");
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_createWebSocketClient(context, nullptr, nullptr).code);
+    const KiottyNetWebSocketClientResult defaults = KiottyNet_createWebSocketClient(context, &client_configuration, nullptr);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, defaults.code);
     client = defaults.handle;
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_onWebSocketClientMessage(client, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_onWebSocketClientOpen(nullptr, onClientOpen));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setWebSocketClientProtocols(client, "a,,b"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setWebSocketClientProtocols(client, "bad token"));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setWebSocketClientProtocols(client, std::string(200, 'p').c_str()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setWebSocketClientProtocols(client, "v1 , v2"));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setWebSocketClientProtocols(client, nullptr));
     KiottyNetAddress address;
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
-    const KiottyNetWebSocketHandler no_message = { nullptr, onOpen, nullptr, nullptr };
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, &address, nullptr, &no_message, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, &address, "/chat", nullptr, nullptr));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_onWebSocketClientMessage(client, onClientMessage));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, &address, "chat", nullptr, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, &address, "/a b", nullptr, nullptr));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, &address, nullptr, nullptr, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_runWebSocketClient(client, nullptr, "/chat", nullptr, nullptr));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_byeWebSocketClient(nullptr, 1000, nullptr));
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitWebSocketClient(client, 10));
+    EXPECT_TRUE(client_side.errorList().empty());
 }
 
 #endif

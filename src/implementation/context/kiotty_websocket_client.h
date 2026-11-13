@@ -4,6 +4,7 @@
 #include "context/kiotty_websocket_endpoint.h"
 #include "core/kiotty_fixed_string.h"
 #include "core/kiotty_parker.h"
+#include "core/kiotty_result.h"
 #include "data/repository/http/kiotty_http_site.h"
 #include "domain/usecases/websocket/kiotty_websocket_handshake.h"
 #include "kiotty_net_websocket.h"
@@ -15,23 +16,23 @@
 
 namespace kiotty::net::implementation
 {
-    inline constexpr size_t MAX_UPGRADE_REQUEST_BYTES = 768;
+    inline constexpr size_t MAX_UPGRADE_REQUEST_BYTES = 1024;
 
     using SocketPath = FixedString<KIOTTY_NET_MAX_URL_LENGTH>;
     using UpgradeText = FixedString<MAX_UPGRADE_REQUEST_BYTES>;
+    using RegistrationResult = Result<HttpSite&, KiottyNetCode>;
 
     struct WebSocketClientConfiguration
     {
         KiottyNetClientConfiguration client;
         KiottyNetHttpLimits          limits;
-        SocketPath                   path;
     };
 
     struct ClientRun
     {
         const KiottyNetAddress&                address;
+        Span<const char>                       path;
         const KiottyNetTlsClientConfiguration* tls;
-        const KiottyNetWebSocketHandler&       handler;
         KiottyNetAppContext                    app_context;
     };
 
@@ -51,6 +52,8 @@ namespace kiotty::net::implementation
         KiottyNetCode            initialize(PoolHandle id,
                                             const WebSocketClientConfiguration& configuration);
         void                     reset() noexcept;
+        RegistrationResult       registration();
+        KiottyNetCode            setProtocols(Span<const char> protocols);
         KiottyNetCode            run(const ClientRun& request);
         KiottyNetCode            await(uint64_t timeout_milliseconds);
         KiottyNetWebSocketHandle socket();
@@ -69,19 +72,18 @@ namespace kiotty::net::implementation
                                            Span<const char> reason) override;
 
     private:
-        KiottyNetCode prepareUpgrade(const KiottyNetAddress& address, bool is_secure);
+        KiottyNetCode prepareUpgrade(const ClientRun& request);
         KiottyNetCode runOnce(const ClientRun& request);
-        MaskKey       nextMaskKey();
+        void          reportUnopened(KiottyNetCode code);
         bool          isOpen();
 
         HttpSite              _site;
-        SocketPath            _path;
+        ProtocolText          _protocols;
         UpgradeText           _request;
         AcceptText            _accept;
         std::vector<char>     _scratch;
         std::mutex            _push_mutex;
         Parker                _opened;
-        std::atomic<uint64_t> _mask_state;
         std::atomic<bool>     _is_running;
         std::atomic<bool>     _is_ended;
         KiottyNetCode         _result;

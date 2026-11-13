@@ -43,7 +43,6 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.websocket_handle, sizeof(KiottyNetWebSocketHandle));
     EXPECT_EQ(c.websocket_handle_id_offset, offsetof(KiottyNetWebSocketHandle, id));
     EXPECT_EQ(c.websocket_client_result, sizeof(KiottyNetWebSocketClientResult));
-    EXPECT_EQ(c.websocket_handler, sizeof(KiottyNetWebSocketHandler));
     EXPECT_EQ(c.websocket_route, sizeof(KiottyNetWebSocketRoute));
     EXPECT_EQ(c.websocket_route_index_offset, offsetof(KiottyNetWebSocketRoute, index));
     EXPECT_EQ(c.http_request_keep_alive, offsetof(KiottyNetHttpRequest, keep_alive));

@@ -4,6 +4,7 @@
 #include "core/kiotty_span.h"
 #include "kiotty_net_websocket.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -68,4 +69,5 @@ namespace kiotty::net::implementation
     FrameHead         buildFrameHead(FrameOpcode opcode, uint64_t length);
     FrameHead         buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key);
     void              applyMask(Span<char> data, const MaskKey& key, size_t offset);
+    MaskKey           nextMaskKey(std::atomic<uint64_t>& state);
 }

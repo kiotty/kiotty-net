@@ -19,6 +19,9 @@ namespace kiotty::net::implementation
         constexpr uint64_t LONG_LENGTH_MIN = 0x10000;
         constexpr uint64_t LONG_LENGTH_TOP_BIT = 0x8000000000000000ull;
         constexpr uint32_t BITS_PER_BYTE = 8;
+        constexpr uint64_t GOLDEN_GAMMA = 0x9E3779B97F4A7C15ULL;
+        constexpr uint64_t MIX_FIRST = 0xBF58476D1CE4E5B9ULL;
+        constexpr uint64_t MIX_SECOND = 0x94D049BB133111EBULL;
         using Status = KiottyNetWebSocketStatus;
 
         constexpr Status   PROTOCOL_ERROR = KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR;
@@ -115,6 +118,20 @@ namespace kiotty::net::implementation
             const uint8_t mask = key.bytes[(offset + i) % MASK_KEY_BYTES];
             data[i] = static_cast<char>(static_cast<uint8_t>(data[i]) ^ mask);
         }
+    }
+
+    MaskKey nextMaskKey(std::atomic<uint64_t>& state)
+    {
+        const uint64_t drawn = state.fetch_add(GOLDEN_GAMMA) + GOLDEN_GAMMA;
+        uint64_t mixed = (drawn ^ (drawn >> 30U)) * MIX_FIRST;
+        mixed = (mixed ^ (mixed >> 27U)) * MIX_SECOND;
+        mixed = mixed ^ (mixed >> 31U);
+        MaskKey key{};
+        for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
+        {
+            key.bytes[i] = static_cast<uint8_t>(mixed >> (BITS_PER_BYTE * i));
+        }
+        return key;
     }
 
     namespace

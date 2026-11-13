@@ -37,7 +37,6 @@ typedef struct KiottyTestHeaderLayout
     size_t websocket_handle;
     size_t websocket_handle_id_offset;
     size_t websocket_client_result;
-    size_t websocket_handler;
     size_t websocket_route;
     size_t websocket_route_index_offset;
     size_t http_request_keep_alive;

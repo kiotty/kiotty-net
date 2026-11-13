@@ -57,13 +57,24 @@ namespace kiotty::net::implementation
         int32_t state;
     };
 
+    struct ClientEvents
+    {
+        KiottyNetWebSocketClientOpenAction    on_open;
+        KiottyNetWebSocketClientMessageAction on_message;
+        KiottyNetWebSocketClientCloseAction   on_close;
+    };
+
     struct ClientUpgrade
     {
-        WebSocketTarget  target;
-        Span<const char> request;
-        Span<const char> accept;
-        Parker*          opened;
-        KiottyNetCode    failure;
+        ClientEvents            events;
+        Span<const char>        request;
+        Span<const char>        accept;
+        Span<const char>        protocols;
+        KiottyNetConnectionInfo peer;
+        Parker*                 opened;
+        KiottyNetCode           failure;
+        bool                    has_opened;
+        bool                    has_failed;
     };
 
     using ProtocolText = FixedString<KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH>;

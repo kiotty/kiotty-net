@@ -1062,5 +1062,20 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>Headers</td><td>CAndCppSeeTheSameLayoutForEveryPublicStruct</td><td><span class="tag ok">정상</span></td><td><code>KiottyNetWebSocketRoute</code> 의 크기와 <code>index</code> 위치가 C 와 같다</td></tr>
 </table>
 
+<h2 id="s24">24. 케이스 : 클라이언트 이벤트 등록, subprotocol, bye, onError (V3)</h2>
+<p><code>docs/design/design_websocket_v1.html</code> 5절, 결정 6 ~ 9, 12, 15 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v3.md</code>. 20.4 의 클라이언트 테스트는 <code>onWebSocketClient*</code> 로 등록하고 <code>runWebSocketClient(client, address, path, tls, &amp;side)</code> 로 돈다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>WebSocketClient</td><td>RoundTripsWithTheServerThenClosesFromTheClient</td><td><span class="tag ok">정상</span></td><td>열리기 전 <code>byeWebSocketClient</code> 는 <code>PEER_CLOSED</code>. run 중 등록 / <code>setWebSocketClientProtocols</code> 는 <code>BUSY</code>. 1005 는 <code>INVALID_ARGUMENT</code>. <code>bye(1000, "bye")</code> 로 서버가 1000 / "bye" 를 받고 run 은 <code>PEER_CLOSED</code>. onError 없음</td></tr>
+  <tr><td>WebSocketClient</td><td>SendsAWellFormedUpgradeAndRejectsWrongAnswers</td><td><span class="tag edge">경계</span></td><td>run 의 path (<code>/chat?room=1</code>) 가 요청줄에 간다. 후보 없이 보낸 요청에 subprotocol 이 오면 실패. 실패 셋이 onError 에 <code>PROTOCOL_ERROR</code> 로 한 번씩</td></tr>
+  <tr><td>WebSocketClient</td><td>OffersSubprotocolsAndAcceptsOneOfThemOrNone</td><td><span class="tag ok">정상</span></td><td>후보 <code>"ocpp1.6, ocpp2.0.1"</code> 가 <code>Sec-WebSocket-Protocol</code> 로 간다. 101 이 후보 중 하나면 열리고 <code>info.protocol</code> 이 그 값, 헤더가 없으면 열리고 빈 문자열, 후보 밖이면 <code>PROTOCOL_ERROR</code> 와 onError 한 번</td></tr>
+  <tr><td>WebSocketClient</td><td>MasksOutgoingFramesAndRejectsAMaskedServerFrame</td><td><span class="tag edge">경계</span></td><td>write lane 의 close frame 의 mask key 가 데이터 frame 의 key 와 다르다 (같은 생성기에서 뽑는다). 열린 뒤의 1002 는 onClose 로만 오고 onError 는 없다</td></tr>
+  <tr><td>WebSocketClient</td><td>SilentServerEndsTheHandshakeWithTimeout</td><td><span class="tag edge">경계</span></td><td>101 timeout 이 onError 에 <code>TIMEOUT</code> 한 번</td></tr>
+  <tr><td>WebSocketClient</td><td>GivingUpOnConnectingIsReportedOnceThroughOnError</td><td><span class="tag edge">경계</span></td><td>재시도 두 번이 모두 실패하면 run 의 반환값과 같은 code 로 onError 한 번. onOpen / onClose 없음</td></tr>
+  <tr><td>WebSocketClient</td><td>CppClientRegistersRunsSendsAndSaysBye</td><td><span class="tag ok">정상</span></td><td>C++ <code>KiottyNet_WebSocketClient</code>: <code>protocols</code>, <code>onOpen / onMessage / onClose / onError</code>, <code>run(address, "/chat", &amp;app)</code>, <code>send</code>, <code>bye()</code> (기본 1000)</td></tr>
+  <tr><td>WebSocketClient</td><td>RegistrationAndRunRejectBadArguments</td><td><span class="tag misuse">오용</span></td><td>NULL 콜백 / client 는 <code>INVALID_ARGUMENT</code>. 후보 목록의 빈 항목, 공백 든 항목, 127 바이트 넘는 목록은 <code>INVALID_ARGUMENT</code>, NULL 은 지운다. onMessage 없이 run 하면 <code>INVALID_ARGUMENT</code>. 상대 경로, 공백 든 경로, NULL 경로, NULL 주소도. 이때 onError 는 없다</td></tr>
+  <tr><td>WebSocketFrame</td><td>MaskKeysComeFromTheSharedStateAndChangeEveryDraw</td><td><span class="tag ok">정상</span></td><td><code>nextMaskKey</code> 가 state 를 옮기고 뽑을 때마다 다른 key, 같은 seed 면 같은 열</td></tr>
+</table>
+
 </body>
 </html>

@@ -85,14 +85,6 @@ typedef void (*KiottyNetWebSocketCloseAction)(
     KiottyNetWebSocketContext websocket_context,
     KiottyNetWebSocketClose close);
 
-typedef struct KiottyNetWebSocketHandler
-{
-    KiottyNetWebSocketUpgradeAction onUpgrade;
-    KiottyNetWebSocketOpenAction    onOpen;
-    KiottyNetWebSocketMessageAction onMessage;
-    KiottyNetWebSocketCloseAction   onClose;
-} KiottyNetWebSocketHandler;
-
 typedef struct KiottyNetWebSocketRoute
 {
     KiottyNetCode             code;
@@ -145,22 +137,53 @@ typedef struct KiottyNetWebSocketClientResult
     KiottyNetWebSocketClientHandle handle;
 } KiottyNetWebSocketClientResult;
 
+typedef void (*KiottyNetWebSocketClientOpenAction)(KiottyNetAppContext app_context);
+typedef void (*KiottyNetWebSocketClientMessageAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetWebSocketMessage message);
+typedef void (*KiottyNetWebSocketClientCloseAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetWebSocketClose close);
+typedef void (*KiottyNetWebSocketClientErrorAction)(
+    KiottyNetAppContext app_context,
+    KiottyNetConnectionInfo info,
+    KiottyNetCode code,
+    const char* message);
+
 KIOTTY_NET_API KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(
     KiottyNetContext context,
     const KiottyNetClientConfiguration* configuration,
-    const KiottyNetHttpLimits* limits,
-    const char* path);
+    const KiottyNetHttpLimits* limits);
 KIOTTY_NET_API void                           KiottyNet_destroyWebSocketClient(
     KiottyNetContext context,
     KiottyNetWebSocketClientHandle client);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_setWebSocketClientProtocols(
+    KiottyNetWebSocketClientHandle client,
+    const char* protocols);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_onWebSocketClientOpen(
+    KiottyNetWebSocketClientHandle client,
+    KiottyNetWebSocketClientOpenAction on_open);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_onWebSocketClientMessage(
+    KiottyNetWebSocketClientHandle client,
+    KiottyNetWebSocketClientMessageAction on_message);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_onWebSocketClientClose(
+    KiottyNetWebSocketClientHandle client,
+    KiottyNetWebSocketClientCloseAction on_close);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_onWebSocketClientError(
+    KiottyNetWebSocketClientHandle client,
+    KiottyNetWebSocketClientErrorAction on_error);
 KIOTTY_NET_API KiottyNetCode                  KiottyNet_runWebSocketClient(
     KiottyNetWebSocketClientHandle client,
     const KiottyNetAddress* address,
+    const char* path,
     const KiottyNetTlsClientConfiguration* tls,
-    const KiottyNetWebSocketHandler* handler,
     KiottyNetAppContext app_context);
 KIOTTY_NET_API void KiottyNet_closeWebSocketClient(
     KiottyNetWebSocketClientHandle client);
+KIOTTY_NET_API KiottyNetCode                  KiottyNet_byeWebSocketClient(
+    KiottyNetWebSocketClientHandle client,
+    uint16_t status,
+    const char* reason);
 KIOTTY_NET_API KiottyNetCode                  KiottyNet_awaitWebSocketClient(
     KiottyNetWebSocketClientHandle client,
     uint64_t timeout_milliseconds);
@@ -219,22 +242,29 @@ public:
     KiottyNet_WebSocketClient(
         KiottyNetContext context,
         const KiottyNetClientConfiguration& configuration,
-        const KiottyNetHttpLimits* limits,
-        const char* path);
+        const KiottyNetHttpLimits* limits);
 
     explicit operator bool() const;
     KiottyNetCode                  code() const;
     KiottyNetWebSocketClientHandle handle() const;
 
+    KiottyNetCode            protocols(const char* protocols);
+    KiottyNetCode            onOpen(KiottyNetWebSocketClientOpenAction on_open);
+    KiottyNetCode            onMessage(KiottyNetWebSocketClientMessageAction on_message);
+    KiottyNetCode            onClose(KiottyNetWebSocketClientCloseAction on_close);
+    KiottyNetCode            onError(KiottyNetWebSocketClientErrorAction on_error);
     KiottyNetCode            run(
         const KiottyNetAddress& address,
-        const KiottyNetWebSocketHandler& handler,
+        const char* path,
         KiottyNetAppContext app_context);
     KiottyNetCode            run(
         const KiottyNetAddress& address,
+        const char* path,
         const KiottyNetTlsClientConfiguration& tls,
-        const KiottyNetWebSocketHandler& handler,
         KiottyNetAppContext app_context);
+    KiottyNetCode            bye(
+        uint16_t status = KIOTTY_NET_WEB_SOCKET_STATUS_NORMAL_CLOSURE,
+        const char* reason = nullptr);
     void                     close();
     KiottyNetCode            await(uint64_t timeout_milliseconds);
     KiottyNetWebSocketHandle socket() const;
@@ -363,11 +393,10 @@ inline KiottyNetWebSocketRoute KiottyNet_WebSocketRoute::route() const
 inline KiottyNet_WebSocketClient::KiottyNet_WebSocketClient(
     KiottyNetContext context,
     const KiottyNetClientConfiguration& configuration,
-    const KiottyNetHttpLimits* limits,
-    const char* path)
+    const KiottyNetHttpLimits* limits)
     : KiottyNet_WebSocketClient(
           context,
-          KiottyNet_createWebSocketClient(context, &configuration, limits, path))
+          KiottyNet_createWebSocketClient(context, &configuration, limits))
 {
 }
 
@@ -394,21 +423,54 @@ inline KiottyNetWebSocketClientHandle KiottyNet_WebSocketClient::handle() const
     return _handle.get();
 }
 
-inline KiottyNetCode KiottyNet_WebSocketClient::run(
-    const KiottyNetAddress& address,
-    const KiottyNetWebSocketHandler& handler,
-    KiottyNetAppContext app_context)
+inline KiottyNetCode KiottyNet_WebSocketClient::protocols(const char* protocols)
 {
-    return KiottyNet_runWebSocketClient(_handle.get(), &address, nullptr, &handler, app_context);
+    return KiottyNet_setWebSocketClientProtocols(_handle.get(), protocols);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::onOpen(KiottyNetWebSocketClientOpenAction on_open)
+{
+    return KiottyNet_onWebSocketClientOpen(_handle.get(), on_open);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::onMessage(
+    KiottyNetWebSocketClientMessageAction on_message)
+{
+    return KiottyNet_onWebSocketClientMessage(_handle.get(), on_message);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::onClose(
+    KiottyNetWebSocketClientCloseAction on_close)
+{
+    return KiottyNet_onWebSocketClientClose(_handle.get(), on_close);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::onError(
+    KiottyNetWebSocketClientErrorAction on_error)
+{
+    return KiottyNet_onWebSocketClientError(_handle.get(), on_error);
 }
 
 inline KiottyNetCode KiottyNet_WebSocketClient::run(
     const KiottyNetAddress& address,
-    const KiottyNetTlsClientConfiguration& tls,
-    const KiottyNetWebSocketHandler& handler,
+    const char* path,
     KiottyNetAppContext app_context)
 {
-    return KiottyNet_runWebSocketClient(_handle.get(), &address, &tls, &handler, app_context);
+    return KiottyNet_runWebSocketClient(_handle.get(), &address, path, nullptr, app_context);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::run(
+    const KiottyNetAddress& address,
+    const char* path,
+    const KiottyNetTlsClientConfiguration& tls,
+    KiottyNetAppContext app_context)
+{
+    return KiottyNet_runWebSocketClient(_handle.get(), &address, path, &tls, app_context);
+}
+
+inline KiottyNetCode KiottyNet_WebSocketClient::bye(uint16_t status, const char* reason)
+{
+    return KiottyNet_byeWebSocketClient(_handle.get(), status, reason);
 }
 
 inline void KiottyNet_WebSocketClient::close()

@@ -31,6 +31,7 @@ namespace kiotty::net::implementation
         PushLane*                 lane;
         ClientUpgrade             upgrade;
         SocketRole                role;
+        std::atomic<uint64_t>     mask_state;
         std::atomic<bool>         is_closing;
     };
 
@@ -47,6 +48,7 @@ namespace kiotty::net::implementation
         , lane(nullptr)
         , upgrade{}
         , role(SocketRole::SERVER)
+        , mask_state(0)
         , is_closing(false)
     {
     }

@@ -6,7 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -219,4 +221,16 @@ TEST(WebSocketClose, BuildsPayloadsWithinTheControlLimit)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::buildClosePayload(1000, spanOf(std::string(124, 'r'))).code);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::buildClosePayload(1005, spanOf("")).code);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ENCODING, net::buildClosePayload(1000, spanOf(bytesOf({ 0xC3, 0x28 }))).code);
+}
+
+TEST(WebSocketFrame, MaskKeysComeFromTheSharedStateAndChangeEveryDraw)
+{
+    std::atomic<uint64_t> state(42);
+    std::atomic<uint64_t> same(42);
+    const net::MaskKey first = net::nextMaskKey(state);
+    const net::MaskKey second = net::nextMaskKey(state);
+    const net::MaskKey again = net::nextMaskKey(same);
+    EXPECT_NE(42u, state.load());
+    EXPECT_NE(0, std::memcmp(first.bytes, second.bytes, net::MASK_KEY_BYTES));
+    EXPECT_EQ(0, std::memcmp(first.bytes, again.bytes, net::MASK_KEY_BYTES));
 }

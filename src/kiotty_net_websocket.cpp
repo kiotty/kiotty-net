@@ -158,32 +158,43 @@ namespace
         return true;
     }
 
-    KiottyNetCode configurationOf(const KiottyNetHttpLimits* limits,
-                                  const char* path,
-                                  net::WebSocketClientConfiguration& configuration)
+    bool isProtocolList(net::Span<const char> list)
     {
-        const net::TextResult text = net::parseText(path, MAX_PATH_TEXT);
-        if (!text || !isRequestTarget(text.value)) { return INVALID; }
-        (void)configuration.path.assign(text.value);
-        if (limits != nullptr)
+        size_t start = 0;
+        while (start <= list.length)
         {
-            configuration.limits = *limits;
-            return KIOTTY_NET_CODE_SUCCESS;
+            const size_t comma = net::findCharacter(list, ',', start);
+            const net::Span<const char> item{ list.data + start, comma - start };
+            if (!net::isToken(net::trimWhitespace(item))) { return false; }
+            start = comma + 1;
         }
-        return net::initializeHttpLimits(configuration.limits);
+        return true;
+    }
+
+    KiottyNetCode limitsOf(const KiottyNetHttpLimits* limits, KiottyNetHttpLimits& chosen)
+    {
+        if (limits == nullptr) { return net::initializeHttpLimits(chosen); }
+        chosen = *limits;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    net::RegistrationResult registrationOf(KiottyNetWebSocketClientHandle client, bool has_action)
+    {
+        using Registration = net::RegistrationResult;
+        if (client == nullptr || !has_action) { return Registration::failure(INVALID); }
+        return client->registration();
     }
 }
 
 KiottyNetWebSocketClientResult KiottyNet_createWebSocketClient(
     KiottyNetContext context,
     const KiottyNetClientConfiguration* configuration,
-    const KiottyNetHttpLimits* limits,
-    const char* path)
+    const KiottyNetHttpLimits* limits)
 {
     KiottyNetWebSocketClientResult result = { INVALID, nullptr };
     if (context == nullptr || configuration == nullptr) { return result; }
-    net::WebSocketClientConfiguration made{ *configuration, KiottyNetHttpLimits{}, {} };
-    const KiottyNetCode prepared = configurationOf(limits, path, made);
+    net::WebSocketClientConfiguration made{ *configuration, KiottyNetHttpLimits{} };
+    const KiottyNetCode prepared = limitsOf(limits, made.limits);
     if (prepared != KIOTTY_NET_CODE_SUCCESS) { return result; }
     const net::WebSocketClientResult created = context->create(made);
     result.code = created.code;
@@ -198,16 +209,65 @@ void KiottyNet_destroyWebSocketClient(KiottyNetContext context,
     context->destroy(*client);
 }
 
+KiottyNetCode KiottyNet_setWebSocketClientProtocols(KiottyNetWebSocketClientHandle client,
+                                                    const char* protocols)
+{
+    if (client == nullptr) { return INVALID; }
+    if (protocols == nullptr) { return client->setProtocols(net::Span<const char>{ nullptr, 0 }); }
+    const net::TextResult text = net::parseText(protocols, MAX_PROTOCOL_TEXT);
+    if (!text) { return INVALID; }
+    const bool is_list = text.value.empty() || isProtocolList(text.value);
+    if (!is_list) { return INVALID; }
+    return client->setProtocols(text.value);
+}
+
+KiottyNetCode KiottyNet_onWebSocketClientOpen(KiottyNetWebSocketClientHandle client,
+                                              KiottyNetWebSocketClientOpenAction on_open)
+{
+    const net::RegistrationResult site = registrationOf(client, on_open != nullptr);
+    if (!site) { return site.code; }
+    site.value().upgrade.events.on_open = on_open;
+    return KIOTTY_NET_CODE_SUCCESS;
+}
+
+KiottyNetCode KiottyNet_onWebSocketClientMessage(KiottyNetWebSocketClientHandle client,
+                                                 KiottyNetWebSocketClientMessageAction on_message)
+{
+    const net::RegistrationResult site = registrationOf(client, on_message != nullptr);
+    if (!site) { return site.code; }
+    site.value().upgrade.events.on_message = on_message;
+    return KIOTTY_NET_CODE_SUCCESS;
+}
+
+KiottyNetCode KiottyNet_onWebSocketClientClose(KiottyNetWebSocketClientHandle client,
+                                               KiottyNetWebSocketClientCloseAction on_close)
+{
+    const net::RegistrationResult site = registrationOf(client, on_close != nullptr);
+    if (!site) { return site.code; }
+    site.value().upgrade.events.on_close = on_close;
+    return KIOTTY_NET_CODE_SUCCESS;
+}
+
+KiottyNetCode KiottyNet_onWebSocketClientError(KiottyNetWebSocketClientHandle client,
+                                               KiottyNetWebSocketClientErrorAction on_error)
+{
+    const net::RegistrationResult site = registrationOf(client, on_error != nullptr);
+    if (!site) { return site.code; }
+    site.value().notices.setError(on_error);
+    return KIOTTY_NET_CODE_SUCCESS;
+}
+
 KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client,
                                            const KiottyNetAddress* address,
+                                           const char* path,
                                            const KiottyNetTlsClientConfiguration* tls,
-                                           const KiottyNetWebSocketHandler* handler,
                                            KiottyNetAppContext app_context)
 {
-    if (client == nullptr || address == nullptr || handler == nullptr) { return INVALID; }
+    if (client == nullptr || address == nullptr) { return INVALID; }
+    const net::TextResult text = net::parseText(path, MAX_PATH_TEXT);
+    if (!text || !isRequestTarget(text.value)) { return INVALID; }
     const KiottyNetAddress copied_address = *address;
-    const KiottyNetWebSocketHandler copied_handler = *handler;
-    const net::ClientRun run{ copied_address, tls, copied_handler, app_context };
+    const net::ClientRun run{ copied_address, text.value, tls, app_context };
     return client->run(run);
 }
 
@@ -215,6 +275,14 @@ void KiottyNet_closeWebSocketClient(KiottyNetWebSocketClientHandle client)
 {
     if (client == nullptr) { return; }
     client->close();
+}
+
+KiottyNetCode KiottyNet_byeWebSocketClient(KiottyNetWebSocketClientHandle client,
+                                           uint16_t status,
+                                           const char* reason)
+{
+    if (client == nullptr) { return INVALID; }
+    return KiottyNet_closeWebSocket(client->socket(), status, reason);
 }
 
 KiottyNetCode KiottyNet_awaitWebSocketClient(KiottyNetWebSocketClientHandle client,

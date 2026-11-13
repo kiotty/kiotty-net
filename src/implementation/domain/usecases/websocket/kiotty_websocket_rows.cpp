@@ -28,7 +28,6 @@ namespace kiotty::net::implementation
         constexpr size_t   STATUS_BYTES = 2;
         constexpr uint32_t BITS_PER_BYTE = 8;
         constexpr uint16_t BYTE_MASK = 0xFF;
-        constexpr uint64_t GOLDEN_GAMMA = 0x9E3779B97F4A7C15ULL;
 
         Span<const char>        spanOf(KiottyNetSpan data);
         KiottyNetTransition     readNext(HttpSession& session, HttpState state, size_t length);
@@ -45,6 +44,11 @@ namespace kiotty::net::implementation
                                            KiottyNetCode code);
         KiottyNetCode           codeOf(Status status);
         MaskKey                 closeMaskOf(const HttpSession& session);
+        void                    callOpen(HttpSession& session);
+        void                    callMessage(HttpSession& session,
+                                            const KiottyNetWebSocketMessage& message);
+        void                    callClose(HttpSession& session,
+                                          const KiottyNetWebSocketClose& close);
         bool                    isInOrder(const HttpSession& session, FrameOpcode opcode);
         KiottyNetHttpStatus     storePiece(HttpSession& session, Span<const char> piece);
         void                    storeControl(HttpSession& session, Span<const char> piece);
@@ -139,12 +143,7 @@ namespace kiotty::net::implementation
         session.link.path.store(target.path);
         session.link.closing.store(0);
         session.link.socket.store(session.id.value());
-        const KiottyNetWebSocketHandle handle = socketHandleOf(session);
-        session.socket.context = nullptr;
-        if (target.on_open != nullptr)
-        {
-            session.socket.context = target.on_open(session.site.app_context, handle);
-        }
+        callOpen(session);
         Parker* opened = session.site.upgrade.opened;
         const auto wake = []() {};
         if (opened != nullptr) { opened->unpark(wake); }
@@ -157,11 +156,7 @@ namespace kiotty::net::implementation
         session.socket.is_open = false;
         session.link.socket.store(0);
         const KiottyNetWebSocketClose close = closeOf(session, reason);
-        const WebSocketTarget& target = session.socket.target;
-        if (target.on_close != nullptr)
-        {
-            target.on_close(session.site.app_context, session.socket.context, close);
-        }
+        callClose(session, close);
         session.link.path.store(NO_SOCKET_PATH);
     }
 
@@ -296,14 +291,51 @@ namespace kiotty::net::implementation
 
         MaskKey closeMaskOf(const HttpSession& session)
         {
-            MaskKey key{};
-            if (session.site.role == SocketRole::SERVER) { return key; }
-            const uint64_t seed = deadlineAfter(1) * GOLDEN_GAMMA;
-            for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
+            if (session.site.role == SocketRole::SERVER) { return MaskKey{}; }
+            return nextMaskKey(session.site.mask_state);
+        }
+
+        void callOpen(HttpSession& session)
+        {
+            const KiottyNetAppContext app_context = session.site.app_context;
+            session.socket.context = nullptr;
+            if (session.site.role == SocketRole::CLIENT)
             {
-                key.bytes[i] = static_cast<uint8_t>(seed >> (BITS_PER_BYTE * (i + 4)));
+                ClientUpgrade& upgrade = session.site.upgrade;
+                upgrade.has_opened = true;
+                const KiottyNetWebSocketClientOpenAction on_open = upgrade.events.on_open;
+                if (on_open != nullptr) { on_open(app_context); }
+                return;
             }
-            return key;
+            const KiottyNetWebSocketOpenAction on_open = session.socket.target.on_open;
+            if (on_open == nullptr) { return; }
+            session.socket.context = on_open(app_context, socketHandleOf(session));
+        }
+
+        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message)
+        {
+            if (session.site.role == SocketRole::CLIENT)
+            {
+                session.site.upgrade.events.on_message(session.site.app_context, message);
+                return;
+            }
+            const KiottyNetWebSocketMessageAction on_message = session.socket.target.on_message;
+            on_message(session.socket.context, socketHandleOf(session), message);
+        }
+
+        void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
+        {
+            const KiottyNetAppContext app_context = session.site.app_context;
+            if (session.site.role == SocketRole::CLIENT)
+            {
+                const ClientEvents& events = session.site.upgrade.events;
+                const KiottyNetWebSocketClientCloseAction on_close = events.on_close;
+                if (on_close != nullptr) { on_close(app_context, close); }
+                return;
+            }
+            const KiottyNetWebSocketCloseAction on_close = session.socket.target.on_close;
+            if (on_close == nullptr) { return; }
+            on_close(app_context, session.socket.context, close);
         }
 
         KiottyNetCode codeOf(Status status)
@@ -346,8 +378,7 @@ namespace kiotty::net::implementation
             const KiottyNetWebSocketOpcode kind =
                 is_text ? KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT : KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY;
             const KiottyNetWebSocketMessage message{ kind, data };
-            const WebSocketTarget& target = session.socket.target;
-            target.on_message(session.socket.context, socketHandleOf(session), message);
+            callMessage(session, message);
         }
     }
 }

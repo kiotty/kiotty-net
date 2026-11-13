@@ -19,6 +19,8 @@ namespace kiotty::net::implementation
 
         constexpr char   SWITCHING_LINE[] = "HTTP/1.1 101";
         constexpr size_t SWITCHING_LENGTH = sizeof(SWITCHING_LINE) - 1;
+        constexpr char   PROTOCOL_HEADER[] = "Sec-WebSocket-Protocol";
+        constexpr size_t PROTOCOL_HEADER_LENGTH = sizeof(PROTOCOL_HEADER) - 1;
 
         KiottyNetTransition onConnected(Context context, Connection connection, Event event);
         KiottyNetTransition onUpgradeSent(Context context, Connection connection, Event event);
@@ -119,7 +121,6 @@ namespace kiotty::net::implementation
             session.request.begin(connection);
             session.response.begin();
             session.socket.reset();
-            session.socket.target = session.site.upgrade.target;
             session.sent = 0;
             startHeaderClock(session);
             return writeRequest(session);
@@ -150,8 +151,13 @@ namespace kiotty::net::implementation
             if (line.empty())
             {
                 const KiottyNetHttpRequest& response = session.request.request();
-                const bool is_upgraded = isUpgradeResponse(response, session.site.upgrade.accept);
+                const ClientUpgrade& upgrade = session.site.upgrade;
+                const bool is_upgraded =
+                    isUpgradeResponse(response, upgrade.accept, upgrade.protocols);
                 if (!is_upgraded) { return closeWith(broken); }
+                const Span<const char> name{ PROTOCOL_HEADER, PROTOCOL_HEADER_LENGTH };
+                const Span<const char> chosen = headerOf(response, name);
+                (void)session.socket.protocol.assign(chosen);
                 return openSocket(session);
             }
             const KiottyNetHttpStatus status = session.request.takeHeader(line);
@@ -191,6 +197,7 @@ namespace kiotty::net::implementation
                                                  KiottyNetConnectionInfo info)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
+            site.upgrade.peer = info;
             const SessionResult acquired = site.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
@@ -207,7 +214,10 @@ namespace kiotty::net::implementation
                          KiottyNetCode code,
                          const char* message)
         {
-            const HttpSite& site = *static_cast<HttpSite*>(app_context);
+            HttpSite& site = *static_cast<HttpSite*>(app_context);
+            const bool is_settled = site.upgrade.has_opened || site.upgrade.has_failed;
+            if (is_settled) { return; }
+            site.upgrade.has_failed = true;
             site.notices.reportError(site.app_context, info, code, message);
         }
     }
