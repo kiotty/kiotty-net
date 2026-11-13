@@ -26,8 +26,7 @@ namespace kiotty::net::implementation
         FRAME_START,
         FRAME_LENGTH,
         FRAME_MASK,
-        FRAME_PAYLOAD,
-        SOCKET_CLOSING
+        FRAME_PAYLOAD
     };
 
     HttpSession&        sessionOf(KiottyNetConnectionContext context);

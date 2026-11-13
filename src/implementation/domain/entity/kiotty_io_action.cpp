@@ -65,6 +65,14 @@ namespace kiotty::net::implementation
     {
         IoAction action = blank(IoActionKind::CLOSE, IoPurpose::USER, 0);
         action.as.close.reason = reason;
+        action.as.close.is_after_send = false;
+        return action;
+    }
+
+    IoAction IoAction::closeAfterSend(KiottyNetCode reason)
+    {
+        IoAction action = close(reason);
+        action.as.close.is_after_send = true;
         return action;
     }
 

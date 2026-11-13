@@ -453,11 +453,10 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 | WebSocketReadingExtendedLength | READ (2 또는 8) | 길이 | ReadingMask 또는 ReadingPayload |
 | WebSocketReadingMask | READ (4) | mask key | ReadingPayload |
 | WebSocketReadingPayload | READ (min(남은 길이, `receive_capacity`)) | unmask 하며 Stage 에 붙인다. `max_body_bytes` 를 넘으면 1009 | 남으면 같은 상태 |
-| WebSocketReadingPayload | frame 끝, control frame | ping → push lane 에 pong (닫는 중이면 보내지 않는다). pong → 타이머 리셋. close → 플래그가 서 있으면 우리가 시작한 close 의 답이라 close(`SUCCESS`). 아니면 플래그를 세우고 받은 status 로 close frame 을 write lane 에 | ReadingHeader, close, 또는 SocketClosing |
+| WebSocketReadingPayload | frame 끝, control frame | ping → push lane 에 pong (닫는 중이면 보내지 않는다). pong → 타이머 리셋. close → 플래그가 서 있으면 우리가 시작한 close 의 답이라 close(`SUCCESS`). 아니면 플래그를 세우고 받은 status 의 close frame 을 보낸 뒤 close(`SUCCESS`) (`thenCloseWith`) | ReadingHeader 또는 CLOSED |
 | WebSocketReadingPayload | frame 끝, 데이터 frame | FIN 이 아니면 다음 frame. FIN 이면 TEXT 의 UTF-8 검사 (아니면 1007), 닫힘 플래그가 서 있으면 버리고 아니면 `onMessage(websocket_context, websocket, { opcode, Stage })`, Stage 를 비운다 | ReadingHeader. 닫힘 플래그가 서 있으면 (`onMessage` 안의 close 포함) timeout `close_timeout`, 아니면 `ping_interval` (pong 을 기다리는 중이면 남은 `pong_timeout`) |
-| WebSocket* | READ, 잘못된 frame | 1002 / 1007 / 1009 close frame 을 write lane 에 (플래그가 이미 서 있으면 보내지 않고 바로 close) | SocketClosing |
+| WebSocket* | READ, 잘못된 frame | 1002 / 1007 / 1009 close frame 을 보낸 뒤 close (`thenCloseWith`. 플래그가 이미 서 있으면 보내지 않고 바로 close) | CLOSED |
 | WebSocket* | TIMEOUT | 닫힘 플래그가 서 있으면 close(`TIMEOUT`). pong 이 안 왔으면 push lane 에 1001 close frame, 플래그를 세우고 같은 read 를 `close_timeout` 으로 다시. ping 차례면 push lane 에 ping 하고 같은 read 를 `pong_timeout` 으로 다시 | 같은 상태 |
-| SocketClosing | WRITTEN (write lane 의 close frame) | close(그 이유. 상대 close 에 대한 답이면 `SUCCESS`) | CLOSED |
 | CLOSED | | `onClose(app_context, websocket_context, websocket, { code, status, reason })`, HttpServer 의 `onHttpDisconnected` | release |
 
 **WebSocketClient 의 연결 하나** (base 의 EventClient. 역할 값 = 클라이언트 : 받은 frame 에 mask 가 있으면 1002, 보내는 frame 에 mask 를 씌운다)
@@ -474,7 +473,7 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 - HTTP body 와 WebSocket 메시지가 같은 Stage 를 쓴다. Upgrade 요청에는 body 가 없고 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다.
 - 수신 frame 이 `receive_capacity` 보다 커도 payload 를 그 크기 단위로 나눠 읽어 Stage 에 붙인다. 조각마다 unmask 의 key offset 을 Session 이 든다.
 - 송신 frame (pong, ping, `closeWebSocket` 과 pong 늦음의 close, 사용자의 send 와 broadcast) 은 push lane 이다. 서버는 frame 머리와 payload 를 조각 둘로 넘겨 한 lock 안에서 이어 복사하고, 전부 들어가지 않으면 하나도 넣지 않는다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼 (create 때 한 번 잡는다) 를 mutex 로 지키며 거기에 mask 한 frame 을 만들어 한 조각으로 넣는다. mask key 는 frame 마다 새것이다. 같은 lane 이므로 순서가 섞이지 않는다.
-- 받은 frame 때문에 라이브러리가 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 의 close frame 만 write lane 이다. push lane 에 넣고 바로 연결을 닫으면 남은 push lane 이 나가지 않으므로, Session 의 작은 버퍼 (131 바이트) 에서 write lane 으로 다 보낸 뒤 닫는다. pong 늦음의 close 가 push lane 인 것은 그때 read 가 걸려 있어 write 를 걸 수 없어서다.
+- 받은 frame 때문에 라이브러리가 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 의 close frame 만 write lane 이다. base 의 `thenCloseWith` 로 Session 의 작은 버퍼 (131 바이트) 의 close frame 만 보내고 닫는다. push lane 에 남은 데이터 frame 은 버리므로 close frame 뒤에 데이터가 나가지 않는다. pong 늦음의 close 가 push lane 인 것은 그때 read 가 걸려 있어 write 를 걸 수 없어서다.
 - ping 타이머는 entry action 의 `timeout_milliseconds` 하나를 쓴다. 상태마다 read 에 `ping_interval` / `pong_timeout` / `close_timeout` 을 붙이고 TIMEOUT 행이 "닫는 중인가, ping 보낼 차례인가, pong 이 안 왔는가" 를 가른다.
 - 다른 thread 의 close 는 플래그와 push lane 의 close frame 뿐이다. drain 뒤 상태를 옮기는 훅은 없다 (결정 3). 그래서 5절의 "최대 ping_interval" 이 생긴다.
 

@@ -15,6 +15,7 @@ namespace kiotty::net::implementation
     KiottyNetConnectionAction thenWrite(KiottyNetSpan data, uint32_t timeout_milliseconds);
     KiottyNetConnectionAction thenWork();
     KiottyNetConnectionAction thenClose(KiottyNetCode reason);
+    KiottyNetConnectionAction thenCloseWith(KiottyNetSpan data, KiottyNetCode reason);
 
     KiottyNetConnectionDecision acceptConnection(KiottyNetConnectionContext connection_context);
     KiottyNetConnectionDecision ignoreConnection();

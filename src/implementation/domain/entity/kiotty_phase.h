@@ -9,11 +9,17 @@ namespace kiotty::net::implementation
         IDLE,
         HANDSHAKING,
         READY,
+        FLUSHING,
         CLOSING
     };
 
     inline bool isAlive(Phase phase)
     {
         return phase == Phase::HANDSHAKING || phase == Phase::READY;
+    }
+
+    inline bool isOpen(Phase phase)
+    {
+        return isAlive(phase) || phase == Phase::FLUSHING;
     }
 }

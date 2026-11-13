@@ -33,6 +33,7 @@ namespace kiotty::net::implementation
         , _context(nullptr)
         , _id{ 0, -1 }
         , _machine_state(0)
+        , _flush_reason(KIOTTY_NET_CODE_SUCCESS)
         , _phase(Phase::IDLE)
     {
     }
@@ -72,6 +73,7 @@ namespace kiotty::net::implementation
         _context = nullptr;
         _info = KiottyNetConnectionInfo{};
         _machine_state = 0;
+        _flush_reason = KIOTTY_NET_CODE_SUCCESS;
         _phase.store(Phase::IDLE);
     }
 
@@ -90,15 +92,18 @@ namespace kiotty::net::implementation
     IoAction Connection::dispatch(const IoCompletion& completion, const Handler& handler,
                                   std::mutex& notification)
     {
-        const bool alive = isAlive(_phase.load());
-        if (!alive) { return IoAction::none(); }
-        return apply(react(completion, handler, notification), handler);
+        const Phase phase = _phase.load();
+        if (!isOpen(phase)) { return IoAction::none(); }
+        const bool is_flushing = phase == Phase::FLUSHING;
+        const IoAction action = is_flushing ? onFlushing(completion, notification)
+                                            : react(completion, handler, notification);
+        return apply(action, handler);
     }
 
     IoAction Connection::close(KiottyNetCode reason, const Handler& handler)
     {
-        const bool alive = isAlive(_phase.load());
-        if (!alive) { return IoAction::none(); }
+        const bool open = isOpen(_phase.load());
+        if (!open) { return IoAction::none(); }
         return apply(IoAction::close(reason), handler);
     }
 
@@ -250,6 +255,32 @@ namespace kiotty::net::implementation
         return IoAction::none();
     }
 
+    IoAction Connection::onFlushing(const IoCompletion& completion, std::mutex& notification)
+    {
+        const bool is_failed = completion.code != SocketCode::SUCCESS;
+        switch (completion.kind)
+        {
+        case IoKind::RECEIVE:
+            if (is_failed) { return closedBy(completion.code); }
+            return IoAction::none();
+        case IoKind::SEND:
+            if (is_failed) { return closedBy(completion.code); }
+            _send_flow.release(completion, notification);
+            if (_send_flow.isDrained()) { return IoAction::close(_flush_reason); }
+            return IoAction::none();
+        case IoKind::SEND_TIMEOUT:
+            _send_flow.clearDeadline();
+            return IoAction::close(KIOTTY_NET_CODE_PEER_NOT_READING);
+        case IoKind::TIMEOUT:
+        case IoKind::WORK_READY:
+        case IoKind::WORK_DONE:
+        case IoKind::ACCEPT:
+        case IoKind::WAKE:
+            return IoAction::none();
+        }
+        return IoAction::none();
+    }
+
     IoAction Connection::onWritten(size_t length, const Handler& handler)
     {
         const Caller caller = callerFor(handler);
@@ -320,7 +351,7 @@ namespace kiotty::net::implementation
         switch (returned.type)
         {
         case KIOTTY_NET_ACTION_TYPE_CLOSE:
-            return IoAction::close(returned.reason);
+            return caller.admit(returned);
         case KIOTTY_NET_ACTION_TYPE_HOLD:
         case KIOTTY_NET_ACTION_TYPE_READ:
         case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
@@ -349,6 +380,11 @@ namespace kiotty::net::implementation
             _work.request();
             return action;
         case IoActionKind::CLOSE:
+            if (action.as.close.is_after_send)
+            {
+                enterFlushing(action.as.close.reason);
+                return IoAction::none();
+            }
             enterClosing(action.as.close.reason, handler);
             return action;
         case IoActionKind::NONE:
@@ -367,6 +403,13 @@ namespace kiotty::net::implementation
         _work.abandon();
         const Caller caller = callerFor(handler);
         static_cast<void>(handler.dispatch(caller, closedEvent(reason)));
+    }
+
+    void Connection::enterFlushing(KiottyNetCode reason)
+    {
+        _deadline.store(0);
+        _flush_reason = reason;
+        _phase.store(Phase::FLUSHING);
     }
 
     bool Connection::isUserActionPending()

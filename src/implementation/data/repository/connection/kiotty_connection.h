@@ -74,6 +74,7 @@ namespace kiotty::net::implementation
         IoAction        onSent(const IoCompletion& completion,
                                const Handler& handler,
                                std::mutex& notification);
+        IoAction        onFlushing(const IoCompletion& completion, std::mutex& notification);
         IoAction        onWritten(size_t length, const Handler& handler);
         IoAction        onTimeout(const Handler& handler);
         IoAction        onWorkReady(const Handler& handler);
@@ -82,6 +83,7 @@ namespace kiotty::net::implementation
         IoAction        extend(const KiottyNetConnectionAction& returned, const Caller& caller);
         IoAction        apply(IoAction action, const Handler& handler);
         void            enterClosing(KiottyNetCode reason, const Handler& handler);
+        void            enterFlushing(KiottyNetCode reason);
         bool            isUserActionPending();
         void            setDeadline(uint32_t timeout_milliseconds);
         Caller          callerFor(const Handler& handler);
@@ -101,6 +103,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionContext _context;
         PoolHandle                 _id;
         int32_t                    _machine_state;
+        KiottyNetCode              _flush_reason;
         std::atomic<Phase>         _phase;
     };
 

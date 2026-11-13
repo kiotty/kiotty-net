@@ -51,6 +51,13 @@ namespace kiotty::net::implementation
         return action;
     }
 
+    KiottyNetConnectionAction thenCloseWith(KiottyNetSpan data, KiottyNetCode reason)
+    {
+        KiottyNetConnectionAction action = thenClose(reason);
+        action.data = data;
+        return action;
+    }
+
     KiottyNetConnectionDecision acceptConnection(KiottyNetConnectionContext connection_context)
     {
         return KiottyNetConnectionDecision{ true, connection_context };

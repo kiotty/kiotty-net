@@ -52,6 +52,7 @@ namespace kiotty::net::implementation
             struct
             {
                 KiottyNetCode reason;
+                bool          is_after_send;
             } close;
         } as;
         uint32_t     timeout_milliseconds;
@@ -68,6 +69,7 @@ namespace kiotty::net::implementation
         static IoAction gather(size_t length, size_t notify_length);
         static IoAction startWork();
         static IoAction close(KiottyNetCode reason);
+        static IoAction closeAfterSend(KiottyNetCode reason);
         static IoAction accept();
         static IoAction from(const KiottyNetConnectionAction& action);
     };

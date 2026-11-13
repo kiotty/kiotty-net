@@ -34,6 +34,7 @@ namespace kiotty::net::implementation
         void          limit(uint32_t timeout_milliseconds);
         void          clearDeadline();
         uint64_t      deadline() const;
+        bool          isDrained();
 
     private:
         IoAction select();

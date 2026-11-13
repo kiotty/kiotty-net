@@ -83,6 +83,7 @@
   <li><a href="#s18">케이스 : 주소와 TLS 는 run / connect 때 (B2)</a></li>
   <li><a href="#s19">케이스 : HttpServer (H2 ~ H6)</a></li>
   <li><a href="#s20">케이스 : WebSocket (W1 ~ W4)</a></li>
+  <li><a href="#s21">케이스 : 보내고 닫기 (B3)</a></li>
 </ol>
 
 <h2 id="s1">1. 세 질문과 테스트의 층</h2>
@@ -1032,6 +1033,15 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>WebSocketClient</td><td>CreateRejectsBadArgumentsAndRunRejectsAMissingHandler</td><td><span class="tag misuse">오용</span></td><td>create 의 상대 path, 공백 있는 path, NULL 설정은 <code>{ INVALID_ARGUMENT, NULL }</code>. run 의 handler NULL / onMessage NULL 은 INVALID_ARGUMENT. run 전 await TIMEOUT</td></tr>
 </table>
 <p>하지 않은 것: 외부 클라이언트 (Python websockets, 브라우저) 와의 왕복 (WSL 에 <code>websockets</code> 와 pip 가 없다. 설계 10절의 W3 완료 조건 하나). push lane 이 찬 send 의 BUFFER_FULL, broadcast 의 건너뜀, pong timeout 0 / close timeout 0 (무한) 은 integration 으로 재현하지 않았다. WebSocket benchmark 는 없다.</p>
+
+<h2 id="s21">21. 케이스 : 보내고 닫기 (B3, thenCloseWith)</h2>
+<p><code>docs/design/design_websocket_v1.html</code> 결정 14 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_base_b3.md</code>. base 의 새 action 은 base integration 하나로, 그것을 쓰는 HTTP (<code>Connection: close</code> 응답의 마지막 조각) 와 WebSocket (1002 / 1007 / 1009, 상대 close 의 답) 은 19, 20절의 기존 테스트가 그대로 지나는 것으로 본다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>BaseApiTest</td><td>CloseWithSendsOnlyItsDataThenClosesWithItsReason</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_thenCloseWith</code> 의 필드 (CLOSE, data, reason). onReady 에서 push lane 에 "late" 를 넣고 <code>thenCloseWith("bye!", PROTOCOL_ERROR)</code>: 상대는 "bye!" 만 받고 EOF, onWritten 없음, 끊김 reason <code>PROTOCOL_ERROR</code></td></tr>
+  <tr><td>HttpServer, WebSocketServer, WebSocketClient</td><td>19.2 의 <code>ConnectionCloseEndsAfterTheResponseWithSuccess</code>, <code>BodyOverTheLimitIsContentTooLargeAndCloses</code>, <code>MalformedRequestsGetTheirAutomaticStatus</code>, 20.3 의 <code>BrokenFramesCloseWithProtocolErrorOrInvalidPayload</code>, <code>MessageLargerThanTheBodyCapacityClosesWith1009</code>, <code>EchoesTextBinaryAndFragmentsThenAnswersTheClientClose</code>, 20.4 의 <code>MasksOutgoingFramesAndRejectsAMaskedServerFrame</code></td><td><span class="tag ok">정상</span></td><td>바뀐 길로 같은 바이트와 같은 끊김 reason</td></tr>
+</table>
+<p>하지 않은 것: TLS 위의 thenCloseWith 를 따로 재현하지 않았다 (cipher 가 다 나간 뒤 닫는 것은 <code>SendFlow::isDrained</code> 가 본다). push lane 에 데이터가 남은 채 WebSocket 이 1002 로 닫히는 장면도 따로 만들지 않았다.</p>
 
 </body>
 </html>

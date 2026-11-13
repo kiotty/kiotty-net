@@ -176,6 +176,8 @@ static size_t findDelimiter(const char* view, size_t length, size_t from, const 
 - **notify 의 여러 조각.** `NotificationDesk::notify(id, Span<const KiottyNetSpan>)` 와 `broadcast(Span<const KiottyNetSpan>)` 는 한 lock 안에서 조각들을 이어 복사하고, 다 들어가지 않으면 하나도 넣지 않는다 (`BUFFER_FULL`). WebSocket 의 frame 머리 + payload 가 이것을 쓴다. 공개 API 는 그대로다.
 - **송신 timeout.** `SendFlow` 가 송신 deadline 을 가진다. pick 이 WRITE 를 고르면 `now + send_timeout` 을 적고 (`limit` 으로 받은 값. 0 이면 적지 않는다), release 와 CLOSING 진입이 지운다. `ConnectionStatus::send_deadline` 으로 보이며, IoLoop 의 `stepSlot` 이 지나간 것을 `IoKind::SEND_TIMEOUT` 으로 Connection 에 주고 Connection 은 `close(PEER_NOT_READING)` 을 돌려준다. CLOSE 는 detach 로 걸린 WRITE 를 취소한다. IoLoop 의 대기 시간은 read deadline 과 송신 deadline 중 가까운 쪽이다.
 
+**보내고 닫기 (B3, 2026-11-13).** `thenCloseWith(data, reason)` 을 받으면 `adoptAction` 이 data 를 send Stage 에 복사하고 `IoAction::closeAfterSend(reason)` (CLOSE 에 `is_after_send`) 을 만든다. `Connection::apply` 는 그것을 보고 바로 닫지 않고 `Phase::FLUSHING` 에 들어간다 (deadline 을 지우고 reason 을 `_flush_reason` 에). FLUSHING 은 `isAlive` 가 아니라서 notify / broadcast 는 `PEER_CLOSED` 로 거절되고, `isOpen` 이라서 `SendFlow::pick` 은 계속 돈다. 다만 `select` 는 notify Stage 를 고르지 않는다 (push lane 은 버린다). 그 사이의 완료는 `Connection::onFlushing` 이 받는다: SEND 는 release 뒤 `SendFlow::isDrained` (send Stage 와 TLS cipher 가 비었는가) 면 `close(_flush_reason)`, RECEIVE 는 실패면 닫고 아니면 버린다, SEND_TIMEOUT 은 `PEER_NOT_READING`. 핸들러에는 onWritten 도 onRead 도 가지 않고 마지막에 CLOSED 하나만 간다. 소유자의 close 는 FLUSHING 에서도 바로 닫는다.
+
 ### 1.7 주소와 TLS 는 run / connect 때 (B2)
 
 `design_http_v0.html` 2.3 과 1절 결정 18 이 바탕이다. create 는 자원만, run / connect 는 주소와 TLS 를 받는다.
@@ -1495,7 +1497,7 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | | `kiotty_websocket_close` | close payload 파싱 / 만들기, 보낼 수 있는 status |
 | | `kiotty_websocket_handshake` | `isWebSocketKey`, `acceptOf` |
 | | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse`), subprotocol 선택 |
-| | `kiotty_websocket_rows` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onCloseWritten`), `openSocket`, `endSocket` |
+| | `kiotty_websocket_rows` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onSocketTimeout`), `openSocket`, `endSocket` |
 | | `kiotty_websocket_timing` | 다음 read 의 timeout, `onClose` 의 `{ code, status, reason }` |
 | | `kiotty_websocket_lane` | push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
 | | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast) |
@@ -1591,7 +1593,7 @@ KiottyNetTransition openSocket(HttpSession& session)
 
 ### 5.4 frame 읽기
 
-상태는 `FRAME_START` (2 바이트), `FRAME_LENGTH` (2 또는 8), `FRAME_MASK` (4), `FRAME_PAYLOAD`, `SOCKET_CLOSING` 다. 닫는 중에 상대 close 를 기다리는 따로 된 상태는 없다. 닫힘 플래그가 서 있으면 같은 `FRAME_*` 상태에서 read 의 timeout 만 `close_timeout` 이 된다 (5.5).
+상태는 `FRAME_START` (2 바이트), `FRAME_LENGTH` (2 또는 8), `FRAME_MASK` (4), `FRAME_PAYLOAD` 다. 닫는 중에 상대 close 를 기다리는 따로 된 상태는 없다. 닫힘 플래그가 서 있으면 같은 `FRAME_*` 상태에서 read 의 timeout 만 `close_timeout` 이 된다 (5.5).
 
 | 행 | 하는 일 |
 |---|---|
@@ -1673,7 +1675,7 @@ KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span
 
 base 의 NotificationDesk 는 조각을 그대로 복사하므로 mask 는 그 앞에서 씌운다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼를 initialize 때 한 번 잡고 mutex 하나로 지킨다 (send 는 아무 thread 에서나 오므로). push lane 보다 큰 frame 은 들어갈 수 없으니 scratch 도 그 크기면 된다. base 는 바뀌지 않았다.
 
-**write lane.** frame 행 안에서 우리가 연결을 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 는 close frame 을 `socket.outgoing` 에 만들어 write lane 으로 보내고 (`SOCKET_CLOSING`, timeout `close_timeout`), WRITTEN 에서 `closeWith(close_code)` 한다. push lane 에 넣고 바로 close 하면 base 가 소켓을 shutdown 하면서 push lane 의 남은 것을 보내지 않기 때문이다. READ 행이므로 걸린 read 가 없어 write 를 걸 수 있다.
+**write lane.** frame 행 안에서 우리가 연결을 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 는 close frame 을 `socket.outgoing` 에 만들어 `thenCloseWith(close_frame, code)` 하나로 `CLOSING` 에 간다 (B3, 1.6). base 가 close frame 만 보내고 push lane 의 남은 것은 버린 뒤 닫으므로 close frame 뒤에 데이터 frame 이 나가지 않는다 (RFC 6455 5.5.1). B3 전에는 `thenWrite` 와 `SOCKET_CLOSING` 상태의 WRITTEN 행이었고, 같은 WRITE 에 push lane 이 붙어 close frame 뒤에 데이터 frame 이 나갈 수 있었다.
 
 ### 5.7 close 의 갈래
 
@@ -1683,8 +1685,8 @@ base 의 NotificationDesk 는 조각을 그대로 복사하므로 mask 는 그 �
 |---|---|---|---|
 | `closeWebSocket` | 아무 thread | push lane 에 close frame | `BUSY` |
 | pong 늦음 | TIMEOUT 행 | push lane 에 1001 | (닫는 중이면 TIMEOUT 행이 먼저 끝낸다) |
-| `failSocket` (1002 / 1007 / 1009) | READ 행 | write lane 에 그 status, WRITTEN 뒤 그 코드로 close | 바로 그 코드로 close |
-| `answerClose` (상대 close) | READ 행 | write lane 에 상대 status 를 그대로 (reason 없이, 1005 면 빈 payload), WRITTEN 뒤 `SUCCESS` | 우리가 시작한 close 의 답이다. 바로 `SUCCESS` |
+| `failSocket` (1002 / 1007 / 1009) | READ 행 | `thenCloseWith(그 status 의 close frame, 그 코드)` | 바로 그 코드로 close |
+| `answerClose` (상대 close) | READ 행 | 상대 status 를 그대로 (reason 없이, 1005 면 빈 payload) 담아 `thenCloseWith(..., SUCCESS)` | 우리가 시작한 close 의 답이다. 바로 `SUCCESS` |
 
 `onClose` 는 CLOSED 행의 `endSocket` 이 한 번 부른다. `{ code, status, reason }` 은 `closeOf` 가 만든다.
 
@@ -1718,7 +1720,7 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 | SENDING | WRITTEN | 남았으면 이어서, 다 보냈으면 상태줄 read (남은 header 시간) |
 | REQUEST_LINE (상태줄) | READ | `HTTP/1.1 101` 다음이 끝이거나 공백이 아니면 `PROTOCOL_ERROR` |
 | HEADER_LINE | READ | 4.3 의 `takeHeader` 로 요청 저장소에 (`max_header_bytes`, `max_headers`). 빈 줄이면 `isUpgradeResponse` 를 보고 `openSocket` |
-| FRAME_* , SOCKET_CLOSING | | 5.4 ~ 5.7 그대로 |
+| FRAME_* | | 5.4 ~ 5.7 그대로 |
 | (어디서나) | TIMEOUT | `TIMEOUT` (frame 행의 TIMEOUT 은 위의 `onSocketTimeout` 이 먼저 잡는다) |
 | (어디서나) | CLOSED | 열리기 전이면 끊긴 이유를 `upgrade.failure` 에 적는다. `endSocket` |
 

@@ -19,8 +19,6 @@ namespace kiotty::net::implementation
         , ping_deadline(0)
         , close_deadline(0)
         , control_length(0)
-        , outgoing_length(0)
-        , close_code(KIOTTY_NET_CODE_SUCCESS)
         , peer_status(0)
         , message(FrameOpcode::CONTINUATION)
         , control{}
@@ -40,8 +38,6 @@ namespace kiotty::net::implementation
         ping_deadline = 0;
         close_deadline = 0;
         control_length = 0;
-        outgoing_length = 0;
-        close_code = KIOTTY_NET_CODE_SUCCESS;
         peer_status = 0;
         message = FrameOpcode::CONTINUATION;
         is_open = false;

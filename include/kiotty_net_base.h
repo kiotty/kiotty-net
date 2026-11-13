@@ -323,6 +323,9 @@ KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenWrite(
     uint32_t timeout_milliseconds);
 KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenWork(void);
 KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reason);
+KIOTTY_NET_API KiottyNetConnectionAction KiottyNet_thenCloseWith(
+    KiottyNetSpan data,
+    KiottyNetCode reason);
 
 typedef struct KiottyNetConnectionDecision
 {

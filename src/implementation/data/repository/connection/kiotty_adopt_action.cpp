@@ -9,6 +9,7 @@ namespace kiotty::net::implementation
         AdoptResult adoptRead(const KiottyNetConnectionAction& returned);
         AdoptResult adoptReadUntil(const KiottyNetConnectionAction& returned);
         AdoptResult adoptWrite(const KiottyNetConnectionAction& returned, StageBase& send);
+        AdoptResult adoptClose(const KiottyNetConnectionAction& returned, StageBase& send);
         bool        isValidDelimiter(KiottyNetSpan delimiter, size_t max);
         bool        isValidWrite(KiottyNetSpan data);
     }
@@ -19,8 +20,9 @@ namespace kiotty::net::implementation
         {
         case KIOTTY_NET_ACTION_TYPE_HOLD:
         case KIOTTY_NET_ACTION_TYPE_START_WORK:
-        case KIOTTY_NET_ACTION_TYPE_CLOSE:
             return AdoptResult::success(IoAction::from(returned));
+        case KIOTTY_NET_ACTION_TYPE_CLOSE:
+            return adoptClose(returned, send);
         case KIOTTY_NET_ACTION_TYPE_READ:
             return adoptRead(returned);
         case KIOTTY_NET_ACTION_TYPE_READ_UNTIL:
@@ -55,6 +57,17 @@ namespace kiotty::net::implementation
             const KiottyNetCode staged = Sender::stage(send, returned.data);
             if (staged != KIOTTY_NET_CODE_SUCCESS) { return AdoptResult::failure(staged); }
             return AdoptResult::success(IoAction::hold(returned.timeout_milliseconds));
+        }
+
+        AdoptResult adoptClose(const KiottyNetConnectionAction& returned, StageBase& send)
+        {
+            const bool has_data = returned.data.length > 0;
+            if (!has_data) { return AdoptResult::success(IoAction::from(returned)); }
+            const bool valid = isValidWrite(returned.data);
+            if (!valid) { return AdoptResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            const KiottyNetCode staged = Sender::stage(send, returned.data);
+            if (staged != KIOTTY_NET_CODE_SUCCESS) { return AdoptResult::failure(staged); }
+            return AdoptResult::success(IoAction::closeAfterSend(returned.reason));
         }
 
         bool isValidDelimiter(KiottyNetSpan delimiter, size_t max)

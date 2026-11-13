@@ -23,7 +23,8 @@ namespace
         ECHO,
         PING,
         WORK,
-        FLOOD
+        FLOOD,
+        FAREWELL
     };
 
     struct App
@@ -32,6 +33,7 @@ namespace
             : role(app_role)
             , ready(0)
             , read(0)
+            , written(0)
             , disconnected(0)
             , work_started(0)
             , busy_code(KIOTTY_NET_CODE_SUCCESS)
@@ -48,6 +50,7 @@ namespace
         Role                            role;
         std::atomic<int>                ready;
         std::atomic<int>                read;
+        std::atomic<int>                written;
         std::atomic<int>                disconnected;
         std::atomic<int>                work_started;
         std::atomic<KiottyNetCode>      busy_code;
@@ -105,6 +108,10 @@ namespace
         case Role::FLOOD:
             app.outgoing.assign(FLOOD_BYTES, 'f');
             return KiottyNet_thenWrite(spanOf(app.outgoing), 0);
+        case Role::FAREWELL:
+            app.outgoing = "bye!";
+            app.busy_code.store(KiottyNet_notifyConnection(connection, spanOf("late")));
+            return KiottyNet_thenCloseWith(spanOf(app.outgoing), KIOTTY_NET_CODE_PROTOCOL_ERROR);
         }
         return KiottyNet_thenClose(KIOTTY_NET_CODE_PROTOCOL_ERROR);
     }
@@ -128,6 +135,7 @@ namespace
         (void)connection;
         (void)length;
         App& app = appOf(context);
+        app.written.fetch_add(1);
         if (app.role == Role::FLOOD)
         {
             return KiottyNet_thenWrite(spanOf(app.outgoing), 0);
@@ -436,6 +444,32 @@ TEST_F(BaseApiTest, APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheS
     ASSERT_TRUE(peer.connectTcp(port));
     EXPECT_TRUE(kiotty_test::waitUntil([&]() { return server_app.disconnected.load() > 0; }, WAIT_MS * 10));
     EXPECT_EQ(KIOTTY_NET_CODE_PEER_NOT_READING, server_app.reason.load());
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
+    KiottyNet_destroyServer(context, server);
+}
+
+TEST_F(BaseApiTest, CloseWithSendsOnlyItsDataThenClosesWithItsReason)
+{
+    const KiottyNetConnectionAction farewell = KiottyNet_thenCloseWith(spanOf("bye!"), KIOTTY_NET_CODE_PROTOCOL_ERROR);
+    EXPECT_EQ(KIOTTY_NET_ACTION_TYPE_CLOSE, farewell.type);
+    EXPECT_EQ(4u, farewell.data.length);
+    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, farewell.reason);
+
+    const uint16_t port = kiotty_test::unusedPort();
+    KiottyNetServerHandle server = createServer();
+    ASSERT_NE(nullptr, server);
+    App app(Role::FAREWELL);
+    RunningServer running(server, port, app);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
+    kiotty_test::LoopbackPeer peer;
+    ASSERT_TRUE(peer.connectTcp(port));
+    EXPECT_TRUE(receive(peer, "bye!"));
+    char extra = 0;
+    EXPECT_FALSE(peer.recvExactly(&extra, 1, WAIT_MS));
+    ASSERT_TRUE(kiotty_test::waitUntil([&]() { return app.disconnected.load() == 1; }, WAIT_MS));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, app.busy_code.load());
+    EXPECT_EQ(KIOTTY_NET_CODE_PROTOCOL_ERROR, app.reason.load());
+    EXPECT_EQ(0, app.written.load());
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
     KiottyNet_destroyServer(context, server);
 }

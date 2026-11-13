@@ -542,7 +542,7 @@ private:
 - action 은 값이다. `KiottyNet_thenRead` 같은 action 함수는 struct 를 채워 돌려줄 뿐 검사하지 않는다. 검사는 Connection 이 action 을 받을 때 한 번 한다.
 - 콜백 안에서 handle 로 할 수 있는 것은 `KiottyNet_getConnectionInfo` 와 `KiottyNet_notifyConnection` 둘뿐이다. handle 은 소유자 포인터와 정수 id 의 값이라 복사해 두어도 `releaseContext` 전까지 dangling 이 없다 (규약 8).
 
-**action 여섯 가지.** `timeout_milliseconds` 는 그 action 이 시작한 기다림의 한도이고 0 이면 없다. 지나면 `onTimeout` 이 한 번 오고 그 return 이 다음 action 이다.
+**action 일곱 가지.** `timeout_milliseconds` 는 그 action 이 시작한 기다림의 한도이고 0 이면 없다. 지나면 `onTimeout` 이 한 번 오고 그 return 이 다음 action 이다.
 
 | action | 하는 일 | 완료 | timeout_milliseconds 가 재는 것 |
 |---|---|---|---|
@@ -552,11 +552,12 @@ private:
 | `thenWrite(data, timeout_milliseconds)` | write lane 으로 복사하고 보낸다. return 한 뒤 data 는 버려도 된다. 그때 나가고 있는 notify 가 있으면 그 뒤에 나간다 | `onWritten(length)` | onWritten 까지 (notify 뒤에서 기다리는 시간 포함) |
 | `thenWork()` | 연결을 IO Thread 에서 떼어 Work 로 넘긴다 (아래) | `onWorkStarted(stream)` | 없음 |
 | `thenClose(reason)` | 닫는다 | `onDisconnected(reason)` 마지막 한 번 | 없음 |
+| `thenCloseWith(data, reason)` | data 를 write lane 으로 복사해 보낸 뒤 닫는다. **push lane 의 남은 것은 붙이지 않고 버리며**, 그 뒤의 notify 는 `KIOTTY_NET_CODE_PEER_CLOSED`. 걸려 있던 read 가 끝나도 콜백은 없다. data 가 비면 `thenClose` 와 같다 (B3, 2026-11-13) | `onWritten` 없이 `onDisconnected(reason)` 마지막 한 번 | 없음. 송신은 `send_timeout_milliseconds` 가 잰다 (지나면 `PEER_NOT_READING`) |
 
 action 을 받을 때의 거부 (연결은 닫히고 `onDisconnected(code)`)
 
 - `exact` 가 `receive_capacity` 보다 크면 `KIOTTY_NET_CODE_REQUEST_TOO_LARGE`. `max` 안에 delimiter 가 없으면 `KIOTTY_NET_CODE_PROTOCOL_ERROR`.
-- write 의 data 가 `send_capacity` 보다 크면 `KIOTTY_NET_CODE_BUFFER_FULL`.
+- write 와 thenCloseWith 의 data 가 `send_capacity` 보다 크면 `KIOTTY_NET_CODE_BUFFER_FULL`.
 - `exact == 0`, write 길이 0, delimiter 길이 0 또는 5 이상은 `onError(KIOTTY_NET_CODE_INVALID_ARGUMENT)` 뒤 닫는다.
 
 **onTimeout 이 요청이 걸린 채로 올 때.** READ / READ_UNTIL / WRITE 의 timeout 은 그 요청이 아직 OS 에 걸려 있는 상태에서 온다. 이때 return 은 다음과 같이 받는다.
@@ -654,6 +655,7 @@ KiottyNetConnectionAction KiottyNet_thenReadUntil(KiottyNetSpan delimiter, size_
 KiottyNetConnectionAction KiottyNet_thenWrite(KiottyNetSpan data, uint32_t timeout_milliseconds);
 KiottyNetConnectionAction KiottyNet_thenWork(void);
 KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reason);
+KiottyNetConnectionAction KiottyNet_thenCloseWith(KiottyNetSpan data, KiottyNetCode reason);   /* data 를 보낸 뒤 닫는다. push lane 은 버린다 */
 
 typedef struct KiottyNetConnectionDecision {
     KiottyNetBool              accepted;

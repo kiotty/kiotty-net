@@ -306,6 +306,11 @@ KiottyNetConnectionAction KiottyNet_thenClose(KiottyNetCode reason)
     return net::thenClose(reason);
 }
 
+KiottyNetConnectionAction KiottyNet_thenCloseWith(KiottyNetSpan data, KiottyNetCode reason)
+{
+    return net::thenCloseWith(data, reason);
+}
+
 KiottyNetConnectionDecision KiottyNet_acceptConnection(
     KiottyNetConnectionContext connection_context)
 {

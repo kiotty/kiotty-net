@@ -105,6 +105,13 @@ namespace kiotty::net::implementation
         return _deadline.load();
     }
 
+    bool SendFlow::isDrained()
+    {
+        const size_t staged = _send.consumer().readable();
+        const bool cipher_waiting = hasCipherWaiting(_tls);
+        return staged == 0 && !cipher_waiting;
+    }
+
     IoAction SendFlow::select()
     {
         const Phase phase = _phase.load();
@@ -120,7 +127,8 @@ namespace kiotty::net::implementation
             return IoAction::none();
         }
         const size_t length = _send.consumer().readable();
-        const size_t notify_length = _notify.consumer().readable();
+        const bool is_flushing = phase == Phase::FLUSHING;
+        const size_t notify_length = is_flushing ? 0 : _notify.consumer().readable();
         if (length == 0 && notify_length == 0)
         {
             return IoAction::none();
@@ -144,9 +152,9 @@ namespace kiotty::net::implementation
 
     bool SendFlow::isBlocked() const
     {
-        const bool alive = isAlive(_phase.load());
+        const bool open = isOpen(_phase.load());
         const bool working = _work.state() != WorkContext::State::IDLE;
-        return !alive || working || _write_event.pending;
+        return !open || working || _write_event.pending;
     }
 
     void SendFlow::startDeadline()

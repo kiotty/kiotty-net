@@ -128,11 +128,6 @@ namespace kiotty::net::implementation
         return readNext(session, static_cast<HttpState>(read.state), read.length);
     }
 
-    KiottyNetTransition onCloseWritten(Context context, Connection, Event)
-    {
-        return closeWith(sessionOf(context).socket.close_code);
-    }
-
     KiottyNetTransition openSocket(HttpSession& session)
     {
         const KiottyNetConnectionHandle connection = session.request.request().connection;
@@ -291,11 +286,9 @@ namespace kiotty::net::implementation
             const Span<char> body{ session.socket.outgoing + head.length, payload.length };
             (void)body.copyFrom(payload);
             applyMask(body, key, 0);
-            session.socket.outgoing_length = head.length + payload.length;
-            session.socket.close_code = code;
-            const KiottyNetSpan data{ session.socket.outgoing, session.socket.outgoing_length };
-            const uint32_t timeout = session.site.limits.websocket_close_timeout_milliseconds;
-            return Next::moveToNextState(HttpState::SOCKET_CLOSING, thenWrite(data, timeout));
+            const KiottyNetSpan data{ session.socket.outgoing, head.length + payload.length };
+            const KiottyNetConnectionAction farewell = thenCloseWith(data, code);
+            return Next::moveToNextState(HttpState::CLOSING, farewell);
         }
 
         MaskKey closeMaskOf(const HttpSession& session)

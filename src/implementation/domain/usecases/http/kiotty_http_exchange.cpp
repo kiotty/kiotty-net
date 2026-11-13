@@ -33,6 +33,8 @@ namespace kiotty::net::implementation
         void answerAutomatically(HttpSession& session, const RouteMatch& match);
         void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed);
         void answerWithoutWork(HttpSession& session);
+        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk);
+        bool                isLastPiece(const HttpSession& session, size_t end);
     }
 
     HttpSession& sessionOf(KiottyNetConnectionContext context)
@@ -124,9 +126,7 @@ namespace kiotty::net::implementation
         const PieceResult piece = pieceAt(session, session.sent);
         if (!piece) { return closeWith(piece.code); }
         const Span<const char> chunk = piece.value;
-        const KiottyNetSpan data{ chunk.data, chunk.length };
-        const KiottyNetConnectionAction write = thenWrite(data, 0);
-        if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, write); }
+        if (!chunk.empty()) { return sendPiece(session, chunk); }
         const bool is_kept = session.persistence == Persistence::KEEP_ALIVE;
         if (!is_kept) { return closeWith(session.close_reason); }
         const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
@@ -141,8 +141,7 @@ namespace kiotty::net::implementation
         session.sent = 0;
         const size_t capacity = session.site.send_capacity;
         const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
-        const KiottyNetSpan data{ chunk.data, chunk.length };
-        return Next::moveToNextState(HttpState::SENDING, thenWrite(data, 0));
+        return sendPiece(session, chunk);
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -243,5 +242,25 @@ namespace kiotty::net::implementation
             session.persistence = Persistence::CLOSE;
         }
 
+        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk)
+        {
+            const KiottyNetSpan data{ chunk.data, chunk.length };
+            const size_t end = session.sent + chunk.length;
+            const bool is_closing = session.persistence == Persistence::CLOSE;
+            const bool is_farewell = is_closing && isLastPiece(session, end);
+            const KiottyNetConnectionAction write = thenWrite(data, 0);
+            if (!is_farewell) { return Next::moveToNextState(HttpState::SENDING, write); }
+            const KiottyNetConnectionAction farewell = thenCloseWith(data, session.close_reason);
+            return Next::moveToNextState(HttpState::CLOSING, farewell);
+        }
+
+        bool isLastPiece(const HttpSession& session, size_t end)
+        {
+            const ResponseFrame frame = session.response.frame();
+            const FilePiece file = frame.filePieceAt(end, 1);
+            if (file.is_file) { return false; }
+            const Span<const char> rest = frame.chunkAt(end, 1);
+            return rest.empty();
+        }
     }
 }

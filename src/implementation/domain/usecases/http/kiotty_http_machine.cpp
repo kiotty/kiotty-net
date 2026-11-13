@@ -66,7 +66,6 @@ namespace kiotty::net::implementation
         constexpr HttpState FRAME_LENGTH = HttpState::FRAME_LENGTH;
         constexpr HttpState FRAME_MASK = HttpState::FRAME_MASK;
         constexpr HttpState FRAME_PAYLOAD = HttpState::FRAME_PAYLOAD;
-        constexpr HttpState SOCKET_CLOSING = HttpState::SOCKET_CLOSING;
 
         constexpr EventType CONNECTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;
         constexpr EventType READ = KIOTTY_NET_CONNECTION_EVENT_TYPE_READ;
@@ -77,26 +76,42 @@ namespace kiotty::net::implementation
 
         constexpr auto HTTP_RULES = KiottyNet_rules(
             KiottyNet_when(CONNECTED).then(onConnected).to(REQUEST_LINE),
-            KiottyNet_from(REQUEST_LINE).when(READ).then(onRequestLine).to(HEADER_LINE, SENDING),
+            KiottyNet_from(REQUEST_LINE)
+                .when(READ)
+                .then(onRequestLine)
+                .to(HEADER_LINE, SENDING, CLOSING),
             KiottyNet_from(HEADER_LINE)
                 .when(READ)
                 .then(onHeaderLine)
-                .to(HEADER_LINE, BODY, CHUNK_SIZE, CONTINUING, SENDING, WORKING, SOCKET_OPENING),
-            KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING),
+                .to(HEADER_LINE,
+                    BODY,
+                    CHUNK_SIZE,
+                    CONTINUING,
+                    SENDING,
+                    WORKING,
+                    SOCKET_OPENING,
+                    CLOSING),
+            KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING, CLOSING),
             KiottyNet_from(CHUNK_SIZE)
                 .when(READ)
                 .then(onChunkSize)
-                .to(CHUNK_DATA, TRAILER, SENDING),
+                .to(CHUNK_DATA, TRAILER, SENDING, CLOSING),
             KiottyNet_from(CHUNK_DATA)
                 .when(READ)
                 .then(onChunkData)
-                .to(CHUNK_DATA, CHUNK_END, SENDING),
-            KiottyNet_from(CHUNK_END).when(READ).then(onChunkEnd).to(CHUNK_SIZE, SENDING),
-            KiottyNet_from(TRAILER).when(READ).then(onTrailer).to(TRAILER, SENDING, WORKING),
+                .to(CHUNK_DATA, CHUNK_END, SENDING, CLOSING),
+            KiottyNet_from(CHUNK_END).when(READ).then(onChunkEnd).to(CHUNK_SIZE, SENDING, CLOSING),
+            KiottyNet_from(TRAILER)
+                .when(READ)
+                .then(onTrailer)
+                .to(TRAILER, SENDING, WORKING, CLOSING),
             KiottyNet_from(CONTINUING).when(WRITTEN).then(onContinued).to(BODY, CHUNK_SIZE),
             KiottyNet_from(WORKING).when(WORK_STARTED).then(onWorkStarted).to(WORKING),
             KiottyNet_from(WORKING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
-            KiottyNet_from(WORKING).when(READ).then(onRequestLine).to(HEADER_LINE, SENDING),
+            KiottyNet_from(WORKING)
+                .when(READ)
+                .then(onRequestLine)
+                .to(HEADER_LINE, SENDING, CLOSING),
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
             KiottyNet_from(SOCKET_OPENING)
                 .when(WRITTEN)
@@ -105,36 +120,35 @@ namespace kiotty::net::implementation
             KiottyNet_from(FRAME_START)
                 .when(READ)
                 .then(onFrameStart)
-                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_LENGTH)
                 .when(READ)
                 .then(onFrameLength)
-                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_MASK)
                 .when(READ)
                 .then(onFrameMask)
-                .to(FRAME_PAYLOAD, FRAME_START, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_PAYLOAD)
                 .when(READ)
                 .then(onFramePayload)
-                .to(FRAME_PAYLOAD, FRAME_START, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_START)
                 .when(TIMEOUT)
                 .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_LENGTH)
                 .when(TIMEOUT)
                 .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_MASK)
                 .when(TIMEOUT)
                 .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, SOCKET_CLOSING, CLOSING),
+                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_PAYLOAD)
                 .when(TIMEOUT)
                 .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, SOCKET_CLOSING, CLOSING),
-            KiottyNet_from(SOCKET_CLOSING).when(WRITTEN).then(onCloseWritten).to(CLOSING),
+                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
 
