@@ -25,6 +25,7 @@ namespace kiotty::net::implementation
         KiottyNetHttpLimits       limits;
         size_t                    receive_capacity;
         size_t                    send_capacity;
+        size_t                    push_capacity;
         KiottyNetHttpServerHandle owner;
         KiottyNetAppContext       app_context;
         KiottyNetWebSocketEndpoint* socket_owner;
@@ -42,6 +43,7 @@ namespace kiotty::net::implementation
         , limits{}
         , receive_capacity(0)
         , send_capacity(0)
+        , push_capacity(0)
         , owner(nullptr)
         , app_context(nullptr)
         , socket_owner(nullptr)

@@ -1699,6 +1699,8 @@ KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span
 
 base 의 NotificationDesk 는 조각을 그대로 복사하므로 mask 는 그 앞에서 씌운다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼를 initialize 때 한 번 잡고 mutex 하나로 지킨다 (send 는 아무 thread 에서나 오므로). push lane 보다 큰 frame 은 들어갈 수 없으니 scratch 도 그 크기면 된다. base 는 바뀌지 않았다.
 
+- 크기 검사 (`checkData`) 는 send 와 broadcast 가 같이 쓴다. base 의 desk 는 안 들어가는 notify 를 `BUFFER_FULL` 로 돌려주므로, 그대로 두면 "자리가 나면 된다" 로 읽혀 앱이 영원히 다시 부를 수 있다. 그래서 WebSocket 층이 먼저 `HttpSite::push_capacity` 로 거른다.
+
 **write lane.** frame 행 안에서 우리가 연결을 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 는 close frame 을 `socket.outgoing` 에 만들어 `thenCloseWith(close_frame, code)` 하나로 `CLOSING` 에 간다 (B3, 1.6). base 가 close frame 만 보내고 push lane 의 남은 것은 버린 뒤 닫으므로 close frame 뒤에 데이터 frame 이 나가지 않는다 (RFC 6455 5.5.1). B3 전에는 `thenWrite` 와 `SOCKET_CLOSING` 상태의 WRITTEN 행이었고, 같은 WRITE 에 push lane 이 붙어 close frame 뒤에 데이터 frame 이 나갈 수 있었다.
 
 ### 5.7 close 의 갈래

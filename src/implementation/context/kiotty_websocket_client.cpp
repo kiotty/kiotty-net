@@ -66,6 +66,7 @@ namespace kiotty::net::implementation
         _site.limits = limits;
         _site.receive_capacity = configuration.client.receive_capacity;
         _site.send_capacity = configuration.client.send_capacity;
+        _site.push_capacity = configuration.client.push_capacity;
         _site.socket_owner = this;
         _site.lane = this;
         _site.role = SocketRole::CLIENT;

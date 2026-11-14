@@ -120,6 +120,7 @@ namespace kiotty::net::implementation
         _site.limits = limits;
         _site.receive_capacity = configuration.server.receive_capacity;
         _site.send_capacity = configuration.server.send_capacity;
+        _site.push_capacity = configuration.server.push_capacity;
         _site.owner = static_cast<KiottyNetHttpServer*>(this);
         _site.socket_owner = this;
         _site.lane = this;

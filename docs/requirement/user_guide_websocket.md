@@ -80,7 +80,7 @@ base 의 버퍼 설정과 이렇게 맞물린다.
 |---|---|
 | `receive_capacity` | frame payload 를 이 크기 단위로 나눠 읽어 body 버퍼에 붙인다. 메시지보다 작아도 된다. Upgrade 요청의 상한은 이것이 아니라 `max_header_bytes` 다 |
 | `send_capacity` | 101 / 403 / 426 (서버), Upgrade 요청 (클라이언트), 라이브러리가 닫을 때의 close frame 이 나가는 write lane |
-| `push_capacity` | **`send`, `broadcast`, ping / pong / close frame 이 들어가는 곳.** 메시지 하나는 frame 머리 (최대 14 바이트) 를 더해 이 값 이하여야 하고, 상대가 느리면 여러 개가 쌓인다. 큰 메시지를 보내는 앱은 이 값을 올린다 |
+| `push_capacity` | **`send`, `broadcast`, ping / pong / close frame 이 들어가는 곳.** 기본 4 KiB, 상한 64 KiB. 메시지 하나는 frame 머리 (최대 14 바이트) 를 더해 이 값 이하여야 하고, 상대가 느리면 여러 개가 쌓인다. 큰 메시지를 보내는 앱은 이 값을 올린다 |
 
 메모리는 HttpServer 와 같은 `max_clients × (max_header_bytes + max_body_bytes + response_bytes)` 에 base 의 세 버퍼다. WebSocket 경로를 더해도 늘지 않는다.
 
@@ -187,12 +187,12 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server, con
 |---|---|
 | `KIOTTY_NET_CODE_SUCCESS` | push lane 에 들어갔다 |
 | `KIOTTY_NET_CODE_BUFFER_FULL` | push lane 에 여유가 없다. 아무것도 넣지 않았고 연결은 그대로다. 끊을지는 호출자가 정한다 |
-| `KIOTTY_NET_CODE_INVALID_ARGUMENT` | `data` 가 비었거나 frame 머리를 더한 길이가 `push_capacity` 보다 크다. 모르는 opcode |
+| `KIOTTY_NET_CODE_INVALID_ARGUMENT` | `data` 가 비었거나 frame 머리를 더한 길이가 `push_capacity` 보다 크다 (다시 불러도 들어가지 않는다). 모르는 opcode |
 | `KIOTTY_NET_CODE_PEER_CLOSED` | 닫힌 handle 또는 `{ NULL, 0 }`. `onOpen` 전이거나 `onClose` 가 나간 뒤 |
 | `KIOTTY_NET_CODE_CLOSED` | `closeWebSocket` / `byeWebSocketClient` 를 부른 뒤라 데이터 frame 을 보낼 수 없다 |
 | `KIOTTY_NET_CODE_BUSY` | 다른 thread 의 대기 slot 이 모두 사용 중. 잠시 뒤 다시 |
 
-IO Thread 콜백 안에서 부르면 그 자리에서 복사한다. 다른 thread 에서 부르면 IO Thread 가 복사할 때까지 기다린다. 조각으로 나눠 보내지 않으므로 `push_capacity` 가 메시지 하나의 상한이다.
+IO Thread 콜백 안에서 부르면 그 자리에서 복사한다. 다른 thread 에서 부르면 IO Thread 가 복사할 때까지 기다린다. 조각으로 나눠 보내지 않으므로 `push_capacity` 가 메시지 하나의 상한이다 (3절의 표). `broadcast` 도 같은 검사를 먼저 하므로 너무 큰 메시지는 어느 소켓에도 넣지 않고 `INVALID_ARGUMENT` 다.
 
 **broadcast.** 아무 thread 에서나. `path` 는 `addWebSocket` 에 준 것과 글자 그대로 비교한다. 그 경로로 열린 (`onOpen` 이 나간) 모든 소켓에 `send` 한 것과 같다. `path` 가 NULL 이면 그 서버의 모든 WebSocket 소켓이다. 등록되지 않은 path 는 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 여유가 없는 소켓은 건너뛰고 끊지 않으며, 하나라도 건너뛰면 `KIOTTY_NET_CODE_BUFFER_FULL`.
 
@@ -712,7 +712,7 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 |---|---|---|
 | receive 함수 | 없다 | `onMessage` 가 앱의 큐로 넘긴다 (5.2, 8절) |
 | Work | 없다 | `onMessage` 에서 복사해 worker 로, 결과는 `sendWebSocket`. Work 를 두면 Work 중에 ping / pong 도 멈춘다 |
-| 큰 메시지의 조각 송신 | 없다. `push_capacity` 가 메시지 하나의 상한 | `push_capacity` 를 올린다 |
+| 큰 메시지의 조각 송신 | 없다. `push_capacity` (상한 64 KiB) 가 메시지 하나의 상한 | `push_capacity` 를 올린다. 64 KiB 보다 큰 것은 앱이 나눠 보낸다 |
 | 동기 WebSocketClient | 없다 | 서버 push 를 받으려면 결국 loop 가 필요하다 |
 | 경로마다 다른 메시지 상한 / 타이머 | 없다. 서버 하나에 한 벌 | 다른 값이 필요한 경로는 다른 HttpServer 에 둔다 |
 | 서버의 WebSocket 전용 오류 / 끊김 콜백 | 없다 | HttpServer 의 `onHttpError` / `onHttpDisconnected` (v1 결정 3) |

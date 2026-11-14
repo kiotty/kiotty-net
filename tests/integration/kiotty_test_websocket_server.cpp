@@ -493,6 +493,31 @@ TEST_F(WebSocketServerTest, EchoesTextBinaryAndFragmentsThenAnswersTheClientClos
     EXPECT_EQ("fragment", messages[2].data);
 }
 
+TEST_F(WebSocketServerTest, PushCapacityOfSixtyFourKibibytesSendsTheLargestMessage)
+{
+    const size_t push_capacity = 65536;
+    const size_t head_bytes = 4;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerBufferCapacity(&configuration, 4096, 4096, push_capacity));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureServerBufferCapacity(&configuration, 4096, 4096, push_capacity + 1));
+    start();
+    kiotty_test::LoopbackPeer peer;
+    open(peer, "/chat");
+    const std::string largest(push_capacity - head_bytes, 'a');
+    send(peer, clientFrame(BINARY, largest));
+    expectFrame(peer, BINARY, largest);
+    send(peer, clientFrame(BINARY, largest + "b"));
+    const auto refused = [this]() {
+        const std::vector<KiottyNetCode> codes = app.copyOf(app.codes);
+        return !codes.empty() && codes.back() == KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    };
+    EXPECT_TRUE(kiotty_test::waitUntil(refused, WAIT_MS));
+    const std::string over = largest + "b";
+    const KiottyNetSpan over_span = { over.data(), over.size() };
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_broadcastWebSocket(server, "/chat", KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY, over_span));
+    send(peer, clientFrame(TEXT, "after"));
+    expectFrame(peer, TEXT, "after");
+}
+
 TEST_F(WebSocketServerTest, MessageLargerThanTheBodyCapacityClosesWith1009)
 {
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureHttpBodyCapacity(&limits, 1024));

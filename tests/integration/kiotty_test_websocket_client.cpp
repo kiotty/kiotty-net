@@ -176,6 +176,7 @@ namespace
             , server(nullptr)
             , client(nullptr)
             , port(0)
+            , push_capacity(16384)
             , server_side()
             , client_side()
             , limits()
@@ -215,7 +216,7 @@ namespace
             KiottyNetServerConfiguration configuration;
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&configuration));
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS,
-                      KiottyNet_configureServerBufferCapacity(&configuration, 4096, 4096, 16384));
+                      KiottyNet_configureServerBufferCapacity(&configuration, 4096, 4096, push_capacity));
             const KiottyNetHttpServerResult created = KiottyNet_createHttpServer(context, &configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             server = created.handle;
@@ -231,7 +232,7 @@ namespace
         void createClient()
         {
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS,
-                      KiottyNet_configureClientBufferCapacity(&client_configuration, 4096, 4096, 16384));
+                      KiottyNet_configureClientBufferCapacity(&client_configuration, 4096, 4096, push_capacity));
             const KiottyNetWebSocketClientResult created =
                 KiottyNet_createWebSocketClient(context, &client_configuration, &limits);
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
@@ -289,6 +290,7 @@ namespace
         KiottyNetHttpServerHandle      server;
         KiottyNetWebSocketClientHandle client;
         uint16_t                       port;
+        size_t                         push_capacity;
         Side                           server_side;
         Side                           client_side;
         KiottyNetHttpLimits            limits;
@@ -409,6 +411,39 @@ TEST_F(WebSocketClientTest, OneClientRunsPlainThenSecure)
     ASSERT_EQ(2u, closes.size());
     EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, closes[1].code);
     EXPECT_EQ(1001, closes[1].status);
+}
+
+TEST_F(WebSocketClientTest, PushCapacityOfSixtyFourKibibytesCarriesTheLargestMaskedMessage)
+{
+    const size_t masked_head_bytes = 8;
+    push_capacity = 65536;
+    const std::string largest(push_capacity - masked_head_bytes, 'a');
+    startServer(nullptr);
+    createClient();
+    startClient(nullptr);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitWebSocketClient(client, WAIT_MS));
+    roundTrip(largest);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT,
+              KiottyNet_sendWebSocketClient(client, KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, spanOf(largest + "b")));
+    roundTrip("after");
+    KiottyNet_closeWebSocketClient(client);
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, finishClient());
+    if (!kiotty::net::implementation::tlsSupported()) { return; }
+    stopServer();
+    KiottyNetTlsServerConfiguration server_tls;
+    const std::string cert = certPath("server.pem");
+    const std::string key = certPath("server.key");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsServerConfiguration(&server_tls, cert.c_str(), key.c_str(), nullptr));
+    port = kiotty_test::unusedPort();
+    startServer(&server_tls);
+    KiottyNetTlsClientConfiguration client_tls;
+    const std::string trust = certPath("ca.pem");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTlsClientConfiguration(&client_tls));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureTlsClientTrustStore(&client_tls, trust.c_str()));
+    startClient(&client_tls);
+    ASSERT_TRUE(kiotty_test::waitUntil([this]() { return client_side.opened.load() >= 2; }, WAIT_MS));
+    roundTrip(largest);
+    roundTrip("secure");
 }
 
 TEST_F(WebSocketClientTest, SendsAWellFormedUpgradeAndRejectsWrongAnswers)

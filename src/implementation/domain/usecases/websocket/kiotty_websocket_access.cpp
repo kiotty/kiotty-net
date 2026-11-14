@@ -13,7 +13,9 @@ namespace kiotty::net::implementation
 
         bool          isDataOpcode(KiottyNetWebSocketOpcode opcode);
         FrameOpcode   frameOpcodeOf(KiottyNetWebSocketOpcode opcode);
-        KiottyNetCode checkData(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data);
+        KiottyNetCode checkData(const HttpSite& site,
+                                KiottyNetWebSocketOpcode opcode,
+                                KiottyNetSpan data);
         bool          isBroadcastTarget(const SocketLink& link, int32_t path);
     }
 
@@ -54,7 +56,7 @@ namespace kiotty::net::implementation
                                         KiottyNetWebSocketOpcode opcode,
                                         KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(opcode, data);
+        const KiottyNetCode checked = checkData(_site, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const LinkResult link = openLink(id);
         if (!link) { return link.code; }
@@ -74,7 +76,7 @@ namespace kiotty::net::implementation
                                              KiottyNetWebSocketOpcode opcode,
                                              KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(opcode, data);
+        const KiottyNetCode checked = checkData(_site, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         int32_t index = NO_SOCKET_PATH;
         if (path != nullptr)
@@ -131,10 +133,19 @@ namespace kiotty::net::implementation
             return is_text ? FrameOpcode::TEXT : FrameOpcode::BINARY;
         }
 
-        KiottyNetCode checkData(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data)
+        KiottyNetCode checkData(const HttpSite& site,
+                                KiottyNetWebSocketOpcode opcode,
+                                KiottyNetSpan data)
         {
             const bool is_empty = data.data == nullptr || data.length == 0;
             if (is_empty || !isDataOpcode(opcode)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+            const bool is_masked = site.role == SocketRole::CLIENT;
+            const size_t mask_bytes = is_masked ? MASK_KEY_BYTES : 0;
+            const size_t frame_head = buildFrameHead(FrameOpcode::BINARY, data.length).length;
+            const size_t head = frame_head + mask_bytes;
+            const size_t room = site.push_capacity;
+            const bool fits = head <= room && data.length <= room - head;
+            if (!fits) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
             return KIOTTY_NET_CODE_SUCCESS;
         }
 
