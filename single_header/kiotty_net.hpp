@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit cceff58+modified
+    KiottyNet single header, generated from commit 67b8aa7
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
