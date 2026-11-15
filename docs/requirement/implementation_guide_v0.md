@@ -954,7 +954,7 @@ void HttpSessionPool::release(HttpSession& session)
     session.is_orphaned = session.is_worker_owned;
     if (session.is_orphaned) { return; }              // worker 가 들고 있다. 그 finish 가 돌려준다 (4.6)
     session.file.close();
-    session.id.generation = nextSessionGeneration(session.id.generation);   // 들고 있던 response / work handle 이 모두 무효
+    advanceSession(session);                          // generation + 1, published 에 새 id. 들고 있던 response / work handle 이 모두 무효
     _free.push_back(session.id.index);
 }
 
@@ -1207,7 +1207,7 @@ SessionResult HttpSessionPool::find(int64_t id)                                 
     const bool is_inside = handle.index >= 0 && static_cast<size_t>(handle.index) < _sessions.size();
     if (!is_inside) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
     HttpSession& session = _sessions[static_cast<size_t>(handle.index)];
-    if (session.id.generation != handle.generation) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }   // 이전 요청, 닫힌 연결
+    if (session.published.load() != id) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }   // 이전 요청, 닫힌 연결. atomic 이라 다른 thread 가 읽어도 된다
     return SessionResult::success(session);
 }
 
@@ -1224,7 +1224,7 @@ SessionResult HttpWork::fill(int64_t id)                                        
 - C API 는 `response.server == NULL` 이면 `PEER_CLOSED` 를 돌려주고, 아니면 `response.server->work()` (`HttpWork`) 로 넘긴다. Work 함수는 `HttpWork::working(id)` 를 거친다. phase 가 WORKING / STREAMING 이고 stream 이 있어야 하며, 아니면 `BUSY` 다 (finish 뒤, Work 가 아닌 요청).
 - generation 은 요청마다 (`beginExchange`), 연결이 닫힐 때 (풀의 `release`) 오른다. 그래서 keep-alive 로 같은 Session 이 다음 요청을 받으면 이전 handle 은 자동으로 무효다. worker 가 뒤늦게 setter 를 부르면 `KIOTTY_NET_CODE_PEER_CLOSED` 만 받는다.
 - 소유자 (HttpServer) 는 handle 의 `server` 다. 전역 소유자 표가 필요 없다. HttpServer 를 destroy 해도 객체는 Context 의 풀에서 은퇴만 하므로 포인터는 살아 있고 generation 이 거른다.
-- generation 을 쓰는 것은 IO Thread (`beginExchange`, 풀의 `release`) 와, worker 의 finish 두 경우다. orphan 이면 finish 가 `release` 를 부르고 (4.6), 헤더만 나간 스트림이면 finish 가 `beginExchange` 로 다음 요청을 연다 (4.9). worker 는 `find` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 Session 의 generation 을 바꾸지 않는다. Work 를 열 때 `is_worker_owned` 를 켜고 IO Thread 의 release 는 그것을 보고 미루기 때문이다 (4.2). Work 가 아닐 때 worker 가 handle 을 들고 있다면 그것은 사용자 규칙 위반이다.
+- generation 을 쓰는 것은 IO Thread (`beginExchange`, 풀의 `release`) 와, worker 의 finish 두 경우다. orphan 이면 finish 가 `release` 를 부르고 (4.6), 헤더만 나간 스트림이면 finish 가 `beginExchange` 로 다음 요청을 연다 (4.9). worker 는 `find` 에서 읽기만 한다. Work 중에는 IO Thread 가 이 Session 의 generation 을 바꾸지 않는다. Work 를 열 때 `is_worker_owned` 를 켜고 IO Thread 의 release 는 그것을 보고 미루기 때문이다 (4.2). Work 가 끝난 뒤나 다른 요청의 handle 을 다른 thread 가 늦게 부르는 것은 허용된 사용이다 (`PEER_CLOSED` 를 받는다). 그래서 `find` 는 `session.id.generation` 이 아니라 Session 마다 하나인 `std::atomic<int64_t> published` (풀의 `_published` 배열, Session 은 참조) 와 비교한다. generation 을 바꾸는 자리 넷 (`beginExchange`, 풀의 `release`, 101 의 `acceptUpgrade`, 클라이언트의 `onConnected`) 은 모두 `advanceSession` 으로 둘을 같이 바꾼다 (2026-11-14, H6 의 어긋난 곳 1).
 
 ### 4.6 Work
 

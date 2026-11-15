@@ -11,6 +11,7 @@ namespace kiotty::net::implementation
         , site(owner)
         , file(resources.file)
         , link(resources.link)
+        , published(resources.published)
         , socket()
         , info{}
         , route{}

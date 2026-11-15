@@ -51,7 +51,7 @@ HttpSession ──[HTTP 행]── GET /chat + Upgrade ──onUpgrade──101 
 - 클라이언트는 연결되면 Upgrade 요청 (run 의 path) 을 write lane 으로 보내고 101 을 읽어 검사한 뒤 `onOpen` 이다.
 - **`KiottyNetWebSocketHandle` 은 pool handle 이다** (규약 8). `{ KiottyNetWebSocketEndpoint* owner; int64_t id; }` 로 base 의 `KiottyNetConnectionHandle` 과 같은 모양이다. owner 는 소켓을 가진 쪽 (HttpServer 또는 WebSocketClient) 이고 id 는 generation + Session index 다. 무효는 `{ NULL, 0 }`. **`onUpgrade` 가 받는 handle 과 `onOpen` 이 받는 handle 은 다르다** (101 을 만들 때 generation 을 올린다). `onUpgrade` 의 handle 은 `onUpgrade` 안에서만 쓰고, 연결이 끝날 때까지 쓰는 것은 `onOpen` 의 handle 이다. 닫히면 generation 이 바뀌어 옛 handle 로 부른 함수는 `KIOTTY_NET_CODE_PEER_CLOSED` 를 돌려준다. 다른 thread 에 넘겨 두어도 dangling 이 없다. Upgrade 전의 HTTP 응답 handle 과는 generation 이 달라서 HTTP 쪽 handle 로 WebSocket 을 만질 수 없다.
 - **context 는 둘이다.** base 와 같다. `KiottyNetAppContext` 는 앱의 것이고 run 이 한 번 받아 모든 콜백에 돌려준다 (HTTP 라우트, 끊김 / 오류 action 도 같은 값이다). `KiottyNetWebSocketContext` 는 서버의 소켓마다의 데이터다. `onOpen` 이 만들어 return 하면 라이브러리가 그 소켓에 묶어 두고 `onMessage` 의 첫 인자로 돌려주며, `onClose` 가 `app_context` 와 함께 돌려받아 해제한다. 둘 다 `void*` 의 typedef 이고 라이브러리는 읽지 않는다. 클라이언트에는 소켓마다의 context 가 없다.
-- **state 는 라이브러리가 든다.** frame 파싱 상태, 메시지 버퍼, ping 타이머, 닫힘 플래그는 모두 HttpSession 에 있다. 새 Session 종류도 새 버퍼도 없다. 메시지는 HTTP body 의 Stage 에 모인다. 사용자의 `websocket_context` 에는 앱 데이터만 둔다.
+- **state 는 라이브러리가 든다.** frame 파싱 상태, 메시지 버퍼, ping 타이머, 닫힘 플래그는 모두 HttpSession 에 있다. 새 Session 종류도 새 버퍼도 없다. 메시지는 HttpSession 의 body 버퍼에 모인다 (수신 Stage 에서 복사하며 unmask 한다). 사용자의 `websocket_context` 에는 앱 데이터만 둔다.
 - **사용자의 송신은 모두 push lane 이다.** 사용자의 `send`, `broadcast`, `closeWebSocket` / `byeWebSocketClient` 의 close frame, 라이브러리의 ping / pong 과 pong 늦음의 close frame 은 `KiottyNet_notifyConnection` 과 같은 길로 간다. 그래서 어느 thread 에서나 부를 수 있고 완료 콜백이 없다. write lane 은 핸드셰이크 (101 / 403 / 426 / 405 / 400, 클라이언트의 Upgrade 요청) 와, 받은 frame 때문에 라이브러리가 닫을 때의 close frame (1002 / 1007 / 1009, 상대 close 에 대한 답) 에 쓴다. 뒤의 것은 base 의 `thenCloseWith` 로 close frame 만 보내고 닫는다 (9절).
 - **Work 는 없다.** 긴 작업은 `onMessage` 에서 데이터를 복사해 worker 에 넘기고, worker 가 끝나면 `KiottyNet_sendWebSocket` 으로 보낸다. 연결을 IO Thread 에서 떼어낼 이유가 없다.
 
@@ -61,7 +61,7 @@ WebSocket 전용 설정 struct 는 없다. 서버는 HttpServer 의 `KiottyNetHt
 
 | `KiottyNetHttpLimits` 필드 | 기본값 | WebSocket 에서의 뜻 |
 |---|---|---|
-| `max_body_bytes` | 64 KiB | 조각을 합친 메시지 하나의 최대 크기. 넘으면 1009 로 닫는다. 메시지는 body 의 Stage 에 모이므로 버퍼가 새로 생기지 않는다 |
+| `max_body_bytes` | 64 KiB | 조각을 합친 메시지 하나의 최대 크기. 넘으면 1009 로 닫는다. 메시지는 HTTP body 버퍼에 모이므로 버퍼가 새로 생기지 않는다 |
 | `max_header_bytes`, `max_headers` | 8 KiB, 32 | 서버: Upgrade 요청 (request line + 헤더) 의 상한. 넘으면 431. 클라이언트: 101 응답 헤더의 상한 |
 | `header_timeout_milliseconds` | 10000 | 핸드셰이크 timeout. 서버: Upgrade 요청을 다 받을 때까지. 클라이언트: 101 을 다 받을 때까지. 지나면 끊는다 (`onOpen` 전이므로 서버는 WebSocket 콜백 없음, 클라이언트는 onError) |
 | `response_bytes` | 64 KiB | 서버의 101 / 403 / 426 이 들어가는 응답 버퍼. 그 뒤로는 쓰지 않는다 |
@@ -78,7 +78,7 @@ base 의 버퍼 설정과 이렇게 맞물린다.
 
 | ServerConfig / ClientConfig | WebSocket 에서의 뜻 |
 |---|---|
-| `receive_capacity` | frame payload 를 이 크기 단위로 나눠 읽어 Stage 에 붙인다. 메시지보다 작아도 된다. Upgrade 요청의 상한은 이것이 아니라 `max_header_bytes` 다 |
+| `receive_capacity` | frame payload 를 이 크기 단위로 나눠 읽어 body 버퍼에 붙인다. 메시지보다 작아도 된다. Upgrade 요청의 상한은 이것이 아니라 `max_header_bytes` 다 |
 | `send_capacity` | 101 / 403 / 426 (서버), Upgrade 요청 (클라이언트), 라이브러리가 닫을 때의 close frame 이 나가는 write lane |
 | `push_capacity` | **`send`, `broadcast`, ping / pong / close frame 이 들어가는 곳.** 메시지 하나는 frame 머리 (최대 14 바이트) 를 더해 이 값 이하여야 하고, 상대가 느리면 여러 개가 쌓인다. 큰 메시지를 보내는 앱은 이 값을 올린다 |
 
@@ -159,7 +159,7 @@ app_context 는 `runHttpServer` 에 준 것이다.
 |---|---|---|---|
 | Upgrade | `KiottyNetBool (*)(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketUpgrade upgrade)` | 등록된 경로의 올바른 Upgrade 요청을 다 읽었을 때 | `KiottyNetWebSocketUpgrade` : `path`, `query`, `host`, `origin`, `protocols` (요청의 `Sec-WebSocket-Protocol` 원문). 모두 요청 버퍼를 가리키며 return 하면 무효. 1 이면 101, 0 이면 403 |
 | Open | `KiottyNetWebSocketContext (*)(KiottyNetAppContext app_context, KiottyNetWebSocketHandle websocket)` | 101 송신 완료 | 이 소켓의 `websocket_context`. NULL 이어도 된다 |
-| Message | `void (*)(KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketMessage message)` | 메시지 하나가 완성됐을 때. 조각은 합쳐져 있다 | `{ opcode, data }`. `data` 는 Stage 를 가리키며 return 하면 무효. TEXT 는 UTF-8 검사를 통과한 것 |
+| Message | `void (*)(KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketHandle websocket, KiottyNetWebSocketMessage message)` | 메시지 하나가 완성됐을 때. 조각은 합쳐져 있다 | `{ opcode, data }`. `data` 는 body 버퍼를 가리키며 return 하면 무효. TEXT 는 UTF-8 검사를 통과한 것 |
 | Close | `void (*)(KiottyNetAppContext app_context, KiottyNetWebSocketContext websocket_context, KiottyNetWebSocketClose close)` | 마지막 콜백. `onOpen` 이 나간 소켓에만, 한 번 | `{ code, status, reason }` (5.3). `reason` 은 return 하면 무효. **handle 이 없다** |
 
 **Close 에 handle 이 없는 이유.** 끊긴 뒤라 handle 로 할 수 있는 일이 없다 (http 결정 19 의 규약, base 의 onDisconnected 와 같다). 소켓을 앱의 목록에서 빼야 하면 Open 에서 handle 을 `websocket_context` 에 담아 두고 Close 에서 그것으로 지운다 (7절).
@@ -203,7 +203,7 @@ IO Thread 콜백 안에서 부르면 그 자리에서 복사한다. 다른 threa
 **receive 함수는 없다.** 메시지는 IO Thread 가 `onMessage` 로 밀어 준다 (JavaScript 의 `ws.onmessage`, libwebsockets 의 `LWS_CALLBACK_RECEIVE` 와 같다). 이유는 이렇다.
 
 - 서버의 push 는 언제 올지 모른다. 소켓을 읽고 ping / pong 을 처리하는 loop 는 어차피 돌아야 하고, 그 loop 가 메시지를 다 모은 순간이 `onMessage` 다.
-- `data` 는 Stage 를 가리킨다. 복사 없이 넘기므로 콜백 안에서 쓰거나 필요한 만큼만 복사한다.
+- `data` 는 HttpSession 의 body 버퍼를 가리킨다 (수신 Stage 에서 복사하며 unmask 한다). 복사 없이 넘기므로 콜백 안에서 쓰거나 필요한 만큼만 복사한다.
 
 `onMessage` 는 IO Thread 이므로 블로킹하지 않는다. 앱 thread 가 "요청을 보내고 답을 기다리는" 모양이 필요하면 앱이 다리를 놓는다. `onMessage` 가 받은 것을 앱의 큐에 복사하고 condition variable 을 깨우면, 앱 thread 는 `send` 뒤 그 큐에서 기다린다. 8절에 예제가 있다.
 
@@ -658,7 +658,7 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 | WebSocketReadingHeader | READ (2) | FIN / opcode / mask 비트 / 길이 7 비트 | 126 / 127 이면 ReadingExtendedLength, mask 면 ReadingMask, 아니면 ReadingPayload |
 | WebSocketReadingExtendedLength | READ (2 또는 8) | 길이 | ReadingMask 또는 ReadingPayload |
 | WebSocketReadingMask | READ (4) | mask key | ReadingPayload |
-| WebSocketReadingPayload | READ (min(남은 길이, `receive_capacity`)) | unmask 하며 Stage 에 붙인다. `max_body_bytes` 를 넘으면 1009 | 남으면 같은 상태 |
+| WebSocketReadingPayload | READ (min(남은 길이, `receive_capacity`)) | unmask 하며 body 버퍼에 붙인다. `max_body_bytes` 를 넘으면 1009 | 남으면 같은 상태 |
 | WebSocketReadingPayload | frame 끝, control frame | ping → push lane 에 pong (닫는 중이면 보내지 않는다). pong → 타이머 리셋. close → 플래그가 서 있으면 우리가 시작한 close 의 답이라 close(`SUCCESS`). 아니면 플래그를 세우고 받은 status 의 close frame 을 보낸 뒤 close(`SUCCESS`) (`thenCloseWith`) | ReadingHeader 또는 CLOSED |
 | WebSocketReadingPayload | frame 끝, 데이터 frame | FIN 이 아니면 다음 frame. FIN 이면 TEXT 의 UTF-8 검사 (아니면 1007), 닫힘 플래그가 서 있으면 버리고 아니면 `onMessage(websocket_context, websocket, { opcode, Stage })`, Stage 를 비운다 | ReadingHeader. 닫힘 플래그가 서 있으면 (`onMessage` 안의 close 포함) timeout `close_timeout`, 아니면 `ping_interval` (pong 을 기다리는 중이면 남은 `pong_timeout`) |
 | WebSocket* | READ, 잘못된 frame | 1002 / 1007 / 1009 close frame 을 보낸 뒤 close (`thenCloseWith`. 플래그가 이미 서 있으면 보내지 않고 바로 close) | CLOSED |
@@ -677,8 +677,8 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 | WebSocketReadingHeader ~ CLOSED | | 위 표의 WebSocket 행 그대로. mask 처리와 부르는 콜백 (`onMessage(app_context, message)`, `onClose(app_context, close)`) 만 역할 값을 따른다 | |
 | (run 의 끝) | | 열리지 않았고 아직 알리지 않았으면 run 의 결과 code 로 `onError` (6.1) | |
 
-- HTTP body 와 WebSocket 메시지가 같은 Stage 를 쓴다. Upgrade 요청에는 body 가 없고 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다.
-- 수신 frame 이 `receive_capacity` 보다 커도 payload 를 그 크기 단위로 나눠 읽어 Stage 에 붙인다. 조각마다 unmask 의 key offset 을 Session 이 든다.
+- HTTP body 와 WebSocket 메시지가 같은 body 버퍼를 쓴다. Upgrade 요청에는 body 가 없고 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다.
+- 수신 frame 이 `receive_capacity` 보다 커도 payload 를 그 크기 단위로 나눠 읽어 body 버퍼에 붙인다. 조각마다 unmask 의 key offset 을 Session 이 든다.
 - 송신 frame (pong, ping, `closeWebSocket` / `bye` 와 pong 늦음의 close, 사용자의 send 와 broadcast) 은 push lane 이다. 서버는 frame 머리와 payload 를 조각 둘로 넘겨 한 lock 안에서 이어 복사하고, 전부 들어가지 않으면 하나도 넣지 않는다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼 (create 때 한 번 잡는다) 를 mutex 로 지키며 거기에 mask 한 frame 을 만들어 한 조각으로 넣는다. 같은 lane 이므로 순서가 섞이지 않는다.
 - 클라이언트의 mask key 는 frame 마다 새것이고, `std::random_device` 로 seed 한 splitmix64 하나에서 뽑는다. push lane 의 frame 과 라이브러리가 닫으며 보내는 close frame 이 같은 생성기를 쓴다 (RFC 6455 10.3, v1 결정 15).
 - 받은 frame 때문에 라이브러리가 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 의 close frame 만 write lane 이다. base 의 `thenCloseWith` 로 Session 의 작은 버퍼 (131 바이트) 의 close frame 만 보내고 닫는다. push lane 에 남은 데이터 frame 은 버리므로 close frame 뒤에 데이터가 나가지 않는다. pong 늦음의 close 가 push lane 인 것은 그때 read 가 걸려 있어 write 를 걸 수 없어서다.

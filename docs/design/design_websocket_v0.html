@@ -186,7 +186,7 @@ KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits
 <ul>
   <li><b>등록.</b> run 전에 라우트처럼 부른다. 한 HttpServer 에 WebSocket 경로를 여럿 둘 수 있고 (<code>/chat</code>, <code>/telemetry</code>) 경로마다 handler 와 <code>app_context</code> 가 따로다. 설정 (메시지 상한, 타이머) 은 서버 하나에 한 벌이다 (결정 11).</li>
   <li><b>코드.</b> run 뒤 <code>BUSY</code>, 표가 차면 <code>TABLE_FULL</code> (<code>max_routes</code> 에 들어간다), 같은 path 가 이미 (라우트든 WebSocket 이든) 있으면 <code>DUPLICATE_RULE</code>, path 가 NULL / <code>/</code> 로 시작하지 않음 / 상한 초과, handler 의 <code>onOpen</code> 또는 <code>onMessage</code> 가 NULL 이면 <code>INVALID_ARGUMENT</code>.</li>
-  <li><b>메시지 상한.</b> 메시지는 HTTP body 의 <code>Stage</code> 에 모이므로 상한이 <code>max_body_bytes</code> 다. 넘는 메시지는 1009 로 닫는다.</li>
+  <li><b>메시지 상한.</b> 메시지는 HttpSession 의 body 버퍼에 모이므로 상한이 <code>max_body_bytes</code> 다. 넘는 메시지는 1009 로 닫는다.</li>
   <li><b>subprotocol (서버만, 결정 12).</b> subprotocol 은 같은 경로 안에서 "메시지를 어떤 약속으로 주고받을지" 를 고르는 이름이다 (<code>Sec-WebSocket-Protocol</code>). 일반 앱은 쓰지 않지만 표준 프로토콜을 WebSocket 에 얹는 클라이언트는 반드시 보낸다: MQTT (<code>mqtt</code>), OCPP 충전기 (<code>ocpp1.6</code>, <code>ocpp2.0.1</code>), GraphQL 구독 (<code>graphql-transport-ws</code>), STOMP (<code>v12.stomp</code>), SIP (<code>sip</code>). 이런 클라이언트가 후보를 보냈는데 서버가 하나도 고르지 않으면 브라우저와 대부분의 라이브러리가 연결을 실패로 처리한다. 그래서 서버는 고를 수 있어야 한다.
     <ul>
       <li>클라이언트가 보낸 후보는 <code>onUpgrade</code> 의 <code>upgrade.protocols</code> (쉼표로 이은 원문) 로 본다.</li>
@@ -311,7 +311,7 @@ server.run(address);                                                           /
 <table>
   <tr><th>Endpoint</th><th>base 의 Endpoint</th><th>표</th><th>Session</th></tr>
   <tr><td>HttpServer</td><td>Server</td><td>HTTP 요청 행 전부 + WebSocket 행</td><td>HttpSession. Upgrade 뒤 같은 Session 이 WebSocket 상태를 든다. 역할 값 = 서버 (받은 frame 의 mask 를 검사하고 벗긴다, 보내는 frame 에 mask 없음)</td></tr>
-  <tr><td>WebSocketClient</td><td>EventClient</td><td>Upgrade 요청을 보내고 101 을 읽는 행 (요청 쓰기, 상태줄, 헤더 줄) + 같은 WebSocket 행</td><td>HttpSession 하나 (응답 헤더 파싱에 요청 버퍼를, 메시지에 <code>Stage</code> 를 쓴다). 역할 값 = 클라이언트 (받은 frame 에 mask 가 있으면 1002, 보내는 frame 에 mask 를 씌운다)</td></tr>
+  <tr><td>WebSocketClient</td><td>EventClient</td><td>Upgrade 요청을 보내고 101 을 읽는 행 (요청 쓰기, 상태줄, 헤더 줄) + 같은 WebSocket 행</td><td>HttpSession 하나 (응답 헤더 파싱에 요청 버퍼를, 메시지에 body 버퍼 를 쓴다). 역할 값 = 클라이언트 (받은 frame 에 mask 가 있으면 1002, 보내는 frame 에 mask 를 씌운다)</td></tr>
 </table>
 
 <p>둘 다 "HttpSession 배열 + 표를 든 것" 이고 그것이 <code>KiottyNetWebSocketEndpoint</code> 다. 공통 base 를 어디에 두는지는 사이클 W1 의 코드 모양이고 공개 API 는 <code>owner</code> 포인터의 타입 하나다.</p>
@@ -324,9 +324,9 @@ server.run(address);                                                           /
     1 이면 응답 버퍼에 101 + Sec-WebSocket-Accept + (고른) Sec-WebSocket-Protocol → { WebSocketOpening, thenWrite(101) }       ← generation 을 올린다
 [WebSocketOpening] WRITTEN → onOpen(app_context, websocket) → websocket_context 를 Session 에 → { WebSocketReadingHeader, thenRead(2, ping_interval) }
 [WebSocketReadingHeader] READ(2) → FIN / opcode / mask 비트 / 길이 7 비트 → 126 / 127 이면 [ReadingExtendedLength], mask 면 [ReadingMask], 아니면 [ReadingPayload]
-[WebSocketReadingPayload] READ(min(남은 길이, receive_capacity)) → unmask 하며 Stage 에 붙인다 → 남으면 같은 상태, 다 받으면 :
+[WebSocketReadingPayload] READ(min(남은 길이, receive_capacity)) → unmask 하며 body 버퍼에 붙인다 → 남으면 같은 상태, 다 받으면 :
     control frame : ping → push lane 에 pong, pong → 타이머 리셋, close → 7절
-    데이터 frame : 닫힘 플래그가 서 있으면 버린다. 아니면 FIN 이면 onMessage(websocket_context, websocket, { opcode, Stage }) → Stage 비움
+    데이터 frame : 닫힘 플래그가 서 있으면 버린다. 아니면 FIN 이면 onMessage(websocket_context, websocket, { opcode, body }) → body 비움
     → onMessage 안에서 close 가 불렸으면 { WebSocketClosing, thenRead(2, close_timeout) }, 아니면 { WebSocketReadingHeader, thenRead(2, ping_interval) }
 TIMEOUT (어느 WebSocket 상태에서든) : 닫힘 플래그가 서 있으면 close(TIMEOUT). 아니면 ping 차례면 push lane 에 ping 하고 pong_timeout 으로 다시, pong 이 안 왔으면 close(TIMEOUT, 1001)
 [WebSocketClosing] 상대 close frame 을 받거나 close_timeout → thenClose(...) → CLOSED → onClose(app_context, websocket_context, websocket, { code, status, reason }) → release
@@ -336,12 +336,12 @@ WebSocketClient 의 연결 하나
     → onOpen → 위의 [WebSocketReadingHeader] 부터 같은 행</div>
 
 <ul>
-  <li>HTTP body 와 WebSocket 메시지가 같은 <code>Stage</code> 를 쓴다. Upgrade 요청에는 body 가 없고 (있으면 400), 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다. <code>max_body_bytes</code> 를 넘는 메시지는 1009 로 닫는다.</li>
-  <li>수신 frame 의 payload 는 <code>receive_capacity</code> 조각으로 읽어 Stage 에 붙인다 (user_guide 8절). 조각마다 unmask 의 key offset 을 Session 이 든다.</li>
+  <li>HTTP body 와 WebSocket 메시지가 같은 body 버퍼를 쓴다 (수신 Stage 에서 복사한다). Upgrade 요청에는 body 가 없고 (있으면 400), 101 뒤에는 HTTP 가 없으므로 한 연결에서 둘이 겹치는 순간이 없다. <code>max_body_bytes</code> 를 넘는 메시지는 1009 로 닫는다.</li>
+  <li>수신 frame 의 payload 는 <code>receive_capacity</code> 조각으로 읽어 body 버퍼에 붙인다 (user_guide 8절). 조각마다 unmask 의 key offset 을 Session 이 든다.</li>
   <li>송신 frame (pong / ping / <code>closeWebSocket</code> 과 pong 늦음의 close / 사용자 send) 은 push lane 이고, frame 머리 (2 ~ 14 바이트) + payload 를 한 번에 넣는다. <code>NotificationDesk</code> 가 머리와 payload 를 한 lock 안에서 이어 복사하고, 전부 들어가지 않으면 하나도 넣지 않는다 (http 설계 2.1). 클라이언트는 mask 를 desk 에 맡기지 않고 자기 push 에서 씌운다 (아래 W4).</li>
   <li><b>구현에서 정한 것 (W3, 2026-11-12).</b> (1) 받은 frame 때문에 우리가 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 의 close frame 은 <b>write lane</b> 이다. close 를 하면 base 가 소켓을 바로 shutdown 하고 push lane 의 남은 것은 나가지 않으므로, Session 의 작은 버퍼 (131 바이트) 에서 write lane 으로 보내고 WRITTEN 뒤에 닫는다 (<code>SocketClosing</code> 상태). (2) <b>pong 이 늦으면</b> 1001 close frame 을 push lane 에 넣고 닫힘 플래그를 세운 뒤 같은 read 를 <code>close_timeout</code> 으로 다시 건다. TIMEOUT 행 안에서는 read 가 걸려 있어 write 를 걸 수 없다 (base 가 BUSY). 상대가 답하면 <code>onClose(SUCCESS, 상대 status)</code>, 아니면 <code>onClose(TIMEOUT, 1001)</code>. (3) 위 흐름의 <code>WebSocketClosing</code> 은 따로 된 상태가 아니다. 닫힘 플래그가 서 있으면 같은 frame 읽기 상태에서 read 의 timeout 만 <code>close_timeout</code> 이 된다. (4) 101 을 만들 때 generation 을 올리므로 <code>onUpgrade</code> 의 handle 과 <code>onOpen</code> 의 handle 은 다르다. (5) WebSocket 경로는 라우트 표에 GET 하나로 들어 OPTIONS 는 자동 204, GET / HEAD / OPTIONS 밖은 자동 405 (<code>Allow: GET, HEAD, OPTIONS</code>) 이고, HEAD 만 Upgrade 검사의 405 (<code>Allow: GET</code>) 다.</li>
   <li><b>구현에서 정한 것 (W4, 2026-11-13).</b> (1) <b>클라이언트의 mask 는 push lane 안에서</b> 씌운다. base 의 desk 는 조각을 그대로 복사하므로, WebSocketClient 가 <code>push_capacity</code> 크기의 scratch 버퍼 (initialize 때 한 번) 를 mutex 로 지키며 mask 한 frame 을 만들어 한 조각으로 notify 한다. base 는 바뀌지 않는다. (2) mask key 는 frame 마다 splitmix64 (<code>std::random_device</code> seed), write lane 의 close frame 은 시계에서 만든 key. <code>Sec-WebSocket-Key</code> 는 run 마다 <code>std::random_device</code> 16 바이트. (3) 역할 값은 Session 이 아니라 <code>HttpSite::role</code> 이다 (사이트 하나가 한 역할). (4) 클라이언트도 연결마다 generation 을 올린다. (5) <code>await</code> 는 onOpen 이 나가면 SUCCESS, 그 전에 run 이 끝나면 run 의 반환값. (6) run 의 반환값: 핸드셰이크 실패는 PROTOCOL_ERROR, 101 이 <code>header_timeout</code> 안에 없으면 TIMEOUT, <code>close</code> 는 CLOSED, 그 밖에 끊기면 PEER_CLOSED (close handshake 를 마친 정상 종료 포함).</li>
-  <li><code>onMessage</code> 의 <code>data</code> 는 Stage 를 가리키고 return 하면 무효다 (Stage 를 비운다). TEXT 는 UTF-8 검사를 지나지 않으면 1007.</li>
+  <li><code>onMessage</code> 의 <code>data</code> 는 body 버퍼를 가리키고 return 하면 무효다 (body 를 비운다). TEXT 는 UTF-8 검사를 지나지 않으면 1007.</li>
 </ul>
 
 <h2 id="s7">7. 다른 thread 의 send 와 close</h2>

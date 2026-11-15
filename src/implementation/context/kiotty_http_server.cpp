@@ -9,8 +9,6 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr size_t MIN_RESPONSE_BYTES = RESPONSE_PREFIX_BYTES + 2;
-
         bool areLimitsUsable(const KiottyNetHttpLimits& limits);
         bool hasEverySocketMessage(HttpRegistry& registry);
     }
@@ -137,7 +135,7 @@ namespace kiotty::net::implementation
             if (!isInitialized(limits)) { return false; }
             const bool has_routes = limits.max_routes > 0;
             const bool has_headers = limits.max_headers > 0 && limits.max_header_bytes > 0;
-            const bool has_response = limits.response_bytes >= MIN_RESPONSE_BYTES;
+            const bool has_response = limits.response_bytes >= MIN_HTTP_RESPONSE_BYTES;
             return has_routes && has_headers && has_response;
         }
 

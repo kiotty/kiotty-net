@@ -48,8 +48,7 @@ namespace kiotty::net::implementation
         if (!header_slots) { return header_slots.code; }
         if (_block.size() < total.value) { _block.resize(total.value); }
         if (_headers.size() < header_slots.value) { _headers.resize(header_slots.value); }
-        if (_files.size() < count) { _files = std::vector<InputFile>(count); }
-        if (_links.size() < count) { _links = std::vector<SocketLink>(count); }
+        growResources(count);
         keepGenerations();
         _sessions.clear();
         _sessions.reserve(count);
@@ -62,10 +61,12 @@ namespace kiotty::net::implementation
             buffers.headers = Span<KiottyNetHttpHeader>{ _headers.data() + i * limits.max_headers,
                                                          limits.max_headers };
             const int32_t index = static_cast<int32_t>(i);
-            const SessionResources resources{ _files[i], _links[i] };
+            const SessionResources resources{ _files[i], _links[i], _published[i] };
             _sessions.emplace_back(site, resources, index, buffers);
             const bool has_history = i < _generations.size();
-            _sessions.back().id.generation = has_history ? _generations[i] : 0;
+            HttpSession& session = _sessions.back();
+            session.id.generation = has_history ? _generations[i] : 0;
+            session.published.store(session.id.value());
             _free.push_back(static_cast<int32_t>(count - 1 - i));
         }
         return KIOTTY_NET_CODE_SUCCESS;
@@ -88,7 +89,7 @@ namespace kiotty::net::implementation
         session.is_orphaned = session.is_worker_owned;
         if (session.is_orphaned) { return; }
         session.file.close();
-        session.id.generation = nextSessionGeneration(session.id.generation);
+        advanceSession(session);
         _free.push_back(session.id.index);
     }
 
@@ -106,16 +107,21 @@ namespace kiotty::net::implementation
         const bool is_inside = handle.index >= 0 && index < _sessions.size();
         if (!is_inside) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
         HttpSession& session = _sessions[index];
-        if (session.id.generation != handle.generation)
-        {
-            return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED);
-        }
+        const bool is_current = session.published.load() == id;
+        if (!is_current) { return SessionResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
         return SessionResult::success(session);
     }
 
     Span<SocketLink> HttpSessionPool::links()
     {
         return Span<SocketLink>{ _links.data(), _sessions.size() };
+    }
+
+    void HttpSessionPool::growResources(size_t count)
+    {
+        if (_files.size() < count) { _files = std::vector<InputFile>(count); }
+        if (_links.size() < count) { _links = std::vector<SocketLink>(count); }
+        if (_published.size() < count) { _published = std::vector<std::atomic<int64_t>>(count); }
     }
 
     void HttpSessionPool::keepGenerations()
@@ -131,6 +137,12 @@ namespace kiotty::net::implementation
     {
         if (generation == INT32_MAX) { return 1; }
         return generation + 1;
+    }
+
+    void advanceSession(HttpSession& session)
+    {
+        session.id.generation = nextSessionGeneration(session.id.generation);
+        session.published.store(session.id.value());
     }
 
     namespace

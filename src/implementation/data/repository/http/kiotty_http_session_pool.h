@@ -4,6 +4,7 @@
 #include "data/repository/http/kiotty_http_session.h"
 #include "kiotty_net_http.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -29,12 +30,14 @@ namespace kiotty::net::implementation
         Span<SocketLink> links();
 
     private:
+        void growResources(size_t count);
         void keepGenerations();
 
         std::vector<char>                _block;
         std::vector<KiottyNetHttpHeader> _headers;
         std::vector<InputFile>           _files;
         std::vector<SocketLink>          _links;
+        std::vector<std::atomic<int64_t>> _published;
         std::vector<HttpSession>         _sessions;
         std::vector<int32_t>             _free;
         std::vector<int32_t>             _generations;
@@ -42,4 +45,5 @@ namespace kiotty::net::implementation
     };
 
     int32_t nextSessionGeneration(int32_t generation);
+    void    advanceSession(HttpSession& session);
 }

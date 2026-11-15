@@ -1,5 +1,6 @@
 #include "kiotty_net_http.h"
 
+#include "context/kiotty_http_configuration.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
@@ -692,6 +693,12 @@ TEST_F(HttpServerTest, CreateRefusesLimitsThatWereNotInitialized)
     EXPECT_EQ(nullptr, created.handle);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_createHttpServer(context, nullptr, &limits).code);
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureHttpResponseCapacity(&limits, 16));
+    const size_t smallest = kiotty::net::implementation::MIN_HTTP_RESPONSE_BYTES;
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureHttpResponseCapacity(&limits, smallest - 1));
+    KiottyNetHttpLimits written = limits;
+    written.response_bytes = smallest - 1;
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_createHttpServer(context, &configuration, &written).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureHttpResponseCapacity(&limits, smallest));
 }
 
 #endif

@@ -9,6 +9,7 @@
 #include "domain/usecases/http/kiotty_http_message_framing.h"
 #include "kiotty_net_http.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -37,8 +38,9 @@ namespace kiotty::net::implementation
 
     struct SessionResources
     {
-        InputFile&  file;
-        SocketLink& link;
+        InputFile&            file;
+        SocketLink&           link;
+        std::atomic<int64_t>& published;
     };
 
     struct HttpSession
@@ -53,6 +55,7 @@ namespace kiotty::net::implementation
         HttpSite&                 site;
         InputFile&                file;
         SocketLink&               link;
+        std::atomic<int64_t>&     published;
         SocketState               socket;
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;

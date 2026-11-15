@@ -117,7 +117,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onConnected(Context context, Connection connection, Event)
         {
             HttpSession& session = sessionOf(context);
-            session.id.generation = nextSessionGeneration(session.id.generation);
+            advanceSession(session);
             session.request.begin(connection);
             session.response.begin();
             session.socket.reset();

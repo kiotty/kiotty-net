@@ -477,7 +477,7 @@ KiottyNetCode KiottyNet_setHttpCustomContentType(KiottyNetHttpResponseHandle res
 KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, KiottyNetSpan data);     /* 복사. 인자 순서와 타입 변경 */
 KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, KiottyNetSpan data);  /* 참조. 송신 완료까지 유효해야 한다 */
 KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type, const char* path);       /* 파일. 보통 BY_EXTENSION */
-KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type);                   /* 추가. Work 안에서만 */
+KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response, KiottyNetHttpContentType type);                   /* 추가. onRequest (startHttpWork 와 함께) 또는 Work 안. 보내는 것은 Work 의 writeHttpWorkChunk */
 KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response);</code></pre>
 
 <table>
@@ -779,7 +779,7 @@ int main()
 
 <table>
   <tr><th>어디서든</th><th>IO thread (<code>onRequest</code> 안) 또는 Work 를 든 worker</th><th>IO thread 만</th></tr>
-  <tr><td><code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>closeHttpServer</code>, <code>awaitHttpServer</code></td><td>setter 일곱. <code>startHttpWork</code> 는 <code>onRequest</code> 안만, <code>setHttpBodyStream</code> 은 worker 만 의미가 있다. <code>writeHttpWorkChunk</code> 는 worker 만</td><td><code>findHttpHeader</code> (request 가 유효한 동안), 라우트 등록 (run 전)</td></tr>
+  <tr><td><code>finishHttpWork*</code>, <code>isHttpWorkConnected</code>, <code>closeHttpServer</code>, <code>awaitHttpServer</code></td><td>setter 일곱. <code>startHttpWork</code> 는 <code>onRequest</code> 안만, <code>setHttpBodyStream</code> 은 <code>onRequest</code> (같이 <code>startHttpWork</code> 해야 한다. 6절 예제, HEAD 규칙) 또는 worker. <code>writeHttpWorkChunk</code> 는 worker 만</td><td><code>findHttpHeader</code> (request 가 유효한 동안), 라우트 등록 (run 전)</td></tr>
 </table>
 
 <ul>

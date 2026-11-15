@@ -53,7 +53,7 @@ namespace kiotty::net::implementation
                                       KiottyNetConnectionHandle connection,
                                       uint32_t wait_milliseconds)
     {
-        session.id.generation = nextSessionGeneration(session.id.generation);
+        advanceSession(session);
         detachFile(session);
         session.request.begin(connection);
         session.response.begin();

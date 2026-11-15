@@ -24,14 +24,12 @@ namespace kiotty::net::implementation
         constexpr uint32_t DEFAULT_PING_INTERVAL_MILLISECONDS = 30000;
         constexpr uint32_t DEFAULT_PONG_TIMEOUT_MILLISECONDS = 10000;
         constexpr uint32_t DEFAULT_CLOSE_TIMEOUT_MILLISECONDS = 5000;
-        constexpr size_t   MIN_HEADER_BYTES = 64;
 
         constexpr SizeRange ROUTES{ 1, 4096 };
-        constexpr SizeRange HEADER_BYTES{ MIN_HEADER_BYTES, MEBIBYTE };
+        constexpr SizeRange HEADER_BYTES{ MIN_HTTP_HEADER_BYTES, MEBIBYTE };
         constexpr SizeRange HEADERS{ 1, 1024 };
         constexpr SizeRange BODY_BYTES{ 0, 64 * MEBIBYTE };
-        constexpr size_t    MIN_RESPONSE_BYTES = RESPONSE_PREFIX_BYTES + MIN_HEADER_BYTES;
-        constexpr SizeRange RESPONSE_BYTES{ MIN_RESPONSE_BYTES, 64 * MEBIBYTE };
+        constexpr SizeRange RESPONSE_BYTES{ MIN_HTTP_RESPONSE_BYTES, 64 * MEBIBYTE };
 
         bool isWithin(size_t value, SizeRange range);
     }

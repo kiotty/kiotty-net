@@ -8,6 +8,9 @@
 
 namespace kiotty::net::implementation
 {
+    inline constexpr size_t MIN_HTTP_HEADER_BYTES = 64;
+    inline constexpr size_t MIN_HTTP_RESPONSE_BYTES = RESPONSE_PREFIX_BYTES + MIN_HTTP_HEADER_BYTES;
+
     struct HttpServerConfiguration
     {
         KiottyNetServerConfiguration server;

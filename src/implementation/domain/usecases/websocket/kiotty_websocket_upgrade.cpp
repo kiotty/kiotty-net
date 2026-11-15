@@ -217,7 +217,7 @@ namespace kiotty::net::implementation
             const Span<const char> protocol_name = literalOf("Sec-WebSocket-Protocol");
             if (!protocol.empty()) { (void)session.response.addHeader(protocol_name, protocol); }
             session.persistence = Persistence::UPGRADE;
-            session.id.generation = nextSessionGeneration(session.id.generation);
+            advanceSession(session);
             const KiottyNetTransition sending = startSending(session);
             return Next::moveToNextState(HttpState::SOCKET_OPENING, sending.entry_action);
         }

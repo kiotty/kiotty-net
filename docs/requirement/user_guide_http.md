@@ -146,7 +146,7 @@ DB 조회, 리포트 생성처럼 IO Thread 를 붙잡으면 안 되는 일은 b
 
 - **Work 를 받았으면 반드시 finish 한다.** finish 는 한 번만 유효하고 두 번째는 `KIOTTY_NET_CODE_BUSY`. 소유자가 destroy 된 뒤에 불러도 `KIOTTY_NET_CODE_PEER_CLOSED` 만 돌아온다.
 - finish 전까지 그 연결에는 어떤 콜백도 없다. deadline 도 멈춘다. 라이브러리는 Work 에 timeout 을 두지 않는다. 오래 걸릴 것 같으면 `KiottyNet_isHttpWorkConnected(work)` 로 peer 가 살아 있는지 확인한다. 반환은 `KiottyNetBool` 이고 0 이면 끊겼다 (C++ 의 `connected()` 는 `bool`). 끊겼으면 finish 는 `KIOTTY_NET_CODE_PEER_CLOSED` 다.
-- 소유자의 `close()` 는 Work 중인 연결에 FIN 만 보낸다. 연결은 finish 뒤에 닫히고, 그때까지 `run` 은 돌아오지 않는다. 그 finish 는 `KIOTTY_NET_CODE_CLOSED` 를 돌려준다.
+- 소유자의 `close()` 는 Work 중인 연결에 FIN 만 보낸다. 연결은 finish 뒤에 닫히고, 그때까지 `run` 은 돌아오지 않는다. 그 finish 는 `KIOTTY_NET_CODE_CLOSED` 를 돌려준다. 끊김 action (`KIOTTY_NET_CODE_CLOSED`) 은 worker 의 finish 보다 **먼저** 온다 (base 가 close 때 연결의 끝을 알리고, Session 반납만 finish 까지 미룬다).
 - Work 중에 그 연결로 들어온 notify (WebSocket 송신, broadcast) 는 쌓이기만 하고 finish 뒤에 나간다.
 - `finishHttpWorkWithResponse` 는 응답 버퍼의 내용을 그대로 보낸다. body 가 `response_bytes` 보다 커서 setter 가 `KIOTTY_NET_CODE_BUFFER_FULL` 이었다면 `setHttpBodyRef` 나 `setHttpFile` 로 바꾼다.
 
@@ -186,7 +186,7 @@ GET / HEAD 에만 적용되고 라우트와 같은 표에 들어간다. 다른 �
 | 함수 | 하는 일 |
 |---|---|
 | `KiottyNet_runHttpServer(s, address, tls, app_context)` | (tls 가 있으면 SSL_CTX 를 만들고) listen 을 열고 IO loop 를 돈다. **blocking.** `close` 가 불릴 때까지 return 하지 않는다. 열기에 실패하면 바로 그 코드. tls 가 `NULL` 이면 평문. `app_context` 는 이 run 동안의 모든 콜백 (라우트, Work, 끊김, 오류) 의 첫 인자다. worker 가 run 뒤까지 들고 있을 수 있으므로 수명은 앱이 지킨다 |
-| `KiottyNet_closeHttpServer(s)` | loop 를 멈추라고 알린다. 기다리지 않는다. Work 중인 연결도 바로 닫힌다 |
+| `KiottyNet_closeHttpServer(s)` | loop 를 멈추라고 알린다. 기다리지 않는다. Work 중인 연결은 FIN 을 보내고 worker 의 finish 뒤에 닫힌다 (1.5) |
 | `KiottyNet_awaitHttpServer(s, timeout_milliseconds)` | loop 가 돌기 시작할 때까지 기다린다. 시작했으면 `KIOTTY_NET_CODE_SUCCESS`, run 이 이미 끝났으면 run 의 반환값, 시간 안에 못 봤으면 `KIOTTY_NET_CODE_TIMEOUT` |
 | `KiottyNet_destroyHttpServer(context, s)` | run 이 return 한 뒤에 부른다 |
 
@@ -467,7 +467,7 @@ int main()
 
 | 함수 | 코드 | 뜻 |
 |---|---|---|
-| `addHttpRoute`, `setHttpNotFound`, `serveHttp*` | `KIOTTY_NET_CODE_TABLE_FULL` | `max_routes` 초과 |
+| `addHttpRoute`, `serveHttp*` | `KIOTTY_NET_CODE_TABLE_FULL` | `max_routes` 초과 (`setHttpNotFound` 는 표를 쓰지 않으므로 이 코드가 없다) |
 | `onHttpDisconnected`, `onHttpError` | `KIOTTY_NET_CODE_BUSY` | run 이 시작된 뒤 |
 | | `KIOTTY_NET_CODE_DUPLICATE_RULE` | 같은 (method, path) |
 | | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | path 형식 / 길이, `onRequest` NULL, 지원하지 않는 method, 끝에 `/` 없는 url_prefix |
@@ -478,12 +478,12 @@ int main()
 | body setter, `writeHttpWorkChunk` | `KIOTTY_NET_CODE_INVALID_ENCODING` | 텍스트 계열인데 UTF-8 아님 |
 | body setter | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | 이름 없는 `CUSTOM`, 자리에 맞지 않는 type (`BY_EXTENSION` 은 파일만, `EVENT_STREAM` 은 스트림만) |
 | setter 전부 | `KIOTTY_NET_CODE_BUSY` | 헤더가 이미 나감 |
-| `setHttpFile` | `KIOTTY_NET_CODE_NOT_FOUND` | 파일 없음 |
-| `writeHttpWorkChunk` | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | body 가 스트림이 아님, 빈 data |
+| `setHttpFile` | `KIOTTY_NET_CODE_NOT_FOUND` | 파일 없음. 파일을 type 검사보다 먼저 열므로 없는 파일 + 잘못된 type 도 `NOT_FOUND` 다 |
+| `writeHttpWorkChunk` | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | body 가 스트림이 아님, 빈 data. 인자 검사가 남아 있는 실패보다 먼저다 (앞의 write 가 실패한 뒤에도 빈 data 는 `INVALID_ARGUMENT`) |
 | | `KIOTTY_NET_CODE_TIMEOUT`, `KIOTTY_NET_CODE_PEER_CLOSED`, `KIOTTY_NET_CODE_CLOSED` | 그 뒤는 `finishHttpWorkWithClose` 만 |
 | `startHttpWork` | `KIOTTY_NET_CODE_INVALID_ARGUMENT` | 라우트에 `onWorkStarted` 가 없음 |
 | | `KIOTTY_NET_CODE_BUSY` | 이미 startWork 했음 |
-| `finishHttpWork*` | `KIOTTY_NET_CODE_BUSY` | 두 번째 finish |
+| `finishHttpWork*` | `KIOTTY_NET_CODE_BUSY` | 두 번째 finish. keep-alive 로 다음 요청이 열린 뒤에는 handle 의 generation 이 바뀌어 `KIOTTY_NET_CODE_PEER_CLOSED` 다 |
 | 응답 / Work 함수 공통 | `KIOTTY_NET_CODE_PEER_CLOSED` | 닫힌 handle |
 | `runHttpServer` | `KIOTTY_NET_CODE_SOCKET_ERROR`, `KIOTTY_NET_CODE_INVALID_ARGUMENT`, `KIOTTY_NET_CODE_TLS_*` | listen 실패, handle / 주소 / TLS 설정 잘못, 인증서 |
 | 끊김 action 의 reason | `KIOTTY_NET_CODE_PEER_NOT_READING` | 상대가 읽지 않아 send timeout |
