@@ -1,5 +1,7 @@
 #include "domain/usecases/websocket/kiotty_websocket_frame.h"
 
+#include "core/kiotty_bytes.h"
+
 namespace kiotty::net::implementation
 {
     namespace
@@ -18,13 +20,9 @@ namespace kiotty::net::implementation
         constexpr uint64_t SHORT_LENGTH_MIN = 126;
         constexpr uint64_t LONG_LENGTH_MIN = 0x10000;
         constexpr uint64_t LONG_LENGTH_TOP_BIT = 0x8000000000000000ull;
-        constexpr uint32_t BITS_PER_BYTE = 8;
         constexpr uint64_t GOLDEN_GAMMA = 0x9E3779B97F4A7C15ULL;
         constexpr uint64_t MIX_FIRST = 0xBF58476D1CE4E5B9ULL;
         constexpr uint64_t MIX_SECOND = 0x94D049BB133111EBULL;
-        using Status = KiottyNetWebSocketStatus;
-
-        constexpr Status   PROTOCOL_ERROR = KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR;
 
         bool      isKnownOpcode(uint8_t opcode);
         uint64_t  bigEndianOf(Span<const char> bytes);
@@ -40,13 +38,13 @@ namespace kiotty::net::implementation
 
     FrameStartResult parseFrameStart(Span<const char> bytes)
     {
-        if (bytes.length != FRAME_START_BYTES) { return FrameStartResult::failure(PROTOCOL_ERROR); }
+        if (bytes.length != FRAME_START_BYTES) { return FrameStartResult::failure(CLOSE_PROTOCOL); }
         const uint8_t first = static_cast<uint8_t>(bytes[0]);
         const uint8_t second = static_cast<uint8_t>(bytes[1]);
         const uint8_t opcode = first & OPCODE_BITS;
         const bool is_reserved = (first & RESERVED_BITS) != 0;
         const bool is_known = isKnownOpcode(opcode);
-        if (is_reserved || !is_known) { return FrameStartResult::failure(PROTOCOL_ERROR); }
+        if (is_reserved || !is_known) { return FrameStartResult::failure(CLOSE_PROTOCOL); }
         const FrameStart start{
             static_cast<FrameOpcode>(opcode),
             (first & FINAL_BIT) != 0 ? FrameFinality::FINAL : FrameFinality::MORE,
@@ -57,7 +55,7 @@ namespace kiotty::net::implementation
         const bool is_split = start.finality == FrameFinality::MORE;
         const bool is_long = start.length_code > MAX_CONTROL_PAYLOAD_BYTES;
         const bool is_bad_control = is_control && (is_split || is_long);
-        if (is_bad_control) { return FrameStartResult::failure(PROTOCOL_ERROR); }
+        if (is_bad_control) { return FrameStartResult::failure(CLOSE_PROTOCOL); }
         return FrameStartResult::success(start);
     }
 
@@ -72,11 +70,11 @@ namespace kiotty::net::implementation
     {
         const bool is_short = bytes.length == SHORT_LENGTH_BYTES;
         const bool is_long = bytes.length == LONG_LENGTH_BYTES;
-        if (!is_short && !is_long) { return FrameLengthResult::failure(PROTOCOL_ERROR); }
+        if (!is_short && !is_long) { return FrameLengthResult::failure(CLOSE_PROTOCOL); }
         const uint64_t length = bigEndianOf(bytes);
         const uint64_t minimum = is_short ? SHORT_LENGTH_MIN : LONG_LENGTH_MIN;
         const bool is_top_set = (length & LONG_LENGTH_TOP_BIT) != 0;
-        if (length < minimum || is_top_set) { return FrameLengthResult::failure(PROTOCOL_ERROR); }
+        if (length < minimum || is_top_set) { return FrameLengthResult::failure(CLOSE_PROTOCOL); }
         return FrameLengthResult::success(length);
     }
 

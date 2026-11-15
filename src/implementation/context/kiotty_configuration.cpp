@@ -1,7 +1,10 @@
 #include "context/kiotty_configuration.h"
 
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "data/datasource/kiotty_memory_limits.h"
+
+#include <algorithm>
 
 namespace kiotty::net::implementation
 {
@@ -24,9 +27,9 @@ namespace kiotty::net::implementation
 
         static_assert(sizeof(Capacities) == 3 * sizeof(size_t), "Capacities: unexpected padding");
 
-        using AddressResult = Result<KiottyNetAddress, KiottyNetCode>;
+        using MadeAddressResult = Result<KiottyNetAddress, KiottyNetCode>;
 
-        AddressResult                addressOf(KiottyNetTransport transport,
+        MadeAddressResult            addressOf(KiottyNetTransport transport,
                                                Span<const char> name,
                                                uint16_t port);
         KiottyNetServerConfiguration defaultServer();
@@ -36,7 +39,6 @@ namespace kiotty::net::implementation
         bool                         areCapacitiesValid(Capacities capacities);
         bool                         isWithin(size_t value, size_t maximum);
         bool                         isNoDelayKnown(KiottyNetNoDelay no_delay);
-        size_t                       smallerOf(size_t left, size_t right);
     }
 
     KiottyNetCode initializeTcpAddress(KiottyNetAddress& address,
@@ -44,7 +46,7 @@ namespace kiotty::net::implementation
                                        uint16_t port)
     {
         if (port == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const AddressResult made = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
+        const MadeAddressResult made = addressOf(KIOTTY_NET_TRANSPORT_TCP, host, port);
         if (!made) { return made.code; }
         address = made.value;
         return KIOTTY_NET_CODE_SUCCESS;
@@ -52,7 +54,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode initializePipeAddress(KiottyNetAddress& address, Span<const char> pipe_name)
     {
-        const AddressResult made = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
+        const MadeAddressResult made = addressOf(KIOTTY_NET_TRANSPORT_PIPE, pipe_name, 0);
         if (!made) { return made.code; }
         address = made.value;
         return KIOTTY_NET_CODE_SUCCESS;
@@ -215,18 +217,18 @@ namespace kiotty::net::implementation
             return false;
         }
 
-        AddressResult addressOf(KiottyNetTransport transport,
-                                Span<const char> name,
-                                uint16_t port)
+        MadeAddressResult addressOf(KiottyNetTransport transport,
+                                    Span<const char> name,
+                                    uint16_t port)
         {
-            if (name.empty()) { return AddressResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            if (name.empty()) { return MadeAddressResult::failure(INVALID); }
             KiottyNetAddress address{};
             address.transport = transport;
             const Span<char> field{ address.host, sizeof(address.host) };
             const bool written = writeText(field, name);
-            if (!written) { return AddressResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+            if (!written) { return MadeAddressResult::failure(INVALID); }
             address.port = port;
-            return AddressResult::success(address);
+            return MadeAddressResult::success(address);
         }
 
         bool isTransportKnown(KiottyNetTransport transport)
@@ -273,9 +275,9 @@ namespace kiotty::net::implementation
         Capacities defaultCapacities()
         {
             const size_t receive = DEFAULT_RECEIVE_CAPACITY_BYTES;
-            return Capacities{ smallerOf(receive, MemoryLimits::RECEIVE_CAPACITY),
-                               smallerOf(DEFAULT_CAPACITY_BYTES, MemoryLimits::SEND_CAPACITY),
-                               smallerOf(DEFAULT_CAPACITY_BYTES, MemoryLimits::PUSH_CAPACITY) };
+            return Capacities{ std::min(receive, MemoryLimits::RECEIVE_CAPACITY),
+                               std::min(DEFAULT_CAPACITY_BYTES, MemoryLimits::SEND_CAPACITY),
+                               std::min(DEFAULT_CAPACITY_BYTES, MemoryLimits::PUSH_CAPACITY) };
         }
 
         bool areCapacitiesValid(Capacities capacities)
@@ -289,11 +291,6 @@ namespace kiotty::net::implementation
         bool isWithin(size_t value, size_t maximum)
         {
             return value >= 1 && value <= maximum;
-        }
-
-        size_t smallerOf(size_t left, size_t right)
-        {
-            return left < right ? left : right;
         }
     }
 }

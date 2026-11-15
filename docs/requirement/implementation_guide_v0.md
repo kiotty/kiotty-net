@@ -2002,6 +2002,15 @@ void HttpClientLink::close()                          // 아무 thread
 
 ---
 
+### 6.8 단일 헤더 (2026-11-16)
+
+`tools/make_single_header.py` 가 공개 헤더 넷과 `KIOTTY_NET_SOURCES` (CMakeLists) 의 모든 .cpp 를 한 파일로 합친다 (사용법은 `user_guide_single_header.md`). 구현 부분은 **번역 단위 하나** 로 컴파일되므로 소스에 규칙이 하나 더 생긴다.
+
+- **파일 지역 이름도 라이브러리 전체에서 겹치지 않는다.** 익명 namespace 안의 함수, 상수, 타입이 다른 .cpp 의 것과 같은 이름이면 단일 헤더가 깨진다. 같은 것이면 공유 헤더로 옮기고 (재사용), 뜻이 다르면 파일에 맞는 이름을 붙인다. 같이 컴파일되지 않는 짝 (POSIX / Windows, iocp / readiness backend) 은 같은 이름이어도 된다. 같은 type alias (`Next`, `Event`, `Clock` 등) 의 반복은 문법상 괜찮다.
+- **Windows 매크로 이름을 쓰지 않는다.** `windows.h` 가 앞의 파일에서 include 되면 뒤의 모든 코드에 매크로가 걸린다 (`near`, `far`, `min`, `max`, `DELETE`, `ERROR`, `IN`, `OUT`, `interface` 등).
+- 이번에 생긴 공유 헤더: `core/kiotty_bytes.h` (`BITS_PER_BYTE`, `BYTE_MASK`), `core/kiotty_codes.h` (`INVALID`, `PROTOCOL_ERROR`, `RESULT_MAXIMUM_BYTES`, `resultOf`), `domain/usecases/http/kiotty_http_constants.h` (HTTP status 상수, `CONTENT_LENGTH`), `domain/usecases/http/kiotty_http_rule_names.h` (서버 / 클라이언트 machine 이 같이 쓰는 상태 / 이벤트 이름). `core/kiotty_text.h` 에 줄 끝 상수와 `literalOf`, `core/kiotty_clock.h` 에 `EXPIRED_MILLISECONDS`.
+- 깨졌는지는 `tests/single_header/` 가 매 빌드에 본다 (생성 → 컴파일 → smoke).
+
 ## 7. 미결
 
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.

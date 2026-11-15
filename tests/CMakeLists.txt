@@ -41,6 +41,7 @@ endfunction()
 
 add_subdirectory(unit)
 add_subdirectory(integration)
+add_subdirectory(single_header)
 
 if(KIOTTY_NET_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)

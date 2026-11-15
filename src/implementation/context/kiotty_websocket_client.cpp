@@ -22,12 +22,6 @@ namespace kiotty::net::implementation
 
         using KeyText = FixedString<WEB_SOCKET_KEY_LENGTH + 1>;
 
-        template <size_t N>
-        Span<const char> literalOf(const char (&text)[N])
-        {
-            return Span<const char>{ text, N - 1 };
-        }
-
         KeyText     randomKey();
         const char* messageOf(KiottyNetCode code);
         bool        isReported(KiottyNetCode code);

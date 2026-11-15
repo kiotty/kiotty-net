@@ -8,7 +8,7 @@ namespace kiotty::net::implementation
     {
         constexpr int32_t NO_MACHINE_STATE = 0;
 
-        KiottyNetConnectionAction actionOf(KiottyNetActionType type);
+        KiottyNetConnectionAction typedActionOf(KiottyNetActionType type);
     }
 
     CallbackHandler::CallbackHandler(const KiottyNetConnectionHandler& callbacks,
@@ -54,7 +54,7 @@ namespace kiotty::net::implementation
         case KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED:
             return disconnect(event, caller);
         }
-        return actionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
+        return typedActionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
     }
 
     void CallbackHandler::report(const KiottyNetConnectionInfo& info,
@@ -68,7 +68,7 @@ namespace kiotty::net::implementation
                                                          const Caller& caller) const
     {
         _callbacks.onWorkStarted(caller.context, event.stream);
-        return actionOf(KIOTTY_NET_ACTION_TYPE_START_WORK);
+        return typedActionOf(KIOTTY_NET_ACTION_TYPE_START_WORK);
     }
 
     KiottyNetConnectionAction CallbackHandler::disconnect(const KiottyNetConnectionEvent& event,
@@ -76,12 +76,12 @@ namespace kiotty::net::implementation
     {
         const KiottyNetCode reason = event.reason;
         _callbacks.onDisconnected(_app_context, caller.context, reason);
-        return actionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
+        return typedActionOf(KIOTTY_NET_ACTION_TYPE_HOLD);
     }
 
     namespace
     {
-        KiottyNetConnectionAction actionOf(KiottyNetActionType type)
+        KiottyNetConnectionAction typedActionOf(KiottyNetActionType type)
         {
             KiottyNetConnectionAction action{};
             action.type = type;

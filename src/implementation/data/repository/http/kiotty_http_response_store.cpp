@@ -6,7 +6,7 @@
 #include "domain/usecases/http/kiotty_http_response_text.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 
-#include <string>
+#include <algorithm>
 
 namespace kiotty::net::implementation
 {
@@ -18,20 +18,18 @@ namespace kiotty::net::implementation
         constexpr int32_t STATUS_NOT_FOUND = 404;
         constexpr int32_t STATUS_NO_CONTENT = 204;
         constexpr int32_t STATUS_NOT_MODIFIED = 304;
-        constexpr size_t  LINE_END_BYTES = 2;
         constexpr size_t  SEPARATOR_BYTES = 2;
         constexpr char    LAST_CHUNK[] = "0\r\n\r\n";
 
-        constexpr const char* RESERVED_NAMES[] = {
+        constexpr const char* RESERVED_RESPONSE_NAMES[] = {
             "Content-Length", "Transfer-Encoding", "Connection", "Date", "Content-Type",
         };
 
         ResponseLayout   emptyLayout(Span<char> buffer);
-        Span<const char> literalOf(const char* text);
-        bool             isReservedName(Span<const char> name);
-        bool             isFieldValue(Span<const char> value);
+        bool             isReservedResponseName(Span<const char> name);
+        bool             isFieldText(Span<const char> value);
         bool             isBodiless(int32_t status);
-        bool             isNamedType(KiottyNetHttpContentType type, BodyStorage storage);
+        bool             isNamedBodyType(KiottyNetHttpContentType type, BodyStorage storage);
         void             writeField(Span<char> target,
                                     Span<const char> name,
                                     Span<const char> value);
@@ -39,7 +37,6 @@ namespace kiotty::net::implementation
         Span<const char> sealedBodyOf(const ResponseLayout& layout, bool is_bodiless);
         uint64_t         bodyLengthOf(const ResponseLayout& layout);
         size_t           headerLengthOf(const ResponseLayout& layout);
-        size_t           smallerOf(size_t left, size_t right);
     }
 
     ResponseFrame::ResponseFrame(const ResponseLayout& layout)
@@ -57,7 +54,7 @@ namespace kiotty::net::implementation
         const bool is_file = _layout.storage == BodyStorage::FILE;
         const Span<const char> body{ _layout.body.data, is_file ? 0 : _layout.sendable_body };
         const Span<const char> rest = is_header ? header : body.skip(offset - header_length);
-        return Span<const char>{ rest.data, smallerOf(rest.length, max_length) };
+        return Span<const char>{ rest.data, std::min(rest.length, max_length) };
     }
 
     KiottyNetCode ResponseFrame::checkChunk(Span<const char> data) const
@@ -83,7 +80,7 @@ namespace kiotty::net::implementation
         const FilePiece none{ Span<char>{ nullptr, 0 }, 0, false };
         if (!has_rest) { return none; }
         const size_t rest = _layout.sendable_body - body_offset;
-        const size_t length = smallerOf(smallerOf(rest, max_length), _layout.buffer.length);
+        const size_t length = std::min(std::min(rest, max_length), _layout.buffer.length);
         return FilePiece{ Span<char>{ _layout.buffer.data, length }, body_offset, true };
     }
 
@@ -98,7 +95,7 @@ namespace kiotty::net::implementation
     {
         const Span<const char> none{ nullptr, 0 };
         const Span<char> area = _layout.buffer.skip(_layout.header_start);
-        const size_t room = smallerOf(area.length, limit);
+        const size_t room = std::min(area.length, limit);
         const ChunkHead head = chunkHeadOf(data.length);
         const size_t framing = kept + head.length() + LINE_END_BYTES;
         const bool has_room = framing <= room && data.length <= room - framing;
@@ -139,9 +136,9 @@ namespace kiotty::net::implementation
 
     KiottyNetCode HttpResponseStore::addHeader(Span<const char> name, Span<const char> value)
     {
-        const bool is_name = isToken(name) && !isReservedName(name);
+        const bool is_name = isToken(name) && !isReservedResponseName(name);
         if (!is_name) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isFieldValue(value)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isFieldText(value)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         if (!isUtf8(value)) { return KIOTTY_NET_CODE_INVALID_ENCODING; }
         const size_t needed = name.length + value.length + SEPARATOR_BYTES + LINE_END_BYTES;
         if (needed > headerRoom()) { return KIOTTY_NET_CODE_BUFFER_FULL; }
@@ -224,7 +221,7 @@ namespace kiotty::net::implementation
     KiottyNetCode HttpResponseStore::checkBodyType(KiottyNetHttpContentType type,
                                                    BodyStorage storage) const
     {
-        if (isNamedType(type, storage)) { return KIOTTY_NET_CODE_SUCCESS; }
+        if (isNamedBodyType(type, storage)) { return KIOTTY_NET_CODE_SUCCESS; }
         const bool is_custom = type == KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM && !_custom.empty();
         if (is_custom) { return KIOTTY_NET_CODE_SUCCESS; }
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -266,21 +263,16 @@ namespace kiotty::net::implementation
             };
         }
 
-        Span<const char> literalOf(const char* text)
+        bool isReservedResponseName(Span<const char> name)
         {
-            return Span<const char>{ text, std::char_traits<char>::length(text) };
-        }
-
-        bool isReservedName(Span<const char> name)
-        {
-            for (const char* reserved : RESERVED_NAMES)
+            for (const char* reserved : RESERVED_RESPONSE_NAMES)
             {
                 if (equalsLiteralIgnoreCase(name, reserved)) { return true; }
             }
             return false;
         }
 
-        bool isFieldValue(Span<const char> value)
+        bool isFieldText(Span<const char> value)
         {
             for (size_t i = 0; i < value.length; ++i)
             {
@@ -298,7 +290,7 @@ namespace kiotty::net::implementation
             return is_informational || status == STATUS_NO_CONTENT || status == STATUS_NOT_MODIFIED;
         }
 
-        bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)
+        bool isNamedBodyType(KiottyNetHttpContentType type, BodyStorage storage)
         {
             const bool is_listed = type >= KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM
                                    && type < KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION;
@@ -343,11 +335,6 @@ namespace kiotty::net::implementation
         size_t headerLengthOf(const ResponseLayout& layout)
         {
             return layout.header_end - layout.header_start;
-        }
-
-        size_t smallerOf(size_t left, size_t right)
-        {
-            return left < right ? left : right;
         }
     }
 }

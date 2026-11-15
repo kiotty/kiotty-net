@@ -1,6 +1,8 @@
 #include "domain/usecases/http/kiotty_http_request_head.h"
 
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
+#include "domain/usecases/http/kiotty_http_constants.h"
 #include "domain/usecases/http/kiotty_http_content_type.h"
 #include "domain/usecases/http/kiotty_http_request_check.h"
 #include "domain/usecases/http/kiotty_http_request_line.h"
@@ -24,7 +26,6 @@ namespace kiotty::net::implementation
             bool   has_content_length;
         };
 
-        constexpr KiottyNetCode INVALID_ARGUMENT = KIOTTY_NET_CODE_INVALID_ARGUMENT;
         constexpr size_t        HOST_LINE_COUNT = 1;
         constexpr char          OPEN_BRACKET[] = "[";
         constexpr char          CLOSE_BRACKET[] = "]";
@@ -32,11 +33,9 @@ namespace kiotty::net::implementation
         constexpr char          FIELD_SEPARATOR[] = ": ";
         constexpr char          SPACE[] = " ";
         constexpr char          VERSION_LINE_END[] = " HTTP/1.1\r\n";
-        constexpr char          LINE_END[] = "\r\n";
         constexpr char          HOST[] = "Host";
         constexpr char          PIPE_HOST[] = "localhost";
         constexpr char          CONTENT_TYPE[] = "Content-Type";
-        constexpr char          CONTENT_LENGTH[] = "Content-Length";
 
         bool          isHostText(Span<const char> host);
         bool          isLiteralV6(Span<const char> host);
@@ -52,13 +51,13 @@ namespace kiotty::net::implementation
         bool writeSharedHeaders(HeadCursor& cursor, const RequestHead& head, const HeadPlan& plan);
         bool writeExtraHeaders(HeadCursor& cursor, Span<const KiottyNetHttpHeader> headers);
         bool writeBodyFields(HeadCursor& cursor, const RequestHead& head, const HeadPlan& plan);
-        bool writeField(HeadCursor& cursor, Span<const char> name, Span<const char> value);
+        bool putField(HeadCursor& cursor, Span<const char> name, Span<const char> value);
         bool appendText(HeadCursor& cursor, Span<const char> text);
     }
 
     HostFieldResult buildHostField(Span<const char> host, uint16_t port, uint16_t default_port)
     {
-        if (!isHostText(host)) { return HostFieldResult::failure(INVALID_ARGUMENT); }
+        if (!isHostText(host)) { return HostFieldResult::failure(INVALID); }
         const bool is_literal_v6 = isLiteralV6(host);
         const bool has_port = port != default_port;
         const DecimalText digits = decimalOf(port);
@@ -68,7 +67,7 @@ namespace kiotty::net::implementation
         is_written = is_written && (!is_literal_v6 || field.append(textOf(CLOSE_BRACKET)));
         is_written = is_written && (!has_port || field.append(textOf(PORT_SEPARATOR)));
         is_written = is_written && (!has_port || field.append(digits.span()));
-        if (!is_written) { return HostFieldResult::failure(INVALID_ARGUMENT); }
+        if (!is_written) { return HostFieldResult::failure(INVALID); }
         return HostFieldResult::success(field);
     }
 
@@ -118,7 +117,7 @@ namespace kiotty::net::implementation
         KiottyNetCode checkHeadParts(const RequestHead& head)
         {
             const bool is_method = methodTextOf(head.method).length > 0;
-            if (!is_method) { return INVALID_ARGUMENT; }
+            if (!is_method) { return INVALID; }
             const KiottyNetCode path = checkRequestPath(head.method, head.path);
             if (path != KIOTTY_NET_CODE_SUCCESS) { return path; }
             const bool is_table_full = head.extra_headers.length > head.max_headers;
@@ -188,7 +187,7 @@ namespace kiotty::net::implementation
             is_written = is_written && appendText(cursor, textOf(SPACE));
             is_written = is_written && appendText(cursor, head.path);
             is_written = is_written && appendText(cursor, textOf(VERSION_LINE_END));
-            return is_written && writeField(cursor, textOf(HOST), head.host_field);
+            return is_written && putField(cursor, textOf(HOST), head.host_field);
         }
 
         bool writeSharedHeaders(HeadCursor& cursor, const RequestHead& head, const HeadPlan& plan)
@@ -197,7 +196,7 @@ namespace kiotty::net::implementation
             {
                 const bool is_sent = isSharedSent(header, head, plan);
                 const Span<const char> name = spanOf(header.name);
-                const bool is_written = !is_sent || writeField(cursor, name, spanOf(header.value));
+                const bool is_written = !is_sent || putField(cursor, name, spanOf(header.value));
                 if (!is_written) { return false; }
             }
             return true;
@@ -208,7 +207,7 @@ namespace kiotty::net::implementation
             for (const KiottyNetHttpHeader& header : headers)
             {
                 const Span<const char> value = trimWhitespace(spanOf(header.value));
-                const bool is_written = writeField(cursor, spanOf(header.name), value);
+                const bool is_written = putField(cursor, spanOf(header.name), value);
                 if (!is_written) { return false; }
             }
             return true;
@@ -219,13 +218,13 @@ namespace kiotty::net::implementation
             const Span<const char> type = contentTypeTextOf(head.type);
             const DecimalText length = decimalOf(head.body_length);
             const bool is_typed = !plan.has_content_type
-                                  || writeField(cursor, textOf(CONTENT_TYPE), type);
+                                  || putField(cursor, textOf(CONTENT_TYPE), type);
             if (!is_typed) { return false; }
             return !plan.has_content_length
-                   || writeField(cursor, textOf(CONTENT_LENGTH), length.span());
+                   || putField(cursor, textOf(CONTENT_LENGTH), length.span());
         }
 
-        bool writeField(HeadCursor& cursor, Span<const char> name, Span<const char> value)
+        bool putField(HeadCursor& cursor, Span<const char> name, Span<const char> value)
         {
             bool is_written = appendText(cursor, name);
             is_written = is_written && appendText(cursor, textOf(FIELD_SEPARATOR));

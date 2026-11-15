@@ -1,17 +1,18 @@
 #include "domain/usecases/http/kiotty_http_reply_framing.h"
 
+#include "core/kiotty_codes.h"
+
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr KiottyNetCode PROTOCOL_ERROR = KIOTTY_NET_CODE_PROTOCOL_ERROR;
         constexpr int32_t       FIRST_SUCCESS_STATUS = 200;
         constexpr int32_t       SWITCHING_STATUS = KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS;
         constexpr int32_t       NO_CONTENT_STATUS = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
         constexpr int32_t       NOT_MODIFIED_STATUS = KIOTTY_NET_HTTP_STATUS_NOT_MODIFIED;
 
         ReplyFraming  frameWithoutBody(ReplyPhase phase, Persistence persistence);
-        ReplyBodyKind kindOf(BodyKind kind);
+        ReplyBodyKind replyKindOf(BodyKind kind);
         bool          isAcceptedStatus(int32_t status);
         bool          isBodyless(KiottyNetHttpMethod method, int32_t status);
     }
@@ -29,7 +30,7 @@ namespace kiotty::net::implementation
         if (isBodyless(method, status)) { return ReplyFramingResult::success(bodyless); }
         const FramingResult framing = selectBodyFraming(headers);
         if (!framing) { return ReplyFramingResult::failure(PROTOCOL_ERROR); }
-        const ReplyBodyKind kind = kindOf(framing.value.kind);
+        const ReplyBodyKind kind = replyKindOf(framing.value.kind);
         const bool is_until_close = kind == ReplyBodyKind::UNTIL_CLOSE;
         const Persistence kept = is_until_close ? Persistence::CLOSE : persistence;
         const ReplyFraming framed{ framing.value.length, kind, kept, ReplyPhase::FINAL };
@@ -43,7 +44,7 @@ namespace kiotty::net::implementation
             return ReplyFraming{ 0, ReplyBodyKind::NONE, persistence, phase };
         }
 
-        ReplyBodyKind kindOf(BodyKind kind)
+        ReplyBodyKind replyKindOf(BodyKind kind)
         {
             switch (kind)
             {

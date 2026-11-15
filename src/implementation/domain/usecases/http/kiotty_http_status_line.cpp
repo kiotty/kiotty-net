@@ -1,5 +1,7 @@
 #include "domain/usecases/http/kiotty_http_status_line.h"
 
+#include "core/kiotty_codes.h"
+
 #include "core/kiotty_parse_integer.h"
 #include "domain/usecases/http/kiotty_http_header_line.h"
 
@@ -9,7 +11,6 @@ namespace kiotty::net::implementation
     {
         using StatusResult = Result<int32_t, KiottyNetCode>;
 
-        constexpr KiottyNetCode PROTOCOL_ERROR = KIOTTY_NET_CODE_PROTOCOL_ERROR;
         constexpr size_t        VERSION_BYTES = 8;
         constexpr size_t        STATUS_DIGITS = 3;
         constexpr size_t        STATUS_START = VERSION_BYTES + 1;

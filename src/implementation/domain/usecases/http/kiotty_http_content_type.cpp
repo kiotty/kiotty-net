@@ -25,7 +25,7 @@ namespace kiotty::net::implementation
         constexpr TextKind CHARSET = TextKind::UTF8_WITH_CHARSET;
         constexpr TextKind UTF8 = TextKind::UTF8;
         constexpr TextKind BINARY = TextKind::BINARY;
-        constexpr size_t   NOT_FOUND = static_cast<size_t>(-1);
+        constexpr size_t   NO_INDEX = static_cast<size_t>(-1);
 
         constexpr ContentTypeEntry CONTENT_TYPES[] = {
             { KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM, "application/octet-stream", BINARY },
@@ -190,14 +190,14 @@ namespace kiotty::net::implementation
 
         Span<const char> extensionOf(Span<const char> path)
         {
-            size_t dot = NOT_FOUND;
+            size_t dot = NO_INDEX;
             for (size_t i = 0; i < path.length; ++i)
             {
                 const bool is_separator = path[i] == '/' || path[i] == '\\';
-                dot = is_separator ? NOT_FOUND : dot;
+                dot = is_separator ? NO_INDEX : dot;
                 dot = path[i] == '.' ? i : dot;
             }
-            if (dot == NOT_FOUND) { return Span<const char>{ nullptr, 0 }; }
+            if (dot == NO_INDEX) { return Span<const char>{ nullptr, 0 }; }
             return path.skip(dot + 1);
         }
 
@@ -220,12 +220,12 @@ namespace kiotty::net::implementation
         {
             const size_t mark = skipWhitespace(text, position);
             const bool has_semicolon = mark < text.length && text[mark] == ';';
-            if (!has_semicolon) { return NOT_FOUND; }
+            if (!has_semicolon) { return NO_INDEX; }
             const size_t name_start = skipWhitespace(text, mark + 1);
             const size_t name_end = skipToken(text, name_start);
             const bool has_name = name_end > name_start && name_end < text.length;
             const bool has_equals = has_name && text[name_end] == '=';
-            if (!has_equals) { return NOT_FOUND; }
+            if (!has_equals) { return NO_INDEX; }
             return skipValue(text, name_end + 1);
         }
 
@@ -234,7 +234,7 @@ namespace kiotty::net::implementation
             const bool is_quoted = position < text.length && text[position] == '"';
             if (is_quoted) { return skipQuoted(text, position + 1); }
             const size_t end = skipToken(text, position);
-            if (end == position) { return NOT_FOUND; }
+            if (end == position) { return NO_INDEX; }
             return end;
         }
 
@@ -245,10 +245,10 @@ namespace kiotty::net::implementation
             {
                 const char character = text[cursor];
                 const bool is_allowed = isVisibleCharacter(character) || isWhitespace(character);
-                if (!is_allowed) { return NOT_FOUND; }
+                if (!is_allowed) { return NO_INDEX; }
                 cursor += text[cursor] == '\\' ? 2 : 1;
             }
-            if (cursor >= text.length) { return NOT_FOUND; }
+            if (cursor >= text.length) { return NO_INDEX; }
             return cursor + 1;
         }
     }

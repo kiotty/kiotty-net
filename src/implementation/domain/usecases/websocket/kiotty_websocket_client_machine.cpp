@@ -2,6 +2,7 @@
 
 #include "domain/entity/kiotty_action.h"
 #include "domain/usecases/http/kiotty_http_exchange.h"
+#include "domain/usecases/http/kiotty_http_rule_names.h"
 #include "domain/usecases/http/kiotty_http_status_line.h"
 #include "domain/usecases/websocket/kiotty_websocket_rows.h"
 #include "domain/usecases/websocket/kiotty_websocket_upgrade.h"
@@ -12,48 +13,35 @@ namespace kiotty::net::implementation
     {
         using Next = KiottyNet_Transition<HttpState>;
         using Event = KiottyNetConnectionEvent;
-        using Context = KiottyNetConnectionContext;
-        using Connection = KiottyNetConnectionHandle;
-        using EventType = KiottyNetConnectionEventType;
+        using Session = KiottyNetConnectionContext;
+        using Handle = KiottyNetConnectionHandle;
 
         constexpr char   PROTOCOL_HEADER[] = "Sec-WebSocket-Protocol";
         constexpr size_t PROTOCOL_HEADER_LENGTH = sizeof(PROTOCOL_HEADER) - 1;
 
-        KiottyNetTransition onConnected(Context context, Connection connection, Event event);
-        KiottyNetTransition onUpgradeSent(Context context, Connection connection, Event event);
-        KiottyNetTransition onStatusLine(Context context, Connection connection, Event event);
-        KiottyNetTransition onResponseHeader(Context context, Connection connection, Event event);
-        KiottyNetTransition onTimeout(Context context, Connection connection, Event event);
-        KiottyNetTransition onClosed(Context context, Connection connection, Event event);
+        KiottyNetTransition onClientConnected(Session context, Handle connection, Event event);
+        KiottyNetTransition onUpgradeSent(Session context, Handle connection, Event event);
+        KiottyNetTransition onStatusLine(Session context, Handle connection, Event event);
+        KiottyNetTransition onResponseHeader(Session context, Handle connection, Event event);
+        KiottyNetTransition onClientTimeout(Session context, Handle connection, Event event);
+        KiottyNetTransition onClientClosed(Session context, Handle connection, Event event);
 
         KiottyNetTransition        writeRequest(HttpSession& session);
         bool                       isSwitchingLine(Span<const char> line);
-        KiottyNetConnectionContext createSession(KiottyNetAppContext app_context,
-                                                 KiottyNetConnectionInfo info);
-        void                       releaseSession(KiottyNetAppContext app_context,
-                                                  KiottyNetConnectionContext context);
-        void                       reportError(KiottyNetAppContext app_context,
-                                               KiottyNetConnectionInfo info,
-                                               KiottyNetCode code,
-                                               const char* message);
+        KiottyNetConnectionContext createClientSession(KiottyNetAppContext app_context,
+                                                       KiottyNetConnectionInfo info);
+        void                       releaseClientSession(KiottyNetAppContext app_context,
+                                                        KiottyNetConnectionContext context);
+        void                       reportClientError(KiottyNetAppContext app_context,
+                                                     KiottyNetConnectionInfo info,
+                                                     KiottyNetCode code,
+                                                     const char* message);
 
         constexpr HttpState UPGRADE_SENDING = HttpState::SENDING;
         constexpr HttpState STATUS_LINE = HttpState::REQUEST_LINE;
-        constexpr HttpState HEADER_LINE = HttpState::HEADER_LINE;
-        constexpr HttpState CLOSING = HttpState::CLOSING;
-        constexpr HttpState FRAME_START = HttpState::FRAME_START;
-        constexpr HttpState FRAME_LENGTH = HttpState::FRAME_LENGTH;
-        constexpr HttpState FRAME_MASK = HttpState::FRAME_MASK;
-        constexpr HttpState FRAME_PAYLOAD = HttpState::FRAME_PAYLOAD;
-
-        constexpr EventType CONNECTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;
-        constexpr EventType READ = KIOTTY_NET_CONNECTION_EVENT_TYPE_READ;
-        constexpr EventType WRITTEN = KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN;
-        constexpr EventType TIMEOUT = KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT;
-        constexpr EventType CLOSED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED;
 
         constexpr auto CLIENT_RULES = KiottyNet_rules(
-            KiottyNet_when(CONNECTED).then(onConnected).to(UPGRADE_SENDING),
+            KiottyNet_when(CONNECTED).then(onClientConnected).to(UPGRADE_SENDING),
             KiottyNet_from(UPGRADE_SENDING)
                 .when(WRITTEN)
                 .then(onUpgradeSent)
@@ -95,8 +83,8 @@ namespace kiotty::net::implementation
                 .when(TIMEOUT)
                 .then(onSocketTimeout)
                 .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
-            KiottyNet_when(CLOSED).then(onClosed));
+            KiottyNet_when(TIMEOUT).then(onClientTimeout).to(CLOSING),
+            KiottyNet_when(CLOSED).then(onClientClosed));
 
         constexpr KiottyNetStateMachine CLIENT_MACHINE =
             KiottyNet_makeStateMachine(CLIENT_RULES, UPGRADE_SENDING);
@@ -105,13 +93,13 @@ namespace kiotty::net::implementation
     KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSite& site)
     {
         return KiottyNetStatefulAppContext{
-            &site, &CLIENT_MACHINE, createSession, releaseSession, reportError,
+            &site, &CLIENT_MACHINE, createClientSession, releaseClientSession, reportClientError,
         };
     }
 
     namespace
     {
-        KiottyNetTransition onConnected(Context context, Connection connection, Event)
+        KiottyNetTransition onClientConnected(Session context, Handle connection, Event)
         {
             HttpSession& session = sessionOf(context);
             advanceSession(session);
@@ -123,7 +111,7 @@ namespace kiotty::net::implementation
             return writeRequest(session);
         }
 
-        KiottyNetTransition onUpgradeSent(Context context, Connection, Event event)
+        KiottyNetTransition onUpgradeSent(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             session.sent += event.length;
@@ -132,7 +120,7 @@ namespace kiotty::net::implementation
             return readLine(session, STATUS_LINE, headerTimeLeft(session));
         }
 
-        KiottyNetTransition onStatusLine(Context context, Connection, Event event)
+        KiottyNetTransition onStatusLine(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             const bool is_switching = isSwitchingLine(lineOf(event.data));
@@ -140,7 +128,7 @@ namespace kiotty::net::implementation
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
         }
 
-        KiottyNetTransition onResponseHeader(Context context, Connection, Event event)
+        KiottyNetTransition onResponseHeader(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             const Span<const char> line = lineOf(event.data);
@@ -162,12 +150,12 @@ namespace kiotty::net::implementation
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
         }
 
-        KiottyNetTransition onTimeout(Context, Connection, Event)
+        KiottyNetTransition onClientTimeout(Session, Handle, Event)
         {
             return closeWith(KIOTTY_NET_CODE_TIMEOUT);
         }
 
-        KiottyNetTransition onClosed(Context context, Connection, Event event)
+        KiottyNetTransition onClientClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             if (!session.socket.is_open) { session.site.upgrade.failure = event.reason; }
@@ -191,8 +179,8 @@ namespace kiotty::net::implementation
             return is_one_one && parsed.value.status == KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS;
         }
 
-        KiottyNetConnectionContext createSession(KiottyNetAppContext app_context,
-                                                 KiottyNetConnectionInfo info)
+        KiottyNetConnectionContext createClientSession(KiottyNetAppContext app_context,
+                                                       KiottyNetConnectionInfo info)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
             site.upgrade.peer = info;
@@ -201,16 +189,17 @@ namespace kiotty::net::implementation
             return &acquired.value();
         }
 
-        void releaseSession(KiottyNetAppContext app_context, KiottyNetConnectionContext context)
+        void releaseClientSession(KiottyNetAppContext app_context,
+                                  KiottyNetConnectionContext context)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
             site.sessions.release(sessionOf(context));
         }
 
-        void reportError(KiottyNetAppContext app_context,
-                         KiottyNetConnectionInfo info,
-                         KiottyNetCode code,
-                         const char* message)
+        void reportClientError(KiottyNetAppContext app_context,
+                               KiottyNetConnectionInfo info,
+                               KiottyNetCode code,
+                               const char* message)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
             const bool is_settled = site.upgrade.has_opened || site.upgrade.has_failed;

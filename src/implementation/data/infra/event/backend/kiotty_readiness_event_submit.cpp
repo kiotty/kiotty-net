@@ -4,6 +4,7 @@
 
 #include "data/infra/error/kiotty_socket_error.h"
 #include "data/infra/event/backend/kiotty_readiness_event_state.h"
+#include "data/infra/socket/backend/kiotty_posix_address.h"
 
 #include <sys/socket.h>
 
@@ -22,8 +23,7 @@ namespace kiotty::net::implementation
         SocketCode admit(const EventListenerState& state, const IoEvent& event,
             const IoAction& action, IoPayload payload);
         void       arm(IoEvent& event, const IoAction& action, IoPayload request);
-        int        sendFlags();
-        bool       isRetryable(ssize_t sent);
+        bool       isInterrupted(ssize_t sent);
         bool       isWouldBlock(ssize_t sent);
     }
 
@@ -56,7 +56,7 @@ namespace kiotty::net::implementation
                 event.done += static_cast<size_t>(sent);
                 continue;
             }
-            if (isRetryable(sent))
+            if (isInterrupted(sent))
             {
                 continue;
             }
@@ -137,16 +137,7 @@ namespace kiotty::net::implementation
             event.result = SocketCode::SUCCESS;
         }
 
-        int sendFlags()
-        {
-#if defined(MSG_NOSIGNAL)
-            return MSG_NOSIGNAL;
-#else
-            return 0;
-#endif
-        }
-
-        bool isRetryable(ssize_t sent)
+        bool isInterrupted(ssize_t sent)
         {
             return sent < 0 && errno == EINTR;
         }

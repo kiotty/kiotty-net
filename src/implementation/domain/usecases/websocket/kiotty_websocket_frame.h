@@ -15,6 +15,9 @@ namespace kiotty::net::implementation
     inline constexpr size_t MAX_FRAME_HEAD_BYTES = 14;
     inline constexpr size_t MAX_CONTROL_PAYLOAD_BYTES = 125;
 
+    inline constexpr KiottyNetWebSocketStatus CLOSE_PROTOCOL =
+        KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR;
+
     enum class FrameOpcode : uint8_t
     {
         CONTINUATION = 0x0,

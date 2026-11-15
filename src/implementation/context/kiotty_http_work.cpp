@@ -1,7 +1,9 @@
 #include "context/kiotty_http_work.h"
 
 #include "context/kiotty_endpoint.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_deadline.h"
+#include "core/kiotty_text.h"
 #include "domain/entity/kiotty_action.h"
 #include "domain/usecases/http/kiotty_http_exchange.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"
@@ -15,9 +17,7 @@ namespace kiotty::net::implementation
         constexpr size_t   WHOLE = std::numeric_limits<size_t>::max();
         constexpr size_t   MAX_CHUNK_BYTES = 0x7FFFFFFF;
         constexpr uint32_t SHORTEST_WAIT_MILLISECONDS = 1;
-        constexpr char     LINE_END[] = "\r\n";
 
-        KiottyNetResult           resultOf(size_t bytes, KiottyNetCode code);
         size_t                    openStream(HttpSession& session);
         KiottyNetCode             sendChunk(HttpSession& session,
                                             Span<const char> data,
@@ -41,7 +41,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionAction sealedPieceOf(HttpSession& session);
         KiottyNetConnectionAction firstPieceOf(HttpSession& session, size_t sent);
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session);
-        size_t                    headerLengthOf(const HttpSession& session);
+        size_t                    headerBytesOf(const HttpSession& session);
         void                      sealFor(HttpSession& session);
     }
 
@@ -143,17 +143,12 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        KiottyNetResult resultOf(size_t bytes, KiottyNetCode code)
-        {
-            return KiottyNetResult{ static_cast<int32_t>(bytes), code };
-        }
-
         size_t openStream(HttpSession& session)
         {
             if (session.phase == SessionPhase::STREAMING) { return 0; }
             sealFor(session);
             session.phase = SessionPhase::STREAMING;
-            return headerLengthOf(session);
+            return headerBytesOf(session);
         }
 
         KiottyNetCode sendChunk(HttpSession& session,
@@ -237,7 +232,7 @@ namespace kiotty::net::implementation
             const KiottyNetCode failure = session.stream_failure;
             if (failure == KIOTTY_NET_CODE_SUCCESS)
             {
-                return firstPieceOf(session, headerLengthOf(session));
+                return firstPieceOf(session, headerBytesOf(session));
             }
             const bool has_body = session.response.frame().hasSendableBody();
             const bool is_ended = failure == KIOTTY_NET_CODE_CLOSED && !has_body;
@@ -268,7 +263,7 @@ namespace kiotty::net::implementation
             return beginExchange(session, connection, wait).entry_action;
         }
 
-        size_t headerLengthOf(const HttpSession& session)
+        size_t headerBytesOf(const HttpSession& session)
         {
             return session.response.frame().chunkAt(0, WHOLE).length;
         }

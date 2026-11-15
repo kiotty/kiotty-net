@@ -10,6 +10,14 @@
 
 namespace kiotty::net::implementation
 {
+    inline constexpr size_t   STATUS_BYTES = 2;
+    inline constexpr uint16_t NO_STATUS = KIOTTY_NET_WEB_SOCKET_STATUS_NO_STATUS;
+    inline constexpr uint16_t ABNORMAL = KIOTTY_NET_WEB_SOCKET_STATUS_ABNORMAL_CLOSURE;
+    inline constexpr uint16_t GOING_AWAY = KIOTTY_NET_WEB_SOCKET_STATUS_GOING_AWAY;
+
+    inline constexpr KiottyNetWebSocketStatus CLOSE_INVALID_PAYLOAD =
+        KIOTTY_NET_WEB_SOCKET_STATUS_INVALID_PAYLOAD;
+
     struct ClosePayload
     {
         Span<const char> reason;

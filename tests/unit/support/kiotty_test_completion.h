@@ -70,7 +70,7 @@ namespace kiotty_test
         return limits;
     }
 
-    inline kiotty::net::implementation::TlsCapacity cipherOf(kiotty::net::implementation::ConnectionLimits limits)
+    inline kiotty::net::implementation::TlsCapacity cipherCapacityOf(kiotty::net::implementation::ConnectionLimits limits)
     {
         const size_t gathered = kiotty::net::implementation::gatheredPlainBytes(limits.send, limits.notify);
         return kiotty::net::implementation::TlsCapacity{ limits.receive, gathered };
@@ -92,7 +92,7 @@ namespace kiotty_test
             , callbacks(Recorder::callbacks())
             , handler(callbacks, &recorder, owner)
         {
-            host.initialize(limits, N, cipherOf(limits));
+            host.initialize(limits, N, cipherCapacityOf(limits));
         }
 
         kiotty::net::implementation::ConnectionResult acquire()

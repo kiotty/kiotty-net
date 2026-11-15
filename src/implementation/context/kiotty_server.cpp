@@ -14,7 +14,6 @@ namespace kiotty::net::implementation
     {
         ConnectionLimits limitsOf(const KiottyNetServerConfiguration& configuration);
         size_t           listenerCapacityOf(size_t max_clients);
-        TlsCapacity      cipherOf(ConnectionLimits limits);
     }
 
     Server::Server()
@@ -193,12 +192,6 @@ namespace kiotty::net::implementation
         size_t listenerCapacityOf(size_t max_clients)
         {
             return 2 * max_clients + 2;
-        }
-
-        TlsCapacity cipherOf(ConnectionLimits limits)
-        {
-            if (!MemoryLimits::TLS) { return TlsCapacity{ 0, 0 }; }
-            return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         }
     }
 }

@@ -2,6 +2,8 @@
 
 #include "core/kiotty_checked.h"
 
+#include <string>
+
 namespace kiotty::net::implementation
 {
     namespace
@@ -103,5 +105,10 @@ namespace kiotty::net::implementation
             if (!is_upper) { return character; }
             return static_cast<char>(character + UPPER_TO_LOWER);
         }
+    }
+
+    Span<const char> literalOf(const char* text)
+    {
+        return Span<const char>{ text, std::char_traits<char>::length(text) };
     }
 }

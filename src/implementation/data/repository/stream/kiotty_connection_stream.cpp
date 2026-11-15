@@ -1,15 +1,16 @@
 #include "data/repository/stream/kiotty_connection_stream.h"
 
+#include "core/kiotty_codes.h"
+
+#include <algorithm>
+
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr size_t RESULT_MAXIMUM_BYTES = 0x7FFFFFFF;
         constexpr size_t TLS_WRITE_PIECE_BYTES = TLS_RECORD_PLAIN_BYTES;
 
-        KiottyNetResult resultOf(size_t bytes, KiottyNetCode code);
-        size_t          smallerOf(size_t left, size_t right);
-        bool            isHardFailure(SocketCode code);
+        bool isHardFailure(SocketCode code);
     }
 
     ConnectionStream::ConnectionStream(ActiveSocket& socket,
@@ -31,7 +32,7 @@ namespace kiotty::net::implementation
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
         if (flushed != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, flushed); }
-        const size_t capped = smallerOf(buffer.length, RESULT_MAXIMUM_BYTES);
+        const size_t capped = std::min(buffer.length, RESULT_MAXIMUM_BYTES);
         const Span<char> target{ buffer.data, capped };
         return readInto(target, deadline);
     }
@@ -274,7 +275,7 @@ namespace kiotty::net::implementation
         size_t done = 0;
         while (done < data.length)
         {
-            const size_t piece = smallerOf(TLS_WRITE_PIECE_BYTES, data.length - done);
+            const size_t piece = std::min(TLS_WRITE_PIECE_BYTES, data.length - done);
             const KiottyNetSpan part{ data.data + done, piece };
             const KiottyNetCode written = sendRecord(part, deadline);
             if (written != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, written); }
@@ -360,7 +361,7 @@ namespace kiotty::net::implementation
     size_t ConnectionStream::takeReceived(Span<char> target)
     {
         StageBase::Consumer consumer = _receive.consumer();
-        const size_t taken = smallerOf(consumer.readable(), target.length);
+        const size_t taken = std::min(consumer.readable(), target.length);
         if (taken == 0) { return 0; }
         const bool copied = target.copyFrom(Span<const char>{ consumer.peek(), taken });
         if (!copied) { return 0; }
@@ -371,19 +372,6 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        KiottyNetResult resultOf(size_t bytes, KiottyNetCode code)
-        {
-            KiottyNetResult result{};
-            result.bytes = static_cast<int32_t>(bytes);
-            result.code = code;
-            return result;
-        }
-
-        size_t smallerOf(size_t left, size_t right)
-        {
-            return left < right ? left : right;
-        }
-
         bool isHardFailure(SocketCode code)
         {
             return code != SocketCode::SUCCESS && code != SocketCode::WOULD_BLOCK;

@@ -2,6 +2,7 @@
 
 #include "core/kiotty_clock.h"
 #include "data/repository/http/kiotty_http_site.h"
+#include "domain/usecases/websocket/kiotty_websocket_close.h"
 
 #include <limits>
 
@@ -9,11 +10,6 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr uint16_t GOING_AWAY = KIOTTY_NET_WEB_SOCKET_STATUS_GOING_AWAY;
-        constexpr uint16_t ABNORMAL = KIOTTY_NET_WEB_SOCKET_STATUS_ABNORMAL_CLOSURE;
-        constexpr size_t   STATUS_BYTES = 2;
-        constexpr uint32_t EXPIRED_MILLISECONDS = 1;
-
         uint32_t      closeTimeOf(HttpSession& session);
         uint32_t      timeLeft(uint64_t deadline);
         KiottyNetSpan peerReasonOf(const HttpSession& session);

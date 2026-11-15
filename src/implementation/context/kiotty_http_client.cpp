@@ -2,7 +2,9 @@
 
 #include "context/kiotty_http_configuration.h"
 #include "core/kiotty_busy_guard.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_result.h"
+#include "core/kiotty_text.h"
 #include "data/datasource/kiotty_memory_limits.h"
 #include "domain/usecases/http/kiotty_http_request_check.h"
 
@@ -16,12 +18,9 @@ namespace kiotty::net::implementation
 
         constexpr size_t HEAD_AREA_COUNT = 2;
         constexpr size_t MAX_INTERIM_REPLIES = 16;
-        constexpr size_t RESULT_MAXIMUM_BYTES = 0x7FFFFFFF;
-        constexpr size_t LINE_END_BYTES = 2;
 
         TimeLeftResult     timeLeftOf(const Deadline& deadline);
         KiottyNetHttpReply failedReply(KiottyNetCode code);
-        KiottyNetResult    resultOf(size_t bytes, KiottyNetCode code);
         KiottyNetCode      checkLimits(const KiottyNetHttpLimits& limits);
         uint16_t           defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
@@ -334,14 +333,6 @@ namespace kiotty::net::implementation
         KiottyNetHttpReply failedReply(KiottyNetCode code)
         {
             return KiottyNetHttpReply{ code, 0, nullptr, 0 };
-        }
-
-        KiottyNetResult resultOf(size_t bytes, KiottyNetCode code)
-        {
-            KiottyNetResult result{};
-            result.bytes = static_cast<int32_t>(bytes);
-            result.code = code;
-            return result;
         }
 
         KiottyNetCode checkLimits(const KiottyNetHttpLimits& limits)

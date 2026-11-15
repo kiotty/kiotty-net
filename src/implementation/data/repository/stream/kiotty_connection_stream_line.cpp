@@ -1,13 +1,12 @@
 #include "data/repository/stream/kiotty_connection_stream.h"
 
+#include "core/kiotty_codes.h"
+#include "core/kiotty_text.h"
+
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr char   LINE_FEED = '\n';
-        constexpr char   CARRIAGE_RETURN = '\r';
-        constexpr size_t RESULT_MAXIMUM_BYTES = 0x7FFFFFFF;
-
         Span<const char> stagedOf(StageBase& stage);
         size_t           findLineFeed(Span<const char> staged, size_t from);
         Span<const char> lineBefore(Span<const char> staged, size_t line_feed);

@@ -31,12 +31,6 @@ namespace kiotty::net::implementation
         constexpr char VERSION[] = "13";
 
         template <size_t N>
-        Span<const char> literalOf(const char (&text)[N])
-        {
-            return Span<const char>{ text, N - 1 };
-        }
-
-        template <size_t N>
         Span<const char> headerNamed(const KiottyNetHttpRequest& request,
                                      const char (&name)[N])
         {

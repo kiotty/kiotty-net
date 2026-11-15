@@ -29,7 +29,7 @@ namespace kiotty::net::implementation
         SocketCode loadAcceptEx(IoEvent& event);
         SocketCode postFailure(const EventListenerState& state, IoEvent& event, SocketCode failure);
         WSABUF     bufferOf(IoPiece piece);
-        ULONG      clampLength(size_t length);
+        ULONG      ulongLengthOf(size_t length);
     }
 
     SocketCode EventListener::submit(IoEvent& event, const IoAction& action, IoPayload payload)
@@ -195,12 +195,12 @@ namespace kiotty::net::implementation
         WSABUF bufferOf(IoPiece piece)
         {
             WSABUF buffer{};
-            buffer.len = clampLength(piece.length);
+            buffer.len = ulongLengthOf(piece.length);
             buffer.buf = static_cast<char*>(piece.buffer);
             return buffer;
         }
 
-        ULONG clampLength(size_t length)
+        ULONG ulongLengthOf(size_t length)
         {
             if (length > static_cast<size_t>(ULONG_MAX))
             {

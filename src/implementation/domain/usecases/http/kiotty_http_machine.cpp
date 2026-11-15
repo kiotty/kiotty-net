@@ -1,8 +1,10 @@
 #include "domain/usecases/http/kiotty_http_machine.h"
 
 #include "domain/entity/kiotty_action.h"
+#include "domain/usecases/http/kiotty_http_constants.h"
 #include "domain/usecases/http/kiotty_http_exchange.h"
 #include "domain/usecases/http/kiotty_http_message_framing.h"
+#include "domain/usecases/http/kiotty_http_rule_names.h"
 #include "domain/usecases/websocket/kiotty_websocket_rows.h"
 
 namespace kiotty::net::implementation
@@ -11,28 +13,27 @@ namespace kiotty::net::implementation
     {
         using Next = KiottyNet_Transition<HttpState>;
         using Event = KiottyNetConnectionEvent;
-        using Context = KiottyNetConnectionContext;
-        using Connection = KiottyNetConnectionHandle;
+        using Session = KiottyNetConnectionContext;
+        using Handle = KiottyNetConnectionHandle;
         using EventType = KiottyNetConnectionEventType;
 
         constexpr size_t CHUNK_END_BYTES = 2;
-        constexpr KiottyNetHttpStatus CONTENT_TOO_LARGE = KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE;
         constexpr char          CONTINUE_LINE[] = "HTTP/1.1 100 Continue\r\n\r\n";
         constexpr KiottyNetSpan CONTINUE_SPAN{ CONTINUE_LINE, sizeof(CONTINUE_LINE) - 1 };
 
-        KiottyNetTransition onConnected(Context context, Connection connection, Event event);
-        KiottyNetTransition onRequestLine(Context context, Connection connection, Event event);
-        KiottyNetTransition onHeaderLine(Context context, Connection connection, Event event);
-        KiottyNetTransition onBody(Context context, Connection connection, Event event);
-        KiottyNetTransition onChunkSize(Context context, Connection connection, Event event);
-        KiottyNetTransition onChunkData(Context context, Connection connection, Event event);
-        KiottyNetTransition onChunkEnd(Context context, Connection connection, Event event);
-        KiottyNetTransition onTrailer(Context context, Connection connection, Event event);
-        KiottyNetTransition onContinued(Context context, Connection connection, Event event);
-        KiottyNetTransition onWorkStarted(Context context, Connection connection, Event event);
-        KiottyNetTransition onSent(Context context, Connection connection, Event event);
-        KiottyNetTransition onTimeout(Context context, Connection connection, Event event);
-        KiottyNetTransition onClosed(Context context, Connection connection, Event event);
+        KiottyNetTransition onConnected(Session context, Handle connection, Event event);
+        KiottyNetTransition onRequestLine(Session context, Handle connection, Event event);
+        KiottyNetTransition onHeaderLine(Session context, Handle connection, Event event);
+        KiottyNetTransition onBody(Session context, Handle connection, Event event);
+        KiottyNetTransition onChunkSize(Session context, Handle connection, Event event);
+        KiottyNetTransition onChunkData(Session context, Handle connection, Event event);
+        KiottyNetTransition onChunkEnd(Session context, Handle connection, Event event);
+        KiottyNetTransition onTrailer(Session context, Handle connection, Event event);
+        KiottyNetTransition onContinued(Session context, Handle connection, Event event);
+        KiottyNetTransition onWorkStarted(Session context, Handle connection, Event event);
+        KiottyNetTransition onSent(Session context, Handle connection, Event event);
+        KiottyNetTransition onTimeout(Session context, Handle connection, Event event);
+        KiottyNetTransition onClosed(Session context, Handle connection, Event event);
 
         KiottyNetTransition afterHeaders(HttpSession& session);
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length);
@@ -51,7 +52,6 @@ namespace kiotty::net::implementation
                                                const char* message);
 
         constexpr HttpState REQUEST_LINE = HttpState::REQUEST_LINE;
-        constexpr HttpState HEADER_LINE = HttpState::HEADER_LINE;
         constexpr HttpState BODY = HttpState::BODY;
         constexpr HttpState CHUNK_SIZE = HttpState::CHUNK_SIZE;
         constexpr HttpState CHUNK_DATA = HttpState::CHUNK_DATA;
@@ -60,19 +60,9 @@ namespace kiotty::net::implementation
         constexpr HttpState CONTINUING = HttpState::CONTINUING;
         constexpr HttpState WORKING = HttpState::WORKING;
         constexpr HttpState SENDING = HttpState::SENDING;
-        constexpr HttpState CLOSING = HttpState::CLOSING;
         constexpr HttpState SOCKET_OPENING = HttpState::SOCKET_OPENING;
-        constexpr HttpState FRAME_START = HttpState::FRAME_START;
-        constexpr HttpState FRAME_LENGTH = HttpState::FRAME_LENGTH;
-        constexpr HttpState FRAME_MASK = HttpState::FRAME_MASK;
-        constexpr HttpState FRAME_PAYLOAD = HttpState::FRAME_PAYLOAD;
 
-        constexpr EventType CONNECTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;
-        constexpr EventType READ = KIOTTY_NET_CONNECTION_EVENT_TYPE_READ;
-        constexpr EventType WRITTEN = KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN;
         constexpr EventType WORK_STARTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED;
-        constexpr EventType TIMEOUT = KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT;
-        constexpr EventType CLOSED = KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED;
 
         constexpr auto HTTP_RULES = KiottyNet_rules(
             KiottyNet_when(CONNECTED).then(onConnected).to(REQUEST_LINE),
@@ -165,14 +155,14 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        KiottyNetTransition onConnected(Context context, Connection connection, Event)
+        KiottyNetTransition onConnected(Session context, Handle connection, Event)
         {
             HttpSession& session = sessionOf(context);
             const uint32_t wait = session.site.limits.header_timeout_milliseconds;
             return beginExchange(session, connection, wait);
         }
 
-        KiottyNetTransition onRequestLine(Context context, Connection, Event event)
+        KiottyNetTransition onRequestLine(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             startHeaderClock(session);
@@ -181,7 +171,7 @@ namespace kiotty::net::implementation
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
         }
 
-        KiottyNetTransition onHeaderLine(Context context, Connection, Event event)
+        KiottyNetTransition onHeaderLine(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             const Span<const char> line = lineOf(event.data);
@@ -191,12 +181,12 @@ namespace kiotty::net::implementation
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
         }
 
-        KiottyNetTransition onBody(Context context, Connection, Event event)
+        KiottyNetTransition onBody(Session context, Handle, Event event)
         {
             return takeBody(sessionOf(context), event.data, BODY);
         }
 
-        KiottyNetTransition onChunkSize(Context context, Connection, Event event)
+        KiottyNetTransition onChunkSize(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             const LengthResult size = parseChunkSize(lineOf(event.data));
@@ -209,12 +199,12 @@ namespace kiotty::net::implementation
             return readBody(session, CHUNK_DATA);
         }
 
-        KiottyNetTransition onChunkData(Context context, Connection, Event event)
+        KiottyNetTransition onChunkData(Session context, Handle, Event event)
         {
             return takeBody(sessionOf(context), event.data, CHUNK_DATA);
         }
 
-        KiottyNetTransition onChunkEnd(Context context, Connection, Event event)
+        KiottyNetTransition onChunkEnd(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             const bool has_two_bytes = event.data.length == CHUNK_END_BYTES;
@@ -223,36 +213,36 @@ namespace kiotty::net::implementation
             return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
-        KiottyNetTransition onTrailer(Context context, Connection, Event event)
+        KiottyNetTransition onTrailer(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             if (lineOf(event.data).empty()) { return dispatch(session); }
             return readLine(session, TRAILER, bodyTimeOf(session));
         }
 
-        KiottyNetTransition onContinued(Context context, Connection, Event)
+        KiottyNetTransition onContinued(Session context, Handle, Event)
         {
             return readFirstBody(sessionOf(context));
         }
 
-        KiottyNetTransition onWorkStarted(Context context, Connection, Event event)
+        KiottyNetTransition onWorkStarted(Session context, Handle, Event event)
         {
             return startWork(sessionOf(context), event.stream);
         }
 
-        KiottyNetTransition onSent(Context context, Connection connection, Event event)
+        KiottyNetTransition onSent(Session context, Handle connection, Event event)
         {
             HttpSession& session = sessionOf(context);
             session.sent += event.length;
             return sendNext(session, connection);
         }
 
-        KiottyNetTransition onTimeout(Context, Connection, Event)
+        KiottyNetTransition onTimeout(Session, Handle, Event)
         {
             return closeWith(KIOTTY_NET_CODE_TIMEOUT);
         }
 
-        KiottyNetTransition onClosed(Context context, Connection, Event event)
+        KiottyNetTransition onClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
             endSocket(session, event.reason);

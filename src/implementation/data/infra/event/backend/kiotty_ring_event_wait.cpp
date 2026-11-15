@@ -17,17 +17,17 @@ namespace kiotty::net::implementation
         static constexpr int  MILLISECONDS_PER_SECOND = 1000;
         static constexpr long NANOSECONDS_PER_MILLISECOND = 1000000L;
 
-        size_t     collect(EventListenerState& state);
+        size_t     collectRing(EventListenerState& state);
         size_t     settleRing(EventListenerState& state, uint64_t tag, int32_t result,
                               size_t count);
         size_t     settleWake(EventListenerState& state, int32_t result, size_t count);
-        SocketCode finish(EventListenerState& state, IoEvent& event, int32_t result);
+        SocketCode finishEvent(EventListenerState& state, IoEvent& event, int32_t result);
         SocketCode progressed(EventListenerState& state, IoEvent& event, size_t moved);
         SocketCode restart(EventListenerState& state, IoEvent& event, bool polling);
         bool       waitRing(EventListenerState& state, backend::Clock::time_point deadline,
                             bool forever);
         void       settleForClose(EventListenerState& state);
-        IoEvent&   eventOf(uint64_t tag);
+        IoEvent&   eventOfTag(uint64_t tag);
     }
 
     size_t backend::ringPoll(EventListenerState& state, uint32_t timeout_milliseconds)
@@ -35,12 +35,12 @@ namespace kiotty::net::implementation
         const bool forever = isForever(timeout_milliseconds);
         const Clock::time_point deadline =
             Clock::now() + std::chrono::milliseconds(timeout_milliseconds);
-        size_t count = collect(state);
+        size_t count = collectRing(state);
         while (count == 0 && waitRing(state, deadline, forever))
         {
-            count = collect(state);
+            count = collectRing(state);
         }
-        if (count == 0) { count = collect(state); }
+        if (count == 0) { count = collectRing(state); }
         static_cast<void>(enterRing(state, 0, nullptr));
         return count;
     }
@@ -57,7 +57,7 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        size_t collect(EventListenerState& state)
+        size_t collectRing(EventListenerState& state)
         {
             RingState& ring = state.ring;
             uint32_t head = *ring.cq_head;
@@ -79,10 +79,10 @@ namespace kiotty::net::implementation
         {
             if (tag == backend::WAKE_TAG) { return settleWake(state, result, count); }
             if (tag == backend::CANCEL_TAG || tag == backend::IGNORE_TAG) { return count; }
-            IoEvent& event = eventOf(tag);
+            IoEvent& event = eventOfTag(tag);
             state.ring.inflight -= 1;
             event.registered = false;
-            const SocketCode code = finish(state, event, result);
+            const SocketCode code = finishEvent(state, event, result);
             if (code == SocketCode::WOULD_BLOCK) { return count; }
             state.completions[count] = backend::completionOf(event, code);
             return count + 1;
@@ -96,7 +96,7 @@ namespace kiotty::net::implementation
             return backend::noteWake(state, count);
         }
 
-        SocketCode finish(EventListenerState& state, IoEvent& event, int32_t result)
+        SocketCode finishEvent(EventListenerState& state, IoEvent& event, int32_t result)
         {
             if (!backend::attached(event) || result == -ECANCELED) { return SocketCode::CANCELLED; }
             if (result == -EAGAIN) { return restart(state, event, true); }
@@ -151,7 +151,7 @@ namespace kiotty::net::implementation
             {
                 const uint64_t tag = backend::cqeAt(ring, head)->user_data;
                 if (tag <= backend::IGNORE_TAG) { continue; }
-                IoEvent& event = eventOf(tag);
+                IoEvent& event = eventOfTag(tag);
                 event.registered = false;
                 backend::disarm(event);
                 ring.inflight -= 1;
@@ -159,7 +159,7 @@ namespace kiotty::net::implementation
             __atomic_store_n(ring.cq_head, tail, __ATOMIC_RELEASE);
         }
 
-        IoEvent& eventOf(uint64_t tag)
+        IoEvent& eventOfTag(uint64_t tag)
         {
             return *reinterpret_cast<IoEvent*>(static_cast<uintptr_t>(tag));
         }

@@ -1,15 +1,13 @@
 #include "data/repository/http/kiotty_http_request_store.h"
 
+#include "domain/usecases/http/kiotty_http_constants.h"
 #include "domain/usecases/http/kiotty_http_header_line.h"
+#include "domain/usecases/http/kiotty_http_token.h"
 
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr KiottyNetHttpStatus TOO_LARGE = KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE;
-        constexpr KiottyNetHttpStatus CONTENT_TOO_LARGE = KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE;
-
-        KiottyNetSpan spanOf(Span<const char> text);
     }
 
     HttpRequestStore::HttpRequestStore(Span<char> header_buffer,
@@ -116,9 +114,5 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        KiottyNetSpan spanOf(Span<const char> text)
-        {
-            return KiottyNetSpan{ text.data, text.length };
-        }
     }
 }

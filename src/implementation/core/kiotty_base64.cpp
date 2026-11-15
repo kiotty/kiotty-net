@@ -1,5 +1,7 @@
 #include "core/kiotty_base64.h"
 
+#include "core/kiotty_bytes.h"
+
 namespace kiotty::net::implementation
 {
     namespace
@@ -10,7 +12,6 @@ namespace kiotty::net::implementation
         constexpr size_t   GROUP_BYTES = 3;
         constexpr size_t   GROUP_CHARACTERS = 4;
         constexpr size_t   MAX_PADDING = 2;
-        constexpr uint32_t BITS_PER_BYTE = 8;
         constexpr uint32_t BITS_PER_CHARACTER = 6;
         constexpr uint32_t CHARACTER_MASK = 0x3F;
 

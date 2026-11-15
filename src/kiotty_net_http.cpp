@@ -2,6 +2,7 @@
 
 #include "context/kiotty_context.h"
 #include "context/kiotty_http_configuration.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "data/repository/http/kiotty_http_file_body.h"
 #include "data/repository/http/kiotty_http_session.h"
@@ -11,8 +12,7 @@ namespace net = kiotty::net::implementation;
 
 namespace
 {
-    constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
-    constexpr size_t        MAX_HEADER_NAME_TEXT = 256;
+    using net::INVALID;
     constexpr size_t        MAX_FILE_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
     constexpr KiottyNetSpan STREAM_PLACEHOLDER = { nullptr, 0 };
 
@@ -94,7 +94,7 @@ KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, cons
 {
     const KiottyNetSpan none = { nullptr, 0 };
     if (request == nullptr || request->headers == nullptr) { return none; }
-    const net::TextResult wanted = net::parseText(name, MAX_HEADER_NAME_TEXT);
+    const net::TextResult wanted = net::parseText(name, net::MAX_HEADER_NAME_TEXT);
     if (!wanted) { return none; }
     for (size_t i = 0; i < request->header_count; ++i)
     {

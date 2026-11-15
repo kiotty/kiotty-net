@@ -31,7 +31,7 @@ namespace kiotty::net::implementation
         constexpr SizeRange BODY_BYTES{ 0, 64 * MEBIBYTE };
         constexpr SizeRange RESPONSE_BYTES{ MIN_HTTP_RESPONSE_BYTES, 64 * MEBIBYTE };
 
-        bool isWithin(size_t value, SizeRange range);
+        bool isInRange(size_t value, SizeRange range);
     }
 
     KiottyNetCode initializeHttpLimits(KiottyNetHttpLimits& limits)
@@ -54,7 +54,7 @@ namespace kiotty::net::implementation
     KiottyNetCode configureHttpMaxRoutes(KiottyNetHttpLimits& limits, size_t max_routes)
     {
         if (!isInitialized(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isWithin(max_routes, ROUTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isInRange(max_routes, ROUTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         limits.max_routes = max_routes;
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -64,8 +64,8 @@ namespace kiotty::net::implementation
                                               size_t max_headers)
     {
         if (!isInitialized(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isWithin(max_header_bytes, HEADER_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isWithin(max_headers, HEADERS)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isInRange(max_header_bytes, HEADER_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isInRange(max_headers, HEADERS)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         limits.max_header_bytes = max_header_bytes;
         limits.max_headers = max_headers;
         return KIOTTY_NET_CODE_SUCCESS;
@@ -74,7 +74,7 @@ namespace kiotty::net::implementation
     KiottyNetCode configureHttpBodyCapacity(KiottyNetHttpLimits& limits, size_t max_body_bytes)
     {
         if (!isInitialized(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isWithin(max_body_bytes, BODY_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isInRange(max_body_bytes, BODY_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         limits.max_body_bytes = max_body_bytes;
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -83,7 +83,7 @@ namespace kiotty::net::implementation
                                                 size_t response_bytes)
     {
         if (!isInitialized(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isWithin(response_bytes, RESPONSE_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isInRange(response_bytes, RESPONSE_BYTES)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         limits.response_bytes = response_bytes;
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -117,7 +117,7 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        bool isWithin(size_t value, SizeRange range)
+        bool isInRange(size_t value, SizeRange range)
         {
             return value >= range.minimum && value <= range.maximum;
         }

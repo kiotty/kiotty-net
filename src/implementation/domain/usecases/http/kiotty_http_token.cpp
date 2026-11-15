@@ -87,6 +87,11 @@ namespace kiotty::net::implementation
         return Span<const char>{ span.data, span.length };
     }
 
+    KiottyNetSpan spanOf(Span<const char> text)
+    {
+        return KiottyNetSpan{ text.data, text.length };
+    }
+
     bool equalsLiteral(Span<const char> text, const char* literal)
     {
         const size_t length = std::char_traits<char>::length(literal);

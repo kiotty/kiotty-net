@@ -16,7 +16,6 @@ namespace kiotty::net::implementation
     namespace
     {
         ConnectionLimits limitsOf(const KiottyNetClientConfiguration& configuration);
-        TlsCapacity      cipherOf(ConnectionLimits limits);
     }
 
     EventClient::EventClient()
@@ -181,12 +180,6 @@ namespace kiotty::net::implementation
                                      configuration.send_capacity,
                                      configuration.push_capacity,
                                      configuration.send_timeout_milliseconds };
-        }
-
-        TlsCapacity cipherOf(ConnectionLimits limits)
-        {
-            if (!MemoryLimits::TLS) { return TlsCapacity{ 0, 0 }; }
-            return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
         }
     }
 }

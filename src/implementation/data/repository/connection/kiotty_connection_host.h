@@ -13,6 +13,8 @@
 
 namespace kiotty::net::implementation
 {
+    TlsCapacity cipherOf(ConnectionLimits limits);
+
     class ConnectionHost
     {
     public:

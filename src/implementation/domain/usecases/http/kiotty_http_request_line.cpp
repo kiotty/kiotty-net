@@ -1,5 +1,7 @@
 #include "domain/usecases/http/kiotty_http_request_line.h"
 
+#include "domain/usecases/http/kiotty_http_constants.h"
+
 #include "domain/usecases/http/kiotty_http_token.h"
 
 #include <string>
@@ -41,8 +43,6 @@ namespace kiotty::net::implementation
             { "DELETE", KIOTTY_NET_HTTP_METHOD_DELETE },
             { "OPTIONS", KIOTTY_NET_HTTP_METHOD_OPTIONS },
         };
-        constexpr KiottyNetHttpStatus BAD_REQUEST = KIOTTY_NET_HTTP_STATUS_BAD_REQUEST;
-        constexpr KiottyNetHttpStatus NOT_IMPLEMENTED = KIOTTY_NET_HTTP_STATUS_NOT_IMPLEMENTED;
         constexpr KiottyNetHttpStatus URI_TOO_LONG = KIOTTY_NET_HTTP_STATUS_URI_TOO_LONG;
         constexpr char VERSION_1_0[] = "HTTP/1.0";
         constexpr char VERSION_1_1[] = "HTTP/1.1";

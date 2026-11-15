@@ -32,7 +32,7 @@ namespace kiotty::net::implementation
                                    const KiottyNetAddress& address,
                                    const StopSignal* stop,
                                    uint32_t timeout_milliseconds);
-        NoDelay            noDelayOf(const KiottyNetClientConfiguration& configuration);
+        NoDelay            clientNoDelayOf(const KiottyNetClientConfiguration& configuration);
     }
 
     ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
@@ -116,12 +116,12 @@ namespace kiotty::net::implementation
             ActiveSocket& socket = opened.value;
             const SocketCode connected = socket.connect(address, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }
-            const SocketCode tuned = configureNoDelay(socket, noDelayOf(configuration));
+            const SocketCode tuned = configureNoDelay(socket, clientNoDelayOf(configuration));
             if (tuned != SocketCode::SUCCESS) { return ActiveSocketResult::failure(tuned); }
             return ActiveSocketResult::success(std::move(socket));
         }
 
-        NoDelay noDelayOf(const KiottyNetClientConfiguration& configuration)
+        NoDelay clientNoDelayOf(const KiottyNetClientConfiguration& configuration)
         {
             if (configuration.no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
             return NoDelay::DISABLED;

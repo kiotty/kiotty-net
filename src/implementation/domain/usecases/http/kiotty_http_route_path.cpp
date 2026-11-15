@@ -1,5 +1,6 @@
 #include "domain/usecases/http/kiotty_http_route_path.h"
 
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 #include "kiotty_net_http.h"
@@ -12,7 +13,6 @@ namespace kiotty::net::implementation
     {
         constexpr size_t MAX_PATH_LENGTH = KIOTTY_NET_MAX_URL_LENGTH - 1;
         constexpr size_t WILDCARD_LENGTH = 1;
-        constexpr KiottyNetCode INVALID_ARGUMENT = KIOTTY_NET_CODE_INVALID_ARGUMENT;
 
         RoutePathResult parsePathText(const char* text);
         bool            isPathText(Span<const char> text);
@@ -38,7 +38,7 @@ namespace kiotty::net::implementation
         const RoutePathResult parsed = parsePathText(text);
         if (!parsed) { return parsed; }
         const Span<const char> path = parsed.value.text;
-        if (!endsWithSlash(path)) { return RoutePathResult::failure(INVALID_ARGUMENT); }
+        if (!endsWithSlash(path)) { return RoutePathResult::failure(INVALID); }
         return RoutePathResult::success(RoutePath{ path, PathKind::PREFIX });
     }
 
@@ -79,7 +79,7 @@ namespace kiotty::net::implementation
         {
             const TextResult parsed = parseText(text, MAX_PATH_LENGTH);
             if (!parsed) { return RoutePathResult::failure(parsed.code); }
-            if (!isPathText(parsed.value)) { return RoutePathResult::failure(INVALID_ARGUMENT); }
+            if (!isPathText(parsed.value)) { return RoutePathResult::failure(INVALID); }
             return RoutePathResult::success(RoutePath{ parsed.value, PathKind::EXACT });
         }
 

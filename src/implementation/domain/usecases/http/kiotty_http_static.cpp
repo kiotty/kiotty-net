@@ -2,6 +2,7 @@
 
 #include "core/kiotty_fixed_string.h"
 #include "data/repository/http/kiotty_http_file_body.h"
+#include "domain/usecases/http/kiotty_http_constants.h"
 #include "domain/usecases/http/kiotty_http_route_path.h"
 
 namespace kiotty::net::implementation
@@ -9,7 +10,6 @@ namespace kiotty::net::implementation
     namespace
     {
         constexpr int32_t FORBIDDEN = KIOTTY_NET_HTTP_STATUS_FORBIDDEN;
-        constexpr int32_t NOT_FOUND = KIOTTY_NET_HTTP_STATUS_NOT_FOUND;
 
         using JoinedPath = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
 

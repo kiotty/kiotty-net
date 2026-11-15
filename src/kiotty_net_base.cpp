@@ -5,6 +5,7 @@
 #include "context/kiotty_context.h"
 #include "context/kiotty_tls_configuration.h"
 #include "data/repository/connection/kiotty_callback_handler.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "data/datasource/kiotty_memory_layout.h"
 #include "data/repository/connection/kiotty_connection.h"
@@ -13,7 +14,7 @@ namespace net = kiotty::net::implementation;
 
 namespace
 {
-    constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    using net::INVALID;
     constexpr size_t        MAX_HOST_TEXT = KIOTTY_NET_MAX_HOST_LENGTH - 1;
     constexpr size_t        MAX_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
     constexpr size_t        MAX_PASSWORD_TEXT = KIOTTY_NET_MAX_PASSWORD_LENGTH - 1;

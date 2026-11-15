@@ -1,9 +1,8 @@
 #include "domain/usecases/http/kiotty_http_response_text.h"
 
+#include "core/kiotty_text.h"
 #include "domain/usecases/http/kiotty_http_request_line.h"
 #include "kiotty_net_http.h"
-
-#include <string>
 
 namespace kiotty::net::implementation
 {
@@ -66,7 +65,6 @@ namespace kiotty::net::implementation
         constexpr size_t      HEX_BASE = 16;
         constexpr char        HEX_LETTERS[] = "0123456789abcdef";
 
-        Span<const char> literalOf(const char* text);
         Span<const char> reasonPhraseOf(int32_t status);
         DecimalText      paddedOf(int32_t value);
         bool             appendDate(PrefixText& text, const CalendarTime& time);
@@ -156,11 +154,6 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        Span<const char> literalOf(const char* text)
-        {
-            return Span<const char>{ text, std::char_traits<char>::length(text) };
-        }
-
         Span<const char> reasonPhraseOf(int32_t status)
         {
             for (const ReasonPhrase& reason : REASON_PHRASES)

@@ -1,10 +1,19 @@
 #include "data/repository/connection/kiotty_connection_host.h"
 
+#include "data/datasource/kiotty_memory_layout.h"
+#include "data/datasource/kiotty_memory_limits.h"
+
 #include <cstddef>
 #include <utility>
 
 namespace kiotty::net::implementation
 {
+    TlsCapacity cipherOf(ConnectionLimits limits)
+    {
+        if (!MemoryLimits::TLS) { return TlsCapacity{ 0, 0 }; }
+        return TlsCapacity{ limits.receive, gatheredPlainBytes(limits.send, limits.notify) };
+    }
+
     ConnectionHost::ConnectionHost(ReusablePoolBase<Connection>& connections)
         : _connections(connections)
         , _limits()

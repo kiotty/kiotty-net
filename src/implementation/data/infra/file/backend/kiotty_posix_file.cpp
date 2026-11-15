@@ -3,6 +3,7 @@
 #include "data/infra/error/kiotty_socket_error.h"
 #include "core/kiotty_fixed_string.h"
 #include "data/infra/file/kiotty_input_file.h"
+#include "data/infra/socket/backend/kiotty_posix_address.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -29,11 +30,6 @@ namespace kiotty::net::implementation
 #if !defined(__linux__)
         const size_t COPY_BUFFER_BYTES = 4096;
 #endif
-
-        int descriptorOf(intptr_t handle)
-        {
-            return static_cast<int>(handle);
-        }
 
 #if defined(__linux__)
         class SigpipeBlock
@@ -90,7 +86,7 @@ namespace kiotty::net::implementation
 #endif
         }
 
-        Result<uint64_t, SocketCode> sendPiece(int out, int in, uint64_t position, uint64_t left)
+        Result<uint64_t, SocketCode> sendSlice(int out, int in, uint64_t position, uint64_t left)
         {
             using Moved = Result<uint64_t, SocketCode>;
             const uint64_t capped = std::min<uint64_t>(left, SEND_CHUNK_BYTES);
@@ -217,7 +213,7 @@ namespace kiotty::net::implementation
         {
             const uint64_t position = range.offset + sent;
             const uint64_t left = range.length - sent;
-            const Result<uint64_t, SocketCode> moved = sendPiece(out, in, position, left);
+            const Result<uint64_t, SocketCode> moved = sendSlice(out, in, position, left);
             if (moved)
             {
                 sent += moved.value;

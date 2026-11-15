@@ -16,6 +16,7 @@ namespace kiotty::net::implementation
     size_t           findCharacter(Span<const char> text, char character, size_t position);
     Span<const char> trimWhitespace(Span<const char> text);
     Span<const char> spanOf(KiottyNetSpan span);
+    KiottyNetSpan    spanOf(Span<const char> text);
     bool             equalsLiteral(Span<const char> text, const char* literal);
     bool             equalsLiteralIgnoreCase(Span<const char> text, const char* literal);
 }

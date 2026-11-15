@@ -1,5 +1,7 @@
 #include "domain/usecases/http/kiotty_http_header_line.h"
 
+#include "domain/usecases/http/kiotty_http_constants.h"
+
 #include "core/kiotty_text.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 
@@ -8,8 +10,6 @@ namespace kiotty::net::implementation
     namespace
     {
         constexpr unsigned char       FIRST_NON_ASCII = 0x80;
-        constexpr KiottyNetHttpStatus BAD_REQUEST = KIOTTY_NET_HTTP_STATUS_BAD_REQUEST;
-        constexpr KiottyNetHttpStatus TOO_LARGE = KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE;
     }
 
     HeaderResult parseHeaderLine(Span<const char> line, size_t max_length)

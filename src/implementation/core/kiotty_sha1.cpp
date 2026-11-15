@@ -1,5 +1,7 @@
 #include "core/kiotty_sha1.h"
 
+#include "core/kiotty_bytes.h"
+
 namespace kiotty::net::implementation
 {
     namespace
@@ -12,7 +14,6 @@ namespace kiotty::net::implementation
         constexpr size_t   STATE_WORDS = 5;
         constexpr size_t   WORD_BYTES = 4;
         constexpr uint8_t  END_MARK = 0x80;
-        constexpr uint32_t BITS_PER_BYTE = 8;
         constexpr uint32_t WORD_BITS = 32;
         constexpr uint32_t INITIAL[STATE_WORDS] = {
             0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u,
@@ -86,9 +87,9 @@ namespace kiotty::net::implementation
             for (size_t i = 0; i < BLOCK_WORDS; ++i) { schedule[i] = wordAt(state.block, i); }
             for (size_t i = BLOCK_WORDS; i < ROUNDS; ++i)
             {
-                const uint32_t near = schedule[i - 3] ^ schedule[i - 8];
-                const uint32_t far = schedule[i - 14] ^ schedule[i - 16];
-                const uint32_t mixed = near ^ far;
+                const uint32_t newer = schedule[i - 3] ^ schedule[i - 8];
+                const uint32_t older = schedule[i - 14] ^ schedule[i - 16];
+                const uint32_t mixed = newer ^ older;
                 schedule[i] = rotateLeft(mixed, 1);
             }
             uint32_t v[STATE_WORDS] = {};

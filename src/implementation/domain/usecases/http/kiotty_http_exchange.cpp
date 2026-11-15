@@ -2,8 +2,10 @@
 
 #include "domain/entity/kiotty_action.h"
 #include "core/kiotty_clock.h"
+#include "core/kiotty_text.h"
 #include "data/repository/http/kiotty_http_file_body.h"
 #include "data/repository/http/kiotty_http_site.h"
+#include "domain/usecases/http/kiotty_http_constants.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"
 #include "domain/usecases/http/kiotty_http_static.h"
 #include "domain/usecases/websocket/kiotty_websocket_upgrade.h"
@@ -16,10 +18,7 @@ namespace kiotty::net::implementation
     {
         using Next = KiottyNet_Transition<HttpState>;
 
-        constexpr char          LINE_END[] = "\r\n";
         constexpr KiottyNetSpan LINE_END_SPAN{ LINE_END, 2 };
-        constexpr uint32_t      EXPIRED_MILLISECONDS = 1;
-        constexpr int32_t       NOT_FOUND = KIOTTY_NET_HTTP_STATUS_NOT_FOUND;
         constexpr int32_t       NOT_ALLOWED = KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
         constexpr int32_t       NO_CONTENT = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
         constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;

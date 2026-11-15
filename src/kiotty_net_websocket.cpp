@@ -4,6 +4,7 @@
 #include "context/kiotty_handles.h"
 #include "context/kiotty_http_configuration.h"
 #include "context/kiotty_websocket_endpoint.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 #include "domain/usecases/websocket/kiotty_websocket_access.h"
@@ -12,10 +13,9 @@ namespace net = kiotty::net::implementation;
 
 namespace
 {
-    constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    using net::INVALID;
     constexpr KiottyNetCode PEER_CLOSED = KIOTTY_NET_CODE_PEER_CLOSED;
     constexpr KiottyNetSpan NONE = { nullptr, 0 };
-    constexpr size_t        MAX_HEADER_NAME_TEXT = 256;
     constexpr size_t        MAX_PROTOCOL_TEXT = KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH - 1;
     constexpr size_t        MAX_REASON_TEXT = KIOTTY_NET_MAX_WEB_SOCKET_REASON_LENGTH - 1;
 
@@ -36,7 +36,7 @@ KiottyNetSpan KiottyNet_findWebSocketUpgradeHeader(KiottyNetWebSocketHandle webs
                                                    const char* name)
 {
     if (websocket.owner == nullptr) { return NONE; }
-    const net::TextResult wanted = net::parseText(name, MAX_HEADER_NAME_TEXT);
+    const net::TextResult wanted = net::parseText(name, net::MAX_HEADER_NAME_TEXT);
     if (!wanted || wanted.value.empty()) { return NONE; }
     return websocket.owner->upgradeHeader(websocket.id, wanted.value);
 }
@@ -146,7 +146,7 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server,
 
 namespace
 {
-    constexpr size_t MAX_PATH_TEXT = KIOTTY_NET_MAX_URL_LENGTH - 1;
+    constexpr size_t MAX_URL_PATH_TEXT = KIOTTY_NET_MAX_URL_LENGTH - 1;
 
     bool isRequestTarget(net::Span<const char> path)
     {
@@ -264,7 +264,7 @@ KiottyNetCode KiottyNet_runWebSocketClient(KiottyNetWebSocketClientHandle client
                                            KiottyNetAppContext app_context)
 {
     if (client == nullptr || address == nullptr) { return INVALID; }
-    const net::TextResult text = net::parseText(path, MAX_PATH_TEXT);
+    const net::TextResult text = net::parseText(path, MAX_URL_PATH_TEXT);
     if (!text || !isRequestTarget(text.value)) { return INVALID; }
     const KiottyNetAddress copied_address = *address;
     const net::ClientRun run{ copied_address, text.value, tls, app_context };

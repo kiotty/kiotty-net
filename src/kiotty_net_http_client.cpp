@@ -2,14 +2,16 @@
 
 #include "context/kiotty_context.h"
 #include "context/kiotty_http_configuration.h"
+#include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "domain/usecases/http/kiotty_http_reply_headers.h"
+#include "domain/usecases/http/kiotty_http_token.h"
 
 namespace net = kiotty::net::implementation;
 
 namespace
 {
-    constexpr KiottyNetCode INVALID = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+    using net::INVALID;
     constexpr size_t        MAX_TEXT = net::MAX_HTTP_HEADER_BYTES;
     constexpr KiottyNetSpan NO_TEXT = { nullptr, 0 };
 
@@ -33,12 +35,6 @@ namespace
     {
         const int32_t index = static_cast<int32_t>(method);
         return index >= 0 && index < KIOTTY_NET_HTTP_METHOD_COUNT;
-    }
-
-    KiottyNetSpan spanOf(net::Span<const char> text)
-    {
-        const KiottyNetSpan span = { text.data, text.length };
-        return span;
     }
 
     KiottyNetHttpClientRequest requestWithBody(KiottyNetHttpMethod method,
@@ -126,7 +122,7 @@ KiottyNetHttpHeader KiottyNet_makeHttpHeader(const char* name, const char* value
     const net::TextResult parsed_name = net::parseText(name, MAX_TEXT);
     const net::TextResult parsed_value = net::parseText(value, MAX_TEXT);
     if (!parsed_name || !parsed_value) { return unusable; }
-    const KiottyNetHttpHeader header = { spanOf(parsed_name.value), spanOf(parsed_value.value) };
+    const KiottyNetHttpHeader header = { net::spanOf(parsed_name.value), net::spanOf(parsed_value.value) };
     return header;
 }
 

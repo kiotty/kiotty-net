@@ -8,6 +8,7 @@
 
 namespace kiotty::net::implementation
 {
+    inline constexpr size_t MAX_HEADER_NAME_TEXT = 256;
     inline constexpr size_t MIN_HTTP_HEADER_BYTES = 64;
     inline constexpr size_t MAX_HTTP_HEADER_BYTES = 1024 * 1024;
     inline constexpr size_t MIN_HTTP_RESPONSE_BYTES = RESPONSE_PREFIX_BYTES + MIN_HTTP_HEADER_BYTES;

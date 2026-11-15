@@ -1,5 +1,7 @@
 #include "domain/usecases/http/kiotty_http_message_framing.h"
 
+#include "domain/usecases/http/kiotty_http_constants.h"
+
 #include "core/kiotty_parse_integer.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 
@@ -22,10 +24,7 @@ namespace kiotty::net::implementation
             KEEP_ALIVE
         };
 
-        constexpr KiottyNetHttpStatus BAD_REQUEST = KIOTTY_NET_HTTP_STATUS_BAD_REQUEST;
-        constexpr KiottyNetHttpStatus NOT_IMPLEMENTED = KIOTTY_NET_HTTP_STATUS_NOT_IMPLEMENTED;
         constexpr char TRANSFER_ENCODING[] = "Transfer-Encoding";
-        constexpr char CONTENT_LENGTH[] = "Content-Length";
         constexpr char CONNECTION[] = "Connection";
         constexpr char CHUNKED[] = "chunked";
         constexpr char CLOSE_OPTION[] = "close";

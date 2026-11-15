@@ -1,14 +1,13 @@
 #include "domain/usecases/http/kiotty_http_body_reader.h"
 
+#include "core/kiotty_text.h"
+
 #include <algorithm>
 
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr char CARRIAGE_RETURN = '\r';
-        constexpr char LINE_FEED = '\n';
-
         BodyState        initialStateOf(const ReplyFraming& framing);
         bool             isMoving(BodyState state, size_t input_left, size_t output_left);
         bool             isSettled(BodyState state);
