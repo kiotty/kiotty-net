@@ -183,7 +183,7 @@ typedef enum KiottyNetCode {
 
 - 돌려줄 값이 없으면 `KiottyNetCode` 를 돌려준다.
 - 돌려줄 값이 있으면 값과 `code` 필드를 함께 가진 공용 struct 를 값으로 돌려준다 (`KiottyNetResult`, `KiottyNetHttpReply`). C++ 래퍼도 같은 struct 를 그대로 돌려준다.
-- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 64 KiB (2026-11-14 에 16 KiB 에서 올렸다. WebSocket 의 송신 메시지가 push lane 하나에 들어가야 하기 때문이다. 송신은 HTTP 와 파일이 `send_capacity` 조각으로 나가므로 16 KiB 로 둔다). 빌드 설정으로 바꾸지 않는다. `KiottyNet_serverMemorySize(configuration)` 와 `KiottyNet_clientMemorySize(configuration)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
+- 메모리가 보장되는 시점은 `KiottyNet_create*` 다. 소유자 (Server, StreamClient, EventClient. 공통 타입은 `KiottyNetEndpoint`) 하나를 만들 때 그 소유자가 실행 중에 쓸 것 (Server 는 `max_clients` 만큼의 연결과 버퍼, 완료 배열) 을 한 번에 잡는다. 만들었으면 그 소유자의 실행 중에 메모리 부족은 생기지 않는다. 할당은 표준 라이브러리로만 하고 라이브러리는 예외를 끄고 빌드하므로, 잡지 못하면 process 가 끝난다 (`KIOTTY_NET_CODE_OUT_OF_MEMORY` 를 돌려주지 않는다). 소유자의 개수에는 상한이 없다. 소유자를 destroy 해도 그 메모리는 OS 에 돌려주지 않고 같은 타입의 다음 create 가 재사용한다 (Server 는 더 큰 `max_clients` 가 올 때만 연결 풀을 다시 잡는다). `KiottyNet_releaseContext` 도 메모리를 유지하고 다음 `initializeContext` 뒤의 create 가 다시 쓴다. 연결 하나의 버퍼는 설정한 capacity (`receive / send / push_capacity`) 만큼 create 때 잡는다 (TLS 설정이 있으면 암호문 버퍼 둘을 더 잡는다). capacity 의 상한은 라이브러리 상수다: 수신 64 KiB, 송신 16 KiB, push 64 KiB (2026-11-14 에 16 KiB 에서 올렸다. WebSocket 의 송신 메시지가 push lane 하나에 들어가야 하기 때문이다. 송신은 HTTP 와 파일이 `send_capacity` 조각으로 나가므로 16 KiB 로 둔다). 빌드 설정으로 바꾸지 않는다. 기본값은 수신 8 KiB, 송신 4 KiB, push 4 KiB 다 (수신은 2026-11-16 에 4 KiB 에서 올렸다. HTTP 헤더 한 줄이 기본 `max_header_bytes` 8 KiB 까지 수신 Stage 에 들어가야 하기 때문이다. 서버는 줄을 `min(receive_capacity, max_header_bytes + 2)` 까지 읽는다). `KiottyNet_serverMemorySize(configuration)` 와 `KiottyNet_clientMemorySize(configuration)` 가 그 설정의 소유자 하나가 잡는 평문 크기를 알려준다. 잡은 메모리는 쓰기 전까지 OS 가 실제 RAM 에 올리지 않는다 (Windows 의 "커밋 크기" 는 잡은 크기를 센다. 줄이려면 `max_clients` 를 낮춘다).
 - Context 는 process 에 하나다. `KiottyNet_initializeContext` 를 두 번 부르면 같은 handle 과 `KIOTTY_NET_CODE_SUCCESS` 이고, `KiottyNet_releaseContext` 한 번이 둘 다 끝낸다.
 - handle 을 만드는 함수 (`KiottyNet_initializeContext`, `KiottyNet_create*`) 는 `{ code, handle }` struct (`KiottyNetServerResult` 등) 를 돌려준다. 실패하면 handle 이 NULL 이고 code 가 이유다. C++ 래퍼는 `explicit operator bool` 과 `code()` 로 보여준다 (판 v1, 2026-11-09. 전에는 `valid()`). HttpServer 와 WebSocketClient 의 create 도 같다 (`KiottyNetHttpServerResult`, `KiottyNetWebSocketClientResult`. 9, 11절).
 - 내부 구현은 `KiottyResult<Value, Code>` 를 쓰지만 공개 인터페이스 (C, C++ 모두) 에는 나오지 않는다.
@@ -281,7 +281,7 @@ typedef enum KiottyNetNoDelay {                        /* TCP_NODELAY. C ABI 에
 typedef struct KiottyNetServerConfiguration {
     uint32_t          initialization_mark;
     size_t            max_clients;      /* 기본 1024, 1 ~ 65536. 동시 연결 수. create 때 이만큼의 연결을 잡는다 */
-    size_t            receive_capacity;    /* 기본 4 KiB, 상한 64 KiB. Connection 당 수신 Stage 크기. create 때 이만큼 잡는다 */
+    size_t            receive_capacity;    /* 기본 8 KiB (2026-11-16 에 4 KiB 에서), 상한 64 KiB. Connection 당 수신 Stage 크기. create 때 이만큼 잡는다 */
     size_t            send_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB, 상한 64 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket 의 송신 frame (send, ping / pong, close) 이 쌓이는 곳. frame 하나의 상한이기도 하다 (4절, 10절) */
     KiottyNetNoDelay  no_delay;         /* 기본 KIOTTY_NET_NO_DELAY_ON. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
@@ -290,7 +290,7 @@ typedef struct KiottyNetServerConfiguration {
 
 typedef struct KiottyNetClientConfiguration {
     uint32_t          initialization_mark;
-    size_t            receive_capacity;     /* 기본 4 KiB */
+    size_t            receive_capacity;     /* 기본 8 KiB (2026-11-16 에 4 KiB 에서) */
     size_t            send_capacity;     /* 기본 4 KiB */
     size_t            push_capacity;     /* 기본 4 KiB. notifyEventClient 가 쌓이는 곳. StreamClient 는 쓰지 않는다 */
     uint32_t          connect_timeout_milliseconds;/* 기본 5000 */
@@ -1713,104 +1713,177 @@ KiottyNet_broadcastWebSocket(server.handle(), "/chat", KIOTTY_NET_WEB_SOCKET_OPC
 for (KiottyNetWebSocketHandle ws : app.clients.snapshot()) KiottyNet_WebSocket(ws).send(KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT, message.span());   // 이미 닫힌 handle 은 KIOTTY_NET_CODE_PEER_CLOSED
 ```
 
-### 11. HttpClient (초안) / WebSocketClient
+### 11. HttpClient / WebSocketClient
 
-HttpClient 는 초안이다. "정말 간략하고 쓰기 쉬운" 인터페이스를 목표로 피드백을 받으며 다듬는다. 열린 질문은 절 끝에 있다.
+**HttpClient.** 6절 StreamClient 위에 얹은 동기 API 다 (cycle C1 ~ C5, 2026-11-15 ~ 16). IO Thread 도 콜백도 없고 호출한 thread 에서 보내고 기다린다. 선언은 서버와 같은 `kiotty_net_http.h` 에 있고, 설계는 `docs/design/design_http_client_v0.html`, 사용법은 [user_guide_http.md](user_guide_http.md) 2절이다. 2026-11-09 의 초안 (create 가 tls 를 받음, `KiottyNetHttpClientLimits`, Reply 의 body, `requestHttp`) 을 이 절이 대신한다.
 
-**HttpClient.** 6절 StreamClient 위에 얹은 동기 API 다. IO Thread 가 없고 호출한 thread 에서 보내고 기다린다.
-
-- 첫 요청에서 연결하고 keep-alive 로 유지한다. 서버가 끊었으면 (`KIOTTY_NET_CODE_PEER_CLOSED`) 다음 요청에서 다시 연결한다. 사용자는 연결을 신경 쓰지 않는다.
-- 응답은 client 안의 고정 크기 버퍼에 들어가고 `KiottyNetHttpReply` 는 그 버퍼를 가리킨다. **다음 요청까지만 유효하다.** 보관하려면 복사한다.
-- 응답 body 가 `max_body_bytes` 를 넘으면 `KIOTTY_NET_CODE_BUFFER_FULL` 이고 연결을 끊는다. chunked 응답은 라이브러리가 합친다.
-- redirect, 쿠키, 압축, 인증은 하지 않는다. 필요한 헤더는 사용자가 넣는다. 매 요청에 같은 헤더 (`Authorization` 등) 를 넣어야 하면 `KiottyNet_setHttpClientHeader` 로 한 번 등록한다.
-
-메서드별 함수. 자주 쓰는 4개 (GET, POST, PUT, DELETE) 와 PATCH, HEAD, OPTIONS 에 전용 함수가 있다. 전용 함수에 없는 조합 (요청마다 다른 헤더, body 있는 DELETE 등) 은 `KiottyNet_requestHttp` 하나로 한다.
+- **create** 는 `(context, configuration, limits)` 이고 `KiottyNetHttpClientResult { code, handle }` 을 돌려준다. 자원만 잡는다. `limits` 가 NULL 이면 `KiottyNet_initializeHttpLimits` 의 기본값이다. 쓰는 필드는 `max_header_bytes` / `max_headers` 둘이고 응답 머리, 보내는 머리, 공통 헤더 저장소에 같이 쓰인다. NULL context / 설정, 초기화하지 않은 설정 / limits, 범위 밖 limits 는 `{ KIOTTY_NET_CODE_INVALID_ARGUMENT, NULL }`, 자리가 없으면 `KIOTTY_NET_CODE_TABLE_FULL`.
+- **connect** 는 `(client, address, tls)` 이다. 대상 (address, tls) 을 기억하고 6절의 재시도로 연결한다. tls 가 NULL 이면 http. 연결만 실패하면 (서버가 없음, 거절, timeout) 그 code 이고 대상은 남는다. 인자가 틀리면 (주소, Host 가 될 수 없는 host, TLS 설정) `KIOTTY_NET_CODE_INVALID_ARGUMENT` 이고 이전 대상도 지운다 (그 뒤의 요청은 connect 한 적 없음과 같다). 다시 부르면 대상을 바꾼다. **Host 와 SNI 는 address 의 host** 다 (기본 포트 80 / 443 이 아니면 `:port`, IPv6 literal 은 `[...]`, pipe 연결은 `localhost`).
+- **연결의 수명.** client 하나 = 연결 하나 = keep-alive. 연결이 없으면 (처음, 끊긴 뒤) 요청이 그 자리에서 연결한다. connect 를 한 번도 하지 않았거나 인자가 틀린 connect 가 대상을 지웠으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 응답이 keep-alive 가 아니면 (`Connection: close`, HTTP/1.0, 닫힘까지의 body) body 를 다 읽은 뒤 닫는다. **disconnect** 는 연결만 닫고 대상은 남는다.
+- **keep-alive 재사용의 재시도.** 이미 열려 있던 연결 (앞 요청이 쓴 것, connect 로 열어 두고 쉬던 것) 에서 응답 바이트를 하나도 받지 못하고 `PEER_CLOSED` / `SOCKET_ERROR` 로 실패하면, 멱등 메서드 (GET, HEAD, PUT, DELETE, OPTIONS) 는 새 연결로 한 번 다시 보낸다. POST / PATCH 는 다시 보내지 않고 `KIOTTY_NET_CODE_PEER_CLOSED` (RFC 9110 9.2.2). `TIMEOUT`, `CLOSED`, `PROTOCOL_ERROR`, TLS 오류, 이 요청이 연 연결의 실패는 다시 보내지 않는다.
+- **요청.** 메서드별 일곱 (`getHttp`, `postHttp`, `putHttp`, `deleteHttp`, `patchHttp`, `headHttp`, `optionsHttp`) 과 struct `KiottyNetHttpClientRequest { method, path, type, body }` 를 받는 `sendHttpRequest`. 메서드별 함수는 안에서 `sendHttpRequest` 를 부른다. 모든 요청 함수는 `(client, path 또는 request, headers, header_count, ...)` 순서이고 헤더가 없으면 `NULL, 0`. 상태줄과 헤더까지 받고 돌아온다. body 는 복사하지 않고 사용자 버퍼에서 바로 보내며 언제나 `Content-Length` 다 (POST / PUT / PATCH 는 body 가 없어도 `Content-Length: 0`). Content-Type 은 `KiottyNetHttpContentType` (서버의 body setter 와 같은 표). `CUSTOM` 이면 라이브러리는 쓰지 않고 앱이 헤더로 넣는다. `BY_EXTENSION` 은 `INVALID_ARGUMENT`, 텍스트 계열 body 가 UTF-8 아니면 `INVALID_ENCODING`.
+- **보내는 머리.** `METHOD path HTTP/1.1`, `Host`, 공통 헤더 (요청 헤더에 같은 이름이 있는 것은 뺀다. 라이브러리가 Content-Type 을 쓰면 공통 헤더의 Content-Type 도 뺀다), 요청 헤더, `Content-Type`, `Content-Length`, 빈 줄. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection` 은 라이브러리가 쓰므로 헤더에 넣으면 `INVALID_ARGUMENT`. 머리 전체가 `max_header_bytes` 를 넘으면 `KIOTTY_NET_CODE_REQUEST_TOO_LARGE`, 헤더 줄 수 (Host 포함) 가 `max_headers` 를 넘으면 `KIOTTY_NET_CODE_TABLE_FULL`. 검사에서 실패한 요청은 아무것도 보내지 않고 이전 응답과 읽지 않은 body 를 건드리지 않는다.
+- **헤더의 글자** (RFC 9110 5.1, 5.5, 서버의 헤더 파서와 같다). name 은 token 글자. value 는 보이는 ASCII, 공백, 탭, UTF-8 이고 앞뒤 공백은 잘라 보낸다. CR / LF / NUL / 깨진 UTF-8 은 `INVALID_ARGUMENT` (헤더 주입). path 는 `/` 로 시작하는 보이는 ASCII (query 포함) 이고 `*` 는 OPTIONS 만.
+- **공통 헤더.** `setHttpClientHeader(client, name, value)` 는 더하거나 같은 name (대소문자 무시) 을 바꾸고, value NULL 이면 그 name 을 지운다 (없으면 SUCCESS). `clearHttpClientHeaders(client)` 는 전부 지운다. connect / disconnect / close 를 지나 destroy 까지 남는다. text 합 `max_header_bytes`, 개수 `max_headers` 를 넘으면 `KIOTTY_NET_CODE_BUFFER_FULL` 이고 저장소는 그대로다. 지운 자리는 0 으로 채운다.
+- **요청마다의 헤더**는 앱의 `KiottyNetHttpHeader` 배열이고 호출 동안만 읽는다. `KiottyNet_makeHttpHeader(name, value)` 가 strlen 으로 원소를 만든다 (NULL 이나 1 MiB 넘는 문자열이면 빈 헤더 → 요청이 `INVALID_ARGUMENT`). thread_local 저장소는 없다.
+- **Reply** `{ code, status, headers, header_count }` 는 값 + code (2절) 다. code 가 SUCCESS 가 아니면 나머지는 0. 4xx / 5xx 도 SUCCESS 이고 HTTP 의 실패는 status 로 본다. headers 는 client 의 응답 머리 저장소를 가리키고 다음 요청 (검사를 지난 것) / connect / destroy 까지 유효하다. body 를 읽거나 disconnect / close 를 해도 무효가 되지 않는다. `findHttpReplyHeader` 는 대소문자 무시로 첫 것을, `getHttpAllowedMethods` 는 `Allow` 를 `KIOTTY_NET_HTTP_METHOD_BIT` 의 합으로 (없으면 0) 준다.
+- **응답을 읽는 규칙.** 상태줄은 `HTTP/1.1 NNN` / `HTTP/1.0 NNN` (100 ~ 599, reason 은 버린다). 1xx 는 건너뛴다 (16 번까지). 101 은 `PROTOCOL_ERROR` (Upgrade 는 WebSocketClient 의 일). body 의 끝은 서버의 요청 파서와 같다: HEAD 의 응답 / 204 / 304 는 없음, `Transfer-Encoding: chunked` 는 chunk (extension 과 trailer 는 버림), 아니면 `Content-Length`, 둘 다 없으면 닫힐 때까지. `Transfer-Encoding` 이 `chunked` 하나가 아니거나 `Content-Length` 가 여럿이면 (값이 같아도) `PROTOCOL_ERROR`. keep-alive 는 서버의 규칙과 같다. 응답 머리가 `max_header_bytes` / `max_headers` 를 넘으면 `BUFFER_FULL`. 한 줄은 `max_header_bytes` 까지 받는다 (create 가 수신 Stage 를 `max(receive_capacity, max_header_bytes + 2)` 로 키운다. 상한 64 KiB).
+- **body 읽기** 는 `readHttpReplyBody(client, buffer, length, timeout)` 하나다. 한 번에 받는 요청, 스트림 open / close 는 없다. chunk 를 벗긴 바이트를 받은 만큼 (최대 length) 주고 body 가 끝나면 `{ 0, SUCCESS }` (그 뒤로도, body 없는 응답, 요청 전에도). body 에는 상한이 없다. UTF-8 을 보지 않는다. `TIMEOUT` 은 연결을 닫지 않고 다시 read 하면 이어 받는다. 그 밖의 실패 (`PROTOCOL_ERROR`, `PEER_CLOSED`, `CLOSED`) 는 연결을 닫는다. buffer NULL / length 0 은 `INVALID_ARGUMENT`. **body 를 다 읽기 전에 다음 요청을 보내면 그 연결을 닫고 다시 연다** (남은 body 를 읽어 버리지 않는다. 끝이 없는 SSE 가 있으므로).
+- **timeout** 은 호출마다 하나다. 요청은 (다시) 연결 + 송신 + 머리 수신 전체이고 다시 연결의 connect 시도, TLS handshake, 재시도 쉼을 남은 시간으로 자른다 (시간이 다 되면 마지막 시도의 code). read 는 read 한 번. 0 은 제한 없음 (요청 timeout 0 이면 다시 연결은 설정의 connect 값). connect 는 timeout 인자가 없고 설정을 따른다.
+- **thread.** client 하나는 한 번에 한 thread 가 쓴다. 다른 thread 의 호출이 걸려 있으면 connect, 요청, read, 공통 헤더 set / clear 는 `KIOTTY_NET_CODE_BUSY`, disconnect 는 아무것도 하지 않는다. **`closeHttpClient` 만 아무 thread 에서나** 부른다. 걸린 호출 (요청, read, 다시 연결, connect) 을 `KIOTTY_NET_CODE_CLOSED` 로 돌아오게 하고 연결을 닫는다. 걸린 호출이 없으면 그 자리에서 닫는다. 대상과 공통 헤더는 남고 다음 요청이 다시 연다 (close 는 그때 걸린 호출만 멈춘다). connect 안의 이름 풀기는 깨우지 못한다.
+- **메모리.** create 때 머리 버퍼 `2 × max_header_bytes` (반은 공통 헤더, 반은 요청 머리), 응답 머리 저장소 `max_header_bytes`, 헤더 표 둘 (`max_headers` 칸씩), StreamClient 의 Stage (수신은 `max(receive_capacity, max_header_bytes + 2)`, 상한 64 KiB) 를 잡는다. body 버퍼는 없다. StreamClient 는 저마다 깨우는 handle (POSIX pipe 의 fd 2 개, Windows UDP socket 1 개) 을 가진다. 열지 못하면 (fd / socket 부족) create 가 `{ KIOTTY_NET_CODE_SOCKET_ERROR, NULL }`.
+- **하지 않는 것.** redirect (3xx 는 그대로 돌려준다), 쿠키, 압축, 인증 흐름, 프록시, HTTP/2, 비동기 판, 요청 body 를 조각으로 올리기, SSE 도우미.
 
 | 메서드 | C | C++ | body 인자 | 응답에서 볼 것 |
 |---|---|---|---|---|
-| GET | `KiottyNet_getHttp` | `get` | 없음 | status, body |
-| POST | `KiottyNet_postHttp` | `post` | 있음 | status, body |
-| PUT | `KiottyNet_putHttp` | `put` | 있음 | status, body |
-| DELETE | `KiottyNet_deleteHttp` | `del` | 없음 | status |
-| PATCH | `KiottyNet_patchHttp` | `patch` | 있음 | status, body |
-| HEAD | `KiottyNet_headHttp` | `head` | 없음 | status, headers. body 는 항상 길이 0 이고 라이브러리는 body 를 읽으려 하지 않는다 |
-| OPTIONS | `KiottyNet_optionsHttp` | `options` | 없음 | `KiottyNet_getHttpAllowedMethods` 로 Allow 헤더를 비트 합으로 |
+| GET | `KiottyNet_getHttp` | `get` | 없음 | status, headers, `readHttpReplyBody` |
+| POST | `KiottyNet_postHttp` | `post` | type, body | status, headers, body |
+| PUT | `KiottyNet_putHttp` | `put` | type, body | status, headers, body |
+| DELETE | `KiottyNet_deleteHttp` | `del` | 없음 (body 가 필요하면 `sendHttpRequest`) | status |
+| PATCH | `KiottyNet_patchHttp` | `patch` | type, body | status, headers, body |
+| HEAD | `KiottyNet_headHttp` | `head` | 없음 | status, headers. body 는 언제나 없다 |
+| OPTIONS | `KiottyNet_optionsHttp` | `options` | 없음 | `KiottyNet_getHttpAllowedMethods`. path `"*"` 는 서버 전체 |
 
 C 의 `headHttp`, `optionsHttp` 는 HTTP 메서드 이름을 그대로 동사로 쓴 것이다 (naming 규약 1번의 예외).
 
-```c
-typedef struct KiottyNetHttpClientLimits {
-    size_t   max_header_bytes;      /* 응답 status line + headers. 기본 8 KiB */
-    size_t   max_headers;           /* 기본 32 */
-    size_t   max_body_bytes;        /* 응답 body. 기본 64 KiB */
-    size_t   request_bytes;         /* 요청 버퍼 (request line + headers). body 는 복사하지 않고 그대로 보낸다. 기본 8 KiB */
-    size_t   default_header_bytes;  /* setHttpClientHeader 로 등록한 헤더 저장 공간. 기본 1 KiB */
-} KiottyNetHttpClientLimits;
+요청과 read 의 code
 
-typedef struct KiottyNetHttpReply {         /* 값 + code (2절). C++ 도 이 struct 를 그대로 돌려준다. code != KIOTTY_NET_CODE_SUCCESS 면 나머지 필드는 0. 다음 요청까지 유효 */
+| 코드 | 뜻 |
+|---|---|
+| `KIOTTY_NET_CODE_SUCCESS` | 요청: 상태줄과 헤더를 받았다 (4xx / 5xx 도). read: 받은 바이트, 0 이면 body 의 끝 |
+| `KIOTTY_NET_CODE_TIMEOUT` | 요청: 머리까지 오지 않았다, 연결을 닫는다. read: 연결은 그대로 |
+| `KIOTTY_NET_CODE_PEER_CLOSED` | 응답 머리 전, 또는 body 의 끝 전에 서버가 끊었다. 다시 보내지 않은 POST / PATCH |
+| `KIOTTY_NET_CODE_PROTOCOL_ERROR` | 깨진 상태줄 / 헤더 / chunk, 101, 1xx 16 번 초과, `chunked` 아닌 Transfer-Encoding, Content-Length 여럿 |
+| `KIOTTY_NET_CODE_BUFFER_FULL` | 요청: 응답 머리가 `max_header_bytes` / `max_headers` 초과 (`max_header_bytes` 가 64 KiB 를 넘으면 한 줄은 64 KiB 까지). `setHttpClientHeader`: 공통 헤더 저장소가 참 |
+| `KIOTTY_NET_CODE_REQUEST_TOO_LARGE` | 보낼 머리가 `max_header_bytes` 초과 |
+| `KIOTTY_NET_CODE_TABLE_FULL` | 보낼 헤더 줄 수가 `max_headers` 초과. C++ 헤더 목록이 넘쳤다 |
+| `KIOTTY_NET_CODE_INVALID_ARGUMENT` | NULL, 잘못된 path / 헤더 / 메서드, 라이브러리가 쓰는 헤더, `BY_EXTENSION`, connect 한 적 없음 (인자가 틀린 connect 뒤도), read 의 buffer NULL / length 0 |
+| `KIOTTY_NET_CODE_INVALID_ENCODING` | 텍스트 계열 type 의 요청 body 가 UTF-8 아님 |
+| `KIOTTY_NET_CODE_BUSY` | 다른 thread 의 호출이 걸려 있다 |
+| `KIOTTY_NET_CODE_CLOSED` | 다른 thread 의 `closeHttpClient`. read 는 body 중간의 disconnect 도 |
+| `KIOTTY_NET_CODE_SOCKET_ERROR`, `KIOTTY_NET_CODE_TLS_*` | (다시) 연결 실패. connect 와 같다 |
+
+```c
+typedef struct KiottyNetHttpClient* KiottyNetHttpClientHandle;
+typedef struct KiottyNetHttpClientResult { KiottyNetCode code; KiottyNetHttpClientHandle handle; } KiottyNetHttpClientResult;
+
+typedef struct KiottyNetHttpReply {         /* 값 + code (2절). code != SUCCESS 면 나머지는 0 */
     KiottyNetCode              code;
-    int                        status;
-    const KiottyNetHttpHeader* headers;
+    int32_t                    status;
+    const KiottyNetHttpHeader* headers;     /* 다음 요청 / connect / destroy 까지 유효 */
     size_t                     header_count;
-    KiottyNetSpan              body;
 } KiottyNetHttpReply;
 
-typedef struct KiottyNetHttpClient* KiottyNetHttpClientHandle;
-KiottyNetHttpClientHandle KiottyNet_createHttpClient(const KiottyNetClientConfiguration* config, const KiottyNetTlsClientConfiguration* tls, const KiottyNetHttpClientLimits* limits);   /* address.host 가 Host 헤더가 된다 */
-void          KiottyNet_destroyHttpClient(KiottyNetHttpClientHandle c);
+typedef struct KiottyNetHttpClientRequest { /* 앱이 채운다. 호출 동안만 읽는다 */
+    KiottyNetHttpMethod      method;
+    const char*              path;          /* "/a/b?x=1". OPTIONS 만 "*" */
+    KiottyNetHttpContentType type;          /* body 의 Content-Type */
+    KiottyNetSpan            body;          /* length 0 이면 body 없음 */
+} KiottyNetHttpClientRequest;
 
-/* 요청 하나. headers 는 사용자 배열 (NULL, 0 가능). body.length == 0 이면 body 없음. timeout_milliseconds 는 연결 + 송신 + 응답 수신 전체 */
-KiottyNetHttpReply KiottyNet_requestHttp(KiottyNetHttpClientHandle c, KiottyNetHttpMethod method, const char* path,
-                                         const KiottyNetHttpHeader* headers, size_t header_count,
-                                         KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-/* 메서드별. requestHttp(c, KIOTTY_NET_HTTP_METHOD_XXX, path, NULL, 0, body, content_type, timeout_milliseconds) 와 같다 */
-KiottyNetHttpReply KiottyNet_getHttp    (KiottyNetHttpClientHandle c, const char* path, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_postHttp   (KiottyNetHttpClientHandle c, const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_putHttp    (KiottyNetHttpClientHandle c, const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_deleteHttp (KiottyNetHttpClientHandle c, const char* path, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_patchHttp  (KiottyNetHttpClientHandle c, const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_headHttp   (KiottyNetHttpClientHandle c, const char* path, uint32_t timeout_milliseconds);
-KiottyNetHttpReply KiottyNet_optionsHttp(KiottyNetHttpClientHandle c, const char* path, uint32_t timeout_milliseconds);   /* path 가 "*" 면 서버 전체 */
+KiottyNetHttpClientResult KiottyNet_createHttpClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration, const KiottyNetHttpLimits* limits /* NULL = 기본값 */);
+void          KiottyNet_destroyHttpClient(KiottyNetContext context, KiottyNetHttpClientHandle client);
+KiottyNetCode KiottyNet_connectHttpClient(KiottyNetHttpClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls /* NULL = http */);
+void          KiottyNet_disconnectHttpClient(KiottyNetHttpClientHandle client);    /* 연결만. 대상은 남는다 */
+void          KiottyNet_closeHttpClient(KiottyNetHttpClientHandle client);         /* 아무 thread. 걸린 호출이 CLOSED */
+KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle client, const char* name, const char* value /* NULL = 그 name 지움 */);
+KiottyNetCode KiottyNet_clearHttpClientHeaders(KiottyNetHttpClientHandle client);
+
+KiottyNetHttpHeader        KiottyNet_makeHttpHeader(const char* name, const char* value);                 /* strlen 으로 Span 둘 */
+KiottyNetHttpClientRequest KiottyNet_makeHttpClientRequest(KiottyNetHttpMethod method, const char* path); /* type OCTET_STREAM, body 없음 */
+
+/* headers, header_count : 이 요청에만 붙는 헤더. 없으면 NULL, 0. timeout_milliseconds 는 (다시) 연결 + 송신 + 머리 수신 전체, 0 은 제한 없음 */
+KiottyNetHttpReply KiottyNet_sendHttpRequest(KiottyNetHttpClientHandle client, const KiottyNetHttpClientRequest* request, const KiottyNetHttpHeader* headers, size_t header_count, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_getHttp    (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_postHttp   (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_putHttp    (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_deleteHttp (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_patchHttp  (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_headHttp   (KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_optionsHttp(KiottyNetHttpClientHandle client, const char* path, const KiottyNetHttpHeader* headers, size_t header_count, uint32_t timeout_milliseconds);
+
+KiottyNetResult KiottyNet_readHttpReplyBody(KiottyNetHttpClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 받은 만큼. { 0, SUCCESS } 가 끝 */
 
 KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name);    /* 대소문자 무시. 없으면 { NULL, 0 } */
-uint32_t      KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);                    /* Allow 헤더를 KIOTTY_NET_HTTP_METHOD_BIT 의 합으로. 헤더가 없으면 0 */
-
-/* 모든 요청에 붙는 헤더. 같은 name 을 다시 부르면 값을 바꾸고, value == NULL 이면 지운다.
-   name + value 합이 KiottyNetHttpClientLimits::default_header_bytes 를 넘으면 KIOTTY_NET_CODE_BUFFER_FULL */
-KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle c, const char* name, const char* value);
-void          KiottyNet_disconnectHttpClient(KiottyNetHttpClientHandle c);   /* 명시적으로 끊고 싶을 때. 다음 요청에서 다시 연결된다 */
+uint32_t      KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);                    /* Allow 를 KIOTTY_NET_HTTP_METHOD_BIT 의 합으로. 없으면 0 */
 ```
 
 ```cpp
-class KiottyNet_HttpClient {
+class KiottyNet_HttpHeaderList {                     // 요청 함수가 받는 것. 배열을 가리키기만 한다. 복사 금지
 public:
-    KiottyNet_HttpClient(const KiottyNetClientConfiguration& config, const KiottyNetHttpClientLimits& limits);
-    KiottyNet_HttpClient(const KiottyNetClientConfiguration& config, const KiottyNetTlsClientConfiguration& tls, const KiottyNetHttpClientLimits& limits);   // TLS
-    KiottyNetHttpReply request(KiottyNetHttpMethod method, const char* path, const KiottyNetHttpHeader* headers, size_t header_count,
-                               KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply get    (const char* path, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply post   (const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply put    (const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply del    (const char* path, uint32_t timeout_milliseconds);                    // DELETE
-    KiottyNetHttpReply patch  (const char* path, KiottyNetSpan body, const char* content_type, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply head   (const char* path, uint32_t timeout_milliseconds);
-    KiottyNetHttpReply options(const char* path, uint32_t timeout_milliseconds);
-    KiottyNetCode setHeader(const char* name, const char* value);           // 모든 요청에 붙는 헤더
+    const KiottyNetHttpHeader* data() const;
+    size_t                     count() const;
+    KiottyNetCode              code() const;          // add 가 넘쳤으면 TABLE_FULL
+};
+
+template <size_t N = 8>
+class KiottyNet_HttpHeaders : public KiottyNet_HttpHeaderList {   // stack 의 고정 배열. heap 없음
+public:
+    KiottyNet_HttpHeaders& add(const char* name, const char* value);   // N 을 넘으면 TABLE_FULL 을 기록하고 버린다
+};
+
+class KiottyNet_HttpClient {                         // 소멸자가 destroyHttpClient
+public:
+    KiottyNet_HttpClient(KiottyNetContext context, const KiottyNetClientConfiguration& configuration, const KiottyNetHttpLimits* limits);
+    explicit operator bool() const;                  // create 가 실패하면 false
+    KiottyNetCode             code() const;
+    KiottyNetHttpClientHandle handle() const;
+
+    KiottyNetCode connect(const KiottyNetAddress& address);
+    KiottyNetCode connect(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls);
     void          disconnect();
+    void          close();                           // 아무 thread
+
+    KiottyNetCode header(const char* name, const char* value);   // 공통 헤더. value nullptr 이면 지움
+    KiottyNetCode clearHeaders();
+
+    KiottyNetHttpReply send(const KiottyNetHttpClientRequest& request, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply send(const KiottyNetHttpClientRequest& request, const KiottyNet_HttpHeaderList& headers, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply get(const char* path, uint32_t timeout_milliseconds);                                   // head, del, options 도 같은 모양
+    KiottyNetHttpReply get(const char* path, const KiottyNet_HttpHeaderList& headers, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply post(const char* path, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);   // put, patch 도 같은 모양
+    KiottyNetHttpReply post(const char* path, const KiottyNet_HttpHeaderList& headers, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
+
+    KiottyNetResult    readBody(void* buffer, size_t length, uint32_t timeout_milliseconds);
 };
 ```
 
-```cpp
-KiottyNet_HttpClient client(config, limits);
-KiottyNetHttpReply   reply = client.get("/api/status", 3000);
-if (reply.code == KIOTTY_NET_CODE_SUCCESS && reply.status == 200) parse(reply.body);
+요청 함수는 템플릿이 아닌 `KiottyNet_HttpHeaderList` 를 받으므로 N 이 달라도 함수가 늘지 않는다. 헤더 목록의 `code()` 가 `TABLE_FULL` 이면 요청은 보내지 않고 `TABLE_FULL` 이다. 공개 메서드 7 개 규칙은 wrapper 에 적용하지 않는다 (`KiottyNet_HttpServer` 와 같다).
 
-client.setHeader("Authorization", "Bearer abc123");                        // 이후 모든 요청에 붙는다
-client.put("/api/devices/7", json, "application/json", 3000);
+```cpp
+KiottyNet_HttpClient client(context.handle(), configuration, nullptr);
+client.connect(address, tls);
+client.header("Authorization", "Bearer abc123");                           // 이후 모든 요청에 붙는다
+
+KiottyNet_HttpHeaders<> headers;
+headers.add("Accept", "application/json");
+KiottyNetHttpReply reply = client.get("/api/status", headers, 3000);
+if (reply.code == KIOTTY_NET_CODE_SUCCESS && reply.status == 200)
+{
+    KiottyNetResult got = client.readBody(buffer, sizeof(buffer), 3000);  // { 0, SUCCESS } 까지 되풀이
+}
+
+client.put("/api/devices/7", KIOTTY_NET_HTTP_CONTENT_TYPE_JSON, json, 3000);
 client.del("/api/devices/7", 3000);
 
 KiottyNetHttpReply allow = client.options("/api/devices", 3000);
 if (allow.code == KIOTTY_NET_CODE_SUCCESS && (KiottyNet_getHttpAllowedMethods(&allow) & KIOTTY_NET_HTTP_METHOD_BIT(KIOTTY_NET_HTTP_METHOD_PATCH))) { /* PATCH 지원 */ }
+
+KiottyNet_HttpClient events(context.handle(), configuration, nullptr);     // 스트림은 client 를 따로
+events.connect(address, tls);
+std::thread worker([&]
+{
+    if (events.get("/events", 5000).code != KIOTTY_NET_CODE_SUCCESS) { return; }
+    for (;;)
+    {
+        KiottyNetResult got = events.readBody(stream_buffer, sizeof(stream_buffer), 30000);
+        if (got.code == KIOTTY_NET_CODE_TIMEOUT) { continue; }                // 조용한 시간. 스트림은 그대로
+        if (got.code != KIOTTY_NET_CODE_SUCCESS || got.bytes == 0) { return; }
+        feedSse(stream_buffer, got.bytes);
+    }
+});
+events.close();                                                            // worker 의 걸린 read 가 CLOSED
+worker.join();
 ```
 
 **WebSocketClient.** 6절 EventClient 위에 Upgrade 요청 / 101 검사 행과 10절의 WebSocket 행을 얹은 것이다 (cycle W4, 등록 모양은 cycle V3, 2026-11-13). 선언은 `kiotty_net_websocket.h` 에 있고, 사용법은 [user_guide_websocket.md](user_guide_websocket.md) 6, 8절이다.
@@ -1900,9 +1973,10 @@ io.join();
 열린 질문
 
 1. (닫힘, 2026-11-11) 동기 WebSocketClient 는 두지 않는다. 서버 push 를 받으려면 결국 loop 가 필요하다 (user_guide_websocket 11절). 요청 / 응답 모양은 앱이 onMessage 와 큐로 놓는다 (user guide 8절).
-2. HttpClient 의 응답 이름. 서버의 `HttpResponse` (사용자가 채우는 것) 와 구분하려고 `HttpReply` (사용자가 읽는 것) 로 두었다.
-3. HttpClient 에 비동기 버전(EventClient 위, 콜백으로 응답)이 필요한지. 동기 버전만으로 시작하는 것을 제안한다.
-4. `request_bytes` 버퍼 없이 요청 헤더를 바로 write lane 에 쓰면 버퍼 하나가 준다. 대신 ClientConfig 의 `send_capacity` 가 요청 크기 상한이 된다.
+2. (닫힘, 2026-11-15) HttpClient 의 응답 이름은 `HttpReply` (사용자가 읽는 것. 서버의 `HttpResponse` 는 사용자가 채우는 것), 요청은 `HttpClientRequest` (서버의 `KiottyNetHttpRequest` 는 서버가 받은 요청) 다 (design_http_client_v0 정할 것 9).
+3. (닫힘, 2026-11-13) HttpClient 의 비동기 버전 (EventClient 위, 콜백으로 응답) 은 두지 않는다. 동시 요청은 client 여럿과 thread 로 한다 (design_http_client_v0 결정 1).
+4. (닫힘, 2026-11-15) `request_bytes` 는 없다. 요청 머리는 client 의 머리 버퍼 (`2 × max_header_bytes` 의 뒤 반) 에 만들고 body 는 사용자 버퍼에서 바로 보낸다 (결정 3, 8. C2 에서 반으로 나눔).
+5. (닫힘, 2026-11-16) HttpClient 의 선언은 서버와 같은 `kiotty_net_http.h` 에 둔다 (design_http_client_v0 결정 10, 정할 것 1). SSE 를 이벤트로 나누는 도우미와 요청 body 를 조각으로 올리기는 지금은 두지 않는다 (정할 것 4, 8).
 
 미결
 

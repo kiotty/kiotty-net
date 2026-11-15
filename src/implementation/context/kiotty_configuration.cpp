@@ -9,6 +9,7 @@ namespace kiotty::net::implementation
     {
         constexpr size_t   DEFAULT_MAX_CLIENTS = 1024;
         constexpr size_t   DEFAULT_CAPACITY_BYTES = 4096;
+        constexpr size_t   DEFAULT_RECEIVE_CAPACITY_BYTES = 8192;
         constexpr uint32_t DEFAULT_CONNECT_TIMEOUT_MILLISECONDS = 5000;
         constexpr uint32_t DEFAULT_MAX_TRIAL = 1;
         constexpr uint32_t DEFAULT_TRIAL_INTERVAL_MILLISECONDS = 1000;
@@ -271,7 +272,8 @@ namespace kiotty::net::implementation
 
         Capacities defaultCapacities()
         {
-            return Capacities{ smallerOf(DEFAULT_CAPACITY_BYTES, MemoryLimits::RECEIVE_CAPACITY),
+            const size_t receive = DEFAULT_RECEIVE_CAPACITY_BYTES;
+            return Capacities{ smallerOf(receive, MemoryLimits::RECEIVE_CAPACITY),
                                smallerOf(DEFAULT_CAPACITY_BYTES, MemoryLimits::SEND_CAPACITY),
                                smallerOf(DEFAULT_CAPACITY_BYTES, MemoryLimits::PUSH_CAPACITY) };
         }

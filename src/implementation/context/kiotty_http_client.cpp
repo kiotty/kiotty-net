@@ -3,7 +3,10 @@
 #include "context/kiotty_http_configuration.h"
 #include "core/kiotty_busy_guard.h"
 #include "core/kiotty_result.h"
+#include "data/datasource/kiotty_memory_limits.h"
 #include "domain/usecases/http/kiotty_http_request_check.h"
+
+#include <algorithm>
 
 namespace kiotty::net::implementation
 {
@@ -14,12 +17,14 @@ namespace kiotty::net::implementation
         constexpr size_t HEAD_AREA_COUNT = 2;
         constexpr size_t MAX_INTERIM_REPLIES = 16;
         constexpr size_t RESULT_MAXIMUM_BYTES = 0x7FFFFFFF;
+        constexpr size_t LINE_END_BYTES = 2;
 
         TimeLeftResult     timeLeftOf(const Deadline& deadline);
         KiottyNetHttpReply failedReply(KiottyNetCode code);
         KiottyNetResult    resultOf(size_t bytes, KiottyNetCode code);
         KiottyNetCode      checkLimits(const KiottyNetHttpLimits& limits);
         uint16_t           defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
         Span<char>         cappedOf(Span<char> buffer);
         bool               isIdempotent(KiottyNetHttpMethod method);
         bool               isConnectionLoss(KiottyNetCode code);
@@ -52,7 +57,7 @@ namespace kiotty::net::implementation
         const KiottyNetHttpLimits& limits = configuration.limits;
         const KiottyNetCode checked = checkLimits(limits);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
-        const KiottyNetCode base = StreamClient::initialize(id, configuration.client);
+        const KiottyNetCode base = StreamClient::initialize(id, lineReadyOf(configuration));
         if (base != KIOTTY_NET_CODE_SUCCESS) { return base; }
         _head_bytes.assign(HEAD_AREA_COUNT * limits.max_header_bytes, '\0');
         _reply_bytes.assign(limits.max_header_bytes, '\0');
@@ -344,6 +349,15 @@ namespace kiotty::net::implementation
             KiottyNetHttpLimits checked = limits;
             const size_t header_bytes = limits.max_header_bytes;
             return configureHttpHeaderCapacity(checked, header_bytes, limits.max_headers);
+        }
+
+        KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration)
+        {
+            KiottyNetClientConfiguration client = configuration.client;
+            const size_t line_bytes = configuration.limits.max_header_bytes + LINE_END_BYTES;
+            const size_t wanted = std::max(client.receive_capacity, line_bytes);
+            client.receive_capacity = std::min(wanted, MemoryLimits::RECEIVE_CAPACITY);
+            return client;
         }
 
         uint16_t defaultPortOf(const KiottyNetTlsClientConfiguration* tls)

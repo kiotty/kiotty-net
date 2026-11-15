@@ -84,6 +84,10 @@
   <li><a href="#s19">케이스 : HttpServer (H2 ~ H6)</a></li>
   <li><a href="#s20">케이스 : WebSocket (W1 ~ W4)</a></li>
   <li><a href="#s21">케이스 : 보내고 닫기 (B3)</a></li>
+  <li><a href="#s22">케이스 : HttpServer 의 app_context 는 run 에 한 번 (V1)</a></li>
+  <li><a href="#s23">케이스 : 서버 WebSocketRoute (V2)</a></li>
+  <li><a href="#s24">케이스 : 클라이언트 이벤트 등록, subprotocol, bye, onError (V3)</a></li>
+  <li><a href="#s25">케이스 : HttpClient (C1 ~ C5)</a></li>
 </ol>
 
 <h2 id="s1">1. 세 질문과 테스트의 층</h2>
@@ -592,7 +596,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p>여기는 <code>include/kiotty_net_base.h</code> 만 포함한다. 내부 헤더를 보지 않는다. 그래서 base.cpp 의 번역이 빠뜨린 것이 드러난다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
-  <tr><td>Config</td><td>ServerDefaultsAreTheRequirementValues</td><td><span class="tag ok">정상</span></td><td>max_clients, 세 capacity 4 KiB, no_delay <code>KIOTTY_NET_NO_DELAY_ON</code>, mark</td></tr>
+  <tr><td>Config</td><td>ServerDefaultsAreTheRequirementValues</td><td><span class="tag ok">정상</span></td><td>max_clients, receive_capacity 8 KiB (2026-11-16 전에는 4 KiB), send / push 4 KiB, no_delay <code>KIOTTY_NET_NO_DELAY_ON</code>, mark</td></tr>
   <tr><td>Config</td><td>ConfigureWithInvalidValueReturnsInvalidArgumentAndLeavesStructUnchanged</td><td><span class="tag misuse">오용</span></td><td>capacity 0, max_clients 0, max_trial 0 → struct memcmp 동일</td></tr>
   <tr><td>Config</td><td>InitializeRejectsMissingHostZeroPortAndTooLongHost</td><td><span class="tag misuse">오용</span></td><td>host NULL / 빈 문자열, port 0, 256 이상</td></tr>
   <tr><td>Config</td><td>PipePathOfOneHundredEightOrMoreIsRejected</td><td><span class="tag misuse">오용</span></td><td>sun_path</td></tr>
@@ -731,7 +735,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p><code>TEST_P</code> 로 조합할 군이다. 군 분류는 확정 전이니 확인이 필요하다.</p>
 <table>
   <tr><th>축</th><th>군</th><th>쓰는 곳</th></tr>
-  <tr><td>Stage capacity</td><td>{ 1, 16, 4096 (기본), 65536 }</td><td>Stage, Connection 의 BUFFER_FULL / REQUEST_TOO_LARGE 경계</td></tr>
+  <tr><td>Stage capacity</td><td>{ 1, 16, 4096 (send / push 기본), 8192 (receive 기본, 2026-11-16 부터), 65536 }</td><td>Stage, Connection 의 BUFFER_FULL / REQUEST_TOO_LARGE 경계</td></tr>
   <tr><td>메시지 길이 (capacity c 에 대해)</td><td>{ 0, 1, c - 1, c, c + 1, 16 KiB + 1 (TLS 레코드 경계) }</td><td>WRITE, notify, READ exact, StreamClient write</td></tr>
   <tr><td>클라이언트 수 (max_clients m)</td><td>{ 1, m, m + 1 }, m ∈ { 1, 128 }, 상한 경계는 1024</td><td>Server, IoLoop, broadcast</td></tr>
   <tr><td>timeout_ms</td><td>{ 0 (없음), 1, 100, 60000 }</td><td>HOLD / READ 의 deadline, await, StreamClient read</td></tr>
@@ -1078,6 +1082,83 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
   <tr><td>WebSocketClient</td><td>RegistrationAndRunRejectBadArguments</td><td><span class="tag misuse">오용</span></td><td>NULL 콜백 / client 는 <code>INVALID_ARGUMENT</code>. 후보 목록의 빈 항목, 공백 든 항목, 127 바이트 넘는 목록은 <code>INVALID_ARGUMENT</code>, NULL 은 지운다. onMessage 없이 run 하면 <code>INVALID_ARGUMENT</code>. 상대 경로, 공백 든 경로, NULL 경로, NULL 주소도. 이때 onError 는 없다</td></tr>
   <tr><td>WebSocketFrame</td><td>MaskKeysComeFromTheSharedStateAndChangeEveryDraw</td><td><span class="tag ok">정상</span></td><td><code>nextMaskKey</code> 가 state 를 옮기고 뽑을 때마다 다른 key, 같은 seed 면 같은 열</td></tr>
 </table>
+
+<h2 id="s25">25. 케이스 : HttpClient (C1 ~ C5)</h2>
+<p><code>docs/design/design_http_client_v0.html</code> 11절의 C1 ~ C5 사이클 (2026-11-15 ~ 16) 의 테스트다. C3 의 몫 (chunked, 닫힘까지의 body, read 의 TIMEOUT, 남긴 body 뒤의 요청) 은 C2 에 들어갔다. progress 는 <code>261115_progress_http_client_c1.md</code>, <code>261116_progress_http_client_c2.md</code>, <code>261116_progress_http_client_c4.md</code>. 파서와 머리는 unit, 나머지는 integration 이고 integration 은 공개 API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 우리 HttpServer (<code>tests/integration/support/kiotty_test_http_site.*</code>) 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (TLS 케이스는 TLS 빌드에서만, MSVC 는 <code>tlsSupported()</code> 로 skip). C5 뒤의 수: MSVC 819, WSL 의 gcc / gcc-notls / clang / clang-notls / clang-asan / clang-tsan 820, clang-release 819.</p>
+
+<h3>25.1 파서와 머리 (C1 unit)</h3>
+<p><code>domain/usecases/http/</code>, <code>data/repository/http/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력을 상태줄에 넣는다. 할당은 없다.</p>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpStatusLine</td><td>EmptyInputIsProtocolError, MiddleNullByteIsProtocolError, InvalidUtf8InTheReasonIsAcceptedAsObsText, LongReasonIsAccepted, StatusBoundsAreOneHundredToFiveNinetyNine, StatusMustBeExactlyThreeDigits</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. 99 / 100 / 599 / 600, 세 자리</td></tr>
+  <tr><td>HttpStatusLine</td><td>StatusWithoutReasonIsAccepted, ReasonPhraseIsDiscarded, EmptyReasonAfterTheSpaceIsAccepted, Http10IsAccepted, ReasonWithTabAndObsTextIsAccepted</td><td><span class="tag ok">정상</span></td><td><code>HTTP/1.1 NNN</code> / <code>HTTP/1.0 NNN</code>, reason 은 버린다</td></tr>
+  <tr><td>HttpStatusLine, HttpVersionText</td><td>ControlCharactersInTheReasonAreProtocolError, MalformedVersionsAndSeparatorsAreProtocolError, OnlyTheTwoExactVersionsAreAccepted</td><td><span class="tag misuse">오용</span></td><td>reason 의 제어 글자, 깨진 버전 / 구분자는 <code>PROTOCOL_ERROR</code></td></tr>
+  <tr><td>HttpReplyFraming</td><td>HeadReplyHasNoBodyWhateverItsFraming, NoContentAndNotModifiedIgnoreFramingHeaders, InterimRepliesHaveNoBodyAndAreMarkedInterim</td><td><span class="tag edge">엣지</span></td><td>HEAD 의 응답 / 204 / 304 는 body 없음, 1xx 는 INTERIM</td></tr>
+  <tr><td>HttpReplyFraming</td><td>ChunkedReplyIsChunked, ContentLengthReplyCarriesTheLength, ReplyWithoutFramingRunsUntilCloseAndIsNotKept, ConnectionCloseEndsKeepAlive, Http10ClosesUnlessItAsksForKeepAlive</td><td><span class="tag ok">정상</span></td><td>body 종류와 keep-alive. 길이 없는 응답은 닫힘까지이고 keep-alive 아님</td></tr>
+  <tr><td>HttpReplyFraming</td><td>SwitchingProtocolsIsProtocolError, StatusOutsideTheRangeIsProtocolError, ConflictingOrUnknownFramingIsProtocolError</td><td><span class="tag misuse">오용</span></td><td>101, 범위 밖, TE 와 CL 같이, <code>chunked</code> 아닌 TE, CL 여럿 (값이 같아도)</td></tr>
+  <tr><td>HttpReplyStore</td><td>KeepsStatusAndHeaders, InterimReplyIsSkippedByBeginningAgain</td><td><span class="tag ok">정상</span></td><td>상태와 헤더, 1xx 뒤 <code>begin</code> 으로 다시</td></tr>
+  <tr><td>HttpReplyStore</td><td>HeadBytesFillTheBufferExactlyThenBufferFull, OneByteOverTheBufferIsBufferFull, StatusLineLongerThanTheBufferIsBufferFull, HeaderCountOverTheTableIsBufferFull</td><td><span class="tag edge">엣지</span></td><td><code>max_header_bytes</code> 경계 (상태줄도 센다), <code>max_headers</code> 초과는 <code>BUFFER_FULL</code></td></tr>
+  <tr><td>HttpReplyStore</td><td>MalformedLinesAreProtocolError, SwitchingProtocolsFailsToFinish, FinishWithoutAStatusLineIsProtocolError</td><td><span class="tag misuse">오용</span></td><td>깨진 줄, 101, 상태줄 없는 finish</td></tr>
+  <tr><td>HttpBodyReader</td><td>DefaultReaderIsFinished, NoneAndZeroLengthAreFinishedImmediately, LengthIsPassedThroughSmallOutputBuffersAndStopsAtTheEnd, UntilCloseIsFinishedOnlyByClose, CloseAfterAFinishedBodyIsSuccess, ChunkedBodyIsDecodedAndStopsAtTheEnd, ChunkExtensionsAreIgnored, TrailersAreSkippedUntilTheEmptyLine, BareLineFeedsAreAccepted</td><td><span class="tag ok">정상</span></td><td>NONE / LENGTH / CHUNKED / UNTIL_CLOSE. 작은 출력 버퍼로 나눠 읽기, extension 과 trailer 를 버림, LF 만의 줄 끝</td></tr>
+  <tr><td>HttpBodyReader</td><td>ChunkedBodyFedOneByteAtATime, ChunkedBodySplitAtEveryPosition, SizeLineAtTheLimitIsAcceptedAndOneMoreIsProtocolError, HexOverflowIsProtocolError</td><td><span class="tag edge">엣지</span></td><td>모든 경계에서 나뉜 입력, 크기 줄 256 바이트 경계, hex 넘침</td></tr>
+  <tr><td>HttpBodyReader</td><td>AnythingButALineEndAfterChunkDataIsProtocolError, MalformedSizeLinesAreProtocolError, LengthCutShortByCloseIsPeerClosed, ChunkedCutShortByCloseIsPeerClosed, FailureIsSticky</td><td><span class="tag misuse">오용</span></td><td>깨진 chunk 는 <code>PROTOCOL_ERROR</code>, 끝 전의 닫힘은 <code>PEER_CLOSED</code>, 실패 뒤로는 같은 code</td></tr>
+  <tr><td>HttpRequestHead</td><td>GetHasRequestLineAndHostOnly, PostWithBodyHasContentTypeAndLength, PostPutPatchWithoutBodySendContentLengthZero, DeleteWithBodySendsItsLength, OptionsAsteriskTargetsTheWholeServer, SharedHeadersComeBeforeExtraHeadersAndExtraOverridesTheSameName, ExtraHeaderValuesAreTrimmed</td><td><span class="tag ok">정상</span></td><td>보내는 바이트 그대로. 공통 헤더를 요청 헤더가 덮는다</td></tr>
+  <tr><td>HttpRequestHead</td><td>CustomTypeLeavesContentTypeToTheHeaders, CustomTypeWithoutAHeaderSendsNoContentType, ExtraContentTypeReplacesTheTypedOne, TypedBodyDropsASharedContentType</td><td><span class="tag ok">정상</span></td><td>Content-Type 이 하나만 나간다</td></tr>
+  <tr><td>HttpRequestHead</td><td>HeadThatFitsExactlyIsWrittenAndOneByteLessIsRequestTooLarge, HeaderCountAtMaxHeadersIsWrittenAndOneMoreIsTableFull, MoreExtraHeadersThanMaxHeadersIsTableFull, HeaderValuesAllowUtf8TabsAndEmptyButNotBrokenUtf8</td><td><span class="tag edge">엣지</span></td><td><code>REQUEST_TOO_LARGE</code> (N 이면 들어가고 N-1 이면 실패), <code>TABLE_FULL</code> 경계 (Host 포함)</td></tr>
+  <tr><td>HttpRequestHead</td><td>HeaderInjectionIsInvalidArgument, BadHeaderNamesAreInvalidArgument, LibraryOwnedHeadersAreInvalidArgument, NullDataWithALengthIsInvalidArgument, PathsMustBeOriginFormVisibleAscii, UnknownMethodIsInvalidArgument, BodyTypeAndEncodingAreChecked</td><td><span class="tag misuse">오용</span></td><td>value 의 CR / LF / NUL, token 아닌 이름, Host / Content-Length / Transfer-Encoding / Connection, 상대 경로와 OPTIONS 아닌 <code>*</code>, <code>BY_EXTENSION</code> 과 <code>INVALID_ENCODING</code></td></tr>
+  <tr><td>HttpSharedHeaders</td><td>StartsEmpty, SetAddsTrimmedValues, SameNameIgnoringCaseIsReplaced, RemoveCompactsAndKeepsTheOtherEntries, RemovingAnAbsentNameIsSuccess, ClearRemovesEverythingAndWipesTheText, EntriesPointIntoTheTextAfterManyChanges</td><td><span class="tag ok">정상</span></td><td>바꾸기 / 지우기 / clear, 지운 자리를 0 으로, 여러 번 고친 뒤에도 항목이 온전함</td></tr>
+  <tr><td>HttpSharedHeaders</td><td>TextExactlyFullIsAcceptedAndOneMoreByteIsBufferFullUnchanged, EntryTableFullIsBufferFullUnchangedButReplacingStillWorks, InvalidHeadersAreRejectedUnchanged</td><td><span class="tag edge">엣지</span></td><td>찰 때 <code>BUFFER_FULL</code> 이고 저장소는 그대로. 표가 차도 같은 이름 바꾸기는 된다</td></tr>
+</table>
+
+<h3>25.2 줄 읽기, Host, 응답 헤더 (C2 unit 과 ConnectionStream)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>ConnectionStream</td><td>ReadLineStripsTheLineEndAndLeavesTheRestForRead, ReadLineWaitsForTheLineFeedAcrossReceives, FillAppendsToTheStagedBytes, ReadLineTlsDecodesIntoTheStage</td><td><span class="tag ok">정상</span></td><td>CR LF / LF 를 뗀 줄, 줄 뒤의 바이트는 <code>read()</code> 로, 나뉘어 오는 줄, TLS 의 복호화 결과 (<code>kiotty_test_connection_stream.cpp</code>)</td></tr>
+  <tr><td>ConnectionStream</td><td>ReadLineThatFillsTheStageExactlyIsReturned, ReadLineLongerThanTheStageIsBufferFull, ReadLineTimesOutAndKeepsThePartialLine, ReadLineReturnsPeerClosedWhenThePeerLeavesMidLine</td><td><span class="tag edge">엣지</span></td><td>Stage 경계, timeout 뒤 남는 반 줄, 줄 중간의 끊김</td></tr>
+  <tr><td>HttpHostField</td><td>DefaultPortIsLeftOut, OtherPortsAreAppended, Ipv6LiteralsAreBracketed, TcpAddressUsesItsHostAndPort, PipeAddressIsLocalhost</td><td><span class="tag ok">정상</span></td><td>80 / 443 생략, <code>:port</code>, <code>[...]</code>, pipe 는 <code>localhost</code> (<code>kiotty_test_http_request_head.cpp</code>)</td></tr>
+  <tr><td>HttpHostField</td><td>EmptyOrInvisibleHostIsInvalidArgument, LongestAddressHostFitsAndAnOverlongHostIsInvalidArgument</td><td><span class="tag edge">엣지</span></td><td>빈 / 보이지 않는 host, 길이 경계</td></tr>
+  <tr><td>HttpReplyHeaders</td><td>FindIgnoresCaseAndReturnsTheFirstMatch, AllowListBecomesMethodBits, AllowIgnoresUnknownLowerCaseAndEmptyItems, SeveralAllowLinesAreJoinedAndOtherHeadersIgnored, MissingOrEmptyAllowIsZero</td><td><span class="tag ok">정상</span></td><td><code>findHttpReplyHeader</code>, <code>getHttpAllowedMethods</code> (<code>kiotty_test_http_reply_headers.cpp</code>)</td></tr>
+  <tr><td>Headers</td><td>(기존 struct 비교에 더함)</td><td><span class="tag ok">정상</span></td><td><code>KiottyNetHttpReply</code> (크기, headers offset), <code>KiottyNetHttpClientRequest</code>, <code>KiottyNetHttpClientResult</code> 의 C / C++ 크기가 같다</td></tr>
+</table>
+
+<h3>25.3 요청과 read (C2 integration, <code>kiotty_test_http_client.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpClientTest</td><td>EveryMethodRoundTripsWithItsBody, ClientErrorStatusIsSuccessWithItsBody, OptionsReplyListsTheAllowedMethods</td><td><span class="tag ok">정상</span></td><td>메서드 일곱과 <code>sendHttpRequest</code> 의 왕복, 4xx 는 SUCCESS 와 status 와 body, OPTIONS 의 Allow</td></tr>
+  <tr><td>HttpClientTest</td><td>TinyBufferReadsTheBodyInManyCallsThenEndsForever, KeepAliveCarriesSeveralRequestsOnOneConnection, ChunkedWorkStreamIsReadUntilTheEndAndTheConnectionIsKept</td><td><span class="tag ok">정상</span></td><td>작은 버퍼로 여러 번, 끝 뒤 <code>{ 0, SUCCESS }</code> 가 계속, 한 연결로 여러 요청, Work 스트림 (chunked) 을 끝까지 읽고 연결이 남음</td></tr>
+  <tr><td>HttpClientTest</td><td>SharedHeadersAreSentOverriddenRemovedAndCleared, PipeTransportSendsLocalhostAsTheHost</td><td><span class="tag ok">정상</span></td><td>공통 헤더가 서버에 보임, 요청 헤더가 덮음, NULL 로 지움, clear. pipe 의 <code>Host: localhost</code></td></tr>
+  <tr><td>HttpClientTest</td><td>ConnectionCloseReplyMakesTheNextRequestReconnect, UnreadBodyIsDroppedWithItsConnectionByTheNextRequest, ReadTimeoutKeepsTheBodyAndTheNextReadContinues, BodyWithoutLengthEndsWhenTheServerCloses</td><td><span class="tag edge">엣지</span></td><td><code>Connection: close</code> 뒤 다시 연결, 남긴 body 뒤 요청이 연결을 바꿈, read 의 TIMEOUT 뒤 이어 읽기, 길이 없는 body 가 서버의 닫힘으로 끝남</td></tr>
+  <tr><td>HttpClientTest</td><td>InterimRepliesAreSkippedAndSwitchingProtocolsIsProtocolError, BodyCutShortByTheServerIsPeerClosed, ReplyHeadOverTheLimitsIsBufferFull</td><td><span class="tag edge">엣지</span></td><td>1xx 건너뛰기, 101 은 <code>PROTOCOL_ERROR</code>, body 중간의 끊김은 <code>PEER_CLOSED</code>, 응답 머리 초과는 <code>BUFFER_FULL</code></td></tr>
+  <tr><td>HttpClientTest</td><td>InjectedOrLibraryOwnedHeadersAndBadPathsAreInvalidArgument, HeadOverTheLimitsIsRequestTooLargeOrTableFullAndSharedStoreFullIsBufferFull, NeverConnectedOrNullArgumentsAreInvalidArgument</td><td><span class="tag misuse">오용</span></td><td>헤더 주입, 라이브러리 헤더, 잘못된 path, 보낼 머리 초과, 공통 헤더 저장소가 참, connect 한 적 없음, NULL</td></tr>
+  <tr><td>HttpClientTest</td><td>HeaderLineLongerThanTheReceiveCapacityFitsWhenWithinMaxHeaderBytes</td><td><span class="tag edge">엣지</span></td><td>작은 <code>receive_capacity</code> 의 client 가 그보다 긴 응답 헤더 한 줄 (<code>max_header_bytes</code> 안) 을 받는다. create 가 수신 Stage 를 <code>max_header_bytes + 2</code> 까지 키운다 (C5)</td></tr>
+  <tr><td>HttpClientTest</td><td>CallsFromAnotherThreadWhileOneIsBlockedAreBusy</td><td><span class="tag misuse">오용</span></td><td>한 thread 가 걸린 동안 다른 thread 의 요청 / read / 공통 헤더가 <code>BUSY</code></td></tr>
+</table>
+
+<h3>25.4 재시도, close, TLS (C4 integration)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>HttpClientRetryTest</td><td>IdempotentRequestOnAnIdleConnectionTheServerClosedIsSentAgainOnce</td><td><span class="tag edge">엣지</span></td><td>서버가 idle 연결을 닫은 뒤 GET, PUT, DELETE, HEAD, OPTIONS 가 한 번씩 다시 감 (연결 수와 서버 count) (<code>kiotty_test_http_client_retry.cpp</code>)</td></tr>
+  <tr><td>HttpClientRetryTest</td><td>PostOrPatchOnAnIdleConnectionTheServerClosedIsPeerClosedAndNotSent</td><td><span class="tag edge">엣지</span></td><td>POST / PATCH 는 <code>PEER_CLOSED</code>, 서버 count 0, 다음 POST 는 됨</td></tr>
+  <tr><td>HttpClientRetryTest</td><td>ConnectionOpenedByConnectAndDroppedWhileIdleIsRetriedForGetOnly</td><td><span class="tag edge">엣지</span></td><td>connect 로 열어 두고 쉬던 연결을 서버가 끊으면 GET 은 다시, POST 는 <code>PEER_CLOSED</code></td></tr>
+  <tr><td>HttpClientRetryTest</td><td>FailureOnAConnectionTheRequestOpenedIsNotRetried, CallTimeoutBoundsTheReconnectAndItsRetryInterval</td><td><span class="tag edge">엣지</span></td><td>요청이 연 연결의 실패는 다시 보내지 않음. 300 ms 호출 timeout 이 retry 간격 4 s 의 다시 연결을 자름</td></tr>
+  <tr><td>HttpClientCloseTest</td><td>CloseWakesAReadBlockedOnASilentStreamAndTheClientIsUsableAfter, CloseWakesARequestWaitingForTheHead, CloseWakesAReconnectWaitingBetweenTrials, CloseWakesAConnectInProgress</td><td><span class="tag ok">정상</span></td><td>걸린 read / 요청 / 재시도 쉼 / connect 가 <code>CLOSED</code>. 그 뒤 요청이 다시 연결하고 공통 헤더가 그대로. 10.255.255.1 이 바로 응답하는 망이면 connect 케이스는 skip (<code>kiotty_test_http_client_close.cpp</code>)</td></tr>
+  <tr><td>HttpClientCloseTest</td><td>CloseWithNothingInFlightClosesTheConnectionAndTheNextRequestReopens, CloseClosesTheIdleSocketAtOnce</td><td><span class="tag edge">엣지</span></td><td>걸린 것 없이 두 번 close 뒤 요청이 됨, peer 가 idle socket 의 닫힘을 바로 봄</td></tr>
+  <tr><td>HttpClientCloseTest</td><td>CloseRacingRequestsGivesOnlySuccessOrClosed</td><td><span class="tag edge">엣지</span></td><td>200 요청 동안 1 ms 마다 close 해도 SUCCESS 나 CLOSED 뿐 (BUSY 없음)</td></tr>
+  <tr><td>HttpClientTlsTest</td><td>GetAndPostCarryTheirBodiesOverOneKeptConnection, HostCarriesTheNonDefaultPort, ChunkedWorkStreamIsReadUntilTheEnd, GetOnAnIdleConnectionTheServerClosedIsSentAgainAndPostIsNot, CloseWakesAReadBlockedOnASilentStream</td><td><span class="tag ok">정상</span></td><td>https 한 벌: 한 연결로 GET / POST, 기본 아닌 포트의 Host, chunked, TLS 위 재시도, TLS read 를 close 로 깨움. TLS 빌드에서만 (<code>kiotty_test_http_client_tls.cpp</code>)</td></tr>
+</table>
+<p>반복: C4 에서 <code>HttpClient*</code> 를 MSVC 30 번, gcc 30 번, ASAN 5 번, TSAN 10 번 돌렸다. TSAN 경고 없음.</p>
+
+<h3>25.5 C++ wrapper (C5, <code>kiotty_test_headers_cpp.cpp</code>, <code>kiotty_test_http_client_cpp.cpp</code>)</h3>
+<table>
+  <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
+  <tr><td>Headers</td><td>HttpHeaderListsCannotBeCopiedOrMovedAndAnySizeIsAList, HttpHeadersAddsInOrderAndRecordsTableFullPastItsSize</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_HttpHeaders&lt;N&gt;</code> 은 복사 / 이동이 안 되고 <code>KiottyNet_HttpHeaderList</code> 는 복사도 기본 생성도 안 된다. 어느 N 이든 <code>const KiottyNet_HttpHeaderList&amp;</code> 로 간다. <code>add</code> 순서, N 을 넘으면 <code>TABLE_FULL</code> 이고 count 와 앞 항목은 그대로</td></tr>
+  <tr><td>Headers</td><td>OwningWrappersTestAsBoolOnlyExplicitly (더함)</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_HttpClient</code> 는 explicit bool 이고 복사는 안 되고 이동은 된다</td></tr>
+  <tr><td>HttpClientCppTest</td><td>DesignUsageOrderRunsEndToEnd, SendTakesARequestWithAndWithoutHeaders, HeaderListsOfDifferentSizesGoToTheSameMethod</td><td><span class="tag ok">정상</span></td><td>설계 0절의 순서 (connect → header → 헤더 목록 → 요청 → readBody → header nullptr → clearHeaders), <code>send</code> 의 두 판, N 이 다른 목록</td></tr>
+  <tr><td>HttpClientCppTest</td><td>OverflowingHeadersAreTableFullAndNothingIsSent</td><td><span class="tag misuse">오용</span></td><td>넘친 목록을 받은 요청은 <code>TABLE_FULL</code> 이고 서버는 아무것도 받지 않는다</td></tr>
+  <tr><td>HttpClientCppTest</td><td>CloseFromAnotherThreadWakesReadBody, DestructorReleasesTheClientEveryRound, FailedConstructionIsFalseWithTheCode</td><td><span class="tag edge">엣지</span></td><td><code>close()</code> 가 다른 thread 의 <code>readBody</code> 를 깨움, 소멸자가 destroy (되풀이해도 자리가 남), 실패한 생성은 false 와 code</td></tr>
+</table>
+<p>외부 확인 (2026-11-16, <code>build/interop/http_client/</code>, gitignore 대상. websocket 의 것과 같은 자리): Python 3.12.3 의 <code>http_server.py</code> 와 C++ wrapper 로 쓴 <code>http_client_check.cpp</code>, <code>run.sh</code>. 45 개 확인, 실패 0. HTTP: 메서드 일곱, 5000 바이트 chunk 의 chunked, 200000 바이트 body 를 1000 바이트 read 로, 103 건너뛰기, 404, keep-alive (같은 peer port), <code>Connection: close</code> 와 닫힘까지의 body 뒤 다시 연결, 읽지 않은 body 뒤 다시 연결, 느린 chunked 의 <code>TIMEOUT</code> 뒤 이어 읽기, <code>HttpHeaders&lt;1&gt;</code> 넘침의 <code>TABLE_FULL</code> (아무것도 안 감), 다른 thread 의 <code>close()</code> 가 <code>readBody</code> 를 깨움, <code>header(name, nullptr)</code> / <code>clearHeaders</code>. HTTPS (Python <code>ssl</code>, <code>tests/certs</code>): GET, <code>Host: localhost:port</code>, POST, chunked, 200 KB, keep-alive, 닫힘까지의 body 와 다시 연결, 테스트 CA 없이는 거절 (code 19).</p>
+<p>하지 않은 것: HTTP/1.0 서버와의 integration (unit 으로만), 큰 body (MB 단위) 다운로드의 benchmark. connect 안의 이름 풀기를 깨우지 못하는 것은 재현하지 않았다.</p>
 
 </body>
 </html>

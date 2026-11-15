@@ -45,7 +45,7 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
     EXPECT_TRUE(net::isInitialized(configuration));
     size_t expected_max = DEFAULT_MAX_CLIENTS;
     EXPECT_EQ(expected_max, configuration.max_clients);
-    EXPECT_EQ(4096u, configuration.receive_capacity);
+    EXPECT_EQ(8192u, configuration.receive_capacity);
     EXPECT_EQ(4096u, configuration.send_capacity);
     EXPECT_EQ(4096u, configuration.push_capacity);
     EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);

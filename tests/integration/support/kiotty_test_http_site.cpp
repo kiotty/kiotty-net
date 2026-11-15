@@ -53,6 +53,15 @@ namespace kiotty_test
             KiottyNet_setHttpBody(response, KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN, textSpan(body));
         }
 
+        void onInspect(KiottyNetAppContext, const KiottyNetHttpRequest* request, KiottyNetHttpResponseHandle response)
+        {
+            const std::string body = "auth=" + textOf(KiottyNet_findHttpHeader(request, "Authorization"))
+                                     + "|agent=" + textOf(KiottyNet_findHttpHeader(request, "User-Agent"))
+                                     + "|accept=" + textOf(KiottyNet_findHttpHeader(request, "Accept"))
+                                     + "|id=" + textOf(KiottyNet_findHttpHeader(request, "X-Request-Id"));
+            KiottyNet_setHttpBody(response, KIOTTY_NET_HTTP_CONTENT_TYPE_TEXT_PLAIN, textSpan(body));
+        }
+
         void onStartWork(KiottyNetAppContext, const KiottyNetHttpRequest*, KiottyNetHttpResponseHandle response)
         {
             KiottyNet_startHttpWork(response);
@@ -120,6 +129,7 @@ namespace kiotty_test
         bool is_routed = true;
         for (KiottyNetHttpMethod method : methods) { is_routed = is_routed && route(method, "/echo", onEcho, nullptr); }
         is_routed = is_routed && route(KIOTTY_NET_HTTP_METHOD_GET, "/headers", onHeaders, nullptr);
+        is_routed = is_routed && route(KIOTTY_NET_HTTP_METHOD_GET, "/inspect", onInspect, nullptr);
         is_routed = is_routed && route(KIOTTY_NET_HTTP_METHOD_GET, "/stream", onStartWork, onStreamStarted);
         is_routed = is_routed && route(KIOTTY_NET_HTTP_METHOD_GET, "/silent", onStartWork, onSilentStarted);
         if (!is_routed) { return false; }

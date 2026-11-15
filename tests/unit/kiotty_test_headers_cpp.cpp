@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <string>
 #include <type_traits>
 
 #include "kiotty_net_base.h"
@@ -163,6 +164,39 @@ TEST(Headers, OwningWrappersTestAsBoolOnlyExplicitly)
     EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_HttpServer&>::value));
     EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_WebSocketClient&>::value));
     EXPECT_FALSE((std::is_convertible<const KiottyNet_WebSocketClient&, bool>::value));
+    EXPECT_TRUE((std::is_constructible<bool, const KiottyNet_HttpClient&>::value));
+    EXPECT_FALSE((std::is_convertible<const KiottyNet_HttpClient&, bool>::value));
+    EXPECT_FALSE((std::is_copy_constructible<KiottyNet_HttpClient>::value));
+    EXPECT_TRUE((std::is_move_constructible<KiottyNet_HttpClient>::value));
+}
+
+TEST(Headers, HttpHeaderListsCannotBeCopiedOrMovedAndAnySizeIsAList)
+{
+    EXPECT_FALSE((std::is_copy_constructible<KiottyNet_HttpHeaders<>>::value));
+    EXPECT_FALSE((std::is_move_constructible<KiottyNet_HttpHeaders<>>::value));
+    EXPECT_FALSE((std::is_copy_assignable<KiottyNet_HttpHeaders<>>::value));
+    EXPECT_FALSE((std::is_move_assignable<KiottyNet_HttpHeaders<>>::value));
+    EXPECT_FALSE((std::is_copy_constructible<KiottyNet_HttpHeaderList>::value));
+    EXPECT_FALSE((std::is_default_constructible<KiottyNet_HttpHeaderList>::value));
+    EXPECT_TRUE((std::is_convertible<KiottyNet_HttpHeaders<1>&, const KiottyNet_HttpHeaderList&>::value));
+    EXPECT_TRUE((std::is_convertible<KiottyNet_HttpHeaders<32>&, const KiottyNet_HttpHeaderList&>::value));
+}
+
+TEST(Headers, HttpHeadersAddsInOrderAndRecordsTableFullPastItsSize)
+{
+    KiottyNet_HttpHeaders<2> headers;
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, headers.code());
+    EXPECT_EQ(0u, headers.count());
+    headers.add("Accept", "text/plain").add("X-Id", "7");
+    ASSERT_EQ(2u, headers.count());
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, headers.code());
+    const KiottyNetHttpHeader* items = headers.data();
+    EXPECT_EQ(std::string("Accept"), std::string(items[0].name.data, items[0].name.length));
+    EXPECT_EQ(std::string("7"), std::string(items[1].value.data, items[1].value.length));
+    headers.add("X-Over", "1");
+    EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, headers.code());
+    EXPECT_EQ(2u, headers.count());
+    EXPECT_EQ(std::string("X-Id"), std::string(items[1].name.data, items[1].name.length));
 }
 
 TEST(Headers, WebSocketHandlesOrderByOwnerThenId)

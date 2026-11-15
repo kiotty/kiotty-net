@@ -796,4 +796,20 @@ TEST_F(HttpClientTest, NeverConnectedOrNullArgumentsAreInvalidArgument)
     EXPECT_EQ(refused_connect, unreachable.code);
 }
 
+TEST_F(HttpClientTest, HeaderLineLongerThanTheReceiveCapacityFitsWhenWithinMaxHeaderBytes)
+{
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientBufferCapacity(&client_configuration, 4096, 4096, 4096));
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    const std::string token(7000, 't');
+    const std::string wire = "HTTP/1.1 200 OK\r\nX-Token: " + token + "\r\nContent-Length: 2\r\n\r\nok";
+    std::string head;
+    std::thread replier([&]() { answer(peer, head, wire); });
+    const KiottyNetHttpReply reply = KiottyNet_getHttp(client, "/token", nullptr, 0, WAIT_MS);
+    replier.join();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, reply.code);
+    EXPECT_EQ(token, replyHeader(reply, "X-Token"));
+    EXPECT_EQ("ok", readAll(client, 64).text);
+}
+
 #endif

@@ -650,6 +650,138 @@ private:
     kiotty::net::OwnedHandle<KiottyNetHttpServerHandle, KiottyNet_destroyHttpServer> _handle;
 };
 
+class KiottyNet_HttpHeaderList
+{
+public:
+    KiottyNet_HttpHeaderList(const KiottyNet_HttpHeaderList&) = delete;
+    KiottyNet_HttpHeaderList& operator=(const KiottyNet_HttpHeaderList&) = delete;
+
+    const KiottyNetHttpHeader* data() const;
+    size_t                     count() const;
+    KiottyNetCode              code() const;
+
+protected:
+    KiottyNet_HttpHeaderList(KiottyNetHttpHeader* items, size_t capacity);
+    ~KiottyNet_HttpHeaderList() = default;
+
+    void append(const char* name, const char* value);
+
+private:
+    KiottyNetHttpHeader* _items;
+    size_t               _capacity;
+    size_t               _count;
+    KiottyNetCode        _code;
+};
+
+template <size_t N = 8>
+class KiottyNet_HttpHeaders : public KiottyNet_HttpHeaderList
+{
+    static_assert(N > 0, "KiottyNet_HttpHeaders needs room for one header");
+
+public:
+    KiottyNet_HttpHeaders();
+
+    KiottyNet_HttpHeaders(const KiottyNet_HttpHeaders&) = delete;
+    KiottyNet_HttpHeaders& operator=(const KiottyNet_HttpHeaders&) = delete;
+    KiottyNet_HttpHeaders(KiottyNet_HttpHeaders&&) = delete;
+    KiottyNet_HttpHeaders& operator=(KiottyNet_HttpHeaders&&) = delete;
+
+    KiottyNet_HttpHeaders& add(const char* name, const char* value);
+
+private:
+    KiottyNetHttpHeader _items[N];
+};
+
+class KiottyNet_HttpClient
+{
+public:
+    KiottyNet_HttpClient(
+        KiottyNetContext context,
+        const KiottyNetClientConfiguration& configuration,
+        const KiottyNetHttpLimits* limits);
+
+    explicit operator bool() const;
+    KiottyNetCode             code() const;
+    KiottyNetHttpClientHandle handle() const;
+
+    KiottyNetCode connect(const KiottyNetAddress& address);
+    KiottyNetCode connect(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls);
+    void          disconnect();
+    void          close();
+
+    KiottyNetCode header(const char* name, const char* value);
+    KiottyNetCode clearHeaders();
+
+    KiottyNetHttpReply send(const KiottyNetHttpClientRequest& request, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply send(
+        const KiottyNetHttpClientRequest& request,
+        const KiottyNet_HttpHeaderList& headers,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply get(const char* path, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply get(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply head(const char* path, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply head(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply del(const char* path, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply del(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply options(const char* path, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply options(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply post(
+        const char* path,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply post(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply put(
+        const char* path,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply put(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply patch(
+        const char* path,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply patch(
+        const char* path,
+        const KiottyNet_HttpHeaderList& headers,
+        KiottyNetHttpContentType type,
+        KiottyNetSpan body,
+        uint32_t timeout_milliseconds);
+
+    KiottyNetResult readBody(void* buffer, size_t length, uint32_t timeout_milliseconds);
+
+private:
+    KiottyNet_HttpClient(KiottyNetContext context, KiottyNetHttpClientResult result);
+
+    static KiottyNetHttpReply refusedReply(KiottyNetCode code);
+
+    KiottyNetCode _code;
+    kiotty::net::OwnedHandle<KiottyNetHttpClientHandle, KiottyNet_destroyHttpClient> _handle;
+};
+
 inline KiottyNet_HttpLimitsBuilder::KiottyNet_HttpLimitsBuilder(KiottyNetHttpLimits& limits)
     : _limits(limits)
     , _code(KiottyNet_initializeHttpLimits(&limits))
@@ -1028,6 +1160,313 @@ inline void KiottyNet_HttpServer::close()
 inline KiottyNetCode KiottyNet_HttpServer::await(uint64_t timeout_milliseconds)
 {
     return KiottyNet_awaitHttpServer(_handle.get(), timeout_milliseconds);
+}
+
+inline KiottyNet_HttpHeaderList::KiottyNet_HttpHeaderList(KiottyNetHttpHeader* items, size_t capacity)
+    : _items(items)
+    , _capacity(capacity)
+    , _count(0)
+    , _code(KIOTTY_NET_CODE_SUCCESS)
+{
+}
+
+inline const KiottyNetHttpHeader* KiottyNet_HttpHeaderList::data() const
+{
+    return _items;
+}
+
+inline size_t KiottyNet_HttpHeaderList::count() const
+{
+    return _count;
+}
+
+inline KiottyNetCode KiottyNet_HttpHeaderList::code() const
+{
+    return _code;
+}
+
+inline void KiottyNet_HttpHeaderList::append(const char* name, const char* value)
+{
+    if (_count >= _capacity)
+    {
+        _code = KIOTTY_NET_CODE_TABLE_FULL;
+        return;
+    }
+    _items[_count] = KiottyNet_makeHttpHeader(name, value);
+    _count += 1;
+}
+
+template <size_t N>
+inline KiottyNet_HttpHeaders<N>::KiottyNet_HttpHeaders()
+    : KiottyNet_HttpHeaderList(_items, N)
+    , _items()
+{
+}
+
+template <size_t N>
+inline KiottyNet_HttpHeaders<N>& KiottyNet_HttpHeaders<N>::add(const char* name, const char* value)
+{
+    append(name, value);
+    return *this;
+}
+
+inline KiottyNet_HttpClient::KiottyNet_HttpClient(
+    KiottyNetContext context,
+    const KiottyNetClientConfiguration& configuration,
+    const KiottyNetHttpLimits* limits)
+    : KiottyNet_HttpClient(context, KiottyNet_createHttpClient(context, &configuration, limits))
+{
+}
+
+inline KiottyNet_HttpClient::KiottyNet_HttpClient(
+    KiottyNetContext context,
+    KiottyNetHttpClientResult result)
+    : _code(result.code)
+    , _handle(context, result.handle)
+{
+}
+
+inline KiottyNet_HttpClient::operator bool() const
+{
+    return _handle.get() != nullptr;
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::code() const
+{
+    return _code;
+}
+
+inline KiottyNetHttpClientHandle KiottyNet_HttpClient::handle() const
+{
+    return _handle.get();
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::connect(const KiottyNetAddress& address)
+{
+    return KiottyNet_connectHttpClient(_handle.get(), &address, nullptr);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::connect(
+    const KiottyNetAddress& address,
+    const KiottyNetTlsClientConfiguration& tls)
+{
+    return KiottyNet_connectHttpClient(_handle.get(), &address, &tls);
+}
+
+inline void KiottyNet_HttpClient::disconnect()
+{
+    KiottyNet_disconnectHttpClient(_handle.get());
+}
+
+inline void KiottyNet_HttpClient::close()
+{
+    KiottyNet_closeHttpClient(_handle.get());
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::header(const char* name, const char* value)
+{
+    return KiottyNet_setHttpClientHeader(_handle.get(), name, value);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::clearHeaders()
+{
+    return KiottyNet_clearHttpClientHeaders(_handle.get());
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::send(
+    const KiottyNetHttpClientRequest& request,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_sendHttpRequest(_handle.get(), &request, nullptr, 0, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::send(
+    const KiottyNetHttpClientRequest& request,
+    const KiottyNet_HttpHeaderList& headers,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_sendHttpRequest(
+        _handle.get(),
+        &request,
+        headers.data(),
+        headers.count(),
+        timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::get(const char* path, uint32_t timeout_milliseconds)
+{
+    return KiottyNet_getHttp(_handle.get(), path, nullptr, 0, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::get(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_getHttp(_handle.get(), path, headers.data(), headers.count(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::head(const char* path, uint32_t timeout_milliseconds)
+{
+    return KiottyNet_headHttp(_handle.get(), path, nullptr, 0, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::head(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_headHttp(_handle.get(), path, headers.data(), headers.count(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::del(const char* path, uint32_t timeout_milliseconds)
+{
+    return KiottyNet_deleteHttp(_handle.get(), path, nullptr, 0, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::del(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_deleteHttp(_handle.get(), path, headers.data(), headers.count(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::options(const char* path, uint32_t timeout_milliseconds)
+{
+    return KiottyNet_optionsHttp(_handle.get(), path, nullptr, 0, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::options(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_optionsHttp(_handle.get(), path, headers.data(), headers.count(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::post(
+    const char* path,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_postHttp(_handle.get(), path, nullptr, 0, type, body, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::post(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_postHttp(
+        _handle.get(),
+        path,
+        headers.data(),
+        headers.count(),
+        type,
+        body,
+        timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::put(
+    const char* path,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_putHttp(_handle.get(), path, nullptr, 0, type, body, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::put(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_putHttp(
+        _handle.get(),
+        path,
+        headers.data(),
+        headers.count(),
+        type,
+        body,
+        timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::patch(
+    const char* path,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_patchHttp(_handle.get(), path, nullptr, 0, type, body, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::patch(
+    const char* path,
+    const KiottyNet_HttpHeaderList& headers,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_patchHttp(
+        _handle.get(),
+        path,
+        headers.data(),
+        headers.count(),
+        type,
+        body,
+        timeout_milliseconds);
+}
+
+inline KiottyNetResult KiottyNet_HttpClient::readBody(
+    void* buffer,
+    size_t length,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_readHttpReplyBody(_handle.get(), buffer, length, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::refusedReply(KiottyNetCode code)
+{
+    const KiottyNetHttpReply reply = { code, 0, nullptr, 0 };
+    return reply;
 }
 
 #endif

@@ -197,3 +197,13 @@ R4, R5 (11-04), R6, R7, R8, 4b (11-05), 5a, 리팩터링 (`plan_refactor_v0.md`)
 2026-11-13 WebSocket 사이클 V3 (`docs/progress/261113_progress_websocket_v3.md`): 클라이언트를 `onWebSocketClientOpen / Message / Close / Error` 등록, `runWebSocketClient(client, address, path, tls, app_context)`, `setWebSocketClientProtocols`, `byeWebSocketClient` 로. `KiottyNetWebSocketHandler` 와 create 의 path 를 없앴다. onError 는 열리기 전에 한 번. close frame 의 mask key 도 공용 생성기. 다음은 V4 (문서).
 
 2026-11-13 WebSocket 사이클 V4 (`docs/progress/261113_progress_websocket_v4.md`): 문서. user guide WebSocket 을 판 v3 으로 다시 (받기 절, 요청 / 응답 예제), requirement 10 / 11절, 구현 가이드 5절, 테스트 계획 20절, 설계 v1 의 완료 기록. 설계 v1 의 사이클 (B3, V1 ~ V4) 은 모두 끝났다.
+
+2026-11-13 HttpClient 설계 v0 (`docs/design/design_http_client_v0.html`, 11-15 고침 둘 `1c88030`): requirement 11절의 초안을 지금 규약으로. 동기 API 하나 (StreamClient 위), create 는 자원만 / connect 가 대상, `KiottyNetHttpLimits`, body 를 읽는 길은 `readHttpReplyBody` 하나, 요청 struct 와 메서드별 일곱, 헤더는 인자, 공통 헤더 등록 / 지우기, `closeHttpClient`. 사이클 C1 ~ C5.
+
+2026-11-15 HttpClient 사이클 C1 (`docs/progress/261115_progress_http_client_c1.md`, `d9a6a09`): 파서와 머리. 상태줄, 응답 framing (none / length / chunked / 닫힘까지, 1xx), 응답 머리 저장소, chunk 를 벗기는 body reader, 요청 검사와 머리 조립 (Host, 공통 헤더를 요청 헤더가 덮음, Content-Type / Content-Length), 공통 헤더 저장소. 서버의 framing / 헤더 파서를 다시 쓴다. unit 89 개. 다음은 C2.
+
+2026-11-16 HttpClient 사이클 C2 (`docs/progress/261116_progress_http_client_c2.md`, `b5ffb04`): 공개 C API, `ConnectionStream::readLine` (수신 Stage 를 줄 버퍼로), `HttpClient : private StreamClient`, BUSY, 머리 버퍼 `2 × max_header_bytes`, pipe 의 Host 는 `localhost`. C3 의 몫 (chunked, 닫힘까지의 body, read 의 TIMEOUT 뒤 이어 읽기, 남긴 body 뒤의 요청) 도 여기 들어가 C3 은 따로 없다. 34 개. 다음은 C4.
+
+2026-11-16 HttpClient 사이클 C4 (`docs/progress/261116_progress_http_client_c4.md`, `ea0186d`): `closeHttpClient` (StreamClient 마다 `StopSignal` 의 깨우는 handle: POSIX pipe, Windows 자기 자신에 connect 한 UDP socket. 모든 wait 가 본다. BusyFlag 는 idle / call / close), 이미 열려 있던 연결 (connect 가 연 것도) 에서 응답 바이트 전에 끊기면 멱등 메서드만 한 번 다시, 호출의 deadline 이 다시 연결을 자른다, TLS integration. 17 개. 다음은 C5.
+
+2026-11-16 HttpClient 사이클 C5 (commit 예정): C++ wrapper (`KiottyNet_HttpHeaderList`, `KiottyNet_HttpHeaders<N>`, `KiottyNet_HttpClient`), client 가 수신 Stage 를 `max_header_bytes + 2` 까지 키움, 기본 `receive_capacity` 4 KiB → 8 KiB (서버와 클라이언트), 외부 확인 (`build/interop/http_client/`, Python 3.12.3, 45 개 실패 0, HTTP 와 HTTPS) 과 문서. user guide HTTP 2절 (클라이언트), requirement 11절을 최종 설계로, 구현 가이드 6절, 테스트 계획 25절, 설계의 정할 것 1 / 4 / 8 과 완료 기록. 테스트 MSVC 819, WSL 820 × 6, clang-release 819. 설계 11절의 사이클은 모두 끝났다.

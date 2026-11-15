@@ -10,7 +10,8 @@
 3. 예제 : Echo (프로토콜, EchoServer, EchoClient 두 가지, C 판)
 4. HttpServer : Connection 별 Request / Response 공급 (HttpSession, 줄 단위 헤더 읽기, 응답 버퍼 배치, handle, Work, 조각 송신과 파일, run, Work 스트림, content type)
 5. WebSocket : HttpSession 위의 frame 행 (Session 에 더한 것, handle, Upgrade, frame 읽기, 타이머, 송신의 두 길, close 의 갈래, 클라이언트, 다른 thread)
-6. 미결
+6. HttpClient : StreamClient 위의 동기 요청 (잡는 것, 수신 Stage 위의 줄 읽기, 요청, body 읽기, 재시도와 deadline, BUSY 와 close, C++ wrapper)
+7. 미결
 
 ---
 
@@ -827,7 +828,7 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 
 핵심은 네 가지다.
 
-- 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `receive_capacity` (기본 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
+- 요청은 수신 Stage 에서 **HttpSession 의 버퍼로 복사**된다. Stage 의 데이터는 onRead 가 return 하면 사라지지만, 요청은 body 를 다 읽을 때까지, 그리고 Work 가 끝날 때까지 살아 있어야 하기 때문이다. 복사하면 `receive_capacity` (기본 8 KiB. 2026-11-16 전에는 4 KiB) 와 `max_header_bytes` / `max_body_bytes` (기본 8 / 64 KiB) 가 서로 묶이지 않는다.
 - 완성 응답은 HttpSession 의 응답 버퍼 하나에 쌓이고, 송신할 때 `send_capacity` 크기의 조각으로 write lane 에 옮긴다. 응답 버퍼가 write lane 보다 커도 된다. 파일 body 는 같은 응답 버퍼로 `send_capacity` 만큼씩 읽어 보낸다 (sendfile 없음).
 - Work 스트림은 worker 가 base Stream 에 동기 write 한다 (`writeConnectionStream`). chunk 의 머리 / 꼬리는 응답 버퍼에서 조립한다. 새 버퍼는 없다.
 - 메모리는 `KiottyNet_createHttpServer` 가 `max_clients` 분량을 한 번 잡는다. run 중 할당은 없다.
@@ -1009,7 +1010,7 @@ constexpr auto HTTP_RULES = KiottyNet_rules(
 
 TIMEOUT 은 어느 상태든 `close(TIMEOUT)` 이다 (408 은 보내지 않는다). CLOSED 는 `onClosed` 가 끊김 action 을 부른다.
 
-**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ receive_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ receive_capacity" 뿐이고 헤더 전체 크기는 헤더 버퍼가 정한다. 그래서 기본값 (recv 4 KiB, header 8 KiB) 이 그대로 성립한다. `lineLimit = min(receive_capacity, max_header_bytes + 2)` 이고, 줄이 이것을 넘으면 base 가 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 닫는다 (응답 없음). 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
+**헤더는 줄 단위로 읽는다.** `readUntil(CRLFCRLF, max_header_bytes)` 한 번이 더 간단하지만, 그러면 `max_header_bytes ≤ receive_capacity` 여야 한다 (1.2 의 `REQUEST_TOO_LARGE`). 줄 단위로 읽으면 Stage 에 걸리는 조건은 "줄 하나 ≤ receive_capacity" 뿐이고 헤더 전체 크기는 헤더 버퍼가 정한다. `lineLimit = min(receive_capacity, max_header_bytes + 2)` 이다. 기본값 (recv 8 KiB, header 8 KiB) 에서 줄 하나는 8 KiB 까지 들어간다. 2026-11-16 전의 기본 recv 4 KiB 에서는 4 KiB 를 넘는 줄 하나가 `max_header_bytes` 안이어도 닫혔다 (그래서 기본 수신을 8 KiB 로 올렸다). 줄이 lineLimit 을 넘으면 base 가 `KIOTTY_NET_CODE_PROTOCOL_ERROR` 로 닫는다 (응답 없음). 헤더 공간이 모자라면 HttpServer 가 431 을 보낸다.
 
 ```cpp
 KiottyNetTransition beginExchange(HttpSession& session, KiottyNetConnectionHandle connection, uint32_t wait_milliseconds)
@@ -1772,7 +1773,236 @@ IO thread 는 깨우지 않는다. push lane 의 drain 은 base 의 notify 가 I
 
 ---
 
-## 6. 미결
+## 6. HttpClient : StreamClient 위의 동기 요청
+
+requirement_v0.md 11절의 HttpClient 와 `include/kiotty_net_http.h` 의 클라이언트 부분의 구현이다. cycle C1 (파서와 머리), C2 (요청과 read. C3 의 스트림 몫도), C4 (다시 연결, close, TLS), C5 (C++ wrapper) 에서 만들었고 progress 는 `docs/progress/261115_progress_http_client_c1.md`, `261116_progress_http_client_c2.md`, `261116_progress_http_client_c4.md` 다. 설계는 `docs/design/design_http_client_v0.html` 9절이다.
+
+핵심은 다섯 가지다.
+
+- **IO Thread 도 StateMachine 도 없다.** 요청 하나는 "보내기 → 상태줄 → 헤더" 를, read 는 "body 조각" 을 차례로 부르는 함수다. 호출 사이에 남는 것은 body 의 진행 (`HttpBodyReader`) 과 keep-alive 여부 하나다.
+- **파서는 서버 것을 다시 쓴다.** 헤더 줄 (`takeHeader`), body 의 끝 (`selectBodyFraming`), chunk 크기 (`parseChunkSize`), keep-alive (`decidePersistence`). 새로 만든 것은 상태줄과 응답 쪽의 조립이다.
+- **줄은 수신 Stage 위에서 자른다.** StreamClient 가 잡아 두고 쓰지 않던 수신 Stage 가 줄 버퍼다. 새 수신 버퍼는 없고, create 가 Stage 를 `max_header_bytes + 2` 까지 키운다 (6.1).
+- **body 는 수신 Stage 에서 앱 버퍼로 바로 간다.** body 버퍼가 없어 크기 상한도 없다.
+- **다른 thread 는 socket 을 만지지 않는다.** close 는 StreamClient 마다의 `StopSignal` 로 걸린 wait 를 깨우고, 닫는 일은 owner thread 가 한다.
+
+| 층 | 파일 | 하는 일 |
+|---|---|---|
+| context | `kiotty_http_client` | `HttpClient : private StreamClient`. connect, send, readBody (6.2 ~ 6.5) |
+| | `kiotty_http_client_headers` | `HttpClientHeaders`: 공통 헤더 set / remove / clear 에 BUSY 를 씌운 값 (수칙 4.19) |
+| | `kiotty_http_client_link` | `HttpClientLink`: disconnect, close (6.6) |
+| | `kiotty_stream_client` | `connect` 를 `prepare` (검사, TLS 프로파일) + `reconnect(address, deadline)` 로 나눔. HttpClient 용 protected 메서드 (줄 읽기, Stage 들여다보기 / 소비, `stopSignal()`) |
+| core | `kiotty_busy_guard.h` | `BusyFlag` (idle / call / close), `BusyGuard` |
+| | `kiotty_deadline` | `Deadline::bound(t)`: t 와 남은 시간 중 작은 것 (6.5) |
+| data/infra/socket | `kiotty_stop_signal`, `backend/kiotty_{posix,windows}_stop_signal` | 깨우는 handle (6.6) |
+| data/repository/stream | `kiotty_connection_stream_line` | `ConnectionStream::readLine`, `fill` (6.2) |
+| data/repository/http | `kiotty_http_reply_store` | 응답 머리 저장소 |
+| | `kiotty_http_shared_headers` | 공통 헤더 저장소 |
+| domain/usecases/http | `kiotty_http_status_line` | `parseStatusLine` |
+| | `kiotty_http_reply_framing` | `selectReplyFraming(method, status, headers)` |
+| | `kiotty_http_body_reader` | `HttpBodyReader::take`, `closeInput` |
+| | `kiotty_http_request_check` | `checkRequestHeader`, `checkRequestPath`, `checkRequestBody` |
+| | `kiotty_http_request_head` | `buildHostField`, `hostFieldOf`, `writeRequestHead` |
+| | `kiotty_http_reply_headers` | `findHttpReplyHeader`, `getHttpAllowedMethods` 의 몸 |
+| C API | `src/kiotty_net_http_client.cpp` | 번역 층. 문자열을 `parseText` (1 MiB, `MAX_HTTP_HEADER_BYTES`) 로 보고 메서드별 함수를 `sendHttpRequest` 로 |
+
+### 6.1 HttpClient 가 잡는 것
+
+```cpp
+class HttpClient : private StreamClient                // context/kiotty_http_client
+{
+    std::vector<char>                _head_bytes;     // 2 × max_header_bytes. 앞 반 공통 헤더, 뒤 반 요청 머리
+    std::vector<char>                _reply_bytes;    // max_header_bytes. 응답 머리
+    std::vector<KiottyNetHttpHeader> _shared_entries; // max_headers
+    std::vector<KiottyNetHttpHeader> _reply_entries;  // max_headers
+    HttpSharedHeaders                _shared;         // _head_bytes 의 앞 반 위
+    HttpReplyStore                   _reply;          // _reply_bytes 위
+    HttpBodyReader                   _body;           // 지금 body 의 진행
+    KiottyNetAddress                 _address;        // 대상. tls 는 StreamClient 의 TLS 프로파일
+    HostField                        _host;           // connect 때 만든 Host 값
+    size_t                           _max_headers;
+    Persistence                      _persistence;    // 지금 응답의 keep-alive
+    bool                             _has_target;     // connect 를 했나
+    bool                             _has_reply_bytes;// 이번 요청에서 줄을 받았나 (재시도 판단)
+    BusyFlag                         _busy;
+};
+```
+
+- 모두 `initialize` (create) 때 잡는다. 요청 중 할당은 없다. StreamClient 에 넘기는 설정은 `lineReadyOf` 가 고친 것이다: `receive_capacity = min(max(receive_capacity, max_header_bytes + 2), MemoryLimits::RECEIVE_CAPACITY)` (64 KiB). 그래서 응답의 줄 하나는 `max_header_bytes` 까지 Stage 에 들어가고, 앱이 `receive_capacity` 를 맞출 일이 없다.
+- create 의 실패: limits 검사 (`INVALID_ARGUMENT`), 풀이 참 (`TABLE_FULL`), `StreamClient::initialize` 의 `StopSignal::open` 실패. 마지막은 `SocketCode` (`EMFILE` / `ENFILE` / `WSAEMFILE` 는 `OUT_OF_RESOURCE`) 를 `toNetCode` 가 `KIOTTY_NET_CODE_SOCKET_ERROR` 로 옮긴다. handle 은 slot 마다 한 번 열리므로 (`open` 은 열려 있으면 바로 SUCCESS) slot 이 처음 쓰일 때만 실패할 수 있다. Context 의 `LazyReusablePool<KiottyNetHttpClient>` 가 slot 을 준다.
+- **private 상속.** public 이면 StreamClient 의 read / write 가 BUSY 를 건너뛰고 HttpClient 의 상태 (body 진행) 를 어긋나게 할 수 있다. 공개 메서드는 7 개 (`initialize`, `reset`, `connect`, `send`, `readBody`, `headers`, `link`).
+- **머리 버퍼를 반으로 나누는 이유.** 경계가 움직이는 한 버퍼면 공통 헤더가 요청 머리에도 복사되어 두 번 세어지고, 요청 머리의 상한이 공통 헤더만큼 줄어든다. 반으로 나누면 공통 헤더는 앞 반 (차면 `BUFFER_FULL`), 요청 머리는 뒤 반 (넘으면 `REQUEST_TOO_LARGE`) 이 각각의 상한이다.
+- **민감 데이터.** 요청 머리 영역은 보낸 뒤 (실패도) 0 으로 지운다. 공통 헤더는 remove / clear / destroy (`reset`) 때 비운 자리를 0 으로.
+
+### 6.2 줄 읽기 : `ConnectionStream::readLine`
+
+```cpp
+LineResult ConnectionStream::readLine(uint32_t timeout_milliseconds)
+{
+    const Deadline deadline(timeout_milliseconds);
+    const KiottyNetCode flushed = flush(deadline);
+    if (flushed != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(flushed); }
+    size_t searched = 0;
+    for (;;)
+    {
+        const Span<const char> staged = stagedOf(_receive);
+        const size_t line_feed = findLineFeed(staged, searched);
+        if (line_feed < staged.length)
+        {
+            _receive.consumer().commit(line_feed + 1);           // LF 까지만 소비
+            return LineResult::success(lineBefore(staged, line_feed));   // LF 와 그 앞의 CR 하나를 뺀다
+        }
+        searched = staged.length;
+        const KiottyNetCode filled = fillStage(deadline);        // compact 뒤 빈 자리에 한 번 받기. 자리가 없으면 BUFFER_FULL
+        if (filled != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(filled); }
+    }
+}
+```
+
+- 수신 Stage 를 socket (TLS 면 복호화 결과) 으로 채우고 LF 까지의 줄을 돌려준다. 돌려준 Span 은 다음 stream 호출까지 유효하다. 응답 머리 저장소가 바로 복사한다.
+- LF 까지만 소비하므로 뒤의 바이트 (머리와 같이 온 body 앞부분) 는 Stage 에 남는다. 기존 `read()` 는 Stage 에 남은 것부터 준다.
+- 한 줄이 Stage 보다 길면 `BUFFER_FULL`. Stage 는 create 때 `max_header_bytes + 2` 이상 (상한 64 KiB) 이므로 `max_header_bytes` 안의 줄은 들어간다. `max_header_bytes` 가 64 KiB 를 넘을 때만 한 줄이 64 KiB 로 묶인다 (test `HeaderLineLongerThanTheReceiveCapacityFitsWhenWithinMaxHeaderBytes`).
+- 다른 길 (HttpClient 의 자기 줄 버퍼) 은 버퍼 하나와 복사 한 번이 더 든다. C2 에서 (a) 로 정했다.
+
+### 6.3 요청 : `send`
+
+```cpp
+KiottyNetHttpReply HttpClient::exchange(const ClientRequest& request, uint32_t timeout_milliseconds)
+{
+    if (!_has_target) { return failedReply(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+    const KiottyNetCode body = checkRequestBody(request.type, request.body);
+    if (body != KIOTTY_NET_CODE_SUCCESS) { return failedReply(body); }
+    const HeadLengthResult head = writeHead(request);           // 검사와 머리 조립. 실패하면 이전 응답을 건드리지 않는다
+    if (!head) { return failedReply(head.code); }
+    const Deadline deadline(timeout_milliseconds);
+    const Attempt first = attempt(request, head.value, deadline);
+    const KiottyNetCode received = first.is_stale ? resend(request, deadline) : first.code;
+    if (received != KIOTTY_NET_CODE_SUCCESS)
+    {
+        StreamClient::disconnect();
+        return failedReply(received);
+    }
+    const Span<const KiottyNetHttpHeader> headers = _reply.headers();
+    return KiottyNetHttpReply{ received, _reply.status(), headers.data, headers.length };
+}
+```
+
+- **`writeRequestHead`** (C1) 가 검사 (path, 헤더 글자, 금지 이름, 줄 수) 를 먼저 하고 뒤 반에 쓴다. 순서: 요청줄, Host, 공통 헤더 (요청 헤더와 같은 이름, 라이브러리가 Content-Type 을 쓸 때의 Content-Type 은 뺀다), 요청 헤더 (trim), Content-Type / Content-Length, 빈 줄. 헤더 줄 수 (Host 포함) 가 `max_headers` 를 넘으면 `TABLE_FULL`, 버퍼를 넘으면 `REQUEST_TOO_LARGE`.
+- **Host** 는 connect 가 `hostFieldOf(address, default_port)` 로 한 번 만든다. TCP 는 `buildHostField(host, port, 80 또는 443)` (기본 포트면 생략, IPv6 literal 은 괄호, 이미 괄호면 그대로), pipe 는 `localhost` (pipe 이름은 파일 경로라 공백이 있을 수 있다). WebSocketClient 의 Upgrade 요청도 같은 함수를 쓴다.
+- **`attempt`** 는 남은 body 가 있으면 먼저 연결을 닫는다 (결정 13: 남은 body 를 읽어 버리지 않는다). 그리고 이전 응답을 버리고, 연결이 열려 있었는지 (`is_reused`) 를 적고, 없으면 `reconnect(address, deadline)` 로 열고, 머리 (뒤 반) 와 body (앱 버퍼) 를 `StreamClient::write` 로 보낸 뒤 `receiveReply` 한다.
+- **`receiveReply`** 는 `receiveHead` (상태줄 → `takeStatusLine`, 헤더 줄 → `takeHeader`, 빈 줄까지) 와 `_reply.finish(method)` (= `selectReplyFraming`) 를 1xx 가 아닐 때까지 되풀이한다. 1xx 는 16 번까지, 그 뒤는 `PROTOCOL_ERROR`. 최종 응답이면 `startBody` 가 `HttpBodyReader(framing)` 을 세운다. body 가 없는 응답 (HEAD, 204, 304, 길이 0) 은 여기서 끝나고 keep-alive 가 아니면 닫는다.
+- **실패하면 연결을 닫는다** (요청의 모든 실패. read 의 TIMEOUT 만 예외 6.4).
+
+### 6.4 body 읽기 : `readBody`
+
+```cpp
+KiottyNetResult HttpClient::pumpBody(Span<char> buffer, const Deadline& deadline)
+{
+    for (;;)
+    {
+        const TimeLeftResult left = timeLeftOf(deadline);
+        if (!left) { return resultOf(0, left.code); }
+        const StagedResult staged = peekReceived(left.value);      // Stage 에 있으면 그대로, 비었으면 한 번 받기
+        if (!staged) { return endInput(staged.code); }             // TIMEOUT 은 그대로, PEER_CLOSED 는 closeInput, 나머지는 닫기
+        const BodyStep step = _body.take(staged.value, buffer);    // 벗겨서 앱 버퍼로
+        consumeReceived(step.consumed);
+        if (step.code != KIOTTY_NET_CODE_SUCCESS)
+        {
+            StreamClient::disconnect();
+            return resultOf(0, step.code);
+        }
+        if (step.is_finished) { finishBody(); }                    // keep-alive 가 아니면 닫는다
+        const bool is_answered = step.produced > 0 || step.is_finished;
+        if (is_answered) { return resultOf(step.produced, step.code); }
+    }
+}
+```
+
+- **모든 framing 이 같은 길이다.** 수신 Stage 를 들여다보고 `HttpBodyReader::take(input, output) -> { consumed, produced, code, is_finished }` 로 앱 버퍼에 옮긴 뒤 옮긴 만큼 소비한다. 평문 body 도 Stage 를 한 번 거친다. chunk 를 앱 버퍼 안에서 벗기면 겹치는 복사가 되므로 이 길을 골랐다.
+- `HttpBodyReader` 는 `ReplyBodyKind { NONE, LENGTH, CHUNKED, UNTIL_CLOSE }` 를 안다. chunk 크기 줄은 안의 256 바이트 버퍼 (`CHUNK_LINE_BYTES`) 에 모은다 (넘으면 `PROTOCOL_ERROR`). extension 과 trailer 는 버리고 data 뒤 CRLF (LF 만도) 를 본다. 실패 뒤로는 같은 code 만 준다 (그래서 끊긴 뒤의 read 는 계속 `PEER_CLOSED`).
+- `closeInput()` 은 UNTIL_CLOSE 면 `SUCCESS` (body 의 끝), 아니면 `PEER_CLOSED`.
+- 앞에서 `_body.take({}, target)` 를 한 번 불러 이미 끝났거나 실패한 body 는 socket 을 보지 않고 답한다 (`{ 0, SUCCESS }` 또는 그 code).
+- `KiottyNetResult.bytes` 가 `int32_t` 라 한 번에 주는 양은 `0x7FFFFFFF` 로 자른다.
+
+### 6.5 재시도와 deadline
+
+```cpp
+HttpClient::Attempt HttpClient::attempt(const ClientRequest& request, size_t head_length, const Deadline& deadline)
+{
+    if (!_body.isFinished()) { StreamClient::disconnect(); }
+    dropReply();
+    const bool is_reused = isConnected();                         // 이 요청이 열지 않은 연결
+    _has_reply_bytes = false;
+    const KiottyNetCode sent = transmit(head_length, request.body, deadline);
+    const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
+    const KiottyNetCode received = is_sent ? receiveReply(request.method, deadline) : sent;
+    const bool is_unanswered = !_has_reply_bytes && stagedBytes() == 0;
+    const bool is_stale = is_reused && is_unanswered && isConnectionLoss(received);   // PEER_CLOSED, SOCKET_ERROR
+    return Attempt{ received, is_stale };
+}
+```
+
+- `is_stale` 이면 `resend` 가 연결을 닫고, 멱등 메서드 (GET, HEAD, PUT, DELETE, OPTIONS) 만 머리를 다시 만들어 `attempt` 를 한 번 더 부른다. 두 번째의 `is_stale` 은 보지 않는다. POST / PATCH 는 밑의 code 가 `SOCKET_ERROR` 여도 `PEER_CLOSED`.
+- **재사용 연결** 은 "요청을 시작할 때 이미 열려 있던 연결" 이다. `connectHttpClient` 로 열어 두고 쉬던 연결도 든다 (C4 의 사용자 결정. 장비는 시작할 때 connect 하고 몇 분 뒤 첫 요청을 보낸다). 처음 구현은 "최종 응답 머리를 받은 연결" 이었다.
+- **응답 바이트 없음** 은 `nextLine` 이 줄을 하나라도 돌려주면 서는 `_has_reply_bytes` 와, 실패한 때 Stage 가 비었는지로 본다.
+- **deadline 이 다시 연결을 자른다.** `reconnect(address, deadline)` 는 connect 시도마다, TLS handshake, 재시도 사이의 쉼을 `Deadline::bound(t)` (t 와 남은 시간 중 작은 것. limit 가 있으면 0 을 돌려주지 않는다. wait 의 0 은 "끝없이") 로 자른다. 시간이 다 되면 재시도를 멈추고 마지막 시도의 code. 요청 timeout 0 은 `Deadline(0)` (제한 없음) 이라 설정 값 그대로다. `connectHttpClient` 도 `Deadline(0)` 으로 부른다. EventClient 는 예전 재시도 함수를 그대로 쓴다.
+
+### 6.6 BUSY 와 close : `BusyFlag`, `StopSignal`
+
+**BusyFlag** 는 atomic 하나에 셋이다.
+
+| 상태 | 누가 잡나 | 다른 호출이 보면 |
+|---|---|---|
+| idle | | |
+| call | connect, send, readBody, disconnect, 공통 헤더 set / remove / clear (`BusyGuard`, compare-exchange, scope 끝에 놓음) | `BUSY` (disconnect 는 조용히 return) |
+| close | 걸린 호출이 없을 때의 `closeHttpClient` | call 은 `yield` 하며 잠깐 기다린다 (close 가 연결을 닫는 짧은 동안) |
+
+`make*`, `find*`, `getHttpAllowedMethods`, create / destroy 는 잡지 않는다.
+
+**StopSignal** (`data/infra/socket/kiotty_stop_signal.*`) 은 StreamClient 마다 하나다.
+
+| 것 | 내용 |
+|---|---|
+| `_raised` | atomic close 수. `raise()` 가 올리고 깨우는 handle 에 한 바이트 쓴다 |
+| `_accepted` | owner thread 만 만지는 "마지막으로 본 수". `accept()` 가 따라잡고 새 close 가 있었으면 true |
+| 깨우는 handle | POSIX: non-blocking pipe (`_reader`, `_writer`). Windows: 127.0.0.1 의 자기 자신에 connect 한 UDP socket 하나 (`WSA_FLAG_OVERLAPPED` 로 만든다. 없으면 closer 의 send 가 owner 의 걸린 `select` 뒤에 줄을 서서 timeout 에야 깨운다) |
+| 수명 | pool slot 마다 한 번 열고 context 를 놓을 때 닫는다. client 보다 오래 산다 |
+
+```cpp
+void HttpClientLink::close()                          // 아무 thread
+{
+    if (!_busy.enterClose())                          // 걸린 호출이 있다
+    {
+        _stop.raise();                                // 그 호출의 wait 를 깨운다. 닫는 일은 owner thread
+        return;
+    }
+    _stream.disconnect();                             // 걸린 호출이 없다. 여기서 닫는다
+    _busy.leave();
+}
+```
+
+- **client socket 의 모든 wait** (POSIX `poll`, Windows `select`) 가 깨우는 handle 도 같이 본다. wait 전과 깨어난 뒤 counter 를 보고 새 close 가 있으면 `KIOTTY_NET_CODE_CLOSED`. close 가 아닌 깨움은 비우고 남은 시간으로 다시 기다린다. connect, TLS handshake, send, receive 가 모두 이 길이다. connect 재시도 사이의 쉼은 10 ms 마다 counter 를 본다.
+- **호출 사이의 close 는 다음 호출을 막지 않는다.** connect, send, readBody, disconnect 는 BusyGuard 를 잡은 뒤 `settleStop()` (`accept()` 가 true 면 연결을 닫는다) 으로 counter 를 따라잡고 그대로 진행한다. 그 뒤에 온 close 만 걸린 호출을 `CLOSED` 로 만든다.
+- **socket 을 다른 thread 에서 건드리지 않는 이유.** Linux 는 `shutdown(SHUT_RDWR)` 이 걸린 `poll` 을 깨우지만 Windows 의 `shutdown(SD_BOTH)` 는 걸린 read / write / connect 를 깨우지 못한다 (C4 에서 실험). 다른 thread 에서 닫으면 handle 경쟁과 재사용된 descriptor 문제도 있다.
+- 깨우지 못하는 것: connect 안의 이름 풀기 (`getaddrinfo`).
+- destroy 와 경쟁하는 close 는 범위 밖이다. 깨우는 handle 이 client 보다 오래 살아 늦은 close 는 자기 pipe 에 쓸 뿐이다. 재사용된 slot 의 오래된 handle 이면 새 client 의 연결을 닫을 수는 있다.
+- **비용.** StreamClient 마다 handle (POSIX fd 2 개, Windows socket 1 개). 평문 StreamClient 도 가진다.
+
+### 6.7 C++ wrapper
+
+`include/kiotty_net_http.h` 의 `KiottyNet_HttpServer` 뒤에 셋이 있다. 모두 C 함수를 부르는 얇은 판이고 할당이 없다.
+
+| 클래스 | 모양 |
+|---|---|
+| `KiottyNet_HttpHeaderList` | 템플릿이 아닌 기반. `data()`, `count()`, `code()`. 생성자 (배열 포인터, 칸 수) 와 소멸자는 protected, 복사는 delete. `append` 가 칸이 남으면 `KiottyNet_makeHttpHeader` 로 채우고, 넘치면 그 헤더를 버리고 `code` 를 `TABLE_FULL` 로 둔다 |
+| `KiottyNet_HttpHeaders<N = 8>` | `KiottyNetHttpHeader _items[N]` 을 멤버로 가진 기반의 자식. `static_assert(N > 0)`. 복사와 이동을 delete (기반이 멤버 배열을 가리키므로 옮기면 어긋난다). `add(name, value)` 는 `append` 후 `*this` |
+| `KiottyNet_HttpClient` | `OwnedHandle<KiottyNetHttpClientHandle, KiottyNet_destroyHttpClient>` 와 create 의 code. 이동만. 생성자 `(context, configuration, limits)` 의 limits 포인터에 기본 인자는 없다 (nullptr 이면 C 가 기본값). `explicit operator bool`, `code()`, `handle()`, `connect` 둘, `disconnect`, `close`, `header`, `clearHeaders`, `send`, `get / head / del / options`, `post / put / patch`, `readBody` |
+
+- 요청 함수마다 헤더 없는 판 (`nullptr, 0`) 과 `const KiottyNet_HttpHeaderList&` 판이 있다. 헤더 판은 `headers.code() != SUCCESS` 이면 C 를 부르지 않고 `{ headers.code(), 0, nullptr, 0 }` (곧 `TABLE_FULL`) 을 돌려준다. 이 검사 하나가 C 로 넘기는 것 말고 wrapper 가 하는 일이다 (`docs/deviations.md` DV13).
+- 기반이 템플릿이 아니므로 N 이 달라도 요청 함수는 하나다. 공개 헤더의 템플릿 (`KiottyNet_HttpHeaders`, `OwnedHandle`) 은 DV18.
+
+---
+
+## 7. 미결
 
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.
 - (닫힘, 2026-11-09) WebSocket upgrade 뒤의 표: HTTP 와 WebSocket 은 한 표, 한 Session 이다 (`design_statemachine_v0.md` 11절, 14절 7, 8).
@@ -1781,3 +2011,5 @@ IO thread 는 깨우지 않는다. push lane 의 drain 은 base 의 notify 가 I
 - (닫힘, 2026-11-13) WebSocket 의 다른 thread close 를 drain 뒤 훅으로 할지: 두지 않는다. 닫힘 플래그를 READ / TIMEOUT 행이 본다 (5.5, 5.7, 설계 결정 3).
 - (닫힘, 2026-11-13) 클라이언트의 mask 를 어디서 씌울지: base 를 바꾸지 않고 클라이언트의 push 가 scratch 버퍼에서 씌운다 (5.6).
 - (닫힘, 2026-11-13) 서버 / 클라이언트의 콜백 모양이 달라진 뒤 (V2, V3) frame 행이 어떻게 부르나: 역할 값으로 가르는 `callOpen` / `callMessage` / `callClose` 셋 (5.3).
+- (닫힘, 2026-11-16) HttpClient 의 줄 읽기를 어디서 할지: StreamClient 의 수신 Stage 위 (`ConnectionStream::readLine`, 6.2).
+- (닫힘, 2026-11-16) 다른 thread 에서 StreamClient 의 걸린 wait 를 깨우는 길: socket 을 만지지 않고 `StopSignal` 의 깨우는 handle 을 모든 wait 가 같이 본다 (6.6). connect 안의 이름 풀기는 깨우지 못한다.
