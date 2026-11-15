@@ -87,6 +87,14 @@ namespace kiotty::net::implementation
         return Span<const char>{ span.data, span.length };
     }
 
+    bool equalsLiteral(Span<const char> text, const char* literal)
+    {
+        const size_t length = std::char_traits<char>::length(literal);
+        if (text.length != length) { return false; }
+        if (length == 0) { return true; }
+        return std::memcmp(text.data, literal, length) == 0;
+    }
+
     bool equalsLiteralIgnoreCase(Span<const char> text, const char* literal)
     {
         const Span<const char> expected{ literal, std::char_traits<char>::length(literal) };

@@ -23,6 +23,9 @@ namespace kiotty::net::implementation
     };
 
     using RequestLineResult = Result<RequestLine, KiottyNetHttpStatus>;
+    using HttpVersionResult = Result<HttpVersion, KiottyNetCode>;
 
     RequestLineResult parseRequestLine(Span<const char> line);
+    HttpVersionResult parseHttpVersion(Span<const char> text);
+    Span<const char>  methodTextOf(KiottyNetHttpMethod method);
 }

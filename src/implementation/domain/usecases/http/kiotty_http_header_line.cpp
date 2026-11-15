@@ -10,9 +10,6 @@ namespace kiotty::net::implementation
         constexpr unsigned char       FIRST_NON_ASCII = 0x80;
         constexpr KiottyNetHttpStatus BAD_REQUEST = KIOTTY_NET_HTTP_STATUS_BAD_REQUEST;
         constexpr KiottyNetHttpStatus TOO_LARGE = KIOTTY_NET_HTTP_STATUS_HEADER_FIELDS_TOO_LARGE;
-
-        bool isFieldValue(Span<const char> value);
-        bool isFieldCharacter(char character);
     }
 
     HeaderResult parseHeaderLine(Span<const char> line, size_t max_length)
@@ -31,22 +28,19 @@ namespace kiotty::net::implementation
         return HeaderResult::success(header);
     }
 
-    namespace
+    bool isFieldValue(Span<const char> value)
     {
-        bool isFieldValue(Span<const char> value)
+        for (size_t i = 0; i < value.length; ++i)
         {
-            for (size_t i = 0; i < value.length; ++i)
-            {
-                if (!isFieldCharacter(value[i])) { return false; }
-            }
-            return isUtf8(value);
+            if (!isFieldCharacter(value[i])) { return false; }
         }
+        return isUtf8(value);
+    }
 
-        bool isFieldCharacter(char character)
-        {
-            if (isVisibleCharacter(character)) { return true; }
-            if (isWhitespace(character)) { return true; }
-            return static_cast<unsigned char>(character) >= FIRST_NON_ASCII;
-        }
+    bool isFieldCharacter(char character)
+    {
+        if (isVisibleCharacter(character)) { return true; }
+        if (isWhitespace(character)) { return true; }
+        return static_cast<unsigned char>(character) >= FIRST_NON_ASCII;
     }
 }

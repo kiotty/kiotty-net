@@ -1,5 +1,6 @@
 #include "domain/usecases/http/kiotty_http_response_text.h"
 
+#include "domain/usecases/http/kiotty_http_request_line.h"
 #include "kiotty_net_http.h"
 
 #include <string>
@@ -55,13 +56,9 @@ namespace kiotty::net::implementation
             { 505, "HTTP Version Not Supported" },
         };
 
-        constexpr const char* METHOD_NAMES[KIOTTY_NET_HTTP_METHOD_COUNT] = {
-            "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
-        };
         constexpr const char* WEEKDAYS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
         constexpr const char* MONTHS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-        constexpr size_t      DECIMAL_DIGITS = 20;
         constexpr uint64_t    DECIMAL_BASE = 10;
         constexpr int32_t     LAST_WEEKDAY = 6;
         constexpr int32_t     LAST_MONTH = 12;
@@ -69,12 +66,9 @@ namespace kiotty::net::implementation
         constexpr size_t      HEX_BASE = 16;
         constexpr char        HEX_LETTERS[] = "0123456789abcdef";
 
-        using DigitText = FixedString<DECIMAL_DIGITS + 1>;
-
         Span<const char> literalOf(const char* text);
         Span<const char> reasonPhraseOf(int32_t status);
-        DigitText        decimalOf(uint64_t value);
-        DigitText        paddedOf(int32_t value);
+        DecimalText      paddedOf(int32_t value);
         bool             appendDate(PrefixText& text, const CalendarTime& time);
         bool             appendClock(PrefixText& text, const CalendarTime& time);
         uint32_t         withImplied(uint32_t methods);
@@ -82,7 +76,7 @@ namespace kiotty::net::implementation
 
     bool appendStatusLine(PrefixText& text, int32_t status)
     {
-        const DigitText code = decimalOf(static_cast<uint64_t>(status));
+        const DecimalText code = decimalOf(static_cast<uint64_t>(status));
         bool is_written = text.append(literalOf("HTTP/1.1 "));
         is_written = is_written && text.append(code.span());
         is_written = is_written && text.append(literalOf(" "));
@@ -100,7 +94,7 @@ namespace kiotty::net::implementation
 
     bool appendLengthField(PrefixText& text, uint64_t length)
     {
-        const DigitText digits = decimalOf(length);
+        const DecimalText digits = decimalOf(length);
         return appendField(text, literalOf("Content-Length"), digits.span());
     }
 
@@ -121,7 +115,8 @@ namespace kiotty::net::implementation
             const bool is_allowed = (allowed & KIOTTY_NET_HTTP_METHOD_BIT(method)) != 0;
             const bool needs_comma = is_allowed && !text.empty();
             if (needs_comma) { (void)text.append(literalOf(", ")); }
-            if (is_allowed) { (void)text.append(literalOf(METHOD_NAMES[method])); }
+            const Span<const char> name = methodTextOf(static_cast<KiottyNetHttpMethod>(method));
+            if (is_allowed) { (void)text.append(name); }
         }
         return text;
     }
@@ -143,6 +138,22 @@ namespace kiotty::net::implementation
         return head;
     }
 
+    DecimalText decimalOf(uint64_t value)
+    {
+        char digits[DECIMAL_DIGITS] = {};
+        size_t start = DECIMAL_DIGITS;
+        uint64_t rest = value;
+        do
+        {
+            start -= 1;
+            digits[start] = static_cast<char>('0' + rest % DECIMAL_BASE);
+            rest /= DECIMAL_BASE;
+        } while (rest > 0);
+        DecimalText text;
+        (void)text.assign(Span<const char>{ digits + start, DECIMAL_DIGITS - start });
+        return text;
+    }
+
     namespace
     {
         Span<const char> literalOf(const char* text)
@@ -159,28 +170,12 @@ namespace kiotty::net::implementation
             return literalOf("");
         }
 
-        DigitText decimalOf(uint64_t value)
-        {
-            char digits[DECIMAL_DIGITS] = {};
-            size_t start = DECIMAL_DIGITS;
-            uint64_t rest = value;
-            do
-            {
-                start -= 1;
-                digits[start] = static_cast<char>('0' + rest % DECIMAL_BASE);
-                rest /= DECIMAL_BASE;
-            } while (rest > 0);
-            DigitText text;
-            (void)text.assign(Span<const char>{ digits + start, DECIMAL_DIGITS - start });
-            return text;
-        }
-
-        DigitText paddedOf(int32_t value)
+        DecimalText paddedOf(int32_t value)
         {
             const bool is_single = value >= 0 && value < static_cast<int32_t>(DECIMAL_BASE);
-            DigitText text;
+            DecimalText text;
             if (is_single) { (void)text.append(literalOf("0")); }
-            const DigitText digits = decimalOf(static_cast<uint64_t>(value));
+            const DecimalText digits = decimalOf(static_cast<uint64_t>(value));
             (void)text.append(digits.span());
             return text;
         }
@@ -190,8 +185,8 @@ namespace kiotty::net::implementation
             const bool is_valid = time.weekday >= 0 && time.weekday <= LAST_WEEKDAY
                                   && time.month >= 1 && time.month <= LAST_MONTH;
             if (!is_valid) { return false; }
-            const DigitText day = paddedOf(time.day);
-            const DigitText year = decimalOf(static_cast<uint64_t>(time.year));
+            const DecimalText day = paddedOf(time.day);
+            const DecimalText year = decimalOf(static_cast<uint64_t>(time.year));
             bool is_written = text.append(literalOf(WEEKDAYS[time.weekday]));
             is_written = is_written && text.append(literalOf(", "));
             is_written = is_written && text.append(day.span());
@@ -203,9 +198,9 @@ namespace kiotty::net::implementation
 
         bool appendClock(PrefixText& text, const CalendarTime& time)
         {
-            const DigitText hour = paddedOf(time.hour);
-            const DigitText minute = paddedOf(time.minute);
-            const DigitText second = paddedOf(time.second);
+            const DecimalText hour = paddedOf(time.hour);
+            const DecimalText minute = paddedOf(time.minute);
+            const DecimalText second = paddedOf(time.second);
             bool is_written = text.append(literalOf(" "));
             is_written = is_written && text.append(hour.span());
             is_written = is_written && text.append(literalOf(":"));

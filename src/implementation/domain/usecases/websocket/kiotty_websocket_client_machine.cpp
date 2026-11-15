@@ -2,10 +2,9 @@
 
 #include "domain/entity/kiotty_action.h"
 #include "domain/usecases/http/kiotty_http_exchange.h"
+#include "domain/usecases/http/kiotty_http_status_line.h"
 #include "domain/usecases/websocket/kiotty_websocket_rows.h"
 #include "domain/usecases/websocket/kiotty_websocket_upgrade.h"
-
-#include <cstring>
 
 namespace kiotty::net::implementation
 {
@@ -17,8 +16,6 @@ namespace kiotty::net::implementation
         using Connection = KiottyNetConnectionHandle;
         using EventType = KiottyNetConnectionEventType;
 
-        constexpr char   SWITCHING_LINE[] = "HTTP/1.1 101";
-        constexpr size_t SWITCHING_LENGTH = sizeof(SWITCHING_LINE) - 1;
         constexpr char   PROTOCOL_HEADER[] = "Sec-WebSocket-Protocol";
         constexpr size_t PROTOCOL_HEADER_LENGTH = sizeof(PROTOCOL_HEADER) - 1;
 
@@ -188,9 +185,10 @@ namespace kiotty::net::implementation
 
         bool isSwitchingLine(Span<const char> line)
         {
-            if (line.length < SWITCHING_LENGTH) { return false; }
-            if (std::memcmp(line.data, SWITCHING_LINE, SWITCHING_LENGTH) != 0) { return false; }
-            return line.length == SWITCHING_LENGTH || line[SWITCHING_LENGTH] == ' ';
+            const StatusLineResult parsed = parseStatusLine(line);
+            if (!parsed) { return false; }
+            const bool is_one_one = parsed.value.version == HttpVersion::V11;
+            return is_one_one && parsed.value.status == KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS;
         }
 
         KiottyNetConnectionContext createSession(KiottyNetAppContext app_context,

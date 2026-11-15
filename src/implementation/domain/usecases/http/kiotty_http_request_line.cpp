@@ -2,7 +2,6 @@
 
 #include "domain/usecases/http/kiotty_http_token.h"
 
-#include <cstring>
 #include <string>
 
 namespace kiotty::net::implementation
@@ -48,13 +47,13 @@ namespace kiotty::net::implementation
         constexpr char VERSION_1_0[] = "HTTP/1.0";
         constexpr char VERSION_1_1[] = "HTTP/1.1";
         constexpr char ASTERISK[] = "*";
+        constexpr char NO_TEXT[] = "";
 
         PartsResult   splitRequestLine(Span<const char> line);
         MethodResult  parseMethod(Span<const char> text);
         TargetResult  parseTarget(Span<const char> text, KiottyNetHttpMethod method);
         VersionResult parseVersion(Span<const char> text);
         bool          isTargetText(Span<const char> text);
-        bool          equalsExactly(Span<const char> text, const char* literal);
     }
 
     RequestLineResult parseRequestLine(Span<const char> line)
@@ -70,6 +69,25 @@ namespace kiotty::net::implementation
         const RequestTarget& found = target.value;
         const RequestLine parsed{ found.path, found.query, method.value, version.value };
         return RequestLineResult::success(parsed);
+    }
+
+    HttpVersionResult parseHttpVersion(Span<const char> text)
+    {
+        const bool is_one_one = equalsLiteral(text, VERSION_1_1);
+        if (is_one_one) { return HttpVersionResult::success(HttpVersion::V11); }
+        const bool is_one_zero = equalsLiteral(text, VERSION_1_0);
+        if (is_one_zero) { return HttpVersionResult::success(HttpVersion::V10); }
+        return HttpVersionResult::failure(KIOTTY_NET_CODE_PROTOCOL_ERROR);
+    }
+
+    Span<const char> methodTextOf(KiottyNetHttpMethod method)
+    {
+        for (const MethodName& name : METHOD_NAMES)
+        {
+            const size_t length = std::char_traits<char>::length(name.text);
+            if (name.method == method) { return Span<const char>{ name.text, length }; }
+        }
+        return Span<const char>{ NO_TEXT, 0 };
     }
 
     namespace
@@ -93,7 +111,7 @@ namespace kiotty::net::implementation
             if (!isToken(text)) { return MethodResult::failure(BAD_REQUEST); }
             for (const MethodName& name : METHOD_NAMES)
             {
-                if (equalsExactly(text, name.text)) { return MethodResult::success(name.method); }
+                if (equalsLiteral(text, name.text)) { return MethodResult::success(name.method); }
             }
             return MethodResult::failure(NOT_IMPLEMENTED);
         }
@@ -103,7 +121,7 @@ namespace kiotty::net::implementation
             const bool is_too_long = text.length >= KIOTTY_NET_MAX_URL_LENGTH;
             if (is_too_long) { return TargetResult::failure(URI_TOO_LONG); }
             if (!isTargetText(text)) { return TargetResult::failure(BAD_REQUEST); }
-            const bool is_asterisk = equalsExactly(text, ASTERISK);
+            const bool is_asterisk = equalsLiteral(text, ASTERISK);
             const bool is_options = method == KIOTTY_NET_HTTP_METHOD_OPTIONS;
             const RequestTarget whole_server{ text, {} };
             if (is_asterisk && is_options) { return TargetResult::success(whole_server); }
@@ -117,11 +135,9 @@ namespace kiotty::net::implementation
 
         VersionResult parseVersion(Span<const char> text)
         {
-            const bool is_one_one = equalsExactly(text, VERSION_1_1);
-            if (is_one_one) { return VersionResult::success(HttpVersion::V11); }
-            const bool is_one_zero = equalsExactly(text, VERSION_1_0);
-            if (is_one_zero) { return VersionResult::success(HttpVersion::V10); }
-            return VersionResult::failure(BAD_REQUEST);
+            const HttpVersionResult version = parseHttpVersion(text);
+            if (!version) { return VersionResult::failure(BAD_REQUEST); }
+            return VersionResult::success(version.value);
         }
 
         bool isTargetText(Span<const char> text)
@@ -132,13 +148,6 @@ namespace kiotty::net::implementation
                 if (!is_allowed) { return false; }
             }
             return true;
-        }
-
-        bool equalsExactly(Span<const char> text, const char* literal)
-        {
-            const size_t length = std::char_traits<char>::length(literal);
-            if (text.length != length) { return false; }
-            return std::memcmp(text.data, literal, length) == 0;
         }
     }
 }

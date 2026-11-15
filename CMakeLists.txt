@@ -119,6 +119,11 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_content_type.cpp
     src/implementation/domain/usecases/http/kiotty_http_response_text.cpp
     src/implementation/domain/usecases/http/kiotty_http_exchange.cpp
+    src/implementation/domain/usecases/http/kiotty_http_status_line.cpp
+    src/implementation/domain/usecases/http/kiotty_http_reply_framing.cpp
+    src/implementation/domain/usecases/http/kiotty_http_body_reader.cpp
+    src/implementation/domain/usecases/http/kiotty_http_request_check.cpp
+    src/implementation/domain/usecases/http/kiotty_http_request_head.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_frame.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_close.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_handshake.cpp
@@ -138,6 +143,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/repository/http/kiotty_http_notices.cpp
     src/implementation/data/repository/http/kiotty_http_session.cpp
     src/implementation/data/repository/http/kiotty_http_session_pool.cpp
+    src/implementation/data/repository/http/kiotty_http_reply_store.cpp
+    src/implementation/data/repository/http/kiotty_http_shared_headers.cpp
     src/implementation/context/kiotty_http_configuration.cpp
     src/implementation/context/kiotty_http_server.cpp
     src/implementation/context/kiotty_http_work.cpp

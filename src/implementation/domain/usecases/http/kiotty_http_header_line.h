@@ -11,4 +11,6 @@ namespace kiotty::net::implementation
     using HeaderResult = Result<KiottyNetHttpHeader, KiottyNetHttpStatus>;
 
     HeaderResult parseHeaderLine(Span<const char> line, size_t max_length);
+    bool         isFieldValue(Span<const char> value);
+    bool         isFieldCharacter(char character);
 }

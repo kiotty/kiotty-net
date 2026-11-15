@@ -256,7 +256,7 @@ KiottyNetHttpReply KiottyNet_optionsHttp(client, path, headers, header_count, ti
   <tr><th>것</th><th>규칙</th></tr>
   <tr><td>상태줄</td><td><code>HTTP/1.1 NNN</code> 또는 <code>HTTP/1.0 NNN</code>. reason phrase 는 버린다. 아니면 <code>PROTOCOL_ERROR</code></td></tr>
   <tr><td>1xx</td><td><code>100 Continue</code> 와 다른 1xx 는 건너뛰고 다음 응답을 읽는다 (우리는 <code>Expect</code> 를 보내지 않지만 서버가 보낼 수 있다). 101 은 <code>PROTOCOL_ERROR</code> (Upgrade 는 WebSocketClient 의 일)</td></tr>
-  <tr><td>body 의 끝</td><td>HEAD 의 응답, 204, 304 는 body 없음. <code>Transfer-Encoding: chunked</code> 면 chunk (extension 과 trailer 는 버린다), 아니면 <code>Content-Length</code> (값이 여럿이고 다르면 <code>PROTOCOL_ERROR</code>), 둘 다 없으면 연결이 닫힐 때까지. 서버의 요청 파서와 같은 <code>selectBodyFraming</code> / <code>parseChunkSize</code> 를 쓴다</td></tr>
+  <tr><td>body 의 끝</td><td>HEAD 의 응답, 204, 304 는 body 없음. <code>Transfer-Encoding: chunked</code> 면 chunk (extension 과 trailer 는 버린다), 아니면 <code>Content-Length</code> (값이 여럿이면 같아도 <code>PROTOCOL_ERROR</code>. <code>Transfer-Encoding</code> 이 <code>chunked</code> 하나가 아니어도 <code>PROTOCOL_ERROR</code>: 압축을 풀지 않는다), 둘 다 없으면 연결이 닫힐 때까지. 서버의 요청 파서와 같은 <code>selectBodyFraming</code> / <code>parseChunkSize</code> 를 쓴다</td></tr>
   <tr><td>keep-alive</td><td>HTTP/1.1 이고 <code>Connection: close</code> 가 없으면 남긴다. 서버의 <code>decidePersistence</code> 와 같다</td></tr>
   <tr><td>헤더</td><td>서버와 같은 줄 파서. 이름은 대소문자 무시로 찾는다 (<code>findHttpReplyHeader</code>). 같은 이름 여럿은 배열에 그대로</td></tr>
   <tr><td>텍스트 body 의 UTF-8</td><td>보지 않는다. 받은 것을 그대로 주고 판단은 앱 (5절)</td></tr>
