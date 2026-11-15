@@ -293,7 +293,7 @@ def version_of():
         return completed.stdout.strip() if completed.returncode == 0 else None
     try:
         described = git("describe", "--always", "--tags")
-        changed = git("status", "--porcelain", "--", *VERSION_PATHS)
+        changed = git("-c", "core.autocrlf=true", "status", "--porcelain", "--", *VERSION_PATHS)
     except OSError:
         return "unknown"
     if described is None:
