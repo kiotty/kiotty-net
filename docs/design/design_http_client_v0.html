@@ -179,7 +179,7 @@ client.clearHeaders();                                                      // �
   <li>body 를 다 읽지 않고 다음 요청을 보내면 그 연결을 닫고 다시 연다 (결정 13). 요청 / read 가 오류로 끝나면 (read 의 <code>TIMEOUT</code> 빼고) 연결을 닫는다.</li>
   <li><b>disconnect</b> 는 연결만 닫는다. 대상은 남아 다음 요청이 다시 연다.</li>
   <li><b>close</b> (<code>closeHttpClient</code>) 는 아무 thread 에서나 부른다. 걸린 호출은 <code>CLOSED</code> 로 돌아오고 연결은 닫힌다. 그 뒤의 요청은 다시 연다 (close 는 그때 걸린 호출만 멈춘다).</li>
-  <li><b>timeout</b> 은 호출마다 하나다. 요청은 (다시) 연결 + 송신 + 머리 수신, read 는 한 번의 read 마다 (한 바이트 이상 올 때까지).</li>
+  <li><b>timeout</b> 은 호출마다 하나다 (C2 현재: 다시 연결은 아직 StreamClient 의 connect 설정을 따르고 호출의 timeout 에 들지 않는다. C4 에서 맞춘다). 요청은 (다시) 연결 + 송신 + 머리 수신, read 는 한 번의 read 마다 (한 바이트 이상 올 때까지).</li>
   <li>client 하나는 한 번에 한 thread 가 쓴다. 다른 thread 가 동시에 부르면 <code>BUSY</code> (atomic 플래그). <code>closeHttpClient</code> 만 예외다.</li>
 </ul>
 
@@ -366,10 +366,11 @@ loop   : got = readBody(client, chunk, 16384, 10000) → file.write(chunk, got.b
 
 <h2 id="s9">9. 안에서</h2>
 <ul>
-  <li><b>HttpClient = StreamClient + 버퍼 둘.</b> 머리 버퍼 (<code>max_header_bytes</code>: 앞쪽은 등록 헤더, 뒤쪽은 요청마다 만드는 머리), 응답 머리 저장소 (서버의 요청 저장소와 같은 것: <code>max_header_bytes</code> / <code>max_headers</code>), 대상 (address, tls 를 가리키는 값 — tls 는 connect 가 프로파일로 만든다). 모두 create 때 잡는다. body 버퍼는 없다 (결정 6). 응답 body 는 수신 Stage 에서 앱 버퍼로 바로 간다 (chunked 는 벗기면서).</li>
+  <li><b>HttpClient = StreamClient + 버퍼 둘.</b> 머리 버퍼 (<code>2 × max_header_bytes</code> 를 반으로: 앞 반은 등록 헤더, 뒤 반은 요청마다 만드는 머리. C2 에서 고침: 경계가 움직이는 한 버퍼면 요청 상한이 등록 헤더만큼 줄어든다), 응답 머리 저장소 (서버의 요청 저장소와 같은 것: <code>max_header_bytes</code> / <code>max_headers</code>), 대상 (address, tls 를 가리키는 값 — tls 는 connect 가 프로파일로 만든다). 모두 create 때 잡는다. body 버퍼는 없다 (결정 6). 응답 body 는 수신 Stage 에서 앱 버퍼로 바로 간다 (chunked 는 벗기면서).</li>
   <li><b>파서는 서버 것을 쓴다.</b> 헤더 줄 (<code>takeHeader</code>), body 의 끝 (<code>selectBodyFraming</code>), chunk 크기 (<code>parseChunkSize</code>), keep-alive (<code>decidePersistence</code>). WebSocketClient 가 101 을 읽을 때 요청 저장소를 다시 쓰는 것과 같다. 상태줄 파서만 새로 (WebSocketClient 의 <code>isSwitchingLine</code> 을 넓힌다).</li>
   <li><b>StateMachine 은 쓰지 않는다.</b> 동기 호출 하나가 "보내기 → 상태줄 → 헤더" 를, read 가 "body 조각" 을 순서대로 부르는 함수다. IO Thread 가 없으므로 표를 둘 이유가 없다. 호출 사이에 남는 것은 body 의 진행 (남은 길이 / chunk 상태 / 닫힘까지) 하나다.</li>
-  <li><b>줄 읽기.</b> StreamClient 의 read 는 받은 만큼 주므로 줄은 HttpClient 가 수신 Stage 위에서 자른다 (StreamClient 에 "Stage 를 보고 줄까지" 를 더할지, HttpClient 가 자기 버퍼로 할지는 C1 에서).</li>
+  <li><b>줄 읽기.</b> StreamClient 의 read 는 받은 만큼 주므로 줄은 수신 Stage 위에서 자른다. <code>ConnectionStream::readLine</code> 이 StreamClient 가 잡아 두고 쓰지 않던 수신 Stage (<code>receive_capacity</code>) 를 채우고 LF 까지만 소비한다. 머리와 같이 온 body 앞부분은 Stage 에 남아 read 가 먼저 준다. 한 줄이 Stage 보다 길면 <code>BUFFER_FULL</code> (C2 에서 정함).</li>
+  <li><b>Host.</b> TCP 는 address 의 host 와 port (기본 포트면 생략, IPv6 는 괄호), pipe 연결은 <code>localhost</code> (curl, Docker 와 같다). WebSocketClient 도 같은 함수를 쓴다 (C2 에서 정함).</li>
   <li><b>keep-alive 재사용의 재시도</b> 는 "이 연결로 응답을 받은 적이 있다" 플래그 하나와 "이번 응답 바이트 수" 로 판단한다 (3절).</li>
   <li><b>BUSY 와 close.</b> 호출마다 atomic 플래그를 잡고 놓는다. <code>closeHttpClient</code> 는 플래그를 보지 않고 StreamClient 의 멈춤 플래그를 세운 뒤 socket 을 깨운다. StreamClient 의 socket 을 다른 thread 에서 닫아도 되는지 (걸린 read / connect 가 바로 돌아오는지) 는 C4 에서 base 와 같이 확인한다.</li>
 </ul>

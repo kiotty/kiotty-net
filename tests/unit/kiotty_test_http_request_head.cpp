@@ -402,3 +402,40 @@ TEST(HttpHostField, LongestAddressHostFitsAndAnOverlongHostIsInvalidArgument)
     EXPECT_EQ(longest.size() + 8, field.value.length());
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, hostCodeOf(std::string(HOST_FIELD_BYTES + 1, 'a')));
 }
+
+namespace
+{
+    KiottyNetAddress addressOf(KiottyNetTransport transport, const std::string& host, uint16_t port)
+    {
+        KiottyNetAddress address = {};
+        address.transport = transport;
+        const Span<char> field{ address.host, sizeof(address.host) - 1 };
+        EXPECT_TRUE(field.copyFrom(spanOf(host)));
+        address.port = port;
+        return address;
+    }
+
+    std::string addressHostOf(const KiottyNetAddress& address, uint16_t default_port)
+    {
+        const HostFieldResult field = kiotty::net::implementation::hostFieldOf(address, default_port);
+        if (!field) { return "<failed>"; }
+        return std::string(field.value.span().data, field.value.span().length);
+    }
+}
+
+TEST(HttpHostField, TcpAddressUsesItsHostAndPort)
+{
+    const KiottyNetAddress plain = addressOf(KIOTTY_NET_TRANSPORT_TCP, "device.local", 80);
+    const KiottyNetAddress secure = addressOf(KIOTTY_NET_TRANSPORT_TCP, "device.local", 443);
+    EXPECT_EQ("device.local", addressHostOf(plain, HTTP_DEFAULT_PORT));
+    EXPECT_EQ("device.local:80", addressHostOf(plain, HTTPS_DEFAULT_PORT));
+    EXPECT_EQ("device.local", addressHostOf(secure, HTTPS_DEFAULT_PORT));
+    EXPECT_EQ("<failed>", addressHostOf(addressOf(KIOTTY_NET_TRANSPORT_TCP, "a b", 80), 80));
+}
+
+TEST(HttpHostField, PipeAddressIsLocalhost)
+{
+    const KiottyNetAddress pipe = addressOf(KIOTTY_NET_TRANSPORT_PIPE, "/tmp/my socket", 0);
+    EXPECT_EQ("localhost", addressHostOf(pipe, HTTP_DEFAULT_PORT));
+    EXPECT_EQ("localhost", addressHostOf(pipe, HTTPS_DEFAULT_PORT));
+}

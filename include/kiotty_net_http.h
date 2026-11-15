@@ -298,6 +298,123 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_awaitHttpServer(
     KiottyNetHttpServerHandle server,
     uint64_t timeout_milliseconds);
 
+typedef struct KiottyNetHttpClient* KiottyNetHttpClientHandle;
+
+typedef struct KiottyNetHttpClientResult
+{
+    KiottyNetCode             code;
+    KiottyNetHttpClientHandle handle;
+} KiottyNetHttpClientResult;
+
+typedef struct KiottyNetHttpReply
+{
+    KiottyNetCode              code;
+    int32_t                    status;
+    const KiottyNetHttpHeader* headers;
+    size_t                     header_count;
+} KiottyNetHttpReply;
+
+typedef struct KiottyNetHttpClientRequest
+{
+    KiottyNetHttpMethod      method;
+    const char*              path;
+    KiottyNetHttpContentType type;
+    KiottyNetSpan            body;
+} KiottyNetHttpClientRequest;
+
+KIOTTY_NET_API KiottyNetHttpClientResult KiottyNet_createHttpClient(
+    KiottyNetContext context,
+    const KiottyNetClientConfiguration* configuration,
+    const KiottyNetHttpLimits* limits);
+KIOTTY_NET_API void                      KiottyNet_destroyHttpClient(
+    KiottyNetContext context,
+    KiottyNetHttpClientHandle client);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_connectHttpClient(
+    KiottyNetHttpClientHandle client,
+    const KiottyNetAddress* address,
+    const KiottyNetTlsClientConfiguration* tls);
+KIOTTY_NET_API void                      KiottyNet_disconnectHttpClient(
+    KiottyNetHttpClientHandle client);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpClientHeader(
+    KiottyNetHttpClientHandle client,
+    const char* name,
+    const char* value);
+KIOTTY_NET_API KiottyNetCode             KiottyNet_clearHttpClientHeaders(
+    KiottyNetHttpClientHandle client);
+
+KIOTTY_NET_API KiottyNetHttpHeader        KiottyNet_makeHttpHeader(
+    const char* name,
+    const char* value);
+KIOTTY_NET_API KiottyNetHttpClientRequest KiottyNet_makeHttpClientRequest(
+    KiottyNetHttpMethod method,
+    const char* path);
+
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_sendHttpRequest(
+    KiottyNetHttpClientHandle client,
+    const KiottyNetHttpClientRequest* request,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_getHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_postHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_putHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_deleteHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_patchHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    KiottyNetHttpContentType type,
+    KiottyNetSpan body,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_headHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_optionsHttp(
+    KiottyNetHttpClientHandle client,
+    const char* path,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint32_t timeout_milliseconds);
+
+KIOTTY_NET_API KiottyNetResult KiottyNet_readHttpReplyBody(
+    KiottyNetHttpClientHandle client,
+    void* buffer,
+    size_t length,
+    uint32_t timeout_milliseconds);
+
+KIOTTY_NET_API KiottyNetSpan KiottyNet_findHttpReplyHeader(
+    const KiottyNetHttpReply* reply,
+    const char* name);
+KIOTTY_NET_API uint32_t      KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);
+
 #ifdef __cplusplus
 }
 

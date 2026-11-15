@@ -40,6 +40,10 @@ TEST(Headers, CAndCppSeeTheSameLayoutForEveryPublicStruct)
     EXPECT_EQ(c.http_work_handle, sizeof(KiottyNetHttpWorkHandle));
     EXPECT_EQ(c.http_route, sizeof(KiottyNetHttpRoute));
     EXPECT_EQ(c.http_server_result, sizeof(KiottyNetHttpServerResult));
+    EXPECT_EQ(c.http_client_result, sizeof(KiottyNetHttpClientResult));
+    EXPECT_EQ(c.http_client_request, sizeof(KiottyNetHttpClientRequest));
+    EXPECT_EQ(c.http_reply, sizeof(KiottyNetHttpReply));
+    EXPECT_EQ(c.http_reply_headers_offset, offsetof(KiottyNetHttpReply, headers));
     EXPECT_EQ(c.websocket_handle, sizeof(KiottyNetWebSocketHandle));
     EXPECT_EQ(c.websocket_handle_id_offset, offsetof(KiottyNetWebSocketHandle, id));
     EXPECT_EQ(c.websocket_client_result, sizeof(KiottyNetWebSocketClientResult));

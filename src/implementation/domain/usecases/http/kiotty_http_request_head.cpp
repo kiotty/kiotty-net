@@ -34,6 +34,7 @@ namespace kiotty::net::implementation
         constexpr char          VERSION_LINE_END[] = " HTTP/1.1\r\n";
         constexpr char          LINE_END[] = "\r\n";
         constexpr char          HOST[] = "Host";
+        constexpr char          PIPE_HOST[] = "localhost";
         constexpr char          CONTENT_TYPE[] = "Content-Type";
         constexpr char          CONTENT_LENGTH[] = "Content-Length";
 
@@ -69,6 +70,13 @@ namespace kiotty::net::implementation
         is_written = is_written && (!has_port || field.append(digits.span()));
         if (!is_written) { return HostFieldResult::failure(INVALID_ARGUMENT); }
         return HostFieldResult::success(field);
+    }
+
+    HostFieldResult hostFieldOf(const KiottyNetAddress& address, uint16_t default_port)
+    {
+        const bool is_pipe = address.transport == KIOTTY_NET_TRANSPORT_PIPE;
+        if (is_pipe) { return buildHostField(textOf(PIPE_HOST), default_port, default_port); }
+        return buildHostField(textOf(address.host), address.port, default_port);
     }
 
     HeadLengthResult writeRequestHead(Span<char> buffer, const RequestHead& head)

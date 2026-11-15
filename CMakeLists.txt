@@ -44,6 +44,7 @@ set(KIOTTY_NET_SOURCES
     src/kiotty_net_base.cpp
     src/kiotty_net_statemachine.cpp
     src/kiotty_net_http.cpp
+    src/kiotty_net_http_client.cpp
     src/kiotty_net_websocket.cpp
     src/implementation/core/kiotty_clock.cpp
     src/implementation/core/kiotty_deadline.cpp
@@ -93,6 +94,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/tls/backend/kiotty_openssl_tls_profile.cpp
     src/implementation/data/infra/tls/backend/kiotty_stub_tls.cpp
     src/implementation/data/repository/stream/kiotty_connection_stream.cpp
+    src/implementation/data/repository/stream/kiotty_connection_stream_line.cpp
     src/implementation/data/infra/file/backend/kiotty_posix_file.cpp
     src/implementation/data/infra/file/backend/kiotty_windows_file.cpp
     src/implementation/data/repository/connection/kiotty_acceptor.cpp
@@ -124,6 +126,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_body_reader.cpp
     src/implementation/domain/usecases/http/kiotty_http_request_check.cpp
     src/implementation/domain/usecases/http/kiotty_http_request_head.cpp
+    src/implementation/domain/usecases/http/kiotty_http_reply_headers.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_frame.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_close.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_handshake.cpp
@@ -160,6 +163,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/context/kiotty_server.cpp
     src/implementation/context/kiotty_event_client.cpp
     src/implementation/context/kiotty_stream_client.cpp
+    src/implementation/context/kiotty_http_client_headers.cpp
+    src/implementation/context/kiotty_http_client.cpp
     src/implementation/context/kiotty_context.cpp
 )
 

@@ -21,6 +21,7 @@ kiotty_net_add_test_target(kiotty_net_integration_tests integration
     kiotty_test_http_mcp.cpp
     kiotty_test_websocket_server.cpp
     kiotty_test_websocket_client.cpp
+    kiotty_test_http_client.cpp
     kiotty_test_stateful_c.c
     ${PROJECT_SOURCE_DIR}/tests/unit/support/kiotty_test_handler.cpp
 )

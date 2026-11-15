@@ -119,6 +119,16 @@ namespace kiotty::net::implementation
         return _websocket_clients.acquire(configuration);
     }
 
+    HttpClientResult Context::create(const HttpClientConfiguration& configuration)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN)
+        {
+            return HttpClientResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT);
+        }
+        return _http_clients.acquire(configuration);
+    }
+
     void Context::destroy(KiottyNetServer& server)
     {
         retire(_servers, server);
@@ -146,12 +156,20 @@ namespace kiotty::net::implementation
         retire(_websocket_clients, client);
     }
 
+    void Context::destroy(KiottyNetHttpClient& client)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if (_phase != ContextPhase::OPEN) { return; }
+        _http_clients.release(client);
+    }
+
     Context::Context()
         : _servers()
         , _stream_clients()
         , _event_clients()
         , _http_servers()
         , _websocket_clients()
+        , _http_clients()
         , _mutex()
         , _phase(ContextPhase::CLOSED)
     {
@@ -199,6 +217,7 @@ namespace kiotty::net::implementation
         _event_clients.clear();
         _http_servers.clear();
         _websocket_clients.clear();
+        _http_clients.clear();
         stopSockets();
         _phase = ContextPhase::CLOSED;
     }

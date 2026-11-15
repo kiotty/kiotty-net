@@ -3,6 +3,7 @@
 #include "context/kiotty_http_configuration.h"
 #include "core/kiotty_base64.h"
 #include "core/kiotty_text.h"
+#include "domain/usecases/http/kiotty_http_request_head.h"
 #include "domain/usecases/http/kiotty_http_token.h"
 #include "domain/usecases/statemachine/kiotty_stateful_handler.h"
 #include "domain/usecases/websocket/kiotty_websocket_access.h"
@@ -15,10 +16,6 @@ namespace kiotty::net::implementation
     namespace
     {
         constexpr size_t   KEY_BYTES = 16;
-        constexpr uint16_t HTTP_PORT = 80;
-        constexpr uint16_t HTTPS_PORT = 443;
-        constexpr size_t   PORT_DIGITS = 5;
-        constexpr uint16_t DECIMAL = 10;
         const char* const  REFUSED_MESSAGE = "websocket upgrade refused";
         const char* const  TIMEOUT_MESSAGE = "websocket upgrade timed out";
         const char* const  UNOPENED_MESSAGE = "websocket closed before open";
@@ -34,8 +31,7 @@ namespace kiotty::net::implementation
         KeyText     randomKey();
         const char* messageOf(KiottyNetCode code);
         bool        isReported(KiottyNetCode code);
-        bool     appendHost(UpgradeText& text, const KiottyNetAddress& address, bool is_secure);
-        bool     appendPort(UpgradeText& text, uint16_t port);
+        bool        appendHost(UpgradeText& text, const ClientRun& request);
     }
 
     WebSocketClient::WebSocketClient()
@@ -181,14 +177,13 @@ namespace kiotty::net::implementation
 
     KiottyNetCode WebSocketClient::prepareUpgrade(const ClientRun& request)
     {
-        const bool is_secure = request.tls != nullptr;
         const KeyText key = randomKey();
         const bool has_protocols = !_protocols.empty();
         _request.clear();
         bool is_written = _request.append(literalOf("GET "));
         is_written = is_written && _request.append(request.path);
         is_written = is_written && _request.append(literalOf(" HTTP/1.1\r\nHost: "));
-        is_written = is_written && appendHost(_request, request.address, is_secure);
+        is_written = is_written && appendHost(_request, request);
         is_written = is_written && _request.append(literalOf("\r\nUpgrade: websocket\r\n"));
         is_written = is_written && _request.append(literalOf("Connection: Upgrade\r\n"));
         is_written = is_written && _request.append(literalOf("Sec-WebSocket-Key: "));
@@ -279,30 +274,13 @@ namespace kiotty::net::implementation
             return key;
         }
 
-        bool appendHost(UpgradeText& text, const KiottyNetAddress& address, bool is_secure)
+        bool appendHost(UpgradeText& text, const ClientRun& request)
         {
-            const Span<const char> host = textOf(address.host);
-            const bool is_literal_v6 = findCharacter(host, ':', 0) < host.length;
-            bool is_written = !is_literal_v6 || text.append(literalOf("["));
-            is_written = is_written && text.append(host);
-            is_written = is_written && (!is_literal_v6 || text.append(literalOf("]")));
-            const uint16_t usual = is_secure ? HTTPS_PORT : HTTP_PORT;
-            if (address.port == usual) { return is_written; }
-            return is_written && text.append(literalOf(":")) && appendPort(text, address.port);
-        }
-
-        bool appendPort(UpgradeText& text, uint16_t port)
-        {
-            char digits[PORT_DIGITS] = {};
-            size_t count = 0;
-            uint16_t rest = port;
-            do
-            {
-                digits[PORT_DIGITS - 1 - count] = static_cast<char>('0' + rest % DECIMAL);
-                rest = static_cast<uint16_t>(rest / DECIMAL);
-                count += 1;
-            } while (rest != 0 && count < PORT_DIGITS);
-            return text.append(Span<const char>{ digits + PORT_DIGITS - count, count });
+            const bool is_secure = request.tls != nullptr;
+            const uint16_t usual = is_secure ? HTTPS_DEFAULT_PORT : HTTP_DEFAULT_PORT;
+            const HostFieldResult host = hostFieldOf(request.address, usual);
+            if (!host) { return false; }
+            return text.append(host.value.span());
         }
     }
 }

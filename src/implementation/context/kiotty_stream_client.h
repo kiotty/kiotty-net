@@ -60,6 +60,17 @@ namespace kiotty::net::implementation
         KiottyNetCode           closeStream(int64_t id,
                                             const KiottyNetConnectionAction& then) override;
 
+    protected:
+        using StagedResult = Result<Span<const char>, KiottyNetCode>;
+
+        KiottyNetCode prepare(const KiottyNetAddress& address,
+                              const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode reconnect(const KiottyNetAddress& address);
+        bool          isConnected() const;
+        LineResult    readLine(uint32_t timeout_milliseconds);
+        StagedResult  peekReceived(uint32_t timeout_milliseconds);
+        void          consumeReceived(size_t length);
+
     private:
         KiottyNetCode    openProfile(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetCode    secure(const KiottyNetAddress& address);

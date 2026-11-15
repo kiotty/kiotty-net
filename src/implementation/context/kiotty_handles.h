@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context/kiotty_event_client.h"
+#include "context/kiotty_http_client.h"
 #include "context/kiotty_http_server.h"
 #include "context/kiotty_server.h"
 #include "context/kiotty_stream_client.h"
@@ -19,6 +20,10 @@ struct KiottyNetEventClient final : kiotty::net::implementation::EventClient
 };
 
 struct KiottyNetHttpServer final : kiotty::net::implementation::HttpServer
+{
+};
+
+struct KiottyNetHttpClient final : kiotty::net::implementation::HttpClient
 {
 };
 

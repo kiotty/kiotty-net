@@ -534,3 +534,155 @@ TEST(ConnectionStream, FlushSendsLeftoverCipherSendFirst)
     EXPECT_EQ(client->engine.stages().send.consumer().readable(), 0u);
     EXPECT_EQ(readExactly(server->stream(), 11), "firstsecond");
 }
+
+namespace
+{
+    std::string lineOf(const kiotty::net::implementation::LineResult& line)
+    {
+        return std::string(line.value.data, line.value.length);
+    }
+
+    std::string readOnce(ConnectionStream stream)
+    {
+        char buffer[CAPACITY];
+        KiottyNetResult result = stream.read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
+        if (result.code != KIOTTY_NET_CODE_SUCCESS)
+        {
+            return std::string();
+        }
+        return std::string(buffer, static_cast<size_t>(result.bytes));
+    }
+}
+
+TEST(ConnectionStream, ReadLineStripsTheLineEndAndLeavesTheRestForRead)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    const std::string sent = "HTTP/1.1 200 OK\r\nA: b\n\r\nbody";
+    ASSERT_TRUE(peer.sendAll(sent.data(), sent.size()));
+    kiotty::net::implementation::LineResult first = side.stream().readLine(WAIT_MS);
+    ASSERT_EQ(first.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(lineOf(first), "HTTP/1.1 200 OK");
+    kiotty::net::implementation::LineResult second = side.stream().readLine(WAIT_MS);
+    ASSERT_EQ(second.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(lineOf(second), "A: b");
+    kiotty::net::implementation::LineResult empty = side.stream().readLine(WAIT_MS);
+    ASSERT_EQ(empty.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(empty.value.length, 0u);
+    std::string rest = readOnce(side.stream());
+    while (rest.size() < 4)
+    {
+        const std::string more = readOnce(side.stream());
+        if (more.empty())
+        {
+            break;
+        }
+        rest += more;
+    }
+    EXPECT_EQ(rest, "body");
+}
+
+TEST(ConnectionStream, ReadLineWaitsForTheLineFeedAcrossReceives)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("ab", 2));
+    std::thread sender([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        peer.sendAll("c", 1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        peer.sendAll("d\r\nnext", 7);
+    });
+    kiotty::net::implementation::LineResult line = side.stream().readLine(WAIT_MS);
+    sender.join();
+    ASSERT_EQ(line.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(lineOf(line), "abcd");
+    EXPECT_EQ(readExactly(side.stream(), 4), "next");
+}
+
+TEST(ConnectionStream, ReadLineLongerThanTheStageIsBufferFull)
+{
+    LoopbackPeer peer;
+    Side side(16);
+    ASSERT_TRUE(connect(peer, side));
+    const std::string sent(32, 'x');
+    ASSERT_TRUE(peer.sendAll(sent.data(), sent.size()));
+    kiotty::net::implementation::LineResult line = side.stream().readLine(WAIT_MS);
+    EXPECT_EQ(line.code, KIOTTY_NET_CODE_BUFFER_FULL);
+}
+
+TEST(ConnectionStream, ReadLineThatFillsTheStageExactlyIsReturned)
+{
+    LoopbackPeer peer;
+    Side side(16);
+    ASSERT_TRUE(connect(peer, side));
+    const std::string sent = std::string(14, 'y') + "\r\n";
+    ASSERT_TRUE(peer.sendAll(sent.data(), sent.size()));
+    kiotty::net::implementation::LineResult line = side.stream().readLine(WAIT_MS);
+    ASSERT_EQ(line.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(lineOf(line), std::string(14, 'y'));
+}
+
+TEST(ConnectionStream, ReadLineTimesOutAndKeepsThePartialLine)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("part", 4));
+    kiotty::net::implementation::LineResult line = side.stream().readLine(100);
+    EXPECT_EQ(line.code, KIOTTY_NET_CODE_TIMEOUT);
+    ASSERT_TRUE(peer.sendAll("ial\n", 4));
+    kiotty::net::implementation::LineResult whole = side.stream().readLine(WAIT_MS);
+    ASSERT_EQ(whole.code, KIOTTY_NET_CODE_SUCCESS);
+    EXPECT_EQ(lineOf(whole), "partial");
+}
+
+TEST(ConnectionStream, ReadLineReturnsPeerClosedWhenThePeerLeavesMidLine)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("half", 4));
+    ASSERT_TRUE(peer.shutdownWrite());
+    kiotty::net::implementation::LineResult line = side.stream().readLine(WAIT_MS);
+    EXPECT_EQ(line.code, KIOTTY_NET_CODE_PEER_CLOSED);
+}
+
+TEST(ConnectionStream, FillAppendsToTheStagedBytes)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    kiotty_test::put(side.receive, "ab");
+    ASSERT_TRUE(peer.sendAll("cd", 2));
+    ASSERT_EQ(side.stream().fill(WAIT_MS), KIOTTY_NET_CODE_SUCCESS);
+    while (side.receive.consumer().readable() < 4)
+    {
+        ASSERT_EQ(side.stream().fill(WAIT_MS), KIOTTY_NET_CODE_SUCCESS);
+    }
+    StageBase::Consumer staged = side.receive.consumer();
+    EXPECT_EQ(std::string(staged.peek(), staged.readable()), "abcd");
+}
+
+TEST(ConnectionStream, ReadLineTlsDecodesIntoTheStage)
+{
+    REQUIRE_TLS();
+    Profiles profiles;
+    std::unique_ptr<Side> server(new Side());
+    std::unique_ptr<Side> client(new Side());
+    ASSERT_TRUE(handshake(profiles, *server, *client));
+    std::thread sender([&]() {
+        server->stream().write(spanOf(std::string("line one\r\nline two\r\ntail")), WAIT_MS);
+    });
+    kiotty::net::implementation::LineResult first = client->stream().readLine(WAIT_MS);
+    const std::string first_text = first ? lineOf(first) : std::string();
+    kiotty::net::implementation::LineResult second = client->stream().readLine(WAIT_MS);
+    const std::string second_text = second ? lineOf(second) : std::string();
+    std::string tail = readExactly(client->stream(), 4);
+    sender.join();
+    EXPECT_EQ(first_text, "line one");
+    EXPECT_EQ(second_text, "line two");
+    EXPECT_EQ(tail, "tail");
+}

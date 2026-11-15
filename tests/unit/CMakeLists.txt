@@ -42,6 +42,7 @@ kiotty_net_add_test_target(kiotty_net_unit_tests unit
     kiotty_test_http_body_reader.cpp
     kiotty_test_http_request_head.cpp
     kiotty_test_http_shared_headers.cpp
+    kiotty_test_http_reply_headers.cpp
     support/kiotty_test_handler.cpp
     support/kiotty_test_openssl_memory.cpp
 )

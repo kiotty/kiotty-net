@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kiotty_deadline.h"
+#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
 #include "data/infra/file/kiotty_input_file.h"
@@ -15,6 +16,8 @@
 
 namespace kiotty::net::implementation
 {
+    using LineResult = Result<Span<const char>, KiottyNetCode>;
+
     class ConnectionStream
     {
     public:
@@ -23,6 +26,8 @@ namespace kiotty::net::implementation
         ConnectionStream& operator=(const ConnectionStream&) = delete;
 
         KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
+        LineResult      readLine(uint32_t timeout_milliseconds);
+        KiottyNetCode   fill(uint32_t timeout_milliseconds);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
         KiottyNetCode   writeFile(Span<const char> path,
                                   uint64_t offset,
@@ -45,6 +50,7 @@ namespace kiotty::net::implementation
         KiottyNetResult readOnce(Span<char> target, const Deadline& deadline);
         KiottyNetResult readCipher(Span<char> target, const Deadline& deadline);
         KiottyNetResult readPlain(Span<char> target, const Deadline& deadline);
+        KiottyNetCode   fillStage(const Deadline& deadline);
         KiottyNetCode   sendFileOverTls(InputFile& file, FileRange range, const Deadline& deadline);
         KiottyNetCode   sendFilePiece(InputFile& file, FileRange piece, const Deadline& deadline);
         KiottyNetCode   exchangeHandshake(TlsStep step, const Deadline& deadline);

@@ -26,7 +26,7 @@ namespace kiotty::net::implementation
         constexpr uint32_t DEFAULT_CLOSE_TIMEOUT_MILLISECONDS = 5000;
 
         constexpr SizeRange ROUTES{ 1, 4096 };
-        constexpr SizeRange HEADER_BYTES{ MIN_HTTP_HEADER_BYTES, MEBIBYTE };
+        constexpr SizeRange HEADER_BYTES{ MIN_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_BYTES };
         constexpr SizeRange HEADERS{ 1, 1024 };
         constexpr SizeRange BODY_BYTES{ 0, 64 * MEBIBYTE };
         constexpr SizeRange RESPONSE_BYTES{ MIN_HTTP_RESPONSE_BYTES, 64 * MEBIBYTE };

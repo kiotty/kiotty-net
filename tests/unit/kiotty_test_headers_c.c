@@ -40,6 +40,10 @@ KiottyTestHeaderLayout kiottyTestHeaderLayoutFromC(void)
     layout.http_work_handle     = sizeof(KiottyNetHttpWorkHandle);
     layout.http_route           = sizeof(KiottyNetHttpRoute);
     layout.http_server_result   = sizeof(KiottyNetHttpServerResult);
+    layout.http_client_result   = sizeof(KiottyNetHttpClientResult);
+    layout.http_client_request  = sizeof(KiottyNetHttpClientRequest);
+    layout.http_reply           = sizeof(KiottyNetHttpReply);
+    layout.http_reply_headers_offset = offsetof(KiottyNetHttpReply, headers);
     layout.websocket_handle     = sizeof(KiottyNetWebSocketHandle);
     layout.websocket_handle_id_offset = offsetof(KiottyNetWebSocketHandle, id);
     layout.websocket_client_result    = sizeof(KiottyNetWebSocketClientResult);

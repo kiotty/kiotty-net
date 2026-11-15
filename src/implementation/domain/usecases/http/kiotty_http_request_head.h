@@ -38,5 +38,6 @@ namespace kiotty::net::implementation
                   "RequestHead: unexpected padding");
 
     HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);
+    HostFieldResult  hostFieldOf(const KiottyNetAddress& address, uint16_t default_port);
     HeadLengthResult writeRequestHead(Span<char> buffer, const RequestHead& head);
 }
