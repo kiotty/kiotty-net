@@ -335,6 +335,8 @@ KIOTTY_NET_API KiottyNetCode             KiottyNet_connectHttpClient(
     const KiottyNetTlsClientConfiguration* tls);
 KIOTTY_NET_API void                      KiottyNet_disconnectHttpClient(
     KiottyNetHttpClientHandle client);
+KIOTTY_NET_API void                      KiottyNet_closeHttpClient(
+    KiottyNetHttpClientHandle client);
 KIOTTY_NET_API KiottyNetCode             KiottyNet_setHttpClientHeader(
     KiottyNetHttpClientHandle client,
     const char* name,

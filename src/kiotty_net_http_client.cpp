@@ -92,7 +92,13 @@ KiottyNetCode KiottyNet_connectHttpClient(KiottyNetHttpClientHandle client,
 void KiottyNet_disconnectHttpClient(KiottyNetHttpClientHandle client)
 {
     if (client == nullptr) { return; }
-    client->disconnect();
+    client->link().disconnect();
+}
+
+void KiottyNet_closeHttpClient(KiottyNetHttpClientHandle client)
+{
+    if (client == nullptr) { return; }
+    client->link().close();
 }
 
 KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle client,

@@ -13,6 +13,8 @@
 
 namespace kiotty::net::implementation
 {
+    class StopSignal;
+
     struct Address
     {
         sockaddr_storage storage;
@@ -34,7 +36,8 @@ namespace kiotty::net::implementation
     AddressResult           resolveAddress(KiottyNetTransport transport,
                                 const KiottyNetAddress& address, AddressRole role);
     KiottyNetConnectionInfo infoOf(const sockaddr_storage& storage);
-    SocketCode              waitFor(int descriptor, short events, uint32_t timeout_milliseconds);
+    SocketCode              waitFor(int descriptor, short events, uint32_t timeout_milliseconds,
+                                const StopSignal* stop);
 }
 
 #endif

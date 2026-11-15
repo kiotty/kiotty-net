@@ -2,10 +2,12 @@
 
 #include "data/infra/socket/backend/kiotty_windows_address.h"
 
+#include "core/kiotty_clock.h"
 #include "core/kiotty_fixed_string.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_text.h"
 #include "data/infra/error/kiotty_socket_error.h"
+#include "data/infra/socket/kiotty_stop_signal.h"
 
 #include <afunix.h>
 #include <windows.h>
@@ -19,9 +21,32 @@ namespace kiotty::net::implementation
     {
         using HostName = FixedString<KIOTTY_NET_MAX_HOST_LENGTH>;
 
+        struct Watch
+        {
+            SOCKET        socket;
+            SOCKET        wake;
+            WaitDirection direction;
+        };
+
+        struct WaitSlice
+        {
+            uint32_t milliseconds;
+            bool     is_expired;
+        };
+
+        struct Readiness
+        {
+            SocketCode code;
+            bool       is_woken;
+        };
+
         AddressResult unixAddressOf(Span<const char> path);
         AddressResult inetAddressOf(const KiottyNetAddress& address, AddressRole role);
         timeval       timevalOf(uint32_t timeout_milliseconds);
+        bool          isStopped(const StopSignal* stop);
+        SOCKET        wakeOf(const StopSignal* stop);
+        WaitSlice     sliceOf(uint64_t deadline, uint32_t timeout_milliseconds);
+        Readiness     selectOnce(const Watch& watch, WaitSlice slice);
     }
 
     SOCKET socketOf(SocketHandle handle)
@@ -83,22 +108,20 @@ namespace kiotty::net::implementation
         return info;
     }
 
-    SocketCode waitReady(SOCKET socket, WaitDirection direction, uint32_t timeout_milliseconds)
+    SocketCode waitReady(SOCKET socket, WaitDirection direction, uint32_t timeout_milliseconds,
+        const StopSignal* stop)
     {
-        fd_set ready{};
-        fd_set failed{};
-        FD_ZERO(&ready);
-        FD_ZERO(&failed);
-        FD_SET(socket, &ready);
-        FD_SET(socket, &failed);
-        timeval limit = timevalOf(timeout_milliseconds);
-        timeval* wait = timeout_milliseconds == 0 ? nullptr : &limit;
-        fd_set* readable = direction == WaitDirection::READ ? &ready : nullptr;
-        fd_set* writable = direction == WaitDirection::WRITE ? &ready : nullptr;
-        const int found = ::select(0, readable, writable, &failed, wait);
-        if (found == 0) { return SocketCode::TIMEOUT; }
-        if (found < 0) { return lastSocketCode(); }
-        return SocketCode::SUCCESS;
+        const uint64_t deadline = monotonicMilliseconds() + timeout_milliseconds;
+        for (;;)
+        {
+            if (isStopped(stop)) { return SocketCode::CANCELLED; }
+            const WaitSlice slice = sliceOf(deadline, timeout_milliseconds);
+            if (slice.is_expired) { return SocketCode::TIMEOUT; }
+            const Readiness ready = selectOnce(Watch{ socket, wakeOf(stop), direction }, slice);
+            if (ready.code != SocketCode::SUCCESS) { return ready.code; }
+            if (!ready.is_woken) { return SocketCode::SUCCESS; }
+            stop->drain();
+        }
     }
 
     namespace
@@ -151,6 +174,45 @@ namespace kiotty::net::implementation
             limit.tv_sec = static_cast<long>(timeout_milliseconds / 1000);
             limit.tv_usec = static_cast<long>((timeout_milliseconds % 1000) * 1000);
             return limit;
+        }
+
+        bool isStopped(const StopSignal* stop)
+        {
+            return stop != nullptr && stop->isRaised();
+        }
+
+        SOCKET wakeOf(const StopSignal* stop)
+        {
+            const bool is_watched = stop != nullptr && stop->handle() != INVALID_SOCKET_HANDLE;
+            return is_watched ? socketOf(stop->handle()) : INVALID_SOCKET;
+        }
+
+        WaitSlice sliceOf(uint64_t deadline, uint32_t timeout_milliseconds)
+        {
+            if (timeout_milliseconds == 0) { return WaitSlice{ 0, false }; }
+            const uint64_t now = monotonicMilliseconds();
+            if (now >= deadline) { return WaitSlice{ 0, true }; }
+            return WaitSlice{ static_cast<uint32_t>(deadline - now), false };
+        }
+
+        Readiness selectOnce(const Watch& watch, WaitSlice slice)
+        {
+            fd_set readable{};
+            fd_set writable{};
+            fd_set failed{};
+            FD_ZERO(&readable);
+            FD_ZERO(&writable);
+            FD_ZERO(&failed);
+            FD_SET(watch.socket, watch.direction == WaitDirection::READ ? &readable : &writable);
+            FD_SET(watch.socket, &failed);
+            if (watch.wake != INVALID_SOCKET) { FD_SET(watch.wake, &readable); }
+            timeval limit = timevalOf(slice.milliseconds);
+            timeval* wait = slice.milliseconds == 0 ? nullptr : &limit;
+            const int found = ::select(0, &readable, &writable, &failed, wait);
+            if (found == 0) { return Readiness{ SocketCode::TIMEOUT, false }; }
+            if (found < 0) { return Readiness{ lastSocketCode(), false }; }
+            const bool is_woken = watch.wake != INVALID_SOCKET && FD_ISSET(watch.wake, &readable);
+            return Readiness{ SocketCode::SUCCESS, is_woken };
         }
     }
 }

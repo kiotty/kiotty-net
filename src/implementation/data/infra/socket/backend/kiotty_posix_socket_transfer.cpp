@@ -45,13 +45,15 @@ namespace kiotty::net::implementation
     SocketCode waitReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        return waitFor(descriptorOf(socket.handle()), POLLIN, timeout_milliseconds);
+        const int descriptor = descriptorOf(socket.handle());
+        return waitFor(descriptor, POLLIN, timeout_milliseconds, socket.traits().stop);
     }
 
     SocketCode waitWritable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        return waitFor(descriptorOf(socket.handle()), POLLOUT, timeout_milliseconds);
+        const int descriptor = descriptorOf(socket.handle());
+        return waitFor(descriptor, POLLOUT, timeout_milliseconds, socket.traits().stop);
     }
 
     SocketCode shutdownWrite(const ActiveSocket& socket)
@@ -65,7 +67,8 @@ namespace kiotty::net::implementation
     SocketCode configureNoDelay(const ActiveSocket& socket, NoDelay no_delay)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        if (socket.transport() == KIOTTY_NET_TRANSPORT_PIPE) { return SocketCode::SUCCESS; }
+        const bool is_pipe = socket.traits().transport == KIOTTY_NET_TRANSPORT_PIPE;
+        if (is_pipe) { return SocketCode::SUCCESS; }
         const int value = no_delay == NoDelay::ENABLED ? 1 : 0;
         const int descriptor = descriptorOf(socket.handle());
         const int set =

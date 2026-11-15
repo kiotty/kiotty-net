@@ -1,7 +1,9 @@
 #pragma once
 
 #include "context/kiotty_http_client_headers.h"
+#include "context/kiotty_http_client_link.h"
 #include "context/kiotty_stream_client.h"
+#include "core/kiotty_busy_guard.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_span.h"
 #include "data/repository/http/kiotty_http_reply_store.h"
@@ -10,7 +12,6 @@
 #include "domain/usecases/http/kiotty_http_request_head.h"
 #include "kiotty_net_http.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -55,13 +56,24 @@ namespace kiotty::net::implementation
         void               reset() noexcept;
         KiottyNetCode      connect(const KiottyNetAddress& address,
                                    const KiottyNetTlsClientConfiguration* tls);
-        void               disconnect();
         KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
         KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
         HttpClientHeaders  headers();
+        HttpClientLink     link();
 
     private:
+        struct Attempt
+        {
+            KiottyNetCode code;
+            bool          is_stale;
+        };
+
+        void               settleStop();
         KiottyNetHttpReply exchange(const ClientRequest& request, uint32_t timeout_milliseconds);
+        Attempt            attempt(const ClientRequest& request,
+                                   size_t head_length,
+                                   const Deadline& deadline);
+        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
         HeadLengthResult   writeHead(const ClientRequest& request);
         KiottyNetCode      transmit(size_t head_length,
                                     Span<const char> body,
@@ -90,6 +102,7 @@ namespace kiotty::net::implementation
         size_t                           _max_headers;
         Persistence                      _persistence;
         bool                             _has_target;
-        std::atomic<bool>                _is_busy;
+        bool                             _has_reply_bytes;
+        BusyFlag                         _busy;
     };
 }

@@ -11,6 +11,13 @@
 namespace kiotty::net::implementation
 {
     class ActiveSocket;
+    class StopSignal;
+
+    struct SocketTraits
+    {
+        const StopSignal*  stop;
+        KiottyNetTransport transport;
+    };
 
     using ActiveSocketResult = Result<ActiveSocket, SocketCode>;
     using TransferResult = Result<size_t, SocketCode>;
@@ -28,13 +35,14 @@ namespace kiotty::net::implementation
         ActiveSocket& operator=(const ActiveSocket&) = delete;
 
         static ActiveSocketResult open(KiottyNetTransport transport);
+        static ActiveSocketResult open(KiottyNetTransport transport, const StopSignal* stop);
 
         SocketCode connect(const KiottyNetAddress& address, uint32_t timeout_milliseconds);
         void       close();
 
         bool                    valid() const;
         SocketHandle            handle() const;
-        KiottyNetTransport      transport() const;
+        SocketTraits            traits() const;
         KiottyNetConnectionInfo peer() const;
 
     private:
@@ -43,6 +51,7 @@ namespace kiotty::net::implementation
         ActiveSocket(SocketHandle handle, KiottyNetTransport transport);
 
         KiottyNetConnectionInfo _peer;
+        const StopSignal*       _stop;
         SocketHandle            _handle;
         KiottyNetTransport      _transport;
     };

@@ -1,7 +1,9 @@
 #pragma once
 
+#include "core/kiotty_deadline.h"
 #include "core/kiotty_result.h"
 #include "data/infra/socket/kiotty_active_socket.h"
+#include "data/infra/socket/kiotty_stop_signal.h"
 #include "kiotty_net_base.h"
 
 #include <atomic>
@@ -13,4 +15,8 @@ namespace kiotty::net::implementation
     ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
                                      const KiottyNetAddress& address,
                                      const std::atomic<bool>& stop);
+    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
+                                     const KiottyNetAddress& address,
+                                     const StopSignal& stop,
+                                     const Deadline& deadline);
 }

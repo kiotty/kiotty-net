@@ -7,6 +7,7 @@
 #include "core/kiotty_span.h"
 #include "core/kiotty_text.h"
 #include "data/infra/error/kiotty_socket_error.h"
+#include "data/infra/socket/kiotty_stop_signal.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -26,8 +27,13 @@ namespace kiotty::net::implementation
 
         AddressResult unixAddressOf(Span<const char> path);
         AddressResult inetAddressOf(const KiottyNetAddress& address, AddressRole role);
+        constexpr nfds_t WAIT_ENTRIES = 2;
+
         int           waitMillisecondsOf(uint64_t deadline, uint32_t timeout_milliseconds);
         SocketCode    disableSigpipe(int descriptor);
+        bool          isStopped(const StopSignal* stop);
+        pollfd        entryOf(int descriptor, short events);
+        pollfd        stopEntryOf(const StopSignal* stop);
     }
 
     int descriptorOf(SocketHandle handle)
@@ -88,19 +94,26 @@ namespace kiotty::net::implementation
         return info;
     }
 
-    SocketCode waitFor(int descriptor, short events, uint32_t timeout_milliseconds)
+    SocketCode waitFor(int descriptor, short events, uint32_t timeout_milliseconds,
+        const StopSignal* stop)
     {
         const uint64_t deadline = monotonicMilliseconds() + timeout_milliseconds;
         for (;;)
         {
+            if (isStopped(stop)) { return SocketCode::CANCELLED; }
             const int wait_milliseconds = waitMillisecondsOf(deadline, timeout_milliseconds);
-            pollfd entry{};
-            entry.fd = descriptor;
-            entry.events = events;
-            const int ready = ::poll(&entry, 1, wait_milliseconds);
-            if (ready > 0) { return SocketCode::SUCCESS; }
+            pollfd entries[WAIT_ENTRIES] = { entryOf(descriptor, events), stopEntryOf(stop) };
+            const int ready = ::poll(entries, WAIT_ENTRIES, wait_milliseconds);
             if (ready == 0) { return SocketCode::TIMEOUT; }
-            if (errno != EINTR) { return lastSocketCode(); }
+            if (ready < 0 && errno != EINTR) { return lastSocketCode(); }
+            if (entries[1].revents != 0)
+            {
+                stop->drain();
+            }
+            else if (ready > 0)
+            {
+                return SocketCode::SUCCESS;
+            }
         }
     }
 
@@ -166,6 +179,25 @@ namespace kiotty::net::implementation
             static_cast<void>(descriptor);
 #endif
             return SocketCode::SUCCESS;
+        }
+
+        bool isStopped(const StopSignal* stop)
+        {
+            return stop != nullptr && stop->isRaised();
+        }
+
+        pollfd entryOf(int descriptor, short events)
+        {
+            pollfd entry{};
+            entry.fd = descriptor;
+            entry.events = events;
+            return entry;
+        }
+
+        pollfd stopEntryOf(const StopSignal* stop)
+        {
+            const bool is_watched = stop != nullptr && stop->handle() != INVALID_SOCKET_HANDLE;
+            return entryOf(is_watched ? descriptorOf(stop->handle()) : -1, POLLIN);
         }
     }
 }

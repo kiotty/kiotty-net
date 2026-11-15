@@ -4,7 +4,7 @@
 
 namespace kiotty::net::implementation
 {
-    HttpClientHeaders::HttpClientHeaders(HttpSharedHeaders& shared, std::atomic<bool>& is_busy)
+    HttpClientHeaders::HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy)
         : _shared(shared)
         , _is_busy(is_busy)
     {

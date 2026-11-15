@@ -18,11 +18,12 @@ namespace kiotty::net::implementation
     {
         SocketCode pendingError(int descriptor);
         SocketCode startConnect(int descriptor, const Address& address,
-            uint32_t timeout_milliseconds);
+            uint32_t timeout_milliseconds, const StopSignal* stop);
     }
 
     ActiveSocket::ActiveSocket()
         : _peer()
+        , _stop(nullptr)
         , _handle(INVALID_SOCKET_HANDLE)
         , _transport(KIOTTY_NET_TRANSPORT_TCP)
     {
@@ -30,6 +31,7 @@ namespace kiotty::net::implementation
 
     ActiveSocket::ActiveSocket(SocketHandle handle, KiottyNetTransport transport)
         : _peer()
+        , _stop(nullptr)
         , _handle(handle)
         , _transport(transport)
     {
@@ -42,6 +44,7 @@ namespace kiotty::net::implementation
 
     ActiveSocket::ActiveSocket(ActiveSocket&& other) noexcept
         : _peer(other._peer)
+        , _stop(other._stop)
         , _handle(other._handle)
         , _transport(other._transport)
     {
@@ -53,6 +56,7 @@ namespace kiotty::net::implementation
         if (this == &other) { return *this; }
         close();
         _peer = other._peer;
+        _stop = other._stop;
         _handle = other._handle;
         _transport = other._transport;
         other._handle = INVALID_SOCKET_HANDLE;
@@ -61,9 +65,15 @@ namespace kiotty::net::implementation
 
     ActiveSocketResult ActiveSocket::open(KiottyNetTransport transport)
     {
+        return open(transport, nullptr);
+    }
+
+    ActiveSocketResult ActiveSocket::open(KiottyNetTransport transport, const StopSignal* stop)
+    {
         const int descriptor = ::socket(familyOf(transport), SOCK_STREAM, 0);
         if (descriptor < 0) { return ActiveSocketResult::failure(lastSocketCode()); }
         ActiveSocket socket(descriptor, transport);
+        socket._stop = stop;
         const SocketCode prepared = prepareDescriptor(descriptor);
         if (prepared != SocketCode::SUCCESS) { return ActiveSocketResult::failure(prepared); }
         return ActiveSocketResult::success(std::move(socket));
@@ -76,7 +86,8 @@ namespace kiotty::net::implementation
         const AddressResult resolved = resolveAddress(_transport, address, AddressRole::ACTIVE);
         if (!resolved) { return resolved.code; }
         const int descriptor = descriptorOf(_handle);
-        const SocketCode connected = startConnect(descriptor, resolved.value, timeout_milliseconds);
+        const SocketCode connected =
+            startConnect(descriptor, resolved.value, timeout_milliseconds, _stop);
         if (connected != SocketCode::SUCCESS) { return connected; }
         _peer = infoOf(resolved.value.storage);
         return SocketCode::SUCCESS;
@@ -99,9 +110,9 @@ namespace kiotty::net::implementation
         return _handle;
     }
 
-    KiottyNetTransport ActiveSocket::transport() const
+    SocketTraits ActiveSocket::traits() const
     {
-        return _transport;
+        return SocketTraits{ _stop, _transport };
     }
 
     KiottyNetConnectionInfo ActiveSocket::peer() const
@@ -121,14 +132,14 @@ namespace kiotty::net::implementation
         }
 
         SocketCode startConnect(int descriptor, const Address& address,
-            uint32_t timeout_milliseconds)
+            uint32_t timeout_milliseconds, const StopSignal* stop)
         {
             const sockaddr* target = reinterpret_cast<const sockaddr*>(&address.storage);
             const int connected = ::connect(descriptor, target, address.length);
             if (connected == 0) { return SocketCode::SUCCESS; }
             const int started = errno;
             if (started != EINPROGRESS) { return toSocketCode(started); }
-            const SocketCode waited = waitFor(descriptor, POLLOUT, timeout_milliseconds);
+            const SocketCode waited = waitFor(descriptor, POLLOUT, timeout_milliseconds, stop);
             if (waited != SocketCode::SUCCESS) { return waited; }
             return pendingError(descriptor);
         }

@@ -1,17 +1,18 @@
 #pragma once
 
 #include "context/kiotty_endpoint.h"
+#include "core/kiotty_deadline.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
 #include "core/pool/kiotty_pool_handle.h"
 #include "data/datasource/kiotty_memory_limits.h"
 #include "data/infra/socket/kiotty_active_socket.h"
+#include "data/infra/socket/kiotty_stop_signal.h"
 #include "data/infra/tls/kiotty_tls_engine.h"
 #include "data/infra/tls/kiotty_tls_profile.h"
 #include "data/repository/stream/kiotty_connection_stream.h"
 #include "kiotty_net_base.h"
 
-#include <atomic>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -65,15 +66,17 @@ namespace kiotty::net::implementation
 
         KiottyNetCode prepare(const KiottyNetAddress& address,
                               const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode reconnect(const KiottyNetAddress& address);
+        KiottyNetCode reconnect(const KiottyNetAddress& address, const Deadline& deadline);
         bool          isConnected() const;
         LineResult    readLine(uint32_t timeout_milliseconds);
         StagedResult  peekReceived(uint32_t timeout_milliseconds);
         void          consumeReceived(size_t length);
+        size_t        stagedBytes();
+        StopSignal&   stopSignal();
 
     private:
         KiottyNetCode    openProfile(const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode    secure(const KiottyNetAddress& address);
+        KiottyNetCode    secure(const KiottyNetAddress& address, const Deadline& deadline);
         ConnectionStream stream();
 
         Stage                        _receive;
@@ -82,6 +85,6 @@ namespace kiotty::net::implementation
         TlsProfile                   _profile;
         ActiveSocket                 _socket;
         KiottyNetClientConfiguration _configuration;
-        std::atomic<bool>            _is_stopping;
+        StopSignal                   _stop;
     };
 }

@@ -12,6 +12,7 @@ namespace kiotty::net::implementation
         bool     limited() const;
         bool     expired() const;
         uint32_t remaining() const;
+        uint32_t bound(uint32_t timeout_milliseconds) const;
 
     private:
         uint64_t _end;

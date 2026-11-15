@@ -58,6 +58,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/error/backend/kiotty_posix_socket_error.cpp
     src/implementation/data/infra/error/backend/kiotty_windows_socket_error.cpp
     src/implementation/data/infra/socket/kiotty_connect_with_retry.cpp
+    src/implementation/data/infra/socket/kiotty_stop_signal.cpp
     src/implementation/data/infra/socket/backend/kiotty_posix_socket_startup.cpp
     src/implementation/data/infra/socket/backend/kiotty_windows_socket_startup.cpp
     src/implementation/data/infra/socket/backend/kiotty_posix_address.cpp
@@ -68,6 +69,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/data/infra/socket/backend/kiotty_windows_active_socket.cpp
     src/implementation/data/infra/socket/backend/kiotty_windows_passive_socket.cpp
     src/implementation/data/infra/socket/backend/kiotty_windows_socket_transfer.cpp
+    src/implementation/data/infra/socket/backend/kiotty_posix_stop_signal.cpp
+    src/implementation/data/infra/socket/backend/kiotty_windows_stop_signal.cpp
     src/implementation/domain/entity/kiotty_io_action.cpp
     src/implementation/data/infra/event/kiotty_event_listener.cpp
     src/implementation/data/infra/event/backend/kiotty_readiness_event_listener.cpp
@@ -164,6 +167,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/context/kiotty_event_client.cpp
     src/implementation/context/kiotty_stream_client.cpp
     src/implementation/context/kiotty_http_client_headers.cpp
+    src/implementation/context/kiotty_http_client_link.cpp
     src/implementation/context/kiotty_http_client.cpp
     src/implementation/context/kiotty_context.cpp
 )

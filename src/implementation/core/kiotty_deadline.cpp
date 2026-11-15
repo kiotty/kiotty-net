@@ -28,4 +28,13 @@ namespace kiotty::net::implementation
         if (now >= _end) { return 0; }
         return static_cast<uint32_t>(_end - now);
     }
+
+    uint32_t Deadline::bound(uint32_t timeout_milliseconds) const
+    {
+        if (!_limited) { return timeout_milliseconds; }
+        const uint32_t left = remaining();
+        const uint32_t positive = left == 0 ? 1 : left;
+        if (timeout_milliseconds == 0) { return positive; }
+        return timeout_milliseconds < positive ? timeout_milliseconds : positive;
+    }
 }

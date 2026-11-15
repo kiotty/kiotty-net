@@ -35,13 +35,17 @@ namespace kiotty::net::implementation
     SocketCode waitReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        return waitReady(socketOf(socket.handle()), WaitDirection::READ, timeout_milliseconds);
+        const SOCKET native = socketOf(socket.handle());
+        const SocketTraits traits = socket.traits();
+        return waitReady(native, WaitDirection::READ, timeout_milliseconds, traits.stop);
     }
 
     SocketCode waitWritable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        return waitReady(socketOf(socket.handle()), WaitDirection::WRITE, timeout_milliseconds);
+        const SOCKET native = socketOf(socket.handle());
+        const SocketTraits traits = socket.traits();
+        return waitReady(native, WaitDirection::WRITE, timeout_milliseconds, traits.stop);
     }
 
     SocketCode shutdownWrite(const ActiveSocket& socket)
@@ -55,7 +59,8 @@ namespace kiotty::net::implementation
     SocketCode configureNoDelay(const ActiveSocket& socket, NoDelay no_delay)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
-        if (socket.transport() == KIOTTY_NET_TRANSPORT_PIPE) { return SocketCode::SUCCESS; }
+        const bool is_pipe = socket.traits().transport == KIOTTY_NET_TRANSPORT_PIPE;
+        if (is_pipe) { return SocketCode::SUCCESS; }
         const BOOL value = no_delay == NoDelay::ENABLED ? TRUE : FALSE;
         const char* option = reinterpret_cast<const char*>(&value);
         const SOCKET native = socketOf(socket.handle());

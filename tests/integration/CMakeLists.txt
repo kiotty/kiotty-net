@@ -1,6 +1,7 @@
 kiotty_net_add_test_target(kiotty_net_integration_tests integration
     support/kiotty_test_os.cpp
     support/kiotty_test_peer.cpp
+    support/kiotty_test_http_site.cpp
     support/kiotty_test_port_lease.cpp
     support/kiotty_test_platform.cpp
     kiotty_test_active_socket.cpp
@@ -22,6 +23,9 @@ kiotty_net_add_test_target(kiotty_net_integration_tests integration
     kiotty_test_websocket_server.cpp
     kiotty_test_websocket_client.cpp
     kiotty_test_http_client.cpp
+    kiotty_test_http_client_retry.cpp
+    kiotty_test_http_client_close.cpp
+    kiotty_test_http_client_tls.cpp
     kiotty_test_stateful_c.c
     ${PROJECT_SOURCE_DIR}/tests/unit/support/kiotty_test_handler.cpp
 )
