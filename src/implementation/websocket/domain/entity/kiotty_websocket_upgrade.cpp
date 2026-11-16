@@ -2,9 +2,9 @@
 
 #include "base/domain/entity/kiotty_action.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/kiotty_http_site.h"
 #include "http/domain/entity/kiotty_http_exchange.h"
 #include "http/domain/entity/kiotty_http_token.h"
+#include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_handshake.h"
 
 #include <cstring>
@@ -67,8 +67,9 @@ namespace kiotty::net::implementation
         case UpgradeCheck::BAD:
             return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST);
         }
-        session.socket.reset();
-        session.socket.target = target;
+        SocketState& socket = socketOf(session);
+        socket.reset();
+        socket.target = target;
         session.phase = SessionPhase::UPGRADING;
         const bool is_allowed = callUpgrade(session);
         if (!is_allowed) { return refuse(session, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
@@ -77,7 +78,7 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketHandle socketHandleOf(const HttpSession& session)
     {
-        return KiottyNetWebSocketHandle{ session.site.socket_owner, session.id.value() };
+        return KiottyNetWebSocketHandle{ handlerOf(session).owner, session.id.value() };
     }
 
     Span<const char> headerOf(const KiottyNetHttpRequest& request, Span<const char> name)
@@ -97,7 +98,7 @@ namespace kiotty::net::implementation
         const Span<const char> offered = headerNamed(request, "Sec-WebSocket-Protocol");
         const bool is_offered = hasToken(offered, protocol, TokenMatch::EXACT);
         if (!is_offered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        (void)session.socket.protocol.assign(protocol);
+        (void)socketOf(session).protocol.assign(protocol);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -162,7 +163,7 @@ namespace kiotty::net::implementation
 
         bool callUpgrade(HttpSession& session)
         {
-            const WebSocketTarget& target = session.socket.target;
+            const WebSocketTarget& target = socketOf(session).target;
             if (target.on_upgrade == nullptr) { return true; }
             const KiottyNetHttpRequest& request = session.request.request();
             const KiottyNetWebSocketUpgrade upgrade{
@@ -207,7 +208,7 @@ namespace kiotty::net::implementation
             (void)session.response.setStatus(KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS);
             (void)session.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
             (void)session.response.addHeader(literalOf("Sec-WebSocket-Accept"), accept.span());
-            const Span<const char> protocol = session.socket.protocol.span();
+            const Span<const char> protocol = socketOf(session).protocol.span();
             const Span<const char> protocol_name = literalOf("Sec-WebSocket-Protocol");
             if (!protocol.empty()) { (void)session.response.addHeader(protocol_name, protocol); }
             session.persistence = Persistence::UPGRADE;

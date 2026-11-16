@@ -83,7 +83,7 @@ namespace
         if (route.server == nullptr || !has_action) { return TargetResult::failure(INVALID); }
         const net::RegistryResult registry = route.server->registry();
         if (!registry) { return TargetResult::failure(registry.code); }
-        return registry.value().find(route.index);
+        return route.server->target(route.index);
     }
 }
 
@@ -93,8 +93,9 @@ KiottyNetWebSocketRoute KiottyNet_addWebSocket(KiottyNetHttpServerHandle server,
     if (server == nullptr) { return route; }
     const net::RegistryResult registry = server->registry();
     if (!registry) { return failedRoute(route, registry.code); }
-    const net::SocketIndexResult added = registry.value().addRoute(path);
+    const net::UpgradeIndexResult added = registry.value().addRoute(path);
     if (!added) { return failedRoute(route, added.code); }
+    server->addTarget(added.value);
     const KiottyNetWebSocketRoute made = { KIOTTY_NET_CODE_SUCCESS, server, added.value };
     return made;
 }
@@ -226,7 +227,7 @@ KiottyNetCode KiottyNet_onWebSocketClientOpen(KiottyNetWebSocketClientHandle cli
 {
     const net::RegistrationResult site = registrationOf(client, on_open != nullptr);
     if (!site) { return site.code; }
-    site.value().upgrade.events.on_open = on_open;
+    net::handlerOf(site.value()).client.events.on_open = on_open;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
@@ -235,7 +236,7 @@ KiottyNetCode KiottyNet_onWebSocketClientMessage(KiottyNetWebSocketClientHandle 
 {
     const net::RegistrationResult site = registrationOf(client, on_message != nullptr);
     if (!site) { return site.code; }
-    site.value().upgrade.events.on_message = on_message;
+    net::handlerOf(site.value()).client.events.on_message = on_message;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
@@ -244,7 +245,7 @@ KiottyNetCode KiottyNet_onWebSocketClientClose(KiottyNetWebSocketClientHandle cl
 {
     const net::RegistrationResult site = registrationOf(client, on_close != nullptr);
     if (!site) { return site.code; }
-    site.value().upgrade.events.on_close = on_close;
+    net::handlerOf(site.value()).client.events.on_close = on_close;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 

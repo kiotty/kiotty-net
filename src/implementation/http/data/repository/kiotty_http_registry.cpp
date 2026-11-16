@@ -25,14 +25,14 @@ namespace kiotty::net::implementation
         TextLocation parseLocation(const char* text);
         KiottyNetCode checkMemory(KiottyNetHttpContentType type, KiottyNetSpan data);
         RouteMatch   matchOf(MatchKind kind, uint32_t allowed);
-        uint32_t     takenMethodsOf(uint32_t methods, int32_t socket);
+        uint32_t     takenMethodsOf(uint32_t methods, int32_t upgrade);
     }
 
     HttpRegistry::HttpRegistry()
         : _entries()
-        , _sockets()
         , _not_found{}
         , _max_routes(0)
+        , _upgrades(0)
     {
     }
 
@@ -40,10 +40,9 @@ namespace kiotty::net::implementation
     {
         _entries.clear();
         _entries.reserve(max_routes);
-        _sockets.clear();
-        _sockets.reserve(max_routes);
         _not_found = KiottyNetHttpRoute{};
         _max_routes = max_routes;
+        _upgrades = 0;
     }
 
     KiottyNetCode HttpRegistry::addRoute(KiottyNetHttpMethod method,
@@ -61,38 +60,30 @@ namespace kiotty::net::implementation
         (void)entry.path.assign(parsed.value.text);
         entry.route = route;
         entry.methods = bit;
-        entry.socket = NO_SOCKET_PATH;
+        entry.upgrade = NO_UPGRADE_ROUTE;
         entry.kind = parsed.value.kind;
         entry.source = StaticKind::NONE;
         _entries.push_back(entry);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    SocketIndexResult HttpRegistry::addRoute(const char* path)
+    UpgradeIndexResult HttpRegistry::addRoute(const char* path)
     {
         const RoutePathResult parsed = parseRoutePath(path);
-        if (!parsed) { return SocketIndexResult::failure(parsed.code); }
+        if (!parsed) { return UpgradeIndexResult::failure(parsed.code); }
         const KiottyNetCode admitted = admit(parsed.value, ALL_METHODS);
-        if (admitted != KIOTTY_NET_CODE_SUCCESS) { return SocketIndexResult::failure(admitted); }
-        const int32_t index = static_cast<int32_t>(_sockets.size());
-        _sockets.push_back(WebSocketTarget{ nullptr, nullptr, nullptr, nullptr, index });
+        if (admitted != KIOTTY_NET_CODE_SUCCESS) { return UpgradeIndexResult::failure(admitted); }
+        const int32_t index = _upgrades;
+        _upgrades += 1;
         RouteEntry entry{};
         (void)entry.path.assign(parsed.value.text);
         entry.methods = GET_BIT;
-        entry.socket = index;
+        entry.upgrade = index;
         entry.kind = parsed.value.kind;
         entry.source = StaticKind::NONE;
         _entries.push_back(entry);
-        return SocketIndexResult::success(index);
+        return UpgradeIndexResult::success(index);
     }
-
-    SocketTargetResult HttpRegistry::find(int32_t index)
-    {
-        const bool is_inside = index >= 0 && static_cast<size_t>(index) < _sockets.size();
-        if (!is_inside) { return SocketTargetResult::failure(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-        return SocketTargetResult::success(_sockets[static_cast<size_t>(index)]);
-    }
-
 
     KiottyNetCode HttpRegistry::setNotFound(KiottyNetHttpRoute route)
     {
@@ -148,16 +139,17 @@ namespace kiotty::net::implementation
         return missing(method, found.allowed);
     }
 
-    int32_t HttpRegistry::find(Span<const char> socket_path) const
+    int32_t HttpRegistry::find(Span<const char> upgrade_path) const
     {
         for (const RouteEntry& entry : _entries)
         {
-            if (entry.socket == NO_SOCKET_PATH) { continue; }
+            if (entry.upgrade == NO_UPGRADE_ROUTE) { continue; }
             const Span<const char> text = entry.path.span();
-            if (text.length != socket_path.length) { continue; }
-            if (std::memcmp(text.data, socket_path.data, text.length) == 0) { return entry.socket; }
+            if (text.length != upgrade_path.length) { continue; }
+            const bool is_same = std::memcmp(text.data, upgrade_path.data, text.length) == 0;
+            if (is_same) { return entry.upgrade; }
         }
-        return NO_SOCKET_PATH;
+        return NO_UPGRADE_ROUTE;
     }
 
     KiottyNetCode HttpRegistry::addStatic(const RoutePath& path, const StaticSource& source)
@@ -173,7 +165,7 @@ namespace kiotty::net::implementation
         entry.memory = source.memory;
         entry.type = source.type;
         entry.methods = STATIC_METHODS;
-        entry.socket = NO_SOCKET_PATH;
+        entry.upgrade = NO_UPGRADE_ROUTE;
         entry.kind = path.kind;
         entry.source = source.kind;
         _entries.push_back(entry);
@@ -192,7 +184,7 @@ namespace kiotty::net::implementation
         for (const RouteEntry& entry : _entries)
         {
             const RoutePath stored{ entry.path.span(), entry.kind };
-            const uint32_t taken = takenMethodsOf(entry.methods, entry.socket);
+            const uint32_t taken = takenMethodsOf(entry.methods, entry.upgrade);
             const bool is_same = isSamePath(stored, path) && (taken & method) != 0;
             if (is_same) { return true; }
         }
@@ -220,12 +212,10 @@ namespace kiotty::net::implementation
         const StaticTarget target{
             prefix, entry.location.span(), entry.memory, entry.type, entry.source,
         };
-        const WebSocketTarget no_socket{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
-        RouteMatch match{ entry.route, target, no_socket, allowed, MatchKind::ROUTE };
+        RouteMatch match{ entry.route, target, entry.upgrade, allowed, MatchKind::ROUTE };
         if (entry.source != StaticKind::NONE) { match.kind = MatchKind::STATIC; }
-        if (entry.socket == NO_SOCKET_PATH) { return match; }
-        match.kind = MatchKind::SOCKET;
-        match.socket = _sockets[static_cast<size_t>(entry.socket)];
+        if (entry.upgrade == NO_UPGRADE_ROUTE) { return match; }
+        match.kind = MatchKind::UPGRADE;
         return match;
     }
 
@@ -307,13 +297,12 @@ namespace kiotty::net::implementation
                 KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM,
                 StaticKind::NONE,
             };
-            const WebSocketTarget no_socket{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
-            return RouteMatch{ KiottyNetHttpRoute{}, none, no_socket, allowed, kind };
+            return RouteMatch{ KiottyNetHttpRoute{}, none, NO_UPGRADE_ROUTE, allowed, kind };
         }
 
-        uint32_t takenMethodsOf(uint32_t methods, int32_t socket)
+        uint32_t takenMethodsOf(uint32_t methods, int32_t upgrade)
         {
-            return socket == NO_SOCKET_PATH ? methods : ALL_METHODS;
+            return upgrade == NO_UPGRADE_ROUTE ? methods : ALL_METHODS;
         }
     }
 }

@@ -1,7 +1,7 @@
 #include "websocket/domain/entity/kiotty_websocket_timing.h"
 
 #include "core/kiotty_clock.h"
-#include "http/data/repository/kiotty_http_site.h"
+#include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_close.h"
 
 #include <limits>
@@ -17,13 +17,13 @@ namespace kiotty::net::implementation
 
     bool isClosing(const HttpSession& session)
     {
-        return session.link.closing.load() != 0;
+        return linkOf(session).closing.load() != 0;
     }
 
     uint32_t readTimeoutOf(HttpSession& session)
     {
         if (isClosing(session)) { return closeTimeOf(session); }
-        const uint64_t ping_deadline = session.socket.ping_deadline;
+        const uint64_t ping_deadline = socketOf(session).ping_deadline;
         if (ping_deadline != 0) { return timeLeft(ping_deadline); }
         return session.site.limits.websocket_ping_interval_milliseconds;
     }
@@ -37,16 +37,17 @@ namespace kiotty::net::implementation
     KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason)
     {
         KiottyNetWebSocketClose close{ reason, ABNORMAL, KiottyNetSpan{ nullptr, 0 } };
-        if (session.socket.has_peer_close)
+        const SocketState& socket = socketOf(session);
+        if (socket.has_peer_close)
         {
-            close.status = session.socket.peer_status;
+            close.status = socket.peer_status;
             close.reason = peerReasonOf(session);
             return close;
         }
         const bool is_dropped = reason == KIOTTY_NET_CODE_PEER_CLOSED
                                 || reason == KIOTTY_NET_CODE_SOCKET_ERROR;
         if (is_dropped) { return close; }
-        const uint16_t sent = session.link.closing.load();
+        const uint16_t sent = linkOf(session).closing.load();
         const bool is_owner_close = reason == KIOTTY_NET_CODE_CLOSED || sent == 0;
         close.status = is_owner_close ? GOING_AWAY : sent;
         return close;
@@ -58,11 +59,9 @@ namespace kiotty::net::implementation
         {
             const uint32_t timeout = session.site.limits.websocket_close_timeout_milliseconds;
             if (timeout == 0) { return 0; }
-            if (session.socket.close_deadline == 0)
-            {
-                session.socket.close_deadline = deadlineAfter(timeout);
-            }
-            return timeLeft(session.socket.close_deadline);
+            SocketState& socket = socketOf(session);
+            if (socket.close_deadline == 0) { socket.close_deadline = deadlineAfter(timeout); }
+            return timeLeft(socket.close_deadline);
         }
 
         uint32_t timeLeft(uint64_t deadline)
@@ -76,10 +75,11 @@ namespace kiotty::net::implementation
 
         KiottyNetSpan peerReasonOf(const HttpSession& session)
         {
-            const size_t length = session.socket.control_length;
+            const SocketState& socket = socketOf(session);
+            const size_t length = socket.control_length;
             const bool has_reason = length > STATUS_BYTES;
             const size_t reason_length = has_reason ? length - STATUS_BYTES : 0;
-            return KiottyNetSpan{ session.socket.control + STATUS_BYTES, reason_length };
+            return KiottyNetSpan{ socket.control + STATUS_BYTES, reason_length };
         }
     }
 }

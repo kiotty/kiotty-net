@@ -4,6 +4,7 @@
 #include "http/data/datasource/kiotty_http_session_pool.h"
 #include "http/data/repository/kiotty_http_site.h"
 #include "kiotty_net_websocket.h"
+#include "websocket/data/repository/kiotty_websocket_handler.h"
 
 #include <cstdint>
 
@@ -31,6 +32,7 @@ namespace kiotty::net::implementation
         SessionResult upgrading(int64_t id);
         LinkResult    openLink(int64_t id);
 
-        HttpSite& _site;
+        HttpSite&         _site;
+        WebSocketHandler& _handler;
     };
 }

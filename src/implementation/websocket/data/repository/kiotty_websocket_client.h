@@ -7,6 +7,7 @@
 #include "http/data/repository/kiotty_http_site.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/data/repository/kiotty_websocket_endpoint.h"
+#include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_handshake.h"
 
 #include <atomic>
@@ -36,7 +37,10 @@ namespace kiotty::net::implementation
         KiottyNetAppContext                    app_context;
     };
 
-    class WebSocketClient : public EventClient, public PushLane, public KiottyNetWebSocketEndpoint
+    class WebSocketClient : public EventClient,
+                            public WebSocketHandler,
+                            public PushLane,
+                            public KiottyNetWebSocketEndpoint
     {
     public:
         using configuration_type = WebSocketClientConfiguration;

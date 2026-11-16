@@ -4,6 +4,7 @@
 #include "http/domain/entity/kiotty_http_exchange.h"
 #include "http/domain/entity/kiotty_http_rule_names.h"
 #include "http/domain/entity/kiotty_http_status_line.h"
+#include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_rows.h"
 #include "websocket/domain/entity/kiotty_websocket_upgrade.h"
 
@@ -105,7 +106,7 @@ namespace kiotty::net::implementation
             advanceSession(session);
             session.request.begin(connection);
             session.response.begin();
-            session.socket.reset();
+            socketOf(session).reset();
             session.sent = 0;
             startHeaderClock(session);
             return writeRequest(session);
@@ -115,7 +116,7 @@ namespace kiotty::net::implementation
         {
             HttpSession& session = sessionOf(context);
             session.sent += event.length;
-            const bool has_more = session.sent < session.site.upgrade.request.length;
+            const bool has_more = session.sent < handlerOf(session).client.request.length;
             if (has_more) { return writeRequest(session); }
             return readLine(session, STATUS_LINE, headerTimeLeft(session));
         }
@@ -136,13 +137,13 @@ namespace kiotty::net::implementation
             if (line.empty())
             {
                 const KiottyNetHttpRequest& response = session.request.request();
-                const ClientUpgrade& upgrade = session.site.upgrade;
+                const ClientUpgrade& upgrade = handlerOf(session).client;
                 const bool is_upgraded =
                     isUpgradeResponse(response, upgrade.accept, upgrade.protocols);
                 if (!is_upgraded) { return closeWith(broken); }
                 const Span<const char> name{ PROTOCOL_HEADER, PROTOCOL_HEADER_LENGTH };
                 const Span<const char> chosen = headerOf(response, name);
-                (void)session.socket.protocol.assign(chosen);
+                (void)socketOf(session).protocol.assign(chosen);
                 return openSocket(session);
             }
             const KiottyNetHttpStatus status = session.request.takeHeader(line);
@@ -158,14 +159,15 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClientClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            if (!session.socket.is_open) { session.site.upgrade.failure = event.reason; }
+            ClientUpgrade& upgrade = handlerOf(session).client;
+            if (!socketOf(session).is_open) { upgrade.failure = event.reason; }
             endSocket(session, event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
         }
 
         KiottyNetTransition writeRequest(HttpSession& session)
         {
-            const Span<const char> request = session.site.upgrade.request.skip(session.sent);
+            const Span<const char> request = handlerOf(session).client.request.skip(session.sent);
             const KiottyNetSpan data{ request.data, request.length };
             const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
             return Next::moveToNextState(UPGRADE_SENDING, thenWrite(data, timeout));
@@ -183,7 +185,7 @@ namespace kiotty::net::implementation
                                                        KiottyNetConnectionInfo info)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.upgrade.peer = info;
+            handlerOf(site).client.peer = info;
             const SessionResult acquired = site.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
@@ -202,9 +204,10 @@ namespace kiotty::net::implementation
                                const char* message)
         {
             HttpSite& site = *static_cast<HttpSite*>(app_context);
-            const bool is_settled = site.upgrade.has_opened || site.upgrade.has_failed;
+            ClientUpgrade& upgrade = handlerOf(site).client;
+            const bool is_settled = upgrade.has_opened || upgrade.has_failed;
             if (is_settled) { return; }
-            site.upgrade.has_failed = true;
+            upgrade.has_failed = true;
             site.notices.reportError(site.app_context, info, code, message);
         }
     }

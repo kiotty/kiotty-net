@@ -3,9 +3,8 @@
 #include "http/data/datasource/kiotty_http_session_pool.h"
 #include "http/data/repository/kiotty_http_notices.h"
 #include "http/data/repository/kiotty_http_registry.h"
+#include "http/data/repository/kiotty_http_upgrade_handler.h"
 #include "kiotty_net_http.h"
-#include "kiotty_net_websocket.h"
-#include "websocket/data/repository/kiotty_websocket_socket.h"
 
 #include <atomic>
 #include <cstddef>
@@ -28,11 +27,7 @@ namespace kiotty::net::implementation
         size_t                    push_capacity;
         KiottyNetHttpServerHandle owner;
         KiottyNetAppContext       app_context;
-        KiottyNetWebSocketEndpoint* socket_owner;
-        PushLane*                 lane;
-        ClientUpgrade             upgrade;
-        SocketRole                role;
-        std::atomic<uint64_t>     mask_state;
+        HttpUpgradeHandler*       upgrade;
         std::atomic<bool>         is_closing;
     };
 
@@ -46,11 +41,7 @@ namespace kiotty::net::implementation
         , push_capacity(0)
         , owner(nullptr)
         , app_context(nullptr)
-        , socket_owner(nullptr)
-        , lane(nullptr)
-        , upgrade{}
-        , role(SocketRole::SERVER)
-        , mask_state(0)
+        , upgrade(nullptr)
         , is_closing(false)
     {
     }

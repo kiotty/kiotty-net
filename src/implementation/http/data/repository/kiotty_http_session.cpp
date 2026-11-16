@@ -10,9 +10,7 @@ namespace kiotty::net::implementation
         , response(buffers.response)
         , site(owner)
         , file(resources.file)
-        , link(resources.link)
         , published(resources.published)
-        , socket()
         , info{}
         , route{}
         , stream{ nullptr, 0 }

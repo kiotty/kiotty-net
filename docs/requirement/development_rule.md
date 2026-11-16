@@ -587,7 +587,7 @@ src/
 single_header/              # 스크립트로만 생성
 ```
 
-- 의존 방향: `core` ← `base` ← `statemachine` ← `http` ← `websocket` ← `context`. 공개 헤더도 같은 순서다 (`core` 는 `kiotty_net_base.h` 의 code 만). `tools/check_rules.py` 의 `LAYER` 가 본다. 2026-11-16 R1 뒤 남은 위반은 http → websocket (서버의 upgrade, R3 에서 없앤다).
+- 의존 방향: `core` ← `base` ← `statemachine` ← `http` ← `websocket` ← `context`. 공개 헤더도 같은 순서다 (`core` 는 `kiotty_net_base.h` 의 code 만). `tools/check_rules.py` 의 `LAYER` 가 본다. 2026-11-16 R3 뒤 위반 0.
 - `src/library_name*.cpp` 는 인자 변환만 하는 얇은 어댑터로 남고 `<module>/domain/usecases` 를 부른다.
 
 ### 7.2 GUI · CLI · 서버 데몬

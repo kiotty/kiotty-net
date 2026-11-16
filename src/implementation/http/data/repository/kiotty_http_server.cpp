@@ -2,14 +2,12 @@
 
 #include "http/domain/entity/kiotty_http_machine.h"
 #include "statemachine/data/repository/kiotty_stateful_handler.h"
-#include "websocket/domain/entity/kiotty_websocket_access.h"
 
 namespace kiotty::net::implementation
 {
     namespace
     {
         bool areLimitsUsable(const KiottyNetHttpLimits& limits);
-        bool hasEverySocketMessage(HttpRegistry& registry);
     }
 
     HttpServer::HttpServer()
@@ -40,7 +38,6 @@ namespace kiotty::net::implementation
                                   const KiottyNetTlsServerConfiguration* tls,
                                   KiottyNetAppContext app_context)
     {
-        if (!hasEverySocketMessage(_site.registry)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _runs.fetch_add(1);
         _site.is_closing.store(false);
         _site.app_context = app_context;
@@ -75,45 +72,6 @@ namespace kiotty::net::implementation
         Server::close();
     }
 
-    KiottyNetCode HttpServer::push(int64_t connection,
-                                   FrameOpcode opcode,
-                                   Span<const char> payload)
-    {
-        const FrameHead head = buildFrameHead(opcode, payload.length);
-        const KiottyNetSpan pieces[] = {
-            KiottyNetSpan{ head.bytes, head.length },
-            KiottyNetSpan{ payload.data, payload.length },
-        };
-        return Server::notify(connection, Span<const KiottyNetSpan>{ pieces, 2 });
-    }
-
-    KiottyNetWebSocketInfo HttpServer::socketInfo(int64_t id)
-    {
-        return WebSocketAccess(_site).info(id);
-    }
-
-    KiottyNetSpan HttpServer::upgradeHeader(int64_t id, Span<const char> name)
-    {
-        return WebSocketAccess(_site).header(id, name);
-    }
-
-    KiottyNetCode HttpServer::selectProtocol(int64_t id, Span<const char> protocol)
-    {
-        return WebSocketAccess(_site).select(id, protocol);
-    }
-
-    KiottyNetCode HttpServer::sendSocket(int64_t id,
-                                         KiottyNetWebSocketOpcode opcode,
-                                         KiottyNetSpan data)
-    {
-        return WebSocketAccess(_site).send(id, opcode, data);
-    }
-
-    KiottyNetCode HttpServer::closeSocket(int64_t id, uint16_t status, Span<const char> reason)
-    {
-        return WebSocketAccess(_site).close(id, status, reason);
-    }
-
     KiottyNetCode HttpServer::prepare(const HttpServerConfiguration& configuration)
     {
         const KiottyNetHttpLimits& limits = configuration.limits;
@@ -122,8 +80,6 @@ namespace kiotty::net::implementation
         _site.receive_capacity = configuration.server.receive_capacity;
         _site.send_capacity = configuration.server.send_capacity;
         _site.push_capacity = configuration.server.push_capacity;
-        _site.socket_owner = this;
-        _site.lane = this;
         _site.registry.initialize(limits.max_routes);
         _site.notices.clear();
         return _site.sessions.initialize(_site, configuration.server.max_clients, limits);
@@ -138,16 +94,6 @@ namespace kiotty::net::implementation
             const bool has_headers = limits.max_headers > 0 && limits.max_header_bytes > 0;
             const bool has_response = limits.response_bytes >= MIN_HTTP_RESPONSE_BYTES;
             return has_routes && has_headers && has_response;
-        }
-
-        bool hasEverySocketMessage(HttpRegistry& registry)
-        {
-            for (int32_t index = 0;; ++index)
-            {
-                const SocketTargetResult target = registry.find(index);
-                if (!target) { return true; }
-                if (target.value().on_message == nullptr) { return false; }
-            }
         }
     }
 }

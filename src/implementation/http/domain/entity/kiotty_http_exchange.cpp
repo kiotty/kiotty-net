@@ -8,7 +8,6 @@
 #include "http/domain/entity/kiotty_http_constants.h"
 #include "http/domain/entity/kiotty_http_response_text.h"
 #include "http/domain/entity/kiotty_http_static.h"
-#include "websocket/domain/entity/kiotty_websocket_upgrade.h"
 
 #include <limits>
 
@@ -104,7 +103,9 @@ namespace kiotty::net::implementation
         const RouteMatch match = session.site.registry.find(request.method, path);
         const bool is_route = match.kind == MatchKind::ROUTE;
         if (is_route) { return callRoute(session, match.route); }
-        if (match.kind == MatchKind::SOCKET) { return answerUpgrade(session, match.socket); }
+        HttpUpgradeHandler* const upgrade = session.site.upgrade;
+        const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
+        if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
         answerAutomatically(session, match);
         return startSending(session);
     }
@@ -210,11 +211,11 @@ namespace kiotty::net::implementation
             switch (match.kind)
             {
             case MatchKind::ROUTE:
-            case MatchKind::SOCKET:
                 return;
             case MatchKind::STATIC:
                 answerStatic(session, match.target);
                 return;
+            case MatchKind::UPGRADE:
             case MatchKind::NOT_FOUND:
                 (void)session.response.setStatus(NOT_FOUND);
                 return;

@@ -28,7 +28,6 @@ namespace kiotty::net::implementation
         : _block()
         , _headers()
         , _files()
-        , _links()
         , _sessions()
         , _free()
         , _generations()
@@ -61,7 +60,7 @@ namespace kiotty::net::implementation
             buffers.headers = Span<KiottyNetHttpHeader>{ _headers.data() + i * limits.max_headers,
                                                          limits.max_headers };
             const int32_t index = static_cast<int32_t>(i);
-            const SessionResources resources{ _files[i], _links[i], _published[i] };
+            const SessionResources resources{ _files[i], _published[i] };
             _sessions.emplace_back(site, resources, index, buffers);
             const bool has_history = i < _generations.size();
             HttpSession& session = _sessions.back();
@@ -112,15 +111,9 @@ namespace kiotty::net::implementation
         return SessionResult::success(session);
     }
 
-    Span<SocketLink> HttpSessionPool::links()
-    {
-        return Span<SocketLink>{ _links.data(), _sessions.size() };
-    }
-
     void HttpSessionPool::growResources(size_t count)
     {
         if (_files.size() < count) { _files = std::vector<InputFile>(count); }
-        if (_links.size() < count) { _links = std::vector<SocketLink>(count); }
         if (_published.size() < count) { _published = std::vector<std::atomic<int64_t>>(count); }
     }
 

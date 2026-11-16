@@ -7,7 +7,6 @@
 #include "http/data/repository/kiotty_http_response_store.h"
 #include "http/domain/entity/kiotty_http_message_framing.h"
 #include "kiotty_net_http.h"
-#include "websocket/data/repository/kiotty_websocket_socket.h"
 
 #include <atomic>
 #include <cstddef>
@@ -39,7 +38,6 @@ namespace kiotty::net::implementation
     struct SessionResources
     {
         InputFile&            file;
-        SocketLink&           link;
         std::atomic<int64_t>& published;
     };
 
@@ -54,9 +52,7 @@ namespace kiotty::net::implementation
         HttpResponseStore         response;
         HttpSite&                 site;
         InputFile&                file;
-        SocketLink&               link;
         std::atomic<int64_t>&     published;
-        SocketState               socket;
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;

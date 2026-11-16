@@ -5,7 +5,6 @@
 #include "http/domain/entity/kiotty_http_exchange.h"
 #include "http/domain/entity/kiotty_http_message_framing.h"
 #include "http/domain/entity/kiotty_http_rule_names.h"
-#include "websocket/domain/entity/kiotty_websocket_rows.h"
 
 namespace kiotty::net::implementation
 {
@@ -32,6 +31,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onContinued(Session context, Handle connection, Event event);
         KiottyNetTransition onWorkStarted(Session context, Handle connection, Event event);
         KiottyNetTransition onSent(Session context, Handle connection, Event event);
+        KiottyNetTransition onUpgraded(Session context, Handle connection, Event event);
         KiottyNetTransition onTimeout(Session context, Handle connection, Event event);
         KiottyNetTransition onClosed(Session context, Handle connection, Event event);
 
@@ -105,39 +105,39 @@ namespace kiotty::net::implementation
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
             KiottyNet_from(SOCKET_OPENING)
                 .when(WRITTEN)
-                .then(onSocketWritten)
+                .then(onUpgraded)
                 .to(SOCKET_OPENING, FRAME_START),
             KiottyNet_from(FRAME_START)
                 .when(READ)
-                .then(onFrameStart)
+                .then(onUpgraded)
                 .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_LENGTH)
                 .when(READ)
-                .then(onFrameLength)
+                .then(onUpgraded)
                 .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_MASK)
                 .when(READ)
-                .then(onFrameMask)
+                .then(onUpgraded)
                 .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_PAYLOAD)
                 .when(READ)
-                .then(onFramePayload)
+                .then(onUpgraded)
                 .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
             KiottyNet_from(FRAME_START)
                 .when(TIMEOUT)
-                .then(onSocketTimeout)
+                .then(onUpgraded)
                 .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_LENGTH)
                 .when(TIMEOUT)
-                .then(onSocketTimeout)
+                .then(onUpgraded)
                 .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_MASK)
                 .when(TIMEOUT)
-                .then(onSocketTimeout)
+                .then(onUpgraded)
                 .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_from(FRAME_PAYLOAD)
                 .when(TIMEOUT)
-                .then(onSocketTimeout)
+                .then(onUpgraded)
                 .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
@@ -237,6 +237,12 @@ namespace kiotty::net::implementation
             return sendNext(session, connection);
         }
 
+        KiottyNetTransition onUpgraded(Session context, Handle connection, Event event)
+        {
+            HttpSession& session = sessionOf(context);
+            return session.site.upgrade->step(session, connection, event);
+        }
+
         KiottyNetTransition onTimeout(Session, Handle, Event)
         {
             return closeWith(KIOTTY_NET_CODE_TIMEOUT);
@@ -245,7 +251,8 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            endSocket(session, event.reason);
+            HttpUpgradeHandler* const upgrade = session.site.upgrade;
+            if (upgrade != nullptr) { upgrade->end(session, event.reason); }
             const KiottyNetAppContext app_context = session.site.app_context;
             session.site.notices.reportDisconnected(app_context, session.info, event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
@@ -295,8 +302,8 @@ namespace kiotty::net::implementation
         KiottyNetTransition takeBody(HttpSession& session, KiottyNetSpan data, HttpState more)
         {
             const Span<const char> piece{ data.data, data.length };
-            const KiottyNetHttpStatus status = session.request.appendBody(piece);
-            if (status != NO_ERROR_STATUS) { return reject(session, status); }
+            const AppendedBodyResult appended = session.request.appendBody(piece);
+            if (!appended) { return reject(session, appended.code); }
             session.body_remaining -= data.length;
             if (session.body_remaining > 0) { return readBody(session, more); }
             const bool is_chunk = more == CHUNK_DATA;

@@ -5,7 +5,6 @@
 #include "core/kiotty_span.h"
 #include "http/domain/entity/kiotty_http_route_path.h"
 #include "kiotty_net_http.h"
-#include "websocket/data/repository/kiotty_websocket_socket.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,11 +12,13 @@
 
 namespace kiotty::net::implementation
 {
+    inline constexpr int32_t NO_UPGRADE_ROUTE = -1;
+
     enum class MatchKind : uint8_t
     {
         ROUTE,
         STATIC,
-        SOCKET,
+        UPGRADE,
         NOT_FOUND,
         NOT_ALLOWED,
         OPTIONS
@@ -44,7 +45,7 @@ namespace kiotty::net::implementation
     {
         KiottyNetHttpRoute route;
         StaticTarget       target;
-        WebSocketTarget    socket;
+        int32_t            upgrade;
         uint32_t           allowed;
         MatchKind          kind;
     };
@@ -57,8 +58,7 @@ namespace kiotty::net::implementation
         StaticKind               kind;
     };
 
-    using SocketIndexResult = Result<int32_t, KiottyNetCode>;
-    using SocketTargetResult = Result<WebSocketTarget&, KiottyNetCode>;
+    using UpgradeIndexResult = Result<int32_t, KiottyNetCode>;
 
     class HttpRegistry
     {
@@ -69,7 +69,7 @@ namespace kiotty::net::implementation
         KiottyNetCode addRoute(KiottyNetHttpMethod method,
                                const char* path,
                                KiottyNetHttpRoute route);
-        SocketIndexResult  addRoute(const char* path);
+        UpgradeIndexResult addRoute(const char* path);
         KiottyNetCode setNotFound(KiottyNetHttpRoute route);
         KiottyNetCode addDirectory(const char* url_prefix, const char* directory);
         KiottyNetCode addFile(const char* url_path, const char* file_path);
@@ -77,8 +77,7 @@ namespace kiotty::net::implementation
                                 KiottyNetHttpContentType type,
                                 KiottyNetSpan data);
         RouteMatch    find(KiottyNetHttpMethod method, Span<const char> path) const;
-        int32_t       find(Span<const char> socket_path) const;
-        SocketTargetResult find(int32_t index);
+        int32_t       find(Span<const char> upgrade_path) const;
 
     private:
         using Location = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
@@ -91,7 +90,7 @@ namespace kiotty::net::implementation
             KiottyNetSpan                          memory;
             KiottyNetHttpContentType               type;
             uint32_t                               methods;
-            int32_t                                socket;
+            int32_t                                upgrade;
             PathKind                               kind;
             StaticKind                             source;
         };
@@ -106,9 +105,9 @@ namespace kiotty::net::implementation
         RouteMatch    missing(KiottyNetHttpMethod method, uint32_t allowed) const;
         uint32_t      allMethods() const;
 
-        std::vector<RouteEntry>      _entries;
-        std::vector<WebSocketTarget> _sockets;
+        std::vector<RouteEntry> _entries;
         KiottyNetHttpRoute      _not_found;
         size_t                  _max_routes;
+        int32_t                 _upgrades;
     };
 }

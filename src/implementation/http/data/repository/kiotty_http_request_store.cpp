@@ -69,26 +69,15 @@ namespace kiotty::net::implementation
         return selectBodyFraming(found);
     }
 
-    KiottyNetHttpStatus HttpRequestStore::appendBody(Span<const char> data)
+    AppendedBodyResult HttpRequestStore::appendBody(Span<const char> data)
     {
         const size_t used = _request.body.length;
         const size_t room = _body_buffer.length - used;
-        if (data.length > room) { return CONTENT_TOO_LARGE; }
-        const Span<char> target = _body_buffer.skip(used);
+        if (data.length > room) { return AppendedBodyResult::failure(CONTENT_TOO_LARGE); }
+        const Span<char> target{ _body_buffer.data + used, data.length };
         (void)target.copyFrom(data);
         _request.body.length = used + data.length;
-        return NO_ERROR_STATUS;
-    }
-
-    KiottyNetHttpStatus HttpRequestStore::appendBody(Span<const char> data,
-                                                     const MaskKey& key,
-                                                     size_t offset)
-    {
-        const size_t used = _request.body.length;
-        const KiottyNetHttpStatus status = appendBody(data);
-        if (status != NO_ERROR_STATUS) { return status; }
-        applyMask(Span<char>{ _body_buffer.data + used, data.length }, key, offset);
-        return NO_ERROR_STATUS;
+        return AppendedBodyResult::success(target);
     }
 
     bool HttpRequestStore::expectsContinue() const
