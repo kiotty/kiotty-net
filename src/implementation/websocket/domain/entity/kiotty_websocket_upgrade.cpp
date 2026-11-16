@@ -2,8 +2,8 @@
 
 #include "base/domain/entity/kiotty_action.h"
 #include "core/kiotty_text.h"
-#include "http/domain/entity/kiotty_http_exchange.h"
-#include "http/domain/entity/kiotty_http_token.h"
+#include "http/data/repository/header/kiotty_http_token_rules.h"
+#include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_handshake.h"
 

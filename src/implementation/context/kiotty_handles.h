@@ -3,7 +3,7 @@
 #include "base/data/repository/endpoint/kiotty_event_client.h"
 #include "base/data/repository/endpoint/kiotty_server.h"
 #include "base/data/repository/endpoint/kiotty_stream_client.h"
-#include "http/data/repository/kiotty_http_client.h"
+#include "http/data/repository/client/kiotty_http_client.h"
 #include "websocket/data/repository/kiotty_websocket_client.h"
 #include "websocket/data/repository/kiotty_websocket_server.h"
 

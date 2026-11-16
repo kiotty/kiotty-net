@@ -853,13 +853,13 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 ### 4.1 HttpServer 가 잡는 것
 
 ```cpp
-class HttpServer : public Server                      // http/data/repository/kiotty_http_server
+class HttpServer : public Server                      // http/data/repository/server/kiotty_http_server
 {
     HttpSite             _site;
     std::atomic<int32_t> _runs;                       // run 중이면 registry() / notices() 가 KIOTTY_NET_CODE_BUSY
 };
 
-struct HttpSite                                       // http/data/repository/kiotty_http_site.h. Session 이 이것을 참조한다
+struct HttpSite                                       // http/data/repository/server/kiotty_http_site.h. Session 이 이것을 참조한다
 {
     HttpRegistry              registry;               // 라우트와 정적 경로의 표, not found 라우트
     HttpNotices               notices;                // 끊김 / 오류 action. app_context 는 들지 않는다
@@ -872,7 +872,7 @@ struct HttpSite                                       // http/data/repository/ki
     std::atomic<bool>         is_closing;             // close() 가 켜고 run 이 시작할 때 끈다 (4.9 의 CLOSED)
 };
 
-class HttpRegistry                                    // http/data/repository/kiotty_http_registry
+class HttpRegistry                                    // http/data/repository/server/kiotty_http_registry
 {
     struct RouteEntry                                 // 라우트와 정적 경로가 한 표에 들어간다. 등록 순서 = 매칭 순서
     {
@@ -902,7 +902,7 @@ class HttpRegistry                                    // http/data/repository/ki
 ```cpp
 enum class SessionPhase : uint8_t { READING, FILLING, WORKING, STREAMING, SENDING };
 
-struct HttpSession                                    // http/data/repository/kiotty_http_session.h
+struct HttpSession                                    // http/data/state/kiotty_http_session.h
 {
     HttpRequestStore          request;                // 헤더 버퍼, 헤더 span 배열, body 버퍼. KiottyNetHttpRequest 를 채운다 (4.3)
     HttpResponseStore         response;               // 응답 버퍼 (4.4)
@@ -973,7 +973,7 @@ bool HttpSessionPool::handBack(HttpSession& session)  // worker 의 finish 가 c
 
 ### 4.3 요청 공급 : Stage → HttpSession
 
-HTTP 표는 사용자 프로토콜의 표와 같은 `KiottyNetStateMachine` 이고 `http/domain/entity/kiotty_http_machine.cpp` 안에 `constexpr` 로 있다 (8절의 C++ `KiottyNet_rules`). `.to(...)` 의 다음 상태가 여섯까지 있어 `KIOTTY_NET_MAX_NEXT` 는 8 이다 (`261112_01_100-continue.md`).
+HTTP 표는 사용자 프로토콜의 표와 같은 `KiottyNetStateMachine` 이고 `http/data/repository/machine/kiotty_http_machine.cpp` 안에 `constexpr` 로 있다 (8절의 C++ `KiottyNet_rules`). `.to(...)` 의 다음 상태가 여섯까지 있어 `KIOTTY_NET_MAX_NEXT` 는 8 이다 (`261112_01_100-continue.md`).
 
 ```cpp
 constexpr auto HTTP_RULES = KiottyNet_rules(
@@ -1102,7 +1102,7 @@ KiottyNetTransition afterRoute(HttpSession& session)
 
 ### 4.4 응답 공급 : setter → 응답 버퍼
 
-응답 버퍼 (`response_bytes`) 의 배치다. `HttpResponseStore` (`http/data/repository/kiotty_http_response_store`) 가 들고, 필드는 `ResponseLayout` 하나로 묶인다.
+응답 버퍼 (`response_bytes`) 의 배치다. `HttpResponseStore` (`http/data/repository/response/kiotty_http_response_store`) 가 들고, 필드는 `ResponseLayout` 하나로 묶인다.
 
 ```
 buffer
@@ -1229,7 +1229,7 @@ SessionResult HttpWork::fill(int64_t id)                                        
 
 ### 4.6 Work
 
-Work 는 `http/data/repository/kiotty_http_work` 의 `HttpWork` 가 한다 (`HttpServer::work()` 가 `HttpSite` 를 들고 만든다). Work stream 의 write 와 close 는 `stream.owner` (Endpoint, 곧 이 HttpServer) 로 부른다.
+Work 는 `http/data/repository/server/kiotty_http_work` 의 `HttpWork` 가 한다 (`HttpServer::work()` 가 `HttpSite` 를 들고 만든다). Work stream 의 write 와 close 는 `stream.owner` (Endpoint, 곧 이 HttpServer) 로 부른다.
 
 ```cpp
 KiottyNetCode HttpWork::start(int64_t id)                                         // KiottyNet_startHttpWork
@@ -1337,7 +1337,7 @@ KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle con
     return beginExchange(session, connection, session.site.limits.keep_alive_timeout_milliseconds);   // 다음 요청. 파일은 여기서 닫힌다
 }
 
-PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repository/kiotty_http_file_body
+PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repository/body/kiotty_http_file_body
 {
     const size_t capacity = session.site.send_capacity;
     const ResponseFrame frame = session.response.frame();
@@ -1358,7 +1358,7 @@ PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repos
 정적 경로와 `setHttpFile`.
 
 - `attachFile(session, type, path)` 가 Session 의 `InputFile` 을 열고 (실패하면 `NOT_FOUND`), 크기를 `size_t` 로 담을 수 있는지 보고, BY_EXTENSION 이면 경로의 확장자로 type 을 고른 뒤 `setBody(type, { nullptr, size }, FILE)` 한다. setBody 가 실패하면 (EVENT_STREAM 등) 파일을 닫는다.
-- `answerStatic` (`http/domain/entity/kiotty_http_static`): MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
+- `answerStatic` (`http/data/repository/machine/kiotty_http_static`): MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
 - `setHttpFile` 은 번역 층이 `parseText` 와 `hasParentSegment` (`/`, `\` 로 나눈 `..` 조각) 를 본 뒤 `attachFile`. Work 중에도 같은 길이다.
 - 파일은 다음 요청 (`beginExchange` 의 `detachFile`) 이나 반납 (풀의 `release`) 때 닫는다.
 
@@ -1462,7 +1462,7 @@ KiottyNetCode failureOf(const HttpSession& session, KiottyNetCode code)         
 
 ### 4.10 content type
 
-content type 의 표는 `http/domain/entity/kiotty_http_content_type.cpp` 의 `constexpr` 배열 둘이다. enum 순서와 같은 `CONTENT_TYPES[] = { type, 문자열, TextKind }` (`static_assert` 로 개수와 순서를 본다), 확장자 → enum 의 `EXTENSIONS[]`. 할당은 없다.
+content type 의 표는 `http/data/repository/header/kiotty_http_content_type_rules.cpp` 의 `constexpr` 배열 둘이다. enum 순서와 같은 `CONTENT_TYPES[] = { type, 문자열, TextKind }` (`static_assert` 로 개수와 순서를 본다), 확장자 → enum 의 `EXTENSIONS[]`. 할당은 없다.
 
 | TextKind | 값 | 하는 일 |
 |---|---|---|
@@ -1808,7 +1808,7 @@ requirement_v0.md 11절의 HttpClient 와 `include/kiotty_net_http.h` 의 클라
 ### 6.1 HttpClient 가 잡는 것
 
 ```cpp
-class HttpClient : private StreamClient                // http/data/repository/kiotty_http_client
+class HttpClient : private StreamClient                // http/data/repository/client/kiotty_http_client
 {
     std::vector<char>                _head_bytes;     // 2 × max_header_bytes. 앞 반 공통 헤더, 뒤 반 요청 머리
     std::vector<char>                _reply_bytes;    // max_header_bytes. 응답 머리
@@ -2008,7 +2008,7 @@ void HttpClientLink::close()                          // 아무 thread
 
 - **파일 지역 이름도 라이브러리 전체에서 겹치지 않는다.** 익명 namespace 안의 함수, 상수, 타입이 다른 .cpp 의 것과 같은 이름이면 단일 헤더가 깨진다. 같은 것이면 공유 헤더로 옮기고 (재사용), 뜻이 다르면 파일에 맞는 이름을 붙인다. 같이 컴파일되지 않는 짝 (POSIX / Windows, iocp / readiness backend) 은 같은 이름이어도 된다. 같은 type alias (`Next`, `Event`, `Clock` 등) 의 반복은 문법상 괜찮다.
 - **Windows 매크로 이름을 쓰지 않는다.** `windows.h` 가 앞의 파일에서 include 되면 뒤의 모든 코드에 매크로가 걸린다 (`near`, `far`, `min`, `max`, `DELETE`, `ERROR`, `IN`, `OUT`, `interface` 등).
-- 이번에 생긴 공유 헤더: `core/kiotty_bytes.h` (`BITS_PER_BYTE`, `BYTE_MASK`), `core/kiotty_codes.h` (`INVALID`, `PROTOCOL_ERROR`, `RESULT_MAXIMUM_BYTES`, `resultOf`), `http/domain/entity/kiotty_http_constants.h` (HTTP status 상수, `CONTENT_LENGTH`), `http/domain/entity/kiotty_http_rule_names.h` (서버 / 클라이언트 machine 이 같이 쓰는 상태 / 이벤트 이름). `core/kiotty_text.h` 에 줄 끝 상수와 `literalOf`, `core/kiotty_clock.h` 에 `EXPIRED_MILLISECONDS`.
+- 이번에 생긴 공유 헤더: `core/kiotty_bytes.h` (`BITS_PER_BYTE`, `BYTE_MASK`), `core/kiotty_codes.h` (`INVALID`, `PROTOCOL_ERROR`, `RESULT_MAXIMUM_BYTES`, `resultOf`), `http/domain/entity/kiotty_http_constants.h` (HTTP status 상수, `CONTENT_LENGTH`), `http/data/repository/machine/kiotty_http_rule_names.h` (서버 / 클라이언트 machine 이 같이 쓰는 상태 / 이벤트 이름). `core/kiotty_text.h` 에 줄 끝 상수와 `literalOf`, `core/kiotty_clock.h` 에 `EXPIRED_MILLISECONDS`.
 - 깨졌는지는 `tests/single_header/` 가 매 빌드에 본다 (생성 → 컴파일 → smoke).
 
 ## 7. 미결

@@ -1,9 +1,9 @@
 #include "websocket/domain/entity/kiotty_websocket_client_machine.h"
 
 #include "base/domain/entity/kiotty_action.h"
-#include "http/domain/entity/kiotty_http_exchange.h"
-#include "http/domain/entity/kiotty_http_rule_names.h"
-#include "http/domain/entity/kiotty_http_status_line.h"
+#include "http/data/repository/machine/kiotty_http_exchange.h"
+#include "http/data/repository/machine/kiotty_http_rule_names.h"
+#include "http/data/repository/response/kiotty_http_status_line_parser.h"
 #include "websocket/data/repository/kiotty_websocket_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_rows.h"
 #include "websocket/domain/entity/kiotty_websocket_upgrade.h"

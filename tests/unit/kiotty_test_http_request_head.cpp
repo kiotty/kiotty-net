@@ -1,5 +1,5 @@
-#include "http/domain/entity/kiotty_http_request_check.h"
-#include "http/domain/entity/kiotty_http_request_head.h"
+#include "http/data/repository/request/kiotty_http_request_check_rules.h"
+#include "http/data/repository/request/kiotty_http_request_head_builder.h"
 
 #include <gtest/gtest.h>
 

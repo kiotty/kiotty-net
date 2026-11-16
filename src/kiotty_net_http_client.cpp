@@ -3,9 +3,9 @@
 #include "context/kiotty_context.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/kiotty_http_configuration.h"
-#include "http/domain/entity/kiotty_http_reply_headers.h"
-#include "http/domain/entity/kiotty_http_token.h"
+#include "http/data/repository/header/kiotty_http_reply_headers_parser.h"
+#include "http/data/repository/header/kiotty_http_token_rules.h"
+#include "http/data/repository/server/kiotty_http_configuration.h"
 
 namespace net = kiotty::net::implementation;
 

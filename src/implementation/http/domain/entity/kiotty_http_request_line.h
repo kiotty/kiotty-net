@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "kiotty_net_http.h"
 
@@ -21,11 +20,4 @@ namespace kiotty::net::implementation
         KiottyNetHttpMethod method;
         HttpVersion         version;
     };
-
-    using RequestLineResult = Result<RequestLine, KiottyNetHttpStatus>;
-    using HttpVersionResult = Result<HttpVersion, KiottyNetCode>;
-
-    RequestLineResult parseRequestLine(Span<const char> line);
-    HttpVersionResult parseHttpVersion(Span<const char> text);
-    Span<const char>  methodTextOf(KiottyNetHttpMethod method);
 }

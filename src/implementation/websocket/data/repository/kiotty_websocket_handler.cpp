@@ -1,6 +1,6 @@
 #include "websocket/data/repository/kiotty_websocket_handler.h"
 
-#include "http/domain/entity/kiotty_http_exchange.h"
+#include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/domain/entity/kiotty_websocket_rows.h"
 #include "websocket/domain/entity/kiotty_websocket_upgrade.h"
 

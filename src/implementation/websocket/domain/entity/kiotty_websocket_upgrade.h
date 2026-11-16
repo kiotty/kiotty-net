@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/kiotty_span.h"
-#include "http/data/repository/kiotty_http_session.h"
+#include "http/data/state/kiotty_http_session.h"
 #include "kiotty_net_statemachine.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/data/repository/kiotty_websocket_socket.h"

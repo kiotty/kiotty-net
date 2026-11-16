@@ -4,7 +4,7 @@
 #include "core/kiotty_fixed_string.h"
 #include "core/kiotty_parker.h"
 #include "core/kiotty_result.h"
-#include "http/data/repository/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_site.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/data/repository/kiotty_websocket_endpoint.h"
 #include "websocket/data/repository/kiotty_websocket_handler.h"

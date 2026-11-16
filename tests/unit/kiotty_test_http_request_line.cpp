@@ -1,4 +1,4 @@
-#include "http/domain/entity/kiotty_http_request_line.h"
+#include "http/data/repository/request/kiotty_http_request_line_parser.h"
 
 #include <gtest/gtest.h>
 

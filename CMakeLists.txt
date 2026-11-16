@@ -116,22 +116,22 @@ set(KIOTTY_NET_SOURCES
     src/implementation/statemachine/data/repository/kiotty_rule_table.cpp
     src/implementation/statemachine/data/repository/kiotty_stateful_handler.cpp
     src/implementation/statemachine/domain/usecases/kiotty_statemachine_usecases.cpp
-    src/implementation/http/domain/entity/kiotty_http_token.cpp
-    src/implementation/http/domain/entity/kiotty_http_request_line.cpp
-    src/implementation/http/domain/entity/kiotty_http_header_line.cpp
-    src/implementation/http/domain/entity/kiotty_http_message_framing.cpp
-    src/implementation/http/domain/entity/kiotty_http_route_path.cpp
-    src/implementation/http/domain/entity/kiotty_http_static.cpp
-    src/implementation/http/domain/entity/kiotty_http_content_type.cpp
-    src/implementation/http/domain/entity/kiotty_http_response_text.cpp
-    src/implementation/http/domain/entity/kiotty_http_exchange.cpp
-    src/implementation/http/domain/entity/kiotty_http_status_line.cpp
-    src/implementation/http/domain/entity/kiotty_http_reply_framing.cpp
-    src/implementation/http/domain/entity/kiotty_http_body_reader.cpp
-    src/implementation/http/domain/entity/kiotty_http_request_check.cpp
-    src/implementation/http/domain/entity/kiotty_http_request_head.cpp
-    src/implementation/http/domain/entity/kiotty_http_upload.cpp
-    src/implementation/http/domain/entity/kiotty_http_reply_headers.cpp
+    src/implementation/http/data/repository/header/kiotty_http_token_rules.cpp
+    src/implementation/http/data/repository/request/kiotty_http_request_line_parser.cpp
+    src/implementation/http/data/repository/header/kiotty_http_header_line_parser.cpp
+    src/implementation/http/data/repository/body/kiotty_http_message_framing_parser.cpp
+    src/implementation/http/data/repository/server/kiotty_http_route_path_rules.cpp
+    src/implementation/http/data/repository/machine/kiotty_http_static.cpp
+    src/implementation/http/data/repository/header/kiotty_http_content_type_rules.cpp
+    src/implementation/http/data/repository/response/kiotty_http_response_text_builder.cpp
+    src/implementation/http/data/repository/machine/kiotty_http_exchange.cpp
+    src/implementation/http/data/repository/response/kiotty_http_status_line_parser.cpp
+    src/implementation/http/data/repository/response/kiotty_http_reply_framing_rules.cpp
+    src/implementation/http/data/repository/body/kiotty_http_body_reader.cpp
+    src/implementation/http/data/repository/request/kiotty_http_request_check_rules.cpp
+    src/implementation/http/data/repository/request/kiotty_http_request_head_builder.cpp
+    src/implementation/http/data/repository/body/kiotty_http_upload_rules.cpp
+    src/implementation/http/data/repository/header/kiotty_http_reply_headers_parser.cpp
     src/implementation/websocket/domain/entity/kiotty_websocket_frame.cpp
     src/implementation/websocket/domain/entity/kiotty_websocket_close.cpp
     src/implementation/websocket/domain/entity/kiotty_websocket_handshake.cpp
@@ -142,20 +142,20 @@ set(KIOTTY_NET_SOURCES
     src/implementation/websocket/domain/entity/kiotty_websocket_client_machine.cpp
     src/implementation/websocket/domain/entity/kiotty_websocket_access.cpp
     src/implementation/websocket/data/repository/kiotty_websocket_socket.cpp
-    src/implementation/http/domain/entity/kiotty_http_machine.cpp
+    src/implementation/http/data/repository/machine/kiotty_http_machine.cpp
     src/implementation/base/data/infra/clock/kiotty_wall_clock.cpp
-    src/implementation/http/data/repository/kiotty_http_request_store.cpp
-    src/implementation/http/data/repository/kiotty_http_response_store.cpp
-    src/implementation/http/data/repository/kiotty_http_registry.cpp
-    src/implementation/http/data/repository/kiotty_http_file_body.cpp
-    src/implementation/http/data/repository/kiotty_http_notices.cpp
-    src/implementation/http/data/repository/kiotty_http_session.cpp
+    src/implementation/http/data/repository/request/kiotty_http_request_store.cpp
+    src/implementation/http/data/repository/response/kiotty_http_response_store.cpp
+    src/implementation/http/data/repository/server/kiotty_http_registry.cpp
+    src/implementation/http/data/repository/body/kiotty_http_file_body.cpp
+    src/implementation/http/data/repository/server/kiotty_http_notices.cpp
+    src/implementation/http/data/state/kiotty_http_session.cpp
     src/implementation/http/data/datasource/kiotty_http_session_pool.cpp
-    src/implementation/http/data/repository/kiotty_http_reply_store.cpp
-    src/implementation/http/data/repository/kiotty_http_shared_headers.cpp
-    src/implementation/http/data/repository/kiotty_http_configuration.cpp
-    src/implementation/http/data/repository/kiotty_http_server.cpp
-    src/implementation/http/data/repository/kiotty_http_work.cpp
+    src/implementation/http/data/repository/response/kiotty_http_reply_store.cpp
+    src/implementation/http/data/repository/header/kiotty_http_shared_headers.cpp
+    src/implementation/http/data/repository/server/kiotty_http_configuration.cpp
+    src/implementation/http/data/repository/server/kiotty_http_server.cpp
+    src/implementation/http/data/repository/server/kiotty_http_work.cpp
     src/implementation/websocket/data/repository/kiotty_websocket_handler.cpp
     src/implementation/websocket/data/repository/kiotty_websocket_server.cpp
     src/implementation/websocket/data/repository/kiotty_websocket_client.cpp
@@ -171,10 +171,10 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/data/repository/endpoint/kiotty_server.cpp
     src/implementation/base/data/repository/endpoint/kiotty_event_client.cpp
     src/implementation/base/data/repository/endpoint/kiotty_stream_client.cpp
-    src/implementation/http/data/repository/kiotty_http_client_headers.cpp
-    src/implementation/http/data/repository/kiotty_http_client_link.cpp
-    src/implementation/http/data/repository/kiotty_http_client.cpp
-    src/implementation/http/data/repository/kiotty_http_client_exchange.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client_headers.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client_link.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client_exchange.cpp
     src/implementation/context/kiotty_context.cpp
 )
 

@@ -1,4 +1,4 @@
-#include "http/domain/entity/kiotty_http_reply_framing.h"
+#include "http/data/repository/response/kiotty_http_reply_framing_rules.h"
 
 #include <gtest/gtest.h>
 

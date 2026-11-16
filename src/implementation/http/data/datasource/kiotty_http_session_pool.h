@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/kiotty_result.h"
-#include "http/data/repository/kiotty_http_session.h"
+#include "http/data/state/kiotty_http_session.h"
 #include "kiotty_net_http.h"
 
 #include <atomic>

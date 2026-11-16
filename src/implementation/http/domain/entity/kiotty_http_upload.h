@@ -2,7 +2,6 @@
 
 #include "kiotty_net_http.h"
 
-#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -25,10 +24,4 @@ namespace kiotty::net::implementation
 
     static_assert(sizeof(HttpUpload) == sizeof(uint64_t) + 2 * sizeof(int32_t),
                   "HttpUpload: unexpected padding");
-
-    HttpUpload    idleUpload();
-    HttpUpload    startUpload(KiottyNetHttpMethod method, uint64_t body_length);
-    KiottyNetCode checkUploadPiece(const HttpUpload& upload, size_t length);
-    HttpUpload    takeUploadPiece(const HttpUpload& upload, size_t length);
-    KiottyNetCode checkUploadEnd(const HttpUpload& upload);
 }

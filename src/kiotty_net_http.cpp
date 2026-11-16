@@ -3,10 +3,10 @@
 #include "context/kiotty_context.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/kiotty_http_configuration.h"
-#include "http/data/repository/kiotty_http_file_body.h"
-#include "http/data/repository/kiotty_http_session.h"
-#include "http/domain/entity/kiotty_http_route_path.h"
+#include "http/data/repository/body/kiotty_http_file_body.h"
+#include "http/data/repository/server/kiotty_http_configuration.h"
+#include "http/data/repository/server/kiotty_http_route_path_rules.h"
+#include "http/data/state/kiotty_http_session.h"
 
 namespace net = kiotty::net::implementation;
 

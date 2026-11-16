@@ -2,8 +2,8 @@
 
 #include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
-#include "http/data/repository/kiotty_http_site.h"
-#include "http/data/repository/kiotty_http_upgrade_handler.h"
+#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_handler.h"
 #include "websocket/data/repository/kiotty_websocket_endpoint.h"
 #include "websocket/data/repository/kiotty_websocket_socket.h"
 

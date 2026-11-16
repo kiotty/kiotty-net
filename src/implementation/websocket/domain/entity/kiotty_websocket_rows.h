@@ -1,6 +1,6 @@
 #pragma once
 
-#include "http/data/repository/kiotty_http_session.h"
+#include "http/data/state/kiotty_http_session.h"
 #include "kiotty_net_statemachine.h"
 
 namespace kiotty::net::implementation

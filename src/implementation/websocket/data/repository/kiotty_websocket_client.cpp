@@ -2,9 +2,9 @@
 
 #include "core/kiotty_base64.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/kiotty_http_configuration.h"
-#include "http/domain/entity/kiotty_http_request_head.h"
-#include "http/domain/entity/kiotty_http_token.h"
+#include "http/data/repository/header/kiotty_http_token_rules.h"
+#include "http/data/repository/request/kiotty_http_request_head_builder.h"
+#include "http/data/repository/server/kiotty_http_configuration.h"
 #include "statemachine/data/repository/kiotty_stateful_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_access.h"
 #include "websocket/domain/entity/kiotty_websocket_client_machine.h"

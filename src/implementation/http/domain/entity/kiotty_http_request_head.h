@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/kiotty_fixed_string.h"
-#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "kiotty_net_http.h"
 
@@ -18,8 +17,6 @@ namespace kiotty::net::implementation
         KIOTTY_NET_MAX_HOST_LENGTH + HOST_BRACKET_BYTES + HOST_PORT_BYTES;
 
     using HostField = FixedString<HOST_FIELD_BYTES + 1>;
-    using HostFieldResult = Result<HostField, KiottyNetCode>;
-    using HeadLengthResult = Result<size_t, KiottyNetCode>;
 
     struct RequestHead
     {
@@ -36,8 +33,4 @@ namespace kiotty::net::implementation
     static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + sizeof(uint64_t)
                                              + sizeof(size_t) + 2 * sizeof(int32_t),
                   "RequestHead: unexpected padding");
-
-    HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);
-    HostFieldResult  hostFieldOf(const KiottyNetAddress& address, uint16_t default_port);
-    HeadLengthResult writeRequestHead(Span<char> buffer, const RequestHead& head);
 }
