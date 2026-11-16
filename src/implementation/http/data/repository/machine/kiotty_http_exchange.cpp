@@ -5,8 +5,8 @@
 #include "core/kiotty_text.h"
 #include "http/data/repository/body/kiotty_http_body_plan_rules.h"
 #include "http/data/repository/body/kiotty_http_file_body.h"
-#include "http/data/repository/machine/kiotty_http_static.h"
-#include "http/data/repository/response/kiotty_http_response_text_builder.h"
+#include "http/data/repository/machine/kiotty_http_answer_writer.h"
+#include "http/data/repository/response/kiotty_http_answer_rules.h"
 #include "http/data/repository/server/kiotty_http_site.h"
 #include "http/domain/entity/kiotty_http_constants.h"
 
@@ -19,19 +19,15 @@ namespace kiotty::net::implementation
         using Next = KiottyNet_Transition<HttpState>;
 
         constexpr KiottyNetSpan LINE_END_SPAN{ LINE_END, 2 };
-        constexpr int32_t       NOT_ALLOWED = KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
-        constexpr int32_t       NO_CONTENT = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
         constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;
-        constexpr char          ALLOW_NAME[] = "Allow";
 
         size_t                      lineLimitOf(const HttpSite& site);
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session);
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route);
         KiottyNetTransition         afterRoute(HttpSession& session);
+        RouteOutcome                outcomeOf(const HttpSession& session);
         KiottyNetTransition         awaitWork(HttpSession& session);
-        void answerAutomatically(HttpSession& session, const RouteMatch& match);
-        void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed);
-        void answerWithoutWork(HttpSession& session);
+        void                        answerWithoutWork(HttpSession& session);
         KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk);
         bool                isLastPiece(const HttpSession& session, size_t end);
     }
@@ -107,7 +103,8 @@ namespace kiotty::net::implementation
         HttpUpgradeHandler* const upgrade = session.site.upgrade;
         const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
         if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
-        answerAutomatically(session, match);
+        const Answer answer = answerOf(match, path);
+        writeAnswer(session, answer);
         return startSending(session);
     }
 
@@ -190,14 +187,18 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterRoute(HttpSession& session)
         {
+            const RouteOutcome outcome = outcomeOf(session);
+            const AfterRoute next = afterRouteOf(outcome);
+            if (next == AfterRoute::AWAIT_WORK) { return awaitWork(session); }
+            if (next == AfterRoute::REFUSE_STREAM) { answerWithoutWork(session); }
+            return startSending(session);
+        }
+
+        RouteOutcome outcomeOf(const HttpSession& session)
+        {
             const bool is_stream = session.response.frame().isStream();
             const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
-            const bool is_head_stream = is_head && is_stream;
-            const bool is_working = session.is_work_requested && !is_head_stream;
-            if (is_working) { return awaitWork(session); }
-            const bool is_orphan_stream = is_stream && !session.is_work_requested;
-            if (is_orphan_stream) { answerWithoutWork(session); }
-            return startSending(session);
+            return RouteOutcome{ is_stream, is_head, session.is_work_requested };
         }
 
         KiottyNetTransition awaitWork(HttpSession& session)
@@ -205,36 +206,6 @@ namespace kiotty::net::implementation
             session.phase = SessionPhase::WORKING;
             session.is_worker_owned = true;
             return Next::moveToNextState(HttpState::WORKING, thenWork());
-        }
-
-        void answerAutomatically(HttpSession& session, const RouteMatch& match)
-        {
-            switch (match.kind)
-            {
-            case MatchKind::ROUTE:
-                return;
-            case MatchKind::STATIC:
-                answerStatic(session, match.target);
-                return;
-            case MatchKind::UPGRADE:
-            case MatchKind::NOT_FOUND:
-                (void)session.response.setStatus(NOT_FOUND);
-                return;
-            case MatchKind::NOT_ALLOWED:
-                answerWithAllow(session, NOT_ALLOWED, match.allowed);
-                return;
-            case MatchKind::OPTIONS:
-                answerWithAllow(session, NO_CONTENT, match.allowed);
-                return;
-            }
-        }
-
-        void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed)
-        {
-            const AllowText allow = allowListOf(allowed);
-            (void)session.response.setStatus(status);
-            const Span<const char> name{ ALLOW_NAME, sizeof(ALLOW_NAME) - 1 };
-            (void)session.response.addHeader(name, allow.span());
         }
 
         void answerWithoutWork(HttpSession& session)

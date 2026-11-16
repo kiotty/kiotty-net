@@ -121,7 +121,8 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/header/kiotty_http_header_line_parser.cpp
     src/implementation/http/data/repository/body/kiotty_http_message_framing_parser.cpp
     src/implementation/http/data/repository/server/kiotty_http_route_path_rules.cpp
-    src/implementation/http/data/repository/machine/kiotty_http_static.cpp
+    src/implementation/http/data/repository/response/kiotty_http_answer_rules.cpp
+    src/implementation/http/data/repository/machine/kiotty_http_answer_writer.cpp
     src/implementation/http/data/repository/header/kiotty_http_content_type_rules.cpp
     src/implementation/http/data/repository/response/kiotty_http_response_text_builder.cpp
     src/implementation/http/data/repository/machine/kiotty_http_exchange.cpp

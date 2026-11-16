@@ -846,7 +846,7 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 | | `kiotty_http_file_body` | 파일 body 의 `attachFile`, 송신 조각 `pieceAt`, `detachFile` (4.7) |
 | http/domain/entity | `kiotty_http_machine` | HTTP 표와 transition action (4.3) |
 | | `kiotty_http_exchange` | 요청 하나의 흐름: `beginExchange`, `dispatch`, `startWork`, `sendNext`, `reject` |
-| | `kiotty_http_static` | 정적 경로의 응답 (`answerStatic`) |
+| | `kiotty_http_answer_writer` | 고른 답 (`Answer`) 을 응답에 쓴다 (`writeAnswer`) |
 | | `kiotty_http_content_type`, `kiotty_http_response_text` 외 파서 | content type 표 (4.10), 상태줄 / Date / Allow / chunk 머리, H2 의 파서 |
 | C API | `src/kiotty_net_http.cpp` | 번역 층. 문자열 인자를 `parseText` 로 보고 HttpServer 에 넘긴다 |
 
@@ -1358,7 +1358,7 @@ PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repos
 정적 경로와 `setHttpFile`.
 
 - `attachFile(session, type, path)` 가 Session 의 `InputFile` 을 열고 (실패하면 `NOT_FOUND`), 크기를 `size_t` 로 담을 수 있는지 보고, BY_EXTENSION 이면 경로의 확장자로 type 을 고른 뒤 `setBody(type, { nullptr, size }, FILE)` 한다. setBody 가 실패하면 (EVENT_STREAM 등) 파일을 닫는다.
-- `answerStatic` (`http/data/repository/machine/kiotty_http_static`): MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
+- `answerOf(match, path) -> Answer` (`http/data/repository/response/kiotty_http_answer_rules`) 가 라우트가 아닌 답을 값으로 고르고 `writeAnswer` (`http/data/repository/machine/kiotty_http_answer_writer`) 가 쓴다. 404 / 405 / OPTIONS 는 상태 (와 `Allow`), MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
 - `setHttpFile` 은 번역 층이 `parseText` 와 `hasParentSegment` (`/`, `\` 로 나눈 `..` 조각) 를 본 뒤 `attachFile`. Work 중에도 같은 길이다.
 - 파일은 다음 요청 (`beginExchange` 의 `detachFile`) 이나 반납 (풀의 `release`) 때 닫는다.
 
