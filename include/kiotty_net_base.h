@@ -280,6 +280,25 @@ typedef struct KiottyNetConnectionStream
     int64_t                   id;
 } KiottyNetConnectionStream;
 
+typedef enum KiottyNetConnectionEventType
+{
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED
+} KiottyNetConnectionEventType;
+
+typedef struct KiottyNetConnectionEvent
+{
+    KiottyNetConnectionEventType type;
+    KiottyNetSpan                data;
+    size_t                       length;
+    KiottyNetConnectionStream    stream;
+    KiottyNetCode                reason;
+} KiottyNetConnectionEvent;
+
 typedef void*   KiottyNetAppContext;
 typedef void*   KiottyNetConnectionContext;
 

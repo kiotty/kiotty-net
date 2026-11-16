@@ -156,6 +156,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/kiotty_http_server.cpp
     src/implementation/http/data/repository/kiotty_http_work.cpp
     src/implementation/websocket/data/repository/kiotty_websocket_client.cpp
+    src/implementation/websocket/data/repository/kiotty_websocket_endpoint.cpp
     src/implementation/base/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/base/data/repository/endpoint/kiotty_endpoint.cpp
     src/implementation/base/data/repository/configuration/kiotty_configuration.cpp

@@ -306,7 +306,7 @@ KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server,
 {
     if (server == nullptr || address == nullptr) { return INVALID; }
     const KiottyNetAddress copied = *address;
-    return server->run(copied, tls, app_context);
+    return server->run(server, copied, tls, app_context);
 }
 
 void KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server)

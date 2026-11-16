@@ -10,25 +10,6 @@ extern "C" {
 #define KIOTTY_NET_ANY_STATE  (-1)
 #define KIOTTY_NET_MAX_NEXT   8
 
-typedef enum KiottyNetConnectionEventType
-{
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED
-} KiottyNetConnectionEventType;
-
-typedef struct KiottyNetConnectionEvent
-{
-    KiottyNetConnectionEventType type;
-    KiottyNetSpan                data;
-    size_t                       length;
-    KiottyNetConnectionStream    stream;
-    KiottyNetCode                reason;
-} KiottyNetConnectionEvent;
-
 typedef struct KiottyNetTransition
 {
     int32_t                   next;

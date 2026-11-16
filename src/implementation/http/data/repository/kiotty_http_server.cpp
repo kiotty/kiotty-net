@@ -1,6 +1,5 @@
 #include "http/data/repository/kiotty_http_server.h"
 
-#include "context/kiotty_handles.h"
 #include "http/domain/entity/kiotty_http_machine.h"
 #include "statemachine/domain/entity/kiotty_stateful_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_access.h"
@@ -36,7 +35,8 @@ namespace kiotty::net::implementation
         _site.notices.clear();
     }
 
-    KiottyNetCode HttpServer::run(const KiottyNetAddress& address,
+    KiottyNetCode HttpServer::run(KiottyNetHttpServerHandle self,
+                                  const KiottyNetAddress& address,
                                   const KiottyNetTlsServerConfiguration* tls,
                                   KiottyNetAppContext app_context)
     {
@@ -44,6 +44,7 @@ namespace kiotty::net::implementation
         _runs.fetch_add(1);
         _site.is_closing.store(false);
         _site.app_context = app_context;
+        _site.owner = self;
         const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);
@@ -121,7 +122,6 @@ namespace kiotty::net::implementation
         _site.receive_capacity = configuration.server.receive_capacity;
         _site.send_capacity = configuration.server.send_capacity;
         _site.push_capacity = configuration.server.push_capacity;
-        _site.owner = static_cast<KiottyNetHttpServer*>(this);
         _site.socket_owner = this;
         _site.lane = this;
         _site.registry.initialize(limits.max_routes);

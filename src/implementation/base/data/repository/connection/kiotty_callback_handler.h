@@ -2,7 +2,6 @@
 
 #include "base/domain/entity/kiotty_handler.h"
 #include "kiotty_net_base.h"
-#include "kiotty_net_statemachine.h"
 
 #include <cstdint>
 

@@ -16,6 +16,8 @@ It is a heuristic scanner, not a parser. It reports:
   CAST      reinterpret_cast outside infra backend  (rule 2.3)
   COMMENT   comment in source                       (rule 4.9)
   MACRO     #define in source                       (rule 4.14)
+  LAYER     include against the module order core <- base <- statemachine <- http <- websocket
+            <- context (rule 7.1, design_module_layout_v0)
 """
 import os
 import re
@@ -27,6 +29,7 @@ MAX_BODY = 30
 MAX_NEST = 2
 MAX_ARGS = 4
 MAX_PUBLIC = 7
+LAYER_RANK = {"core": 0, "base": 1, "statemachine": 2, "http": 3, "websocket": 4, "context": 5}
 
 BANNED = re.compile(
     r"(?<![\w:.>])(?:std::)?(strcpy|strcat|strlen|gets|sprintf|vsprintf|atoi|atol|strtol|"
@@ -146,6 +149,33 @@ def is_backend(path):
     return "/data/infra/" in p and "/backend/" in p
 
 
+def module_of(path):
+    p = path.replace("\\", "/")
+    marker = "src/implementation/"
+    if marker not in p:
+        return None
+    return p.split(marker, 1)[1].split("/", 1)[0]
+
+
+def check_layers(path, raw, report):
+    module = module_of(path)
+    if module not in LAYER_RANK:
+        return
+    rank = LAYER_RANK[module]
+    for number, text in enumerate(raw.splitlines(), 1):
+        m = re.match(r'\s*#\s*include\s+"([^/"]+)/', text)
+        public = re.match(r'\s*#\s*include\s+"kiotty_net_(\w+)\.h"', text)
+        target = m.group(1) if m else None
+        if public:
+            target = public.group(1)
+        if public and target == "base":
+            continue
+        if target not in LAYER_RANK or target == "core":
+            continue
+        if LAYER_RANK[target] > rank:
+            report(path, number, "LAYER", f"{module} includes {target}")
+
+
 def check_classes(path, code, report):
     for m in re.finditer(r"(?<![<,]\s)(?<![<,])\b(class|struct)\s+(\w+)[^;{(<>=]*\{", code):
         start = m.end()
@@ -214,6 +244,7 @@ def check_file(path, report):
             report(path, number, "LINE", f"{len(text)} characters")
         if re.match(r"\s*#\s*define\b", text):
             report(path, number, "MACRO", text.strip())
+    check_layers(path, raw, report)
     if len(lines) > MAX_FILE and not is_core_template(path):
         report(path, 1, "FILE", f"{len(lines)} lines")
     code, comments = strip(raw)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "kiotty_net_base.h"
-#include "kiotty_net_statemachine.h"
 
 #include <cstdint>
 
