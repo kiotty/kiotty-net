@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모듈 정리 설계 v0 (초안)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .keep { background: var(--agree); }
+  .new { background: var(--partial); }
+  .drop { background: var(--concern); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>모듈 정리 설계 v0 (초안) : 의존 방향, 층의 역할, 값으로 잇는 흐름</h1>
+<p class="sub">2026-11-16 초안. 파일을 <code>base / statemachine / http / websocket</code> 로 옮긴 뒤 (사용자 결정 2026-11-16) 드러난 것을 정리한다. 사용자 요구: 의존 방향 <code>core ← base ← statemachine ← http ← websocket</code>, entity 는 값만, 로직은 repository 에 관심사별로, usecases 는 C ABI 인자로 repository 를 조합, 상태는 <code>data/state</code>, 처리 순서는 <code>B b = f(const A&amp; a)</code> 처럼 타입만으로 읽힌다. 동작은 바꾸지 않는다 (공개 API 그대로, 테스트 수 그대로).</p>
+
+<ul class="toc">
+  <li><a href="#s0">0. 지금</a></li>
+  <li><a href="#s1">1. 층의 역할</a></li>
+  <li><a href="#s2">2. 의존 방향을 맞추기</a></li>
+  <li><a href="#s3">3. statemachine</a></li>
+  <li><a href="#s4">4. upgrade 를 websocket 으로</a></li>
+  <li><a href="#s5">5. 관심사별 배치 (http, websocket)</a></li>
+  <li><a href="#s6">6. 값으로 잇는 흐름</a></li>
+  <li><a href="#s7">7. HttpClient 의 State</a></li>
+  <li><a href="#s8">8. 정할 것</a></li>
+  <li><a href="#s9">9. 사이클</a></li>
+</ul>
+
+<h2 id="s0">0. 지금</h2>
+<h3>의존이 거꾸로인 곳</h3>
+<table>
+  <tr><th>방향</th><th>어디</th><th>왜</th></tr>
+  <tr><td>base → websocket</td><td><code>base/.../endpoint/kiotty_endpoint.cpp:2</code></td><td><code>~KiottyNetWebSocketEndpoint()</code> 의 정의만 거기 있다</td></tr>
+  <tr><td>base → statemachine (공개 헤더)</td><td><code>kiotty_handler.h</code>, <code>kiotty_connection_event.h</code>, <code>kiotty_callback_handler.h</code></td><td><code>KiottyNetConnectionEvent</code> 와 그 enum 이 <code>kiotty_net_statemachine.h</code> 에 정의돼 있다</td></tr>
+  <tr><td>http → websocket</td><td>http 8 파일 (registry, request_store, session, site, server, exchange, machine)</td><td>서버의 upgrade 와 frame 처리가 http 안에 섞여 있다 (4절)</td></tr>
+  <tr><td>http → context</td><td><code>kiotty_http_server.cpp:3</code></td><td><code>kiotty_handles.h</code> 를 include</td></tr>
+</table>
+<p>http → statemachine, websocket → http, websocket → statemachine 은 원하는 방향이다.</p>
+
+<h3>http/domain/entity 의 실제</h3>
+<p>파일 36 개 (쌍 17 + 헤더 둘). 순수한 값 / 파서 / 조립기가 대부분이지만 셋은 값이 아니다.</p>
+<table>
+  <tr><th>종류</th><th>파일</th></tr>
+  <tr><td>값</td><td>constants, rule_names (exchange.h 를 include 해서 session 까지 끌고 온다)</td></tr>
+  <tr><td>파서 / 규칙 (순수)</td><td>request_line, header_line, status_line, message_framing, reply_framing, reply_headers, request_check, route_path, content_type, token, upload</td></tr>
+  <tr><td>조립기 (순수, 호출자 버퍼에 씀)</td><td>request_head, response_text</td></tr>
+  <tr><td>상태를 가진 파서</td><td>body_reader (chunk 를 벗기는 streaming)</td></tr>
+  <tr><td><b>흐름 (session 을 바꾸고 I/O, 콜백)</b></td><td><b>exchange, machine, static</b></td></tr>
+</table>
+
+<h3>순서가 안 보이는 까닭</h3>
+<p>서버의 한 단계는 모두 <code>HttpSession&amp; → KiottyNetTransition</code> 이고 값은 session 을 거쳐 다음 단계로 간다. 넘김 조사에서 숨은 쓰기를 19 곳 찾았다. 대표:</p>
+<ul>
+  <li><code>takeRequestLine</code> / <code>takeHeader</code> 는 code 만 돌려주고 파싱한 값은 store 에 남긴다.</li>
+  <li><code>finishHeaders</code> 는 framing 을 돌려주면서 <code>keep_alive</code> 도 몰래 쓴다. <code>afterHeaders</code> 가 <code>persistence</code>, <code>has_body</code> 를 쓰고 한참 뒤 <code>sendPiece</code> 가 읽는다.</li>
+  <li><code>body_remaining</code> 을 세 곳이 쓰고 두 곳이 읽는다.</li>
+  <li>사용자 콜백 → C ABI → <code>HttpWork::fill</code> 이 응답과 <code>is_work_requested</code> 를 쓰고 <code>afterRoute</code> 가 그 flag 를 본다.</li>
+  <li>client: <code>transmit</code> 가 몰래 다시 연결하고 머리 영역을 지운다. <code>nextLine</code> 이 <code>_has_reply_bytes</code> 를 세우고 <code>attempt</code> 가 읽는다.</li>
+</ul>
+<p>이미 원하는 모양인 것: <code>upload</code> (<code>HttpUpload u = takeUploadPiece(u, n)</code>), <code>selectReplyFraming</code>. 이것을 본으로 삼는다.</p>
+
+<h2 id="s1">1. 층의 역할</h2>
+<table>
+  <tr><th>층</th><th>둔다</th><th>두지 않는다</th></tr>
+  <tr><td><code>domain/entity</code></td><td>값 객체와 enum. C ABI 구조체를 그대로 쓰거나 감싼 구현 class. 값 하나의 불변식 검사 (생성 함수가 <code>Result</code>)</td><td>파서, 조립기, 상태 기계, I/O, session</td></tr>
+  <tr><td><code>domain/usecases</code></td><td>C ABI 기능 하나 = 함수 하나. C ABI 인자를 받아 handle 이 가진 repository 를 조합한다. 모듈의 C ABI 단위 (server, client) 마다 파일 하나</td><td>바이트 처리. <code>src/kiotty_net_*.cpp</code> 는 인자 변환만 하고 이것을 부른다</td></tr>
+  <tr><td><code>data/repository</code></td><td>기능을 내는 로직. 관심사별 하위 폴더. 파서 / 조립기 / 상태 기계 / store</td><td>오래 사는 상태 (state 에)</td></tr>
+  <tr><td><code>data/state</code></td><td>호출 사이에 남는 변하는 상태 struct. repository 의 세부 객체가 reference 로 받아 그 자리에서 쓴다 (4.19)</td><td>로직</td></tr>
+  <tr><td><code>data/datasource</code></td><td>create 때 만드는 고정 크기 풀 (Session 풀)</td><td></td></tr>
+</table>
+<p class="note">개발 수칙 7.1 은 이 표로 고친다 (파일 정리 때 트리만 먼저 고쳤다).</p>
+
+<h2 id="s2">2. 의존 방향을 맞추기</h2>
+<div class="flow">core ← base ← statemachine ← http ← websocket        context 는 모두를 안다</div>
+<table>
+  <tr><th>어긋남</th><th>고침</th></tr>
+  <tr><td>base → websocket (소멸자)</td><td><code>websocket/data/repository/kiotty_websocket_endpoint.cpp</code> 를 만들어 소멸자를 옮긴다</td></tr>
+  <tr><td>base → statemachine 공개 헤더</td><td><code>KiottyNetConnectionEventType</code>, <code>KiottyNetConnectionEvent</code> 의 정의를 <code>kiotty_net_base.h</code> 로 옮긴다. <code>kiotty_net_statemachine.h</code> 는 base 를 include 하므로 앱 코드는 그대로 컴파일된다 (정할 것 3). <code>Handler::initialState</code>, <code>Caller::machine_state</code> 는 base 에 남는다 (이름이 state 일 뿐 정수 하나)</td></tr>
+  <tr><td>http → websocket</td><td>4절</td></tr>
+  <tr><td>http → context</td><td><code>kiotty_handles.h</code> 를 쓰는 까닭을 보고 handle 변환을 usecases 나 adapter 로 올린다</td></tr>
+</table>
+<p>수칙 검사에 방향 검사를 더한다: <code>base/</code> 가 <code>statemachine/ http/ websocket/</code> 를, <code>statemachine/</code> 이 <code>http/ websocket/</code> 를, <code>http/</code> 가 <code>websocket/</code> 를 include 하면 <code>LAYER</code>.</p>
+
+<h2 id="s3">3. statemachine</h2>
+<h3>지금</h3>
+<ul>
+  <li>공개 구조체 <code>KiottyNetRule</code>, <code>KiottyNetStateMachine</code> 을 구현이 그대로 쓴다 (복사도 감싸기도 없음). handle 은 없다.</li>
+  <li><code>kiotty_rule_table</code>: 자유 함수 <code>findRule</code>, <code>isAllowed</code>, <code>checkRules</code>.</li>
+  <li><code>kiotty_stateful_handler</code>: <code>class StatefulHandler : public Handler</code>. base 의 연결이 <code>dispatch(caller, event)</code> 를 부르고, 규칙을 찾아 transition action 을 부르고, 다음 상태를 검사해 쓴다.</li>
+  <li>쓰는 곳: http 서버 (<code>HTTP_MACHINE</code>), websocket 클라이언트 (<code>CLIENT_MACHINE</code>), C ABI <code>runStatefulServer / runStatefulEventClient</code>, 테스트 (<code>kiotty_test_rule_table.cpp</code> 가 세 함수를 직접 부름).</li>
+</ul>
+<h3>바꿈</h3>
+<table>
+  <tr><th>층</th><th>무엇</th></tr>
+  <tr><td>entity</td><td><code>class Rule</code> (<code>KiottyNetRule</code> 하나를 감싼 값: state, event, action, 허용 다음 상태), <code>class StateMachine</code> (규칙 목록과 처음 상태. <code>static Result&lt;StateMachine&gt; of(const KiottyNetStateMachine*)</code> 가 검사 (지금의 <code>checkRules</code>) 를 통과한 것만 만든다. 만들어진 것은 언제나 유효). 저장은 정할 것 2</td></tr>
+  <tr><td>repository</td><td><code>StatefulHandler</code> (base 의 Handler 구현). <code>RuleResult findRule(const StateMachine&amp;, int32_t state, event)</code>, <code>bool isAllowed(const Rule&amp;, int32_t next)</code> 는 <code>StateMachine</code> 의 메서드로 (값이 자기 질문에 답한다)</td></tr>
+  <tr><td>usecases</td><td><code>runStatefulServer(Server&amp;, const KiottyNetStatefulAppContext&amp;, address, tls)</code>, <code>runStatefulEventClient(...)</code>: <code>StateMachine::of</code> → handler → <code>run</code></td></tr>
+</table>
+<p class="warn">말씀하신 2번 ("rule_table, stateful_handler 는 usecases 에 가깝다") 과 7번 ("statemachine 같은 것은 repository 가 낸다") 이 서로 다른 자리를 가리킨다. 위 표는 7번의 정의 (usecases = C ABI 를 받아 조합) 를 따랐다: run 의 조합만 usecases, 규칙 찾기와 handler 는 repository. 정할 것 1.</p>
+
+<h2 id="s4">4. upgrade 를 websocket 으로</h2>
+<h3>지금 http 안에 있는 websocket</h3>
+<table>
+  <tr><th>무엇</th><th>어디</th></tr>
+  <tr><td>라우트 대상 <code>WebSocketTarget</code> 의 표</td><td><code>HttpRegistry::_sockets</code>, <code>RouteMatch</code></td></tr>
+  <tr><td>연결별 상태 <code>SocketState</code> (frame 커서, ping / close 시각, control 125 바이트, ...)</td><td><code>HttpSession::socket</code> (session 안에 박혀 있다)</td></tr>
+  <tr><td>방송용 <code>SocketLink</code> (atomic)</td><td><code>HttpSessionPool::_links</code></td></tr>
+  <tr><td>frame 상태와 row 함수</td><td><code>HttpState</code> 의 <code>SOCKET_OPENING</code>, <code>FRAME_*</code>, <code>HTTP_RULES</code> 의 frame row 들</td></tr>
+  <tr><td>upgrade 답 (101), 열기, 닫기</td><td><code>dispatch → answerUpgrade</code>, <code>onClosed → endSocket</code></td></tr>
+  <tr><td>공개 handle 의 owner</td><td><code>HttpServer : KiottyNetWebSocketEndpoint</code></td></tr>
+  <tr><td>작은 것</td><td><code>appendBody(data, MaskKey, offset)</code>, <code>push(FrameOpcode)</code>, <code>HttpSite</code> 의 <code>lane / upgrade / role / mask_state</code></td></tr>
+</table>
+
+<h3>바꿈: http 가 정의하고 websocket 이 채우는 <code>HttpUpgradeHandler</code></h3>
+<pre><code>// http/data/repository/upgrade/kiotty_http_upgrade_handler.h   (http 는 이것만 안다)
+class HttpUpgradeHandler
+{
+public:
+    virtual KiottyNetCode       reserve(size_t session_count) = 0;                    // create 때 연결별 메모리
+    virtual KiottyNetTransition answer(UpgradeRequest request, HttpSession&amp; session) = 0;   // 101 을 줄지
+    virtual KiottyNetTransition step(HttpSession&amp; session, KiottyNetConnectionEvent event) = 0;  // UPGRADED 동안
+    virtual void                end(HttpSession&amp; session, KiottyNetCode reason) = 0;           // 닫힘
+};</code></pre>
+<ul>
+  <li><b>라우트</b>: http 의 라우트 항목은 <code>UPGRADE</code> 종류와 정수 <code>upgrade_index</code> 만 갖는다. 대상 표 (<code>WebSocketTarget</code>) 와 콜백은 websocket 이 가진다.</li>
+  <li><b>상태 기계</b>: <code>HttpState</code> 에서 <code>SOCKET_OPENING</code>, <code>FRAME_*</code> 를 빼고 <code>UPGRADED</code> 하나를 둔다. <code>UPGRADED</code> 의 READ / WRITTEN / TIMEOUT 은 모두 <code>handler.step</code> 으로. frame 의 세부 상태 (머리 / 길이 / mask / payload) 는 websocket 이 자기 상태에 들고 자기 enum 으로 간다 (지금도 <code>socket.read.state</code> 를 따로 든다). 서버 run 은 기계 하나 (<code>HTTP_MACHINE</code>) 그대로.</li>
+  <li><b>연결별 메모리</b>: <code>SocketState</code> 와 <code>SocketLink</code> 를 http session 에서 빼서 websocket 이 create 때 <code>reserve(count)</code> 로 받은 배열에 둔다. session 의 index 로 찾는다. message payload 는 지금처럼 http 의 body 버퍼를 빌린다 (<code>request.body()</code> 를 raw span 으로 내주고 mask 풀기는 websocket 이 한다). 정할 것 4.</li>
+  <li><b>공개 handle</b>: <code>KiottyNetWebSocketEndpoint</code> 는 websocket 의 <code>WebSocketServerEndpoint</code> (HttpServer 와 handler 를 reference 로 듦) 가 구현한다. C ABI 는 그대로.</li>
+  <li><b>HttpServer 와의 연결</b>: <code>KiottyNet_addWebSocket</code> (websocket C ABI) 이 처음 불릴 때 그 서버에 websocket 의 handler 를 붙인다. 붙지 않은 서버는 upgrade 라우트가 없으니 http 혼자 돈다.</li>
+  <li><b>websocket 클라이언트</b>: http 의 조각 (Session, store, 파서, 상태 기계 도우미) 을 쓴다. 허용 방향이라 둔다. <code>HttpSite</code> 의 client 전용 필드 (<code>upgrade</code>, <code>mask_state</code>, <code>role</code>) 는 websocket 의 감싸개로 옮긴다.</li>
+</ul>
+
+<h2 id="s5">5. 관심사별 배치</h2>
+<h3>5.1 http</h3>
+<pre><code>http/
+    domain/
+        entity/        값만: RequestLine, StatusLine, HttpVersion, BodyFraming, ReplyFraming, Persistence,
+                       RequestHead, HostField, HttpUpload, RoutePath, ContentType 표, HttpState, 상수
+        usecases/      kiotty_http_server_usecases.*, kiotty_http_client_usecases.*
+    data/
+        repository/
+            machine/   HTTP_RULES 와 row 함수 (지금 machine + exchange 의 흐름), 정적 파일 답 (static)
+            header/    header_line, token, reply_headers, request_check 의 헤더 쪽, shared_headers
+            body/      message_framing, body_reader, file_body, upload 규칙
+            request/   request_line, request_head (조립), request_store, request_check 의 경로 / body 쪽
+            response/  status_line, response_text, response_store, reply_store, reply_framing
+            upgrade/   HttpUpgradeHandler (4절)
+            server/    HttpServer, HttpWork, registry, notices, configuration, site
+            client/    HttpClient, HttpClientStream, HttpClientHeaders, HttpClientLink
+        state/         kiotty_http_client_state.h, kiotty_http_session_state.h (서버의 연결별)
+        datasource/    session_pool</code></pre>
+<ul>
+  <li>파서와 조립기는 repository 로 가지만 모양은 그대로 순수 함수다 (<code>Result&lt;RequestLine, Status&gt; parseRequestLine(Span)</code>). 값 타입 (<code>RequestLine</code> 등) 만 entity 에 남는다.</li>
+  <li><code>HttpSession</code> 은 state 로 간다. 지금의 묶음 (store 둘, 파일, 커서, flag 여럿) 을 단계별 값으로 나눈다 (6절).</li>
+  <li>entity 의 파일 수는 36 → 약 12. repository 는 하위 폴더 8 개로.</li>
+</ul>
+
+
+<h3>5.2 websocket</h3>
+<p>지금: 파일 24 개 (entity 9 쌍, repository 3 쌍). entity 중 순수한 것은 <code>frame</code>, <code>close</code>, <code>handshake</code> 뿐이고 나머지 여섯 (<code>access, rows, upgrade, timing, lane, client_machine</code>) 은 <code>HttpSession&amp;</code> / <code>HttpSite&amp;</code> 를 받아 바꾸는 흐름이다. 서버와 클라이언트가 frame row (<code>onFrameStart ~ onFramePayload</code>) 를 함께 쓰는데 그 row 가 http 의 session 위에서 돈다. 상태는 <code>SocketState</code> (http session 안), <code>SocketLink</code> (http 풀 안), <code>HttpSite</code> 의 client 칸, <code>WebSocketClient</code> 멤버에 흩어져 있다.</p>
+<pre><code>websocket/
+    domain/
+        entity/        값만: FrameOpcode, FrameFinality, FrameMasking, FrameStart, MaskKey, FrameHead,
+                       ClosePayload, CloseText, AcceptText, ProtocolText, SocketRole, WebSocketTarget (라우트 대상: 콜백 넷과 path),
+                       WebSocketState (자기 frame 세부 상태 enum: FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING), 상수
+        usecases/      kiotty_websocket_server_usecases.*  addWebSocket, on* 등록, send, close, broadcast, upgradeHeader, selectProtocol
+                       kiotty_websocket_client_usecases.*  create, setProtocols, run, await, send, close
+    data/
+        repository/
+            frame/     frame 머리 파싱 / 조립, mask (지금 frame), 그리고 서버와 클라이언트가 함께 쓰는 frame 읽기 단계
+                       (지금 rows 의 onFrame* 를 HttpSession 대신 SocketState 와 사건을 받게)
+            message/   data frame 이어 붙이기, 순서 검사, 끝에서 UTF-8 검사와 on_message (지금 rows 의 storePiece, isInOrder, finishData, deliver)
+            control/   ping / pong / close frame 답, close payload (지금 close, rows 의 finishControl, answerClose, writeClose, failSocket),
+                       keepalive 와 close 시각 (지금 timing)
+            handshake/ Sec-WebSocket-Key / Accept, Upgrade 검사, protocol 고르기, 클라이언트 upgrade 요청 조립과 응답 검사
+                       (지금 handshake, upgrade, client 의 prepareUpgrade)
+            send/      PushLane, pushFrame, pushClose, isOpenSocket (지금 lane). 다른 thread 의 send 가 지나는 길
+            server/    WebSocketUpgradeHandler (http 의 HttpUpgradeHandler 구현: answer = handshake 와 101, step = frame 읽기, end = on_close),
+                       WebSocketServerEndpoint (KiottyNetWebSocketEndpoint 구현, 지금 access 와 HttpServer 의 다섯 override),
+                       WebSocketRoutes (라우트 대상 표, 지금 HttpRegistry::_sockets)
+            client/    WebSocketClient (EventClient), 클라이언트 상태 기계 (지금 client_machine: 머리 단계 row + frame 단계는 frame/ 을 부름)
+            endpoint/  KiottyNetWebSocketEndpoint (공개 handle 의 owner 인터페이스) 와 그 소멸자 .cpp
+        state/         kiotty_websocket_socket_state.h   연결 하나: frame 커서, 읽기 길이, message 진행, ping / close 시각, control 125 바이트, 보낼 close frame, 열림 / 받은 close, context, protocol, 라우트 index
+                       kiotty_websocket_client_state.h   클라이언트 하나: 보낼 upgrade 요청, 기대 accept, 제안 protocol, 열림 Parker, 실패 code, running / ended
+        datasource/    kiotty_websocket_socket_table.*   SocketState[] 와 SocketLink[] (방송용 atomic). 서버는 HttpUpgradeHandler::reserve(count) 로, 클라이언트는 create 때 한 칸</code></pre>
+<ul>
+  <li><b>datasource 가 필요하다.</b> 연결별 상태를 http session 에서 빼면 그 메모리를 websocket 이 create 때 만들어 둬야 한다 (런타임 heap 금지). 정할 것 4 의 "병렬 배열" 이 이것이다.</li>
+  <li><b>frame 읽기 하나를 둘이 쓴다.</b> 서버는 <code>UPGRADED</code> 상태에서 <code>handler.step</code> 이 부르고, 클라이언트는 자기 기계의 frame row 가 부른다. 둘 다 <code>FrameStep stepFrame(const SocketState&amp;, KiottyNetConnectionEvent)</code> 의 결과를 받아 저장하고 다음 읽기를 정한다.</li>
+  <li><b>클라이언트는 http 를 써도 된다</b> (방향 허용): 상태줄 파서, 헤더 줄 파서, 줄 읽기 도우미. 다만 <code>HttpSite</code> / <code>HttpSession</code> 을 통째로 빌리지 않고 필요한 store 만 자기 state 에 든다.</li>
+  <li>파일 수: entity 9 쌍 → 값 헤더 약 5, repository 3 쌍 → 하위 폴더 8.</li>
+</ul>
+
+<h2 id="s6">6. 값으로 잇는 흐름</h2>
+<p>규칙: <b>한 단계는 앞 단계의 값을 받아 새 값을 돌려준다. 다음 단계가 읽을 것은 돌려준 값에 있다.</b> state 에 쓰는 것은 단계의 끝에서 한 번 (돌려받은 값을 저장), 이름이 <code>store*</code> / <code>commit*</code> 로 드러난다. I/O 가 사건 단위로 쪼개지므로 사건 사이의 값은 state 의 "단계 칸" 하나에 둔다.</p>
+
+<h3>서버: 요청 머리까지</h3>
+<pre><code>RequestLineResult  line    = parseRequestLine(bytes);                          // REQUEST_LINE 사건
+HeaderResult       header  = parseHeaderLine(bytes, limits);                   // HEADER_LINE 사건마다
+RequestHeadState   head    = appendHeader(head, header.value);                 //   값 → 새 값
+RequestFraming     framing = frameRequest(line.value, head);                   // 빈 줄: { body, keep_alive, expects_continue }
+BodyPlan           plan    = planBody(framing);                                 // { NONE | LENGTH n | CHUNKED }
+RouteMatch         match   = findRoute(registry, line.value);                  // body 끝
+Answer             answer  = answer(match, request);                            // 라우트 / 정적 / upgrade / 거절
+ResponseFrame      frame   = sealResponse(response, SealOf(framing, answer));  // 머리 조립
+Piece              piece   = pieceAt(frame, sent);                              // WRITTEN 사건마다
+AfterResponse      after   = afterResponse(framing.keep_alive, answer);        // { KEEP | CLOSE reason }</code></pre>
+<ul>
+  <li><code>finishHeaders</code> 가 몰래 쓰던 <code>keep_alive</code>, <code>afterHeaders</code> 가 쓰던 <code>persistence / has_body</code> 는 <code>RequestFraming</code> 값 안에 있다.</li>
+  <li><code>body_remaining</code> 은 <code>BodyPlan</code> 값의 필드다. <code>takeBody(plan, piece) → BodyPlan</code> 이 줄인 새 값을 돌려준다 (upload 와 같은 모양).</li>
+  <li>사용자 콜백이 쓰는 응답과 Work 요청은 콜백이 끝난 뒤 <code>Answer collectAnswer(const ResponseDraft&amp;)</code> 로 값이 된다. flag 를 나중에 읽지 않는다.</li>
+  <li>row 함수 (상태 기계) 는 이 값들을 state 에서 꺼내 위 함수를 부르고 결과를 저장하고 Transition 을 돌려준다. row 하나 = 위 줄 하나 둘.</li>
+</ul>
+
+<h3>클라이언트: 요청 하나</h3>
+<pre><code>ClientRequest      request = clientRequestOf(c_request, headers, count);      // usecase (C ABI 인자)
+RequestHead        head    = requestHeadOf(state.target, state.shared, request, body_length);
+HeadBytes          bytes   = writeRequestHead(state.head_area, head);         // 길이 있는 span
+Connected          link    = ensureConnected(line, state.target, deadline);   // 다시 연결은 여기서만, 값으로 알림 { code, is_reused }
+SendResult         sent    = sendBytes(line, bytes, deadline);
+ReplyHead          reply   = receiveReplyHead(line, state.reply, request.method, deadline);   // { status, headers, framing, saw_bytes }
+RetryPlan          retry   = planRetry(link, sent, reply, request.method);    // 지금 attempt 안의 판단
+KiottyNetHttpReply answer  = replyOf(reply);</code></pre>
+<p><code>_has_reply_bytes</code> 는 <code>ReplyHead::saw_bytes</code>, 몰래 하던 다시 연결은 <code>Connected</code> 값이 된다.</p>
+
+<h3>websocket 서버: upgrade 에서 message 까지</h3>
+<pre><code>UpgradeCheck       check    = checkUpgrade(request);                          // http 가 handler.answer 를 부를 때: GET, body 없음, Upgrade / Connection / Version / Key
+UpgradeChoice      choice   = callUpgrade(target, check.value, app_context);  // 앱의 on_upgrade: protocol 고르기
+HandshakeReply     reply    = handshakeReplyOf(check.value.key, choice);     // 101 과 Sec-WebSocket-Accept, Sec-WebSocket-Protocol
+SocketState        opened   = openSocket(target_index, choice);               // 101 을 다 보낸 뒤, on_open
+
+FrameStartResult   start    = parseFrameStart(bytes);                         // FRAME_START 사건
+FrameLengthResult  length   = parseExtendedLength(bytes);                     // FRAME_LENGTH 사건 (필요할 때)
+MaskKey            key      = parseMaskKey(bytes);                            // FRAME_MASK 사건
+FramePlan          plan     = planFrame(start.value, length.value, key, socket.message);  // { DATA | CONTROL, 남은 길이, 순서 맞음 }
+MessageProgress    progress = appendPiece(socket.message, unmask(piece, plan));          // FRAME_PAYLOAD 사건마다, 값 → 새 값
+MessageResult      message  = finishMessage(progress, plan.opcode);           // 끝 frame: UTF-8 검사 → KiottyNetWebSocketMessage
+ControlAnswer      answer   = answerControl(plan, control_payload);           // PING → PONG, CLOSE → close 답과 닫기, PONG → 없음
+FrameHead          head     = buildFrameHead(opcode, payload.length);         // 보내기 (다른 thread): head 와 payload 를 lane 에</code></pre>
+<p>지금 <code>SocketState</code> 를 바로 고치던 <code>storePiece</code>, <code>storeControl</code>, <code>isInOrder</code> 는 <code>MessageProgress</code> / <code>FramePlan</code> 값이 된다. 사건 사이에는 그 값만 state 에 저장한다.</p>
+
+<h3>websocket 클라이언트: 연결에서 열림까지</h3>
+<pre><code>UpgradeRequest     request  = upgradeRequestOf(path, host, protocols, key);   // run (usecase)
+UpgradeBytes       bytes    = writeUpgradeRequest(state.request_area, request);
+StatusLineResult   status   = parseStatusLine(line);                          // http 의 파서 (허용 방향)
+HeaderResult       header   = parseHeaderLine(line, limits);                  // 헤더 줄마다
+UpgradeReply       reply    = appendReplyHeader(reply, header.value);
+OpenResult         open     = checkUpgradeReply(reply, state.accept, state.protocols);   // 101, Accept, protocol
+SocketState        opened   = openSocket(open.value);                         // 그 뒤 frame 은 서버와 같은 단계</code></pre>
+
+<h2 id="s7">7. HttpClient 의 State</h2>
+<pre><code>// http/data/state/kiotty_http_client_state.h
+struct HttpClientState
+{
+    BusyFlag           busy;
+    HttpClientTarget   target;       // address, host, has_target
+    HttpSharedHeaders  shared;
+    HttpReplyStore     reply;
+    HttpBodyReader     body;
+    HttpUpload         upload;
+    Persistence        persistence;
+    Span&lt;char&gt;         head_area;
+};</code></pre>
+<ul>
+  <li><code>HttpClient</code> 는 <code>StreamClient</code> 를 private 상속하고 State 를 멤버로 가진다. 공개 메서드: <code>initialize, reset, connect, stream, headers, link</code>.</li>
+  <li><code>HttpClientStream(HttpClientState&amp;, StreamClient&amp;)</code> 이 <code>send, readBody, begin, write, finish</code>. StreamClient 의 <b>공개</b> 메서드만 쓴다. friend 도 새 세부 객체도 없다.</li>
+  <li>바이트 일은 이미 있는 <code>ConnectionStream</code> (서버 Work 와 StreamClient 가 함께 씀) 이 한다. <code>peek</code> / <code>consume</code> 을 더한다 (지금 StreamClient 의 protected <code>peekReceived</code>, <code>consumeReceived</code>, <code>stagedBytes</code>).</li>
+  <li>StreamClient 공개 메서드: <code>initialize, reset, connect, reconnect(deadline), disconnect, stream()</code> (6). 지금 공개인 <code>read</code> / <code>write</code> 는 <code>stream().read</code> / <code>stream().write</code> 로 (StreamClient C ABI 의 번역에서). 연결 여부는 <code>stream()</code> 이 알려 준다.</li>
+  <li><code>HttpClientHeaders</code>, <code>HttpClientLink</code> 도 State 를 받는다.</li>
+</ul>
+
+<h2 id="s8">8. 정할 것</h2>
+<table>
+  <tr><th>#</th><th>것</th><th>안</th></tr>
+  <tr><td>1</td><td>statemachine 의 규칙 찾기와 handler 의 자리</td><td><b>닫음 (2026-11-16)</b>: repository. 앱은 몰라도 되는 부분이다. usecases 는 run 의 조합만</td></tr>
+  <tr><td>2</td><td><code>StateMachine</code> 구현 class 의 저장</td><td><b>닫음 (2026-11-16)</b>: 앱의 배열을 가리킨다 (지금과 같음, 복사 없음, run 동안 살아 있어야)</td></tr>
+  <tr><td>3</td><td><code>KiottyNetConnectionEvent</code> 를 <code>kiotty_net_base.h</code> 로</td><td><b>닫음 (2026-11-16)</b>: 옮긴다. 공개 헤더의 위치만 바뀌고 이름과 ABI 는 그대로</td></tr>
+  <tr><td>4</td><td>websocket 의 연결별 메모리</td><td><b>닫음 (2026-11-16)</b>: 병렬 배열. 연결의 context 칸에는 지금처럼 <code>HttpSession*</code> 하나, websocket 은 <code>session.id</code> 의 index 로 자기 칸을 찾는다. http 는 <code>step(session, event)</code> 로 넘길 뿐 websocket 을 모른다</td></tr>
+  <tr><td>5</td><td>HttpClientStream 이 StreamClient 를 쓰는 길</td><td><b>닫음 (2026-11-16)</b>: 새 세부 객체 없이 <code>ConnectionStream</code> 을 다시 쓰고 StreamClient 공개 메서드를 정리 (7절)</td></tr>
+  <tr><td>6</td><td>U2 (HttpClient v1) 와의 순서</td><td><b>닫음 (2026-11-16)</b>: 모듈 정리 (R0 ~ R6) 를 먼저 끝내고 U2</td></tr>
+</table>
+
+<h2 id="s9">9. 사이클</h2>
+<p>모두 동작을 바꾸지 않는다. 매 사이클 WSL 7 + MSVC, 수칙 검사 (방향 검사 포함), 단일 헤더 번역 단위 하나 확인.</p>
+<table>
+  <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>R0 파일 정리</td><td>지금 작업 트리 (242 개 이동, 7.1 트리) 를 commit</td><td>끝 (확인 대기)</td></tr>
+  <tr><td>R1 작은 방향</td><td>websocket endpoint 소멸자, ConnectionEvent 를 base 헤더로, http → context, 수칙 검사의 <code>LAYER</code></td><td>LAYER 위반이 http → websocket 만 남음</td></tr>
+  <tr><td>R2 statemachine</td><td>entity <code>Rule / StateMachine</code>, repository handler, usecases run, http / websocket 이 새 것을 씀, <code>kiotty_test_rule_table</code> 을 새 이름으로</td><td>statemachine 테스트 그대로 통과</td></tr>
+  <tr><td>R3 upgrade</td><td><code>HttpUpgradeHandler</code>, <code>UPGRADED</code> 상태, websocket 이 frame 상태와 연결별 배열 (datasource) 과 라우트 대상을 가짐, <code>WebSocketServerEndpoint</code>, mask 와 push 의 작은 것. 파일은 5.2 의 자리로 바로 둔다</td><td>LAYER 위반 0. websocket 테스트 그대로 통과</td></tr>
+  <tr><td>R4 http 관심사와 서버 흐름</td><td>entity 를 값만, repository 하위 폴더 8, <code>HttpSessionState</code>, 6절의 값 흐름 (숨은 쓰기 19 곳을 값으로)</td><td>http 서버 테스트 그대로. 숨은 쓰기 목록이 비었음</td></tr>
+  <tr><td>R4w websocket 관심사</td><td>entity 를 값만, repository 하위 폴더 8, state 둘, datasource (socket table), 서버와 클라이언트가 함께 쓰는 frame 읽기 (<code>stepFrame</code>), 클라이언트가 HttpSite / HttpSession 을 통째로 빌리지 않음</td><td>websocket 테스트 그대로. websocket 이 http 의 session / site 를 include 하지 않음</td></tr>
+  <tr><td>R5 client State</td><td><code>HttpClientState</code>, <code>ConnectionStream</code> 의 peek / consume, StreamClient 공개 메서드 정리, <code>HttpClientStream</code> (friend 제거), 6절의 client 흐름</td><td>HttpClient 테스트 그대로. friend 0</td></tr>
+  <tr><td>R6 usecases</td><td>http / websocket / statemachine / base 의 C ABI 를 usecases 함수로, adapter 는 변환만</td><td>adapter 에 조합 로직 없음</td></tr>
+</table>
+
+</body>
+</html>
