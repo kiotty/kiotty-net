@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 9ad71d9
+    KiottyNet single header, generated from commit adb6e7f
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -3936,122 +3936,135 @@ inline KiottyNetCode KiottyNet_WebSocketClient::send(
 #endif
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_ACTION_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_ACTION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_DATASOURCE_MEMORY_LAYOUT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_DATASOURCE_MEMORY_LAYOUT_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_DATASOURCE_MEMORY_LIMITS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_DATASOURCE_MEMORY_LIMITS_H
 
 #include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    static constexpr size_t CONNECTIONS_PER_SERVER_LIMIT = 65536;
+
+    struct MemoryLimits
+    {
+        static constexpr size_t RECEIVE_CAPACITY = 65536;
+        static constexpr size_t SEND_CAPACITY = 16384;
+        static constexpr size_t PUSH_CAPACITY = 65536;
+        static constexpr bool   TLS = KIOTTY_NET_USE_TLS != 0;
+    };
+}
+
+#endif
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    static constexpr size_t TLS_RECORD_PLAIN_BYTES = 16384;
+    static constexpr size_t TLS_RECORD_OVERHEAD_BYTES = 64;
+    static constexpr size_t TLS_CONTROL_RESERVE_BYTES = 512;
+    static constexpr size_t STAGE_ALIGNMENT = 16;
+
+    constexpr size_t alignStage(size_t bytes)
+    {
+        return (bytes + STAGE_ALIGNMENT - 1) / STAGE_ALIGNMENT * STAGE_ALIGNMENT;
+    }
+
+    constexpr size_t gatheredPlainBytes(size_t send, size_t notify)
+    {
+        return send + notify + TLS_RECORD_OVERHEAD_BYTES;
+    }
+
+    constexpr size_t cipherSendBytes(size_t plain)
+    {
+        const size_t records = plain / TLS_RECORD_PLAIN_BYTES + 1;
+        return plain + records * TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONFIGURATION_CONFIGURATION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONFIGURATION_CONFIGURATION_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_TRANSFER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_TRANSFER_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_ACTIVE_SOCKET_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_ACTIVE_SOCKET_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_HANDLE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_HANDLE_H
+
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    KiottyNetConnectionAction thenHold(uint32_t timeout_milliseconds);
-    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_milliseconds);
-    KiottyNetConnectionAction thenReadUntil(KiottyNetSpan delimiter,
-                                            size_t max,
-                                            uint32_t timeout_milliseconds);
-    KiottyNetConnectionAction thenWrite(KiottyNetSpan data, uint32_t timeout_milliseconds);
-    KiottyNetConnectionAction thenWork();
-    KiottyNetConnectionAction thenClose(KiottyNetCode reason);
-    KiottyNetConnectionAction thenCloseWith(KiottyNetSpan data, KiottyNetCode reason);
+    using SocketHandle = intptr_t;
 
-    KiottyNetConnectionDecision acceptConnection(KiottyNetConnectionContext connection_context);
-    KiottyNetConnectionDecision ignoreConnection();
+    static constexpr SocketHandle INVALID_SOCKET_HANDLE = -1;
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_CONFIGURATION_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_CONFIGURATION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_SOCKET_CODE_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_SOCKET_CODE_H
 
-#ifndef KIOTTY_NET_INTERNAL_CORE_SPAN_H
-#define KIOTTY_NET_INTERNAL_CORE_SPAN_H
-
-#include <cstddef>
-#include <cstring>
-#include <type_traits>
+#include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    template <typename T>
-    struct Span
+    enum class SocketCode : uint8_t
     {
-        T*     data;
-        size_t length;
-
-        T*      begin() const;
-        T*      end() const;
-        bool    empty() const;
-        T&      operator[](size_t index) const;
-        Span<T> skip(size_t count) const;
-        void    fill(const T& value) const;
-
-        template <typename Source>
-        bool copyFrom(Span<Source> source) const;
+        SUCCESS,
+        WOULD_BLOCK,
+        PENDING,
+        CLOSED,
+        CANCELLED,
+        TIMEOUT,
+        REFUSED,
+        RESET,
+        UNREACHABLE,
+        ADDRESS_IN_USE,
+        INVALID_ARGUMENT,
+        OUT_OF_RESOURCE,
+        NOT_SUPPORTED,
+        BUSY,
+        UNKNOWN
     };
 
-    template <typename T>
-    inline T* Span<T>::begin() const
+    inline KiottyNetCode toNetCode(SocketCode code)
     {
-        return data;
-    }
-
-    template <typename T>
-    inline T* Span<T>::end() const
-    {
-        return data + length;
-    }
-
-    template <typename T>
-    inline bool Span<T>::empty() const
-    {
-        return length == 0;
-    }
-
-    template <typename T>
-    inline T& Span<T>::operator[](size_t index) const
-    {
-        return data[index];
-    }
-
-    template <typename T>
-    inline Span<T> Span<T>::skip(size_t count) const
-    {
-        if (count >= length) { return Span<T>{ data + length, 0 }; }
-        return Span<T>{ data + count, length - count };
-    }
-
-    template <typename T>
-    inline void Span<T>::fill(const T& value) const
-    {
-        for (size_t i = 0; i < length; ++i)
+        switch (code)
         {
-            data[i] = value;
+        case SocketCode::SUCCESS:
+            return KIOTTY_NET_CODE_SUCCESS;
+        case SocketCode::CLOSED:
+            return KIOTTY_NET_CODE_PEER_CLOSED;
+        case SocketCode::CANCELLED:
+            return KIOTTY_NET_CODE_CLOSED;
+        case SocketCode::TIMEOUT:
+            return KIOTTY_NET_CODE_TIMEOUT;
+        case SocketCode::BUSY:
+            return KIOTTY_NET_CODE_BUSY;
+        case SocketCode::WOULD_BLOCK:
+        case SocketCode::PENDING:
+        case SocketCode::REFUSED:
+        case SocketCode::RESET:
+        case SocketCode::UNREACHABLE:
+        case SocketCode::ADDRESS_IN_USE:
+        case SocketCode::INVALID_ARGUMENT:
+        case SocketCode::OUT_OF_RESOURCE:
+        case SocketCode::NOT_SUPPORTED:
+        case SocketCode::UNKNOWN:
+            return KIOTTY_NET_CODE_SOCKET_ERROR;
         }
-    }
-
-    template <typename T>
-    template <typename Source>
-    inline bool Span<T>::copyFrom(Span<Source> source) const
-    {
-        using Target = typename std::remove_const<T>::type;
-        using Origin = typename std::remove_const<Source>::type;
-        static_assert(std::is_same<Target, Origin>::value,
-                      "Span::copyFrom: element types must match");
-        static_assert(std::is_trivially_copyable<T>::value,
-                      "Span::copyFrom: elements must be trivially copyable");
-        if (source.length > length) { return false; }
-        if (source.length == 0) { return true; }
-        std::memcpy(data, source.data, source.length * sizeof(T));
-        return true;
+        return KIOTTY_NET_CODE_SOCKET_ERROR;
     }
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_TRANSFER_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_TRANSFER_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_ACTIVE_SOCKET_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_ACTIVE_SOCKET_H
-
 #ifndef KIOTTY_NET_INTERNAL_CORE_RESULT_H
 #define KIOTTY_NET_INTERNAL_CORE_RESULT_H
 
@@ -4154,76 +4167,6 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_HANDLE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_HANDLE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    using SocketHandle = intptr_t;
-
-    static constexpr SocketHandle INVALID_SOCKET_HANDLE = -1;
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_SOCKET_CODE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_SOCKET_CODE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class SocketCode : uint8_t
-    {
-        SUCCESS,
-        WOULD_BLOCK,
-        PENDING,
-        CLOSED,
-        CANCELLED,
-        TIMEOUT,
-        REFUSED,
-        RESET,
-        UNREACHABLE,
-        ADDRESS_IN_USE,
-        INVALID_ARGUMENT,
-        OUT_OF_RESOURCE,
-        NOT_SUPPORTED,
-        BUSY,
-        UNKNOWN
-    };
-
-    inline KiottyNetCode toNetCode(SocketCode code)
-    {
-        switch (code)
-        {
-        case SocketCode::SUCCESS:
-            return KIOTTY_NET_CODE_SUCCESS;
-        case SocketCode::CLOSED:
-            return KIOTTY_NET_CODE_PEER_CLOSED;
-        case SocketCode::CANCELLED:
-            return KIOTTY_NET_CODE_CLOSED;
-        case SocketCode::TIMEOUT:
-            return KIOTTY_NET_CODE_TIMEOUT;
-        case SocketCode::BUSY:
-            return KIOTTY_NET_CODE_BUSY;
-        case SocketCode::WOULD_BLOCK:
-        case SocketCode::PENDING:
-        case SocketCode::REFUSED:
-        case SocketCode::RESET:
-        case SocketCode::UNREACHABLE:
-        case SocketCode::ADDRESS_IN_USE:
-        case SocketCode::INVALID_ARGUMENT:
-        case SocketCode::OUT_OF_RESOURCE:
-        case SocketCode::NOT_SUPPORTED:
-        case SocketCode::UNKNOWN:
-            return KIOTTY_NET_CODE_SOCKET_ERROR;
-        }
-        return KIOTTY_NET_CODE_SOCKET_ERROR;
-    }
-}
-
-#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -4275,6 +4218,90 @@ namespace kiotty::net::implementation
         SocketHandle            _handle;
         KiottyNetTransport      _transport;
     };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_CORE_SPAN_H
+#define KIOTTY_NET_INTERNAL_CORE_SPAN_H
+
+#include <cstddef>
+#include <cstring>
+#include <type_traits>
+
+namespace kiotty::net::implementation
+{
+    template <typename T>
+    struct Span
+    {
+        T*     data;
+        size_t length;
+
+        T*      begin() const;
+        T*      end() const;
+        bool    empty() const;
+        T&      operator[](size_t index) const;
+        Span<T> skip(size_t count) const;
+        void    fill(const T& value) const;
+
+        template <typename Source>
+        bool copyFrom(Span<Source> source) const;
+    };
+
+    template <typename T>
+    inline T* Span<T>::begin() const
+    {
+        return data;
+    }
+
+    template <typename T>
+    inline T* Span<T>::end() const
+    {
+        return data + length;
+    }
+
+    template <typename T>
+    inline bool Span<T>::empty() const
+    {
+        return length == 0;
+    }
+
+    template <typename T>
+    inline T& Span<T>::operator[](size_t index) const
+    {
+        return data[index];
+    }
+
+    template <typename T>
+    inline Span<T> Span<T>::skip(size_t count) const
+    {
+        if (count >= length) { return Span<T>{ data + length, 0 }; }
+        return Span<T>{ data + count, length - count };
+    }
+
+    template <typename T>
+    inline void Span<T>::fill(const T& value) const
+    {
+        for (size_t i = 0; i < length; ++i)
+        {
+            data[i] = value;
+        }
+    }
+
+    template <typename T>
+    template <typename Source>
+    inline bool Span<T>::copyFrom(Span<Source> source) const
+    {
+        using Target = typename std::remove_const<T>::type;
+        using Origin = typename std::remove_const<Source>::type;
+        static_assert(std::is_same<Target, Origin>::value,
+                      "Span::copyFrom: element types must match");
+        static_assert(std::is_trivially_copyable<T>::value,
+                      "Span::copyFrom: elements must be trivially copyable");
+        if (source.length > length) { return false; }
+        if (source.length == 0) { return true; }
+        std::memcpy(data, source.data, source.length * sizeof(T));
+        return true;
+    }
 }
 
 #endif
@@ -4349,26 +4376,170 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_CONTEXT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_CONTEXT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONFIGURATION_TLS_CONFIGURATION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONFIGURATION_TLS_CONFIGURATION_H
 
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HANDLES_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HANDLES_H
+#include <cstdint>
 
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_EVENT_CLIENT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_EVENT_CLIENT_H
+namespace kiotty::net::implementation
+{
+    struct TlsIdentityText
+    {
+        Span<const char> certificate_file;
+        Span<const char> key_file;
+        Span<const char> key_password;
+    };
 
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_CONNECTION_ACCESS_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_CONNECTION_ACCESS_H
+    KiottyNetCode initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration& configuration,
+                                                   const TlsIdentityText& identity);
+    KiottyNetCode configureTlsServerVersions(KiottyNetTlsServerConfiguration& configuration,
+                                             uint32_t versions);
+    KiottyNetCode configureTlsServerV12CipherSuites(KiottyNetTlsServerConfiguration& configuration,
+                                                    uint32_t suites);
+    KiottyNetCode configureTlsServerV13CipherSuites(KiottyNetTlsServerConfiguration& configuration,
+                                                    uint32_t suites);
+    KiottyNetCode configureTlsServerClientAuthentication(
+        KiottyNetTlsServerConfiguration& configuration,
+        KiottyNetClientAuthentication mode,
+        Span<const char> trust_store_path);
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_EVENT_LISTENER_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_EVENT_LISTENER_H
+    KiottyNetCode initializeTlsClientConfiguration(KiottyNetTlsClientConfiguration& configuration);
+    KiottyNetCode configureTlsClientVersions(KiottyNetTlsClientConfiguration& configuration,
+                                             uint32_t versions);
+    KiottyNetCode configureTlsClientV12CipherSuites(KiottyNetTlsClientConfiguration& configuration,
+                                                    uint32_t suites);
+    KiottyNetCode configureTlsClientV13CipherSuites(KiottyNetTlsClientConfiguration& configuration,
+                                                    uint32_t suites);
+    KiottyNetCode configureTlsClientTrustStore(KiottyNetTlsClientConfiguration& configuration,
+                                               Span<const char> trust_store_path);
+    KiottyNetCode configureTlsClientVerification(KiottyNetTlsClientConfiguration& configuration,
+                                                 KiottyNetTlsVerification verification);
+    KiottyNetCode configureTlsClientIdentity(KiottyNetTlsClientConfiguration& configuration,
+                                             const TlsIdentityText& identity);
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_COMPLETION_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_COMPLETION_H
+    bool isInitialized(const KiottyNetTlsServerConfiguration& configuration);
+    bool isInitialized(const KiottyNetTlsClientConfiguration& configuration);
+}
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_ACTION_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_ACTION_H
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CALLBACK_HANDLER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CALLBACK_HANDLER_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_HANDLER_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_HANDLER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct Caller;
+
+    class Handler
+    {
+    public:
+        explicit Handler(KiottyNetEndpoint& connection_owner);
+        virtual ~Handler() = default;
+
+        Handler(const Handler&) = delete;
+        Handler& operator=(const Handler&) = delete;
+
+        virtual KiottyNetCode               validate() const = 0;
+        virtual int32_t                     initialState() const = 0;
+        virtual KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const = 0;
+        virtual KiottyNetConnectionAction   dispatch(
+            const Caller& caller, const KiottyNetConnectionEvent& event) const = 0;
+        virtual void                        report(const KiottyNetConnectionInfo& info,
+                                                   KiottyNetCode code,
+                                                   const char* message) const = 0;
+
+        KiottyNetEndpoint& owner;
+    };
+
+    inline Handler::Handler(KiottyNetEndpoint& connection_owner)
+        : owner(connection_owner)
+    {
+    }
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class CallbackHandler final : public Handler
+    {
+    public:
+        CallbackHandler(const KiottyNetConnectionHandler& callbacks,
+                        KiottyNetAppContext app_context,
+                        KiottyNetEndpoint& connection_owner);
+
+        KiottyNetCode               validate() const override;
+        int32_t                     initialState() const override;
+        KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const override;
+        KiottyNetConnectionAction   dispatch(const Caller& caller,
+                                             const KiottyNetConnectionEvent& event) const override;
+        void                        report(const KiottyNetConnectionInfo& info,
+                                           KiottyNetCode code,
+                                           const char* message) const override;
+
+    private:
+        KiottyNetConnectionAction startWork(const KiottyNetConnectionEvent& event,
+                                            const Caller& caller) const;
+        KiottyNetConnectionAction disconnect(const KiottyNetConnectionEvent& event,
+                                             const Caller& caller) const;
+
+        const KiottyNetConnectionHandler& _callbacks;
+        KiottyNetAppContext               _app_context;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_EVENT_LISTENER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_EVENT_LISTENER_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_PASSIVE_SOCKET_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_PASSIVE_SOCKET_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class PassiveSocket
+    {
+    public:
+        PassiveSocket();
+        ~PassiveSocket();
+
+        PassiveSocket(const PassiveSocket&) = delete;
+        PassiveSocket& operator=(const PassiveSocket&) = delete;
+
+        SocketCode         open(const KiottyNetAddress& address, int backlog);
+        ActiveSocketResult prepare();
+        ActiveSocketResult accept();
+        ActiveSocketResult accept(ActiveSocket&& prepared);
+        void               close();
+
+        bool         valid() const;
+        SocketHandle handle() const;
+        uint16_t     port() const;
+
+    private:
+        SocketHandle       _handle;
+        KiottyNetTransport _transport;
+        uint16_t           _port;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_COMPLETION_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_COMPLETION_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_ACTION_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_ACTION_H
 
 #include <cstddef>
 #include <cstdint>
@@ -4515,8 +4686,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_PAYLOAD_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_IO_PAYLOAD_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_PAYLOAD_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_IO_PAYLOAD_H
 
 #include <cstddef>
 
@@ -4571,43 +4742,9 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_PASSIVE_SOCKET_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_PASSIVE_SOCKET_H
 
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class PassiveSocket
-    {
-    public:
-        PassiveSocket();
-        ~PassiveSocket();
-
-        PassiveSocket(const PassiveSocket&) = delete;
-        PassiveSocket& operator=(const PassiveSocket&) = delete;
-
-        SocketCode         open(const KiottyNetAddress& address, int backlog);
-        ActiveSocketResult prepare();
-        ActiveSocketResult accept();
-        ActiveSocketResult accept(ActiveSocket&& prepared);
-        void               close();
-
-        bool         valid() const;
-        SocketHandle handle() const;
-        uint16_t     port() const;
-
-    private:
-        SocketHandle       _handle;
-        KiottyNetTransport _transport;
-        uint16_t           _port;
-    };
-}
-
-#endif
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_EVENT_BACKEND_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_EVENT_BACKEND_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_EVENT_BACKEND_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_EVENT_BACKEND_H
 
 #if defined(_WIN32)
 #define KIOTTY_NET_EVENT_IOCP 1
@@ -4639,8 +4776,8 @@ namespace kiotty::net::implementation
 #endif
 
 #if KIOTTY_NET_EVENT_IOCP
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_H
 
 #if defined(_WIN32)
 
@@ -4727,13 +4864,13 @@ namespace kiotty::net::implementation
 
 #endif
 #elif KIOTTY_NET_EVENT_EPOLL
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_EPOLL_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_EPOLL_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_EPOLL_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_EPOLL_EVENT_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -4816,8 +4953,8 @@ namespace kiotty::net::implementation
 #endif
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
@@ -4907,13 +5044,13 @@ namespace kiotty::net::implementation
 
 #endif
 #elif KIOTTY_NET_EVENT_KQUEUE
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_KQUEUE_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_KQUEUE_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_KQUEUE_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_KQUEUE_EVENT_H
 
 #if KIOTTY_NET_EVENT_KQUEUE
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -5025,8 +5162,8 @@ namespace kiotty::net::implementation
 
 #endif
 #else
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_NO_EVENT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_NO_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_NO_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_NO_EVENT_H
 
 #if !KIOTTY_NET_HAS_EVENT_BACKEND
 
@@ -5108,8 +5245,705 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_FILE_INPUT_FILE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_FILE_INPUT_FILE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_ENGINE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_ENGINE_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_PROFILE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_PROFILE_H
+
+#include <cstddef>
+#include <cstdint>
+
+struct ssl_ctx_st;
+
+namespace kiotty::net::implementation
+{
+    inline constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MILLISECONDS = 10000;
+
+    bool          tlsSupported();
+    KiottyNetCode initializeTlsLibrary();
+
+    struct TlsSettings
+    {
+        uint32_t handshake_timeout_milliseconds;
+        bool     is_server;
+        bool     has_hostname_verification;
+    };
+
+    static_assert(sizeof(TlsSettings) == 8, "TlsSettings: unexpected padding");
+
+    class TlsProfile
+    {
+    public:
+        TlsProfile();
+        ~TlsProfile();
+
+        TlsProfile(const TlsProfile&) = delete;
+        TlsProfile& operator=(const TlsProfile&) = delete;
+
+        KiottyNetCode openServer(const KiottyNetTlsServerConfiguration& configuration);
+        KiottyNetCode openClient(const KiottyNetTlsClientConfiguration& configuration);
+        void          close();
+
+        bool        valid() const;
+        TlsSettings settings() const;
+        ssl_ctx_st* context() const;
+
+    private:
+        ssl_ctx_st* _context;
+        TlsSettings _settings;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_TLS_STEP_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_TLS_STEP_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class TlsStep : uint8_t
+    {
+        SEND,
+        RECEIVE,
+        DONE,
+        FAILED
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_CORE_STAGE_H
+#define KIOTTY_NET_INTERNAL_CORE_STAGE_H
+
+#include <cstddef>
+#include <vector>
+
+namespace kiotty::net::implementation
+{
+    class StageBase
+    {
+    public:
+        class Provider
+        {
+        public:
+            explicit Provider(StageBase& stage);
+
+            size_t writable() const;
+            char*  prepare(size_t requested);
+            void   commit(size_t written);
+
+        private:
+            StageBase& _stage;
+        };
+
+        class Consumer
+        {
+        public:
+            explicit Consumer(StageBase& stage);
+
+            size_t readable() const;
+            char*  peek();
+            void   commit(size_t consumed);
+
+        private:
+            StageBase& _stage;
+        };
+
+        StageBase(const StageBase&) = delete;
+        StageBase& operator=(const StageBase&) = delete;
+
+        size_t   capacity() const;
+        size_t   maximum() const;
+        Provider provider();
+        Consumer consumer();
+        void     compact();
+        void     clear();
+        void     limit(size_t capacity);
+
+    protected:
+        explicit StageBase(Span<char> storage);
+        ~StageBase() = default;
+
+        void bind(Span<char> storage);
+
+    private:
+        char*  _buffer;
+        size_t _maximum;
+        size_t _capacity;
+        size_t _begin_position;
+        size_t _end_position;
+    };
+
+    struct StageStorage
+    {
+        std::vector<char> bytes;
+    };
+
+    class Stage : private StageStorage, public StageBase
+    {
+    public:
+        Stage();
+        explicit Stage(size_t maximum);
+
+        void reserve(size_t maximum);
+    };
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+struct ssl_st;
+struct bio_st;
+
+namespace kiotty::net::implementation
+{
+    typedef Result<size_t, KiottyNetCode> DecodeResult;
+
+    size_t tlsCipherBound(size_t plain_length);
+    size_t tlsCipherCapacity(size_t plain_capacity);
+
+    struct TlsFailure
+    {
+        const char*   message;
+        KiottyNetCode code;
+    };
+
+    static_assert(sizeof(TlsFailure) == 2 * sizeof(void*), "TlsFailure: unexpected padding");
+
+    struct TlsStatus
+    {
+        TlsFailure failure;
+        bool       is_active;
+    };
+
+    static_assert(sizeof(TlsStatus) == sizeof(TlsFailure) + sizeof(void*),
+                  "TlsStatus: unexpected padding");
+
+    struct TlsCapacity
+    {
+        size_t receive;
+        size_t send;
+    };
+
+    static_assert(sizeof(TlsCapacity) == 2 * sizeof(size_t), "TlsCapacity: unexpected padding");
+
+    struct TlsStages
+    {
+        Stage& receive;
+        Stage& send;
+    };
+
+    void reserveTlsStages(TlsStages stages, TlsCapacity capacity);
+
+    static_assert(sizeof(TlsStages) == 2 * sizeof(void*), "TlsStages: unexpected padding");
+
+    class TlsPipe;
+
+    class TlsEngine
+    {
+    public:
+        TlsEngine();
+        ~TlsEngine();
+
+        TlsEngine(const TlsEngine&) = delete;
+        TlsEngine& operator=(const TlsEngine&) = delete;
+
+        KiottyNetCode open(const TlsProfile& profile, Span<const char> hostname,
+                           TlsCapacity capacity);
+        void          close();
+        TlsStep       handshake();
+        DecodeResult  decode(StageBase& plain);
+        DecodeResult  decode(Span<char> plain);
+        void          encode(KiottyNetSpan plain);
+        TlsStatus     status() const;
+        TlsStages     stages();
+
+    private:
+        friend class TlsPipe;
+
+        struct Outcome
+        {
+            int result;
+            int reason;
+        };
+
+        struct Drained
+        {
+            size_t        length;
+            KiottyNetCode code;
+        };
+
+        void          limit(TlsCapacity capacity);
+        TlsStep       fail(KiottyNetCode code, const char* message);
+        KiottyNetCode prepareSsl(ssl_ctx_st* context);
+        KiottyNetCode createSsl(ssl_ctx_st* context);
+        Outcome       driveHandshake();
+        Drained       drain(Span<char> target);
+        size_t        resume(int reason);
+        bool          fitsCipherSend(size_t plain_length);
+        void          writeRecord(KiottyNetSpan plain);
+        size_t        feed();
+        size_t        flush();
+        size_t        pending() const;
+
+        Stage     _cipher_receive;
+        Stage     _cipher_send;
+        ssl_st*   _ssl;
+        bio_st*   _network;
+        TlsStatus _status;
+        bool      _failed;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CALLER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CALLER_H
+
+#ifndef KIOTTY_NET_INTERNAL_CORE_POOL_POOL_HANDLE_H
+#define KIOTTY_NET_INTERNAL_CORE_POOL_POOL_HANDLE_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct PoolHandle
+    {
+        int32_t generation;
+        int32_t index;
+
+        int64_t value() const;
+
+        static PoolHandle fromValue(int64_t value);
+    };
+
+    static_assert(sizeof(PoolHandle) == 8, "PoolHandle packs into one int64");
+
+    inline int64_t PoolHandle::value() const
+    {
+        const uint64_t high = static_cast<uint32_t>(generation);
+        const uint64_t low = static_cast<uint32_t>(index);
+        const uint64_t bits = (high << 32) | low;
+        return static_cast<int64_t>(bits);
+    }
+
+    inline PoolHandle PoolHandle::fromValue(int64_t value)
+    {
+        const uint64_t bits = static_cast<uint64_t>(value);
+        const uint32_t high = static_cast<uint32_t>(bits >> 32);
+        const uint32_t low = static_cast<uint32_t>(bits);
+        return PoolHandle{ static_cast<int32_t>(high), static_cast<int32_t>(low) };
+    }
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct Caller
+    {
+        const Handler&                 handler;
+        const KiottyNetConnectionInfo& info;
+        StageBase&                     send;
+        int32_t&                       machine_state;
+        KiottyNetConnectionContext     context;
+        PoolHandle                     id;
+
+        KiottyNetConnectionHandle handle() const;
+        KiottyNetConnectionStream stream() const;
+        void                      reject(KiottyNetCode code, const char* message) const;
+        IoAction                  admit(const KiottyNetConnectionAction& returned) const;
+    };
+
+    static constexpr size_t CALLER_BYTES =
+        4 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle);
+    static_assert(sizeof(Caller) == CALLER_BYTES, "Caller: unexpected padding");
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_CONFIGURATION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_CONFIGURATION_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CONNECTION_LIMITS_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CONNECTION_LIMITS_H
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    struct ConnectionLimits
+    {
+        size_t receive;
+        size_t send;
+        size_t notify;
+        size_t send_timeout_milliseconds;
+    };
+
+    static_assert(sizeof(ConnectionLimits) == 4 * sizeof(size_t),
+                  "ConnectionLimits: unexpected padding");
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    struct ConnectionConfiguration
+    {
+        ActiveSocket               socket;
+        ConnectionLimits           limits;
+        KiottyNetConnectionContext context;
+        Span<const char>           hostname;
+        TlsProfile&                profile;
+    };
+
+    static constexpr size_t CONNECTION_CONFIGURATION_BYTES =
+        sizeof(ActiveSocket) + sizeof(ConnectionLimits) + sizeof(Span<const char>)
+        + 2 * sizeof(void*);
+    static_assert(sizeof(ConnectionConfiguration) == CONNECTION_CONFIGURATION_BYTES,
+                  "ConnectionConfiguration: unexpected padding");
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_FLOWS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_FLOWS_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_RECEIVE_FLOW_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_RECEIVE_FLOW_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_PARTS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_PARTS_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_CONTEXT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_CONTEXT_H
+
+#include <atomic>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class WorkContext
+    {
+    public:
+        enum class State : uint8_t
+        {
+            IDLE,
+            REQUESTED,
+            WORKING,
+            DONE
+        };
+
+        WorkContext();
+        WorkContext(const WorkContext&) = delete;
+        WorkContext& operator=(const WorkContext&) = delete;
+
+        void     request();
+        void     abandon();
+        void     start(int32_t generation);
+        State    state() const;
+        IoAction takeOutcome();
+        void     reset();
+
+    private:
+        friend class WorkReporter;
+
+        void move(State from, State to);
+
+        IoAction           _outcome;
+        int32_t            _generation;
+        std::atomic<State> _state;
+    };
+
+    inline WorkContext::WorkContext()
+        : _outcome(IoAction::none())
+        , _generation(0)
+        , _state(State::IDLE)
+    {
+    }
+
+    inline void WorkContext::request()
+    {
+        move(State::IDLE, State::REQUESTED);
+    }
+
+    inline void WorkContext::abandon()
+    {
+        move(State::REQUESTED, State::IDLE);
+    }
+
+    inline void WorkContext::start(int32_t generation)
+    {
+        const State current = state();
+        if (current != State::REQUESTED)
+        {
+            return;
+        }
+        _generation = generation;
+        _state.store(State::WORKING, std::memory_order_release);
+    }
+
+    inline WorkContext::State WorkContext::state() const
+    {
+        return _state.load(std::memory_order_acquire);
+    }
+
+    inline IoAction WorkContext::takeOutcome()
+    {
+        const State current = state();
+        if (current != State::DONE)
+        {
+            return IoAction::none();
+        }
+        const IoAction outcome = _outcome;
+        _outcome = IoAction::none();
+        _state.store(State::IDLE, std::memory_order_release);
+        return outcome;
+    }
+
+    inline void WorkContext::reset()
+    {
+        _generation = 0;
+        _outcome = IoAction::none();
+        _state.store(State::IDLE, std::memory_order_release);
+    }
+
+    inline void WorkContext::move(State from, State to)
+    {
+        State expected = from;
+        const std::memory_order success = std::memory_order_acq_rel;
+        const std::memory_order failure = std::memory_order_acquire;
+        _state.compare_exchange_strong(expected, to, success, failure);
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_PHASE_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_PHASE_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class Phase : uint8_t
+    {
+        IDLE,
+        HANDSHAKING,
+        READY,
+        FLUSHING,
+        CLOSING
+    };
+
+    inline bool isAlive(Phase phase)
+    {
+        return phase == Phase::HANDSHAKING || phase == Phase::READY;
+    }
+
+    inline bool isOpen(Phase phase)
+    {
+        return isAlive(phase) || phase == Phase::FLUSHING;
+    }
+}
+
+#endif
+
+#include <atomic>
+
+namespace kiotty::net::implementation
+{
+    struct ConnectionParts
+    {
+        std::atomic<Phase>& phase;
+        WorkContext&        work;
+        IoEvent&            read_event;
+        IoEvent&            write_event;
+        StageBase&          receive;
+        StageBase&          send;
+        StageBase&          notify;
+        TlsEngine&          tls;
+        ActiveSocket&       socket;
+    };
+
+    static_assert(sizeof(ConnectionParts) == 9 * sizeof(void*),
+                  "ConnectionParts: unexpected padding");
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class ReceiveFlow
+    {
+    public:
+        explicit ReceiveFlow(const ConnectionParts& parts);
+        ReceiveFlow(const ReceiveFlow&) = delete;
+        ReceiveFlow& operator=(const ReceiveFlow&) = delete;
+
+        IoAction  drive(IoAction action, const Caller& caller);
+        IoPayload room(IoPurpose purpose);
+        void      commit(IoPurpose purpose, size_t length);
+
+    private:
+        using RefillResult = Result<size_t, KiottyNetCode>;
+
+        IoAction     deliver(KiottyNetSpan data, const Caller& caller);
+        RefillResult refill();
+        IoAction     refuse(KiottyNetCode code, const Caller& caller);
+        StageBase&   stageFor(IoPurpose purpose);
+
+        StageBase& _receive;
+        TlsEngine& _tls;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_SEND_FLOW_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_SEND_FLOW_H
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+
+namespace kiotty::net::implementation
+{
+    class SendFlow
+    {
+    public:
+        explicit SendFlow(const ConnectionParts& parts);
+        SendFlow(const SendFlow&) = delete;
+        SendFlow& operator=(const SendFlow&) = delete;
+
+        IoAction      pick(const std::lock_guard<std::mutex>& notification);
+        IoPayload     payload(const IoAction& write);
+        void          release(const IoCompletion& sent, std::mutex& notification);
+        size_t        notificationWritable();
+        KiottyNetCode stageNotification(Span<const KiottyNetSpan> pieces);
+        void          limit(uint32_t timeout_milliseconds);
+        void          clearDeadline();
+        uint64_t      deadline() const;
+        bool          isDrained();
+
+    private:
+        IoAction select();
+        IoAction encoded(IoAction write);
+        bool     isBlocked() const;
+        void     startDeadline();
+
+        StageBase&                _send;
+        StageBase&                _notify;
+        TlsEngine&                _tls;
+        const IoEvent&            _write_event;
+        const WorkContext&        _work;
+        const std::atomic<Phase>& _phase;
+        std::atomic<uint64_t>     _deadline;
+        uint32_t                  _timeout;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_FLOW_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_FLOW_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_STATE_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    static constexpr uint8_t PENDING_NONE = 0U;
+    static constexpr uint8_t PENDING_READING = 1U << 1U;
+    static constexpr uint8_t PENDING_WRITING = 1U << 2U;
+    static constexpr uint8_t PENDING_WORKING = 1U << 3U;
+
+    struct ConnectionState
+    {
+        uint64_t                   deadline;
+        KiottyNetConnectionContext context;
+        PoolHandle                 id;
+        KiottyNetConnectionInfo    info;
+        Phase                      phase;
+        bool                       is_alive;
+        uint8_t                    pending;
+        uint8_t                    _padding[1];
+
+        bool isExpired(uint64_t now) const;
+        bool isSettled() const;
+    };
+
+    static constexpr size_t CONNECTION_STATE_TAIL_BYTES = 4;
+    static constexpr size_t CONNECTION_STATE_BYTES = sizeof(uint64_t)
+                                                   + sizeof(KiottyNetConnectionContext)
+                                                   + sizeof(PoolHandle)
+                                                   + sizeof(KiottyNetConnectionInfo)
+                                                   + CONNECTION_STATE_TAIL_BYTES;
+    static_assert(sizeof(ConnectionState) == CONNECTION_STATE_BYTES,
+                  "ConnectionState: unexpected padding");
+
+    inline bool ConnectionState::isExpired(uint64_t now) const
+    {
+        return deadline != 0 && now >= deadline;
+    }
+
+    inline bool ConnectionState::isSettled() const
+    {
+        return pending == PENDING_NONE;
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_REPORTER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_WORK_REPORTER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class WorkReporter
+    {
+    public:
+        explicit WorkReporter(WorkContext& work);
+
+        KiottyNetCode verify(int32_t generation) const;
+        void          finish(IoAction outcome);
+
+    private:
+        WorkContext& _work;
+    };
+
+    inline WorkReporter::WorkReporter(WorkContext& work)
+        : _work(work)
+    {
+    }
+
+    inline KiottyNetCode WorkReporter::verify(int32_t generation) const
+    {
+        const WorkContext::State current = _work.state();
+        if (current != WorkContext::State::WORKING) { return KIOTTY_NET_CODE_BUSY; }
+        if (_work._generation != generation) { return KIOTTY_NET_CODE_PEER_CLOSED; }
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    inline void WorkReporter::finish(IoAction outcome)
+    {
+        _work._outcome = outcome;
+        _work.move(WorkContext::State::WORKING, WorkContext::State::DONE);
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_STREAM_CONNECTION_STREAM_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_STREAM_CONNECTION_STREAM_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_FILE_INPUT_FILE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_FILE_INPUT_FILE_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_DEADLINE_H
 #define KIOTTY_NET_INTERNAL_CORE_DEADLINE_H
@@ -5176,46 +6010,444 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_NOTIFICATION_DESK_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_NOTIFICATION_DESK_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_PIPE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_TLS_PIPE_H
 
-#ifndef KIOTTY_NET_INTERNAL_CORE_POOL_POOL_HANDLE_H
-#define KIOTTY_NET_INTERNAL_CORE_POOL_POOL_HANDLE_H
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    class TlsPipe
+    {
+    public:
+        explicit TlsPipe(TlsEngine& engine);
+
+        TlsStep          write(KiottyNetSpan plain);
+        Span<char>       receiveRoom();
+        void             received(size_t length);
+        Span<const char> outgoing();
+        void             sent(size_t length);
+
+#if defined(KIOTTY_NET_TESTING)
+        void requestKeyUpdate();
+        void sendCloseNotify();
+#endif
+
+    private:
+        TlsEngine& _engine;
+    };
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using LineResult = Result<Span<const char>, KiottyNetCode>;
+
+    class ConnectionStream
+    {
+    public:
+        ConnectionStream(ActiveSocket& socket, TlsEngine& tls, StageBase& receive, StageBase& send);
+        ConnectionStream(const ConnectionStream& other) = default;
+        ConnectionStream& operator=(const ConnectionStream&) = delete;
+
+        KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
+        LineResult      readLine(uint32_t timeout_milliseconds);
+        KiottyNetCode   fill(uint32_t timeout_milliseconds);
+        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+        KiottyNetCode   writeFile(Span<const char> path,
+                                  uint64_t offset,
+                                  uint64_t length,
+                                  uint32_t timeout_milliseconds);
+        bool            connected() const;
+        KiottyNetCode   handshake(uint32_t timeout_milliseconds);
+
+    private:
+        struct Sent
+        {
+            size_t     length;
+            SocketCode code;
+        };
+
+        static_assert(sizeof(Sent) == 2 * sizeof(size_t),
+                      "ConnectionStream::Sent: unexpected padding");
+
+        KiottyNetResult readInto(Span<char> target, const Deadline& deadline);
+        KiottyNetResult readOnce(Span<char> target, const Deadline& deadline);
+        KiottyNetResult readCipher(Span<char> target, const Deadline& deadline);
+        KiottyNetResult readPlain(Span<char> target, const Deadline& deadline);
+        KiottyNetCode   fillStage(const Deadline& deadline);
+        KiottyNetCode   sendFileOverTls(InputFile& file, FileRange range, const Deadline& deadline);
+        KiottyNetCode   sendFilePiece(InputFile& file, FileRange piece, const Deadline& deadline);
+        KiottyNetCode   exchangeHandshake(TlsStep step, const Deadline& deadline);
+        KiottyNetCode   receiveHandshake(const Deadline& deadline);
+        KiottyNetCode   flush(const Deadline& deadline);
+        KiottyNetCode   flushCipherStage(const Deadline& deadline);
+        KiottyNetCode   flushPipe(const Deadline& deadline);
+        KiottyNetResult send(KiottyNetSpan data, const Deadline& deadline);
+        KiottyNetCode   sendRecord(KiottyNetSpan part, const Deadline& deadline);
+        Sent            sendAll(Span<const char> data, const Deadline& deadline);
+        SocketCode      awaitWritable(SocketCode code, const Deadline& deadline);
+        SocketCode      waitReadable(const Deadline& deadline);
+        SocketCode      receiveCipher();
+        SocketCode      receiveIntoStage();
+        size_t          takeReceived(Span<char> target);
+
+        ActiveSocket& _socket;
+        TlsEngine&    _tls;
+        TlsPipe       _pipe;
+        StageBase&    _receive;
+        StageBase&    _send;
+    };
+}
+
+#endif
+
+#include <atomic>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class WorkFlow
+    {
+    public:
+        explicit WorkFlow(const ConnectionParts& parts);
+        WorkFlow(const WorkFlow&) = delete;
+        WorkFlow& operator=(const WorkFlow&) = delete;
+
+        KiottyNetCode    verify(int32_t generation) const;
+        ConnectionStream stream();
+        KiottyNetCode    closeStream(int32_t generation, const KiottyNetConnectionAction& then);
+        IoAction         takeOutcome();
+        bool             isReady() const;
+        bool             isFinished() const;
+        uint8_t          pending() const;
+
+    private:
+        StageBase&                _receive;
+        StageBase&                _send;
+        TlsEngine&                _tls;
+        ActiveSocket&             _socket;
+        WorkContext&              _work;
+        WorkReporter              _reporter;
+        const IoEvent&            _read_event;
+        const IoEvent&            _write_event;
+        const std::atomic<Phase>& _phase;
+    };
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    struct ConnectionFlows
+    {
+        ReceiveFlow& receive;
+        SendFlow&    send;
+        WorkFlow&    work;
+    };
+
+    static_assert(sizeof(ConnectionFlows) == 3 * sizeof(void*),
+                  "ConnectionFlows: unexpected padding");
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_STATUS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_STATUS_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct ConnectionStatus
+    {
+        uint64_t deadline;
+        uint64_t send_deadline;
+        Phase    phase;
+        uint8_t  pending;
+
+        bool isExpired(uint64_t now) const;
+        bool isSendExpired(uint64_t now) const;
+        bool isSettled() const;
+    };
+
+    static_assert(sizeof(ConnectionStatus) == 24, "ConnectionStatus: unexpected padding");
+
+    inline bool ConnectionStatus::isExpired(uint64_t now) const
+    {
+        return deadline != 0 && now >= deadline;
+    }
+
+    inline bool ConnectionStatus::isSendExpired(uint64_t now) const
+    {
+        return send_deadline != 0 && now >= send_deadline;
+    }
+
+    inline bool ConnectionStatus::isSettled() const
+    {
+        return pending == PENDING_NONE;
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_IO_SOURCE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_IO_SOURCE_H
 
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    struct PoolHandle
+    class IoSource
     {
-        int32_t generation;
-        int32_t index;
+    public:
+        virtual ~IoSource() = default;
 
-        int64_t value() const;
+        virtual SocketHandle socket() const = 0;
+        virtual int32_t      slot() const = 0;
+        virtual IoEvent&     eventFor(const IoAction& action) = 0;
+        virtual IoPayload    resolve(const IoAction& action) = 0;
+        virtual SocketCode   attach(EventListener& listener) = 0;
+        virtual void         detach(EventListener& listener) = 0;
+        virtual void         shutdown() = 0;
 
-        static PoolHandle fromValue(int64_t value);
+    protected:
+        IoSource() = default;
+        IoSource(const IoSource&) = delete;
+        IoSource& operator=(const IoSource&) = delete;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_CORE_STAGE_SET_H
+#define KIOTTY_NET_INTERNAL_CORE_STAGE_SET_H
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    struct StageSet
+    {
+        void reserve(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
+        void limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
+        void clear();
+
+        Stage receive;
+        Stage send;
+        Stage notify;
     };
 
-    static_assert(sizeof(PoolHandle) == 8, "PoolHandle packs into one int64");
-
-    inline int64_t PoolHandle::value() const
+    inline void StageSet::reserve(size_t receive_capacity,
+                                  size_t send_capacity,
+                                  size_t notify_capacity)
     {
-        const uint64_t high = static_cast<uint32_t>(generation);
-        const uint64_t low = static_cast<uint32_t>(index);
-        const uint64_t bits = (high << 32) | low;
-        return static_cast<int64_t>(bits);
+        receive.reserve(receive_capacity);
+        send.reserve(send_capacity);
+        notify.reserve(notify_capacity);
     }
 
-    inline PoolHandle PoolHandle::fromValue(int64_t value)
+    inline void StageSet::limit(size_t receive_capacity,
+                                size_t send_capacity,
+                                size_t notify_capacity)
     {
-        const uint64_t bits = static_cast<uint64_t>(value);
-        const uint32_t high = static_cast<uint32_t>(bits >> 32);
-        const uint32_t low = static_cast<uint32_t>(bits);
-        return PoolHandle{ static_cast<int32_t>(high), static_cast<int32_t>(low) };
+        receive.limit(receive_capacity);
+        send.limit(send_capacity);
+        notify.limit(notify_capacity);
+    }
+
+    inline void StageSet::clear()
+    {
+        receive.clear();
+        send.clear();
+        notify.clear();
     }
 }
 
 #endif
+
+#include <atomic>
+#include <cstdint>
+#include <mutex>
+
+namespace kiotty::net::implementation
+{
+    class Connection : public IoSource
+    {
+    public:
+        using code_type = KiottyNetCode;
+        using configuration_type = ConnectionConfiguration;
+
+        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
+        static constexpr KiottyNetCode OUT_OF_MEMORY = KIOTTY_NET_CODE_OUT_OF_MEMORY;
+        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_PEER_CLOSED;
+
+        Connection();
+        ~Connection() override;
+
+        Connection(const Connection&) = delete;
+        Connection& operator=(const Connection&) = delete;
+        Connection(Connection&&) = delete;
+        Connection& operator=(Connection&&) = delete;
+
+        KiottyNetCode   initialize(PoolHandle id, ConnectionConfiguration&& configuration);
+        void            reset() noexcept;
+        void            reserve(ConnectionLimits limits, TlsCapacity cipher);
+        IoAction        onOpened(const Handler& handler);
+        IoAction        dispatch(const IoCompletion& completion,
+                                 const Handler& handler,
+                                 std::mutex& notification);
+        IoAction        close(KiottyNetCode reason, const Handler& handler);
+        ConnectionState  state() const;
+        ConnectionStatus status() const;
+        ConnectionFlows  flows();
+
+        SocketHandle socket() const override;
+        int32_t      slot() const override;
+        IoEvent&     eventFor(const IoAction& action) override;
+        IoPayload    resolve(const IoAction& action) override;
+        SocketCode   attach(EventListener& listener) override;
+        void         detach(EventListener& listener) override;
+        void         shutdown() override;
+
+    private:
+        KiottyNetCode   open(TlsProfile& profile, Span<const char> hostname, TlsCapacity capacity);
+        IoAction        react(const IoCompletion& completion,
+                              const Handler& handler,
+                              std::mutex& notification);
+        IoAction        onReceived(const IoCompletion& completion, const Handler& handler);
+        IoAction        onSent(const IoCompletion& completion,
+                               const Handler& handler,
+                               std::mutex& notification);
+        IoAction        onFlushing(const IoCompletion& completion, std::mutex& notification);
+        IoAction        onWritten(size_t length, const Handler& handler);
+        IoAction        onTimeout(const Handler& handler);
+        IoAction        onWorkReady(const Handler& handler);
+        IoAction        onHandshake(const Handler& handler);
+        IoAction        onReady(const Handler& handler);
+        IoAction        extend(const KiottyNetConnectionAction& returned, const Caller& caller);
+        IoAction        apply(IoAction action, const Handler& handler);
+        void            enterClosing(KiottyNetCode reason, const Handler& handler);
+        void            enterFlushing(KiottyNetCode reason);
+        bool            isUserActionPending();
+        void            setDeadline(uint32_t timeout_milliseconds);
+        Caller          callerFor(const Handler& handler);
+        ConnectionParts parts();
+
+        StageSet                   _plain;
+        TlsEngine                  _tls;
+        ActiveSocket               _socket;
+        KiottyNetConnectionInfo    _info;
+        IoEvent                    _read_event;
+        IoEvent                    _write_event;
+        WorkContext                _work;
+        WorkFlow                   _work_flow;
+        SendFlow                   _send_flow;
+        ReceiveFlow                _receive_flow;
+        std::atomic<uint64_t>      _deadline;
+        KiottyNetConnectionContext _context;
+        PoolHandle                 _id;
+        int32_t                    _machine_state;
+        KiottyNetCode              _flush_reason;
+        std::atomic<Phase>         _phase;
+    };
+
+    inline ConnectionStatus Connection::status() const
+    {
+        ConnectionStatus snapshot{};
+        snapshot.deadline = _deadline.load();
+        snapshot.send_deadline = _send_flow.deadline();
+        snapshot.phase = _phase.load();
+        snapshot.pending = _work_flow.pending();
+        return snapshot;
+    }
+
+    using ConnectionResult = Result<Connection&, KiottyNetCode>;
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_ACTION_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_ACTION_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    KiottyNetConnectionAction thenHold(uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenRead(size_t exact, uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenReadUntil(KiottyNetSpan delimiter,
+                                            size_t max,
+                                            uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenWrite(KiottyNetSpan data, uint32_t timeout_milliseconds);
+    KiottyNetConnectionAction thenWork();
+    KiottyNetConnectionAction thenClose(KiottyNetCode reason);
+    KiottyNetConnectionAction thenCloseWith(KiottyNetSpan data, KiottyNetCode reason);
+
+    KiottyNetConnectionDecision acceptConnection(KiottyNetConnectionContext connection_context);
+    KiottyNetConnectionDecision ignoreConnection();
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_CONTEXT_CONTEXT_H
+#define KIOTTY_NET_INTERNAL_CONTEXT_CONTEXT_H
+
+#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HANDLES_H
+#define KIOTTY_NET_INTERNAL_CONTEXT_HANDLES_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_EVENT_CLIENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_EVENT_CLIENT_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_ACCEPTOR_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_ACCEPTOR_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class Acceptor : public IoSource
+    {
+    public:
+        Acceptor();
+        ~Acceptor() override;
+
+        Acceptor(const Acceptor&) = delete;
+        Acceptor& operator=(const Acceptor&) = delete;
+        Acceptor(Acceptor&&) = delete;
+        Acceptor& operator=(Acceptor&&) = delete;
+
+        SocketCode         open(const KiottyNetAddress& address, int backlog, NoDelay no_delay);
+        void               close();
+        ActiveSocketResult accept();
+        bool               listening() const;
+        bool               isPending() const;
+        uint16_t           port() const;
+
+        SocketHandle socket() const override;
+        int32_t      slot() const override;
+        IoEvent&     eventFor(const IoAction& action) override;
+        IoPayload    resolve(const IoAction& action) override;
+        SocketCode   attach(EventListener& listener) override;
+        void         detach(EventListener& listener) override;
+        void         shutdown() override;
+
+    private:
+        IoPayload acceptPayload();
+
+        AcceptBuffer  _buffer;
+        IoEvent       _event;
+        ActiveSocket  _prepared;
+        PassiveSocket _socket;
+        NoDelay       _no_delay;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_HOST_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_CONNECTION_HOST_H
+
 #ifndef KIOTTY_NET_INTERNAL_CORE_POOL_REUSABLE_POOL_H
 #define KIOTTY_NET_INTERNAL_CORE_POOL_REUSABLE_POOL_H
 
@@ -5523,1199 +6755,6 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_H
-
-#ifndef KIOTTY_NET_INTERNAL_CORE_STAGE_SET_H
-#define KIOTTY_NET_INTERNAL_CORE_STAGE_SET_H
-
-#ifndef KIOTTY_NET_INTERNAL_CORE_STAGE_H
-#define KIOTTY_NET_INTERNAL_CORE_STAGE_H
-
-#include <cstddef>
-#include <vector>
-
-namespace kiotty::net::implementation
-{
-    class StageBase
-    {
-    public:
-        class Provider
-        {
-        public:
-            explicit Provider(StageBase& stage);
-
-            size_t writable() const;
-            char*  prepare(size_t requested);
-            void   commit(size_t written);
-
-        private:
-            StageBase& _stage;
-        };
-
-        class Consumer
-        {
-        public:
-            explicit Consumer(StageBase& stage);
-
-            size_t readable() const;
-            char*  peek();
-            void   commit(size_t consumed);
-
-        private:
-            StageBase& _stage;
-        };
-
-        StageBase(const StageBase&) = delete;
-        StageBase& operator=(const StageBase&) = delete;
-
-        size_t   capacity() const;
-        size_t   maximum() const;
-        Provider provider();
-        Consumer consumer();
-        void     compact();
-        void     clear();
-        void     limit(size_t capacity);
-
-    protected:
-        explicit StageBase(Span<char> storage);
-        ~StageBase() = default;
-
-        void bind(Span<char> storage);
-
-    private:
-        char*  _buffer;
-        size_t _maximum;
-        size_t _capacity;
-        size_t _begin_position;
-        size_t _end_position;
-    };
-
-    struct StageStorage
-    {
-        std::vector<char> bytes;
-    };
-
-    class Stage : private StageStorage, public StageBase
-    {
-    public:
-        Stage();
-        explicit Stage(size_t maximum);
-
-        void reserve(size_t maximum);
-    };
-}
-
-#endif
-
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    struct StageSet
-    {
-        void reserve(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
-        void limit(size_t receive_capacity, size_t send_capacity, size_t notify_capacity);
-        void clear();
-
-        Stage receive;
-        Stage send;
-        Stage notify;
-    };
-
-    inline void StageSet::reserve(size_t receive_capacity,
-                                  size_t send_capacity,
-                                  size_t notify_capacity)
-    {
-        receive.reserve(receive_capacity);
-        send.reserve(send_capacity);
-        notify.reserve(notify_capacity);
-    }
-
-    inline void StageSet::limit(size_t receive_capacity,
-                                size_t send_capacity,
-                                size_t notify_capacity)
-    {
-        receive.limit(receive_capacity);
-        send.limit(send_capacity);
-        notify.limit(notify_capacity);
-    }
-
-    inline void StageSet::clear()
-    {
-        receive.clear();
-        send.clear();
-        notify.clear();
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_DATASOURCE_MEMORY_LIMITS_H
-#define KIOTTY_NET_INTERNAL_DATA_DATASOURCE_MEMORY_LIMITS_H
-
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    static constexpr size_t CONNECTIONS_PER_SERVER_LIMIT = 65536;
-
-    struct MemoryLimits
-    {
-        static constexpr size_t RECEIVE_CAPACITY = 65536;
-        static constexpr size_t SEND_CAPACITY = 16384;
-        static constexpr size_t PUSH_CAPACITY = 65536;
-        static constexpr bool   TLS = KIOTTY_NET_USE_TLS != 0;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_ENGINE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_ENGINE_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_PROFILE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_PROFILE_H
-
-#include <cstddef>
-#include <cstdint>
-
-struct ssl_ctx_st;
-
-namespace kiotty::net::implementation
-{
-    inline constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MILLISECONDS = 10000;
-
-    bool          tlsSupported();
-    KiottyNetCode initializeTlsLibrary();
-
-    struct TlsSettings
-    {
-        uint32_t handshake_timeout_milliseconds;
-        bool     is_server;
-        bool     has_hostname_verification;
-    };
-
-    static_assert(sizeof(TlsSettings) == 8, "TlsSettings: unexpected padding");
-
-    class TlsProfile
-    {
-    public:
-        TlsProfile();
-        ~TlsProfile();
-
-        TlsProfile(const TlsProfile&) = delete;
-        TlsProfile& operator=(const TlsProfile&) = delete;
-
-        KiottyNetCode openServer(const KiottyNetTlsServerConfiguration& configuration);
-        KiottyNetCode openClient(const KiottyNetTlsClientConfiguration& configuration);
-        void          close();
-
-        bool        valid() const;
-        TlsSettings settings() const;
-        ssl_ctx_st* context() const;
-
-    private:
-        ssl_ctx_st* _context;
-        TlsSettings _settings;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_DATASOURCE_MEMORY_LAYOUT_H
-#define KIOTTY_NET_INTERNAL_DATA_DATASOURCE_MEMORY_LAYOUT_H
-
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    static constexpr size_t TLS_RECORD_PLAIN_BYTES = 16384;
-    static constexpr size_t TLS_RECORD_OVERHEAD_BYTES = 64;
-    static constexpr size_t TLS_CONTROL_RESERVE_BYTES = 512;
-    static constexpr size_t STAGE_ALIGNMENT = 16;
-
-    constexpr size_t alignStage(size_t bytes)
-    {
-        return (bytes + STAGE_ALIGNMENT - 1) / STAGE_ALIGNMENT * STAGE_ALIGNMENT;
-    }
-
-    constexpr size_t gatheredPlainBytes(size_t send, size_t notify)
-    {
-        return send + notify + TLS_RECORD_OVERHEAD_BYTES;
-    }
-
-    constexpr size_t cipherSendBytes(size_t plain)
-    {
-        const size_t records = plain / TLS_RECORD_PLAIN_BYTES + 1;
-        return plain + records * TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_TLS_STEP_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_TLS_STEP_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class TlsStep : uint8_t
-    {
-        SEND,
-        RECEIVE,
-        DONE,
-        FAILED
-    };
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-
-struct ssl_st;
-struct bio_st;
-
-namespace kiotty::net::implementation
-{
-    typedef Result<size_t, KiottyNetCode> DecodeResult;
-
-    size_t tlsCipherBound(size_t plain_length);
-    size_t tlsCipherCapacity(size_t plain_capacity);
-
-    struct TlsFailure
-    {
-        const char*   message;
-        KiottyNetCode code;
-    };
-
-    static_assert(sizeof(TlsFailure) == 2 * sizeof(void*), "TlsFailure: unexpected padding");
-
-    struct TlsStatus
-    {
-        TlsFailure failure;
-        bool       is_active;
-    };
-
-    static_assert(sizeof(TlsStatus) == sizeof(TlsFailure) + sizeof(void*),
-                  "TlsStatus: unexpected padding");
-
-    struct TlsCapacity
-    {
-        size_t receive;
-        size_t send;
-    };
-
-    static_assert(sizeof(TlsCapacity) == 2 * sizeof(size_t), "TlsCapacity: unexpected padding");
-
-    struct TlsStages
-    {
-        Stage& receive;
-        Stage& send;
-    };
-
-    void reserveTlsStages(TlsStages stages, TlsCapacity capacity);
-
-    static_assert(sizeof(TlsStages) == 2 * sizeof(void*), "TlsStages: unexpected padding");
-
-    class TlsPipe;
-
-    class TlsEngine
-    {
-    public:
-        TlsEngine();
-        ~TlsEngine();
-
-        TlsEngine(const TlsEngine&) = delete;
-        TlsEngine& operator=(const TlsEngine&) = delete;
-
-        KiottyNetCode open(const TlsProfile& profile, Span<const char> hostname,
-                           TlsCapacity capacity);
-        void          close();
-        TlsStep       handshake();
-        DecodeResult  decode(StageBase& plain);
-        DecodeResult  decode(Span<char> plain);
-        void          encode(KiottyNetSpan plain);
-        TlsStatus     status() const;
-        TlsStages     stages();
-
-    private:
-        friend class TlsPipe;
-
-        struct Outcome
-        {
-            int result;
-            int reason;
-        };
-
-        struct Drained
-        {
-            size_t        length;
-            KiottyNetCode code;
-        };
-
-        void          limit(TlsCapacity capacity);
-        TlsStep       fail(KiottyNetCode code, const char* message);
-        KiottyNetCode prepareSsl(ssl_ctx_st* context);
-        KiottyNetCode createSsl(ssl_ctx_st* context);
-        Outcome       driveHandshake();
-        Drained       drain(Span<char> target);
-        size_t        resume(int reason);
-        bool          fitsCipherSend(size_t plain_length);
-        void          writeRecord(KiottyNetSpan plain);
-        size_t        feed();
-        size_t        flush();
-        size_t        pending() const;
-
-        Stage     _cipher_receive;
-        Stage     _cipher_send;
-        ssl_st*   _ssl;
-        bio_st*   _network;
-        TlsStatus _status;
-        bool      _failed;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CALLER_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CALLER_H
-
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_HANDLER_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_HANDLER_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    struct Caller;
-
-    class Handler
-    {
-    public:
-        explicit Handler(KiottyNetEndpoint& connection_owner);
-        virtual ~Handler() = default;
-
-        Handler(const Handler&) = delete;
-        Handler& operator=(const Handler&) = delete;
-
-        virtual KiottyNetCode               validate() const = 0;
-        virtual int32_t                     initialState() const = 0;
-        virtual KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const = 0;
-        virtual KiottyNetConnectionAction   dispatch(
-            const Caller& caller, const KiottyNetConnectionEvent& event) const = 0;
-        virtual void                        report(const KiottyNetConnectionInfo& info,
-                                                   KiottyNetCode code,
-                                                   const char* message) const = 0;
-
-        KiottyNetEndpoint& owner;
-    };
-
-    inline Handler::Handler(KiottyNetEndpoint& connection_owner)
-        : owner(connection_owner)
-    {
-    }
-}
-
-#endif
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    struct Caller
-    {
-        const Handler&                 handler;
-        const KiottyNetConnectionInfo& info;
-        StageBase&                     send;
-        int32_t&                       machine_state;
-        KiottyNetConnectionContext     context;
-        PoolHandle                     id;
-
-        KiottyNetConnectionHandle handle() const;
-        KiottyNetConnectionStream stream() const;
-        void                      reject(KiottyNetCode code, const char* message) const;
-        IoAction                  admit(const KiottyNetConnectionAction& returned) const;
-    };
-
-    static constexpr size_t CALLER_BYTES =
-        4 * sizeof(void*) + sizeof(KiottyNetConnectionContext) + sizeof(PoolHandle);
-    static_assert(sizeof(Caller) == CALLER_BYTES, "Caller: unexpected padding");
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_CONFIGURATION_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_CONFIGURATION_H
-
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CONNECTION_LIMITS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CONNECTION_LIMITS_H
-
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    struct ConnectionLimits
-    {
-        size_t receive;
-        size_t send;
-        size_t notify;
-        size_t send_timeout_milliseconds;
-    };
-
-    static_assert(sizeof(ConnectionLimits) == 4 * sizeof(size_t),
-                  "ConnectionLimits: unexpected padding");
-}
-
-#endif
-
-namespace kiotty::net::implementation
-{
-    struct ConnectionConfiguration
-    {
-        ActiveSocket               socket;
-        ConnectionLimits           limits;
-        KiottyNetConnectionContext context;
-        Span<const char>           hostname;
-        TlsProfile&                profile;
-    };
-
-    static constexpr size_t CONNECTION_CONFIGURATION_BYTES =
-        sizeof(ActiveSocket) + sizeof(ConnectionLimits) + sizeof(Span<const char>)
-        + 2 * sizeof(void*);
-    static_assert(sizeof(ConnectionConfiguration) == CONNECTION_CONFIGURATION_BYTES,
-                  "ConnectionConfiguration: unexpected padding");
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_FLOWS_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_FLOWS_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_RECEIVE_FLOW_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_RECEIVE_FLOW_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_PARTS_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_PARTS_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_CONTEXT_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_CONTEXT_H
-
-#include <atomic>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class WorkContext
-    {
-    public:
-        enum class State : uint8_t
-        {
-            IDLE,
-            REQUESTED,
-            WORKING,
-            DONE
-        };
-
-        WorkContext();
-        WorkContext(const WorkContext&) = delete;
-        WorkContext& operator=(const WorkContext&) = delete;
-
-        void     request();
-        void     abandon();
-        void     start(int32_t generation);
-        State    state() const;
-        IoAction takeOutcome();
-        void     reset();
-
-    private:
-        friend class WorkReporter;
-
-        void move(State from, State to);
-
-        IoAction           _outcome;
-        int32_t            _generation;
-        std::atomic<State> _state;
-    };
-
-    inline WorkContext::WorkContext()
-        : _outcome(IoAction::none())
-        , _generation(0)
-        , _state(State::IDLE)
-    {
-    }
-
-    inline void WorkContext::request()
-    {
-        move(State::IDLE, State::REQUESTED);
-    }
-
-    inline void WorkContext::abandon()
-    {
-        move(State::REQUESTED, State::IDLE);
-    }
-
-    inline void WorkContext::start(int32_t generation)
-    {
-        const State current = state();
-        if (current != State::REQUESTED)
-        {
-            return;
-        }
-        _generation = generation;
-        _state.store(State::WORKING, std::memory_order_release);
-    }
-
-    inline WorkContext::State WorkContext::state() const
-    {
-        return _state.load(std::memory_order_acquire);
-    }
-
-    inline IoAction WorkContext::takeOutcome()
-    {
-        const State current = state();
-        if (current != State::DONE)
-        {
-            return IoAction::none();
-        }
-        const IoAction outcome = _outcome;
-        _outcome = IoAction::none();
-        _state.store(State::IDLE, std::memory_order_release);
-        return outcome;
-    }
-
-    inline void WorkContext::reset()
-    {
-        _generation = 0;
-        _outcome = IoAction::none();
-        _state.store(State::IDLE, std::memory_order_release);
-    }
-
-    inline void WorkContext::move(State from, State to)
-    {
-        State expected = from;
-        const std::memory_order success = std::memory_order_acq_rel;
-        const std::memory_order failure = std::memory_order_acquire;
-        _state.compare_exchange_strong(expected, to, success, failure);
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_PHASE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_PHASE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class Phase : uint8_t
-    {
-        IDLE,
-        HANDSHAKING,
-        READY,
-        FLUSHING,
-        CLOSING
-    };
-
-    inline bool isAlive(Phase phase)
-    {
-        return phase == Phase::HANDSHAKING || phase == Phase::READY;
-    }
-
-    inline bool isOpen(Phase phase)
-    {
-        return isAlive(phase) || phase == Phase::FLUSHING;
-    }
-}
-
-#endif
-
-#include <atomic>
-
-namespace kiotty::net::implementation
-{
-    struct ConnectionParts
-    {
-        std::atomic<Phase>& phase;
-        WorkContext&        work;
-        IoEvent&            read_event;
-        IoEvent&            write_event;
-        StageBase&          receive;
-        StageBase&          send;
-        StageBase&          notify;
-        TlsEngine&          tls;
-        ActiveSocket&       socket;
-    };
-
-    static_assert(sizeof(ConnectionParts) == 9 * sizeof(void*),
-                  "ConnectionParts: unexpected padding");
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class ReceiveFlow
-    {
-    public:
-        explicit ReceiveFlow(const ConnectionParts& parts);
-        ReceiveFlow(const ReceiveFlow&) = delete;
-        ReceiveFlow& operator=(const ReceiveFlow&) = delete;
-
-        IoAction  drive(IoAction action, const Caller& caller);
-        IoPayload room(IoPurpose purpose);
-        void      commit(IoPurpose purpose, size_t length);
-
-    private:
-        using RefillResult = Result<size_t, KiottyNetCode>;
-
-        IoAction     deliver(KiottyNetSpan data, const Caller& caller);
-        RefillResult refill();
-        IoAction     refuse(KiottyNetCode code, const Caller& caller);
-        StageBase&   stageFor(IoPurpose purpose);
-
-        StageBase& _receive;
-        TlsEngine& _tls;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_SEND_FLOW_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_SEND_FLOW_H
-
-#include <atomic>
-#include <cstddef>
-#include <cstdint>
-#include <mutex>
-
-namespace kiotty::net::implementation
-{
-    class SendFlow
-    {
-    public:
-        explicit SendFlow(const ConnectionParts& parts);
-        SendFlow(const SendFlow&) = delete;
-        SendFlow& operator=(const SendFlow&) = delete;
-
-        IoAction      pick(const std::lock_guard<std::mutex>& notification);
-        IoPayload     payload(const IoAction& write);
-        void          release(const IoCompletion& sent, std::mutex& notification);
-        size_t        notificationWritable();
-        KiottyNetCode stageNotification(Span<const KiottyNetSpan> pieces);
-        void          limit(uint32_t timeout_milliseconds);
-        void          clearDeadline();
-        uint64_t      deadline() const;
-        bool          isDrained();
-
-    private:
-        IoAction select();
-        IoAction encoded(IoAction write);
-        bool     isBlocked() const;
-        void     startDeadline();
-
-        StageBase&                _send;
-        StageBase&                _notify;
-        TlsEngine&                _tls;
-        const IoEvent&            _write_event;
-        const WorkContext&        _work;
-        const std::atomic<Phase>& _phase;
-        std::atomic<uint64_t>     _deadline;
-        uint32_t                  _timeout;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_FLOW_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_FLOW_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_STATE_H
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    static constexpr uint8_t PENDING_NONE = 0U;
-    static constexpr uint8_t PENDING_READING = 1U << 1U;
-    static constexpr uint8_t PENDING_WRITING = 1U << 2U;
-    static constexpr uint8_t PENDING_WORKING = 1U << 3U;
-
-    struct ConnectionState
-    {
-        uint64_t                   deadline;
-        KiottyNetConnectionContext context;
-        PoolHandle                 id;
-        KiottyNetConnectionInfo    info;
-        Phase                      phase;
-        bool                       is_alive;
-        uint8_t                    pending;
-        uint8_t                    _padding[1];
-
-        bool isExpired(uint64_t now) const;
-        bool isSettled() const;
-    };
-
-    static constexpr size_t CONNECTION_STATE_TAIL_BYTES = 4;
-    static constexpr size_t CONNECTION_STATE_BYTES = sizeof(uint64_t)
-                                                   + sizeof(KiottyNetConnectionContext)
-                                                   + sizeof(PoolHandle)
-                                                   + sizeof(KiottyNetConnectionInfo)
-                                                   + CONNECTION_STATE_TAIL_BYTES;
-    static_assert(sizeof(ConnectionState) == CONNECTION_STATE_BYTES,
-                  "ConnectionState: unexpected padding");
-
-    inline bool ConnectionState::isExpired(uint64_t now) const
-    {
-        return deadline != 0 && now >= deadline;
-    }
-
-    inline bool ConnectionState::isSettled() const
-    {
-        return pending == PENDING_NONE;
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_REPORTER_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_WORK_REPORTER_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class WorkReporter
-    {
-    public:
-        explicit WorkReporter(WorkContext& work);
-
-        KiottyNetCode verify(int32_t generation) const;
-        void          finish(IoAction outcome);
-
-    private:
-        WorkContext& _work;
-    };
-
-    inline WorkReporter::WorkReporter(WorkContext& work)
-        : _work(work)
-    {
-    }
-
-    inline KiottyNetCode WorkReporter::verify(int32_t generation) const
-    {
-        const WorkContext::State current = _work.state();
-        if (current != WorkContext::State::WORKING) { return KIOTTY_NET_CODE_BUSY; }
-        if (_work._generation != generation) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    inline void WorkReporter::finish(IoAction outcome)
-    {
-        _work._outcome = outcome;
-        _work.move(WorkContext::State::WORKING, WorkContext::State::DONE);
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_STREAM_CONNECTION_STREAM_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_STREAM_CONNECTION_STREAM_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_PIPE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_TLS_PIPE_H
-
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    class TlsPipe
-    {
-    public:
-        explicit TlsPipe(TlsEngine& engine);
-
-        TlsStep          write(KiottyNetSpan plain);
-        Span<char>       receiveRoom();
-        void             received(size_t length);
-        Span<const char> outgoing();
-        void             sent(size_t length);
-
-#if defined(KIOTTY_NET_TESTING)
-        void requestKeyUpdate();
-        void sendCloseNotify();
-#endif
-
-    private:
-        TlsEngine& _engine;
-    };
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    using LineResult = Result<Span<const char>, KiottyNetCode>;
-
-    class ConnectionStream
-    {
-    public:
-        ConnectionStream(ActiveSocket& socket, TlsEngine& tls, StageBase& receive, StageBase& send);
-        ConnectionStream(const ConnectionStream& other) = default;
-        ConnectionStream& operator=(const ConnectionStream&) = delete;
-
-        KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
-        LineResult      readLine(uint32_t timeout_milliseconds);
-        KiottyNetCode   fill(uint32_t timeout_milliseconds);
-        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
-        KiottyNetCode   writeFile(Span<const char> path,
-                                  uint64_t offset,
-                                  uint64_t length,
-                                  uint32_t timeout_milliseconds);
-        bool            connected() const;
-        KiottyNetCode   handshake(uint32_t timeout_milliseconds);
-
-    private:
-        struct Sent
-        {
-            size_t     length;
-            SocketCode code;
-        };
-
-        static_assert(sizeof(Sent) == 2 * sizeof(size_t),
-                      "ConnectionStream::Sent: unexpected padding");
-
-        KiottyNetResult readInto(Span<char> target, const Deadline& deadline);
-        KiottyNetResult readOnce(Span<char> target, const Deadline& deadline);
-        KiottyNetResult readCipher(Span<char> target, const Deadline& deadline);
-        KiottyNetResult readPlain(Span<char> target, const Deadline& deadline);
-        KiottyNetCode   fillStage(const Deadline& deadline);
-        KiottyNetCode   sendFileOverTls(InputFile& file, FileRange range, const Deadline& deadline);
-        KiottyNetCode   sendFilePiece(InputFile& file, FileRange piece, const Deadline& deadline);
-        KiottyNetCode   exchangeHandshake(TlsStep step, const Deadline& deadline);
-        KiottyNetCode   receiveHandshake(const Deadline& deadline);
-        KiottyNetCode   flush(const Deadline& deadline);
-        KiottyNetCode   flushCipherStage(const Deadline& deadline);
-        KiottyNetCode   flushPipe(const Deadline& deadline);
-        KiottyNetResult send(KiottyNetSpan data, const Deadline& deadline);
-        KiottyNetCode   sendRecord(KiottyNetSpan part, const Deadline& deadline);
-        Sent            sendAll(Span<const char> data, const Deadline& deadline);
-        SocketCode      awaitWritable(SocketCode code, const Deadline& deadline);
-        SocketCode      waitReadable(const Deadline& deadline);
-        SocketCode      receiveCipher();
-        SocketCode      receiveIntoStage();
-        size_t          takeReceived(Span<char> target);
-
-        ActiveSocket& _socket;
-        TlsEngine&    _tls;
-        TlsPipe       _pipe;
-        StageBase&    _receive;
-        StageBase&    _send;
-    };
-}
-
-#endif
-
-#include <atomic>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class WorkFlow
-    {
-    public:
-        explicit WorkFlow(const ConnectionParts& parts);
-        WorkFlow(const WorkFlow&) = delete;
-        WorkFlow& operator=(const WorkFlow&) = delete;
-
-        KiottyNetCode    verify(int32_t generation) const;
-        ConnectionStream stream();
-        KiottyNetCode    closeStream(int32_t generation, const KiottyNetConnectionAction& then);
-        IoAction         takeOutcome();
-        bool             isReady() const;
-        bool             isFinished() const;
-        uint8_t          pending() const;
-
-    private:
-        StageBase&                _receive;
-        StageBase&                _send;
-        TlsEngine&                _tls;
-        ActiveSocket&             _socket;
-        WorkContext&              _work;
-        WorkReporter              _reporter;
-        const IoEvent&            _read_event;
-        const IoEvent&            _write_event;
-        const std::atomic<Phase>& _phase;
-    };
-}
-
-#endif
-
-namespace kiotty::net::implementation
-{
-    struct ConnectionFlows
-    {
-        ReceiveFlow& receive;
-        SendFlow&    send;
-        WorkFlow&    work;
-    };
-
-    static_assert(sizeof(ConnectionFlows) == 3 * sizeof(void*),
-                  "ConnectionFlows: unexpected padding");
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_STATUS_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_STATUS_H
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    struct ConnectionStatus
-    {
-        uint64_t deadline;
-        uint64_t send_deadline;
-        Phase    phase;
-        uint8_t  pending;
-
-        bool isExpired(uint64_t now) const;
-        bool isSendExpired(uint64_t now) const;
-        bool isSettled() const;
-    };
-
-    static_assert(sizeof(ConnectionStatus) == 24, "ConnectionStatus: unexpected padding");
-
-    inline bool ConnectionStatus::isExpired(uint64_t now) const
-    {
-        return deadline != 0 && now >= deadline;
-    }
-
-    inline bool ConnectionStatus::isSendExpired(uint64_t now) const
-    {
-        return send_deadline != 0 && now >= send_deadline;
-    }
-
-    inline bool ConnectionStatus::isSettled() const
-    {
-        return pending == PENDING_NONE;
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_IO_SOURCE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_IO_SOURCE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class IoSource
-    {
-    public:
-        virtual ~IoSource() = default;
-
-        virtual SocketHandle socket() const = 0;
-        virtual int32_t      slot() const = 0;
-        virtual IoEvent&     eventFor(const IoAction& action) = 0;
-        virtual IoPayload    resolve(const IoAction& action) = 0;
-        virtual SocketCode   attach(EventListener& listener) = 0;
-        virtual void         detach(EventListener& listener) = 0;
-        virtual void         shutdown() = 0;
-
-    protected:
-        IoSource() = default;
-        IoSource(const IoSource&) = delete;
-        IoSource& operator=(const IoSource&) = delete;
-    };
-}
-
-#endif
-
-#include <atomic>
-#include <cstdint>
-#include <mutex>
-
-namespace kiotty::net::implementation
-{
-    class Connection : public IoSource
-    {
-    public:
-        using code_type = KiottyNetCode;
-        using configuration_type = ConnectionConfiguration;
-
-        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
-        static constexpr KiottyNetCode OUT_OF_MEMORY = KIOTTY_NET_CODE_OUT_OF_MEMORY;
-        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_PEER_CLOSED;
-
-        Connection();
-        ~Connection() override;
-
-        Connection(const Connection&) = delete;
-        Connection& operator=(const Connection&) = delete;
-        Connection(Connection&&) = delete;
-        Connection& operator=(Connection&&) = delete;
-
-        KiottyNetCode   initialize(PoolHandle id, ConnectionConfiguration&& configuration);
-        void            reset() noexcept;
-        void            reserve(ConnectionLimits limits, TlsCapacity cipher);
-        IoAction        onOpened(const Handler& handler);
-        IoAction        dispatch(const IoCompletion& completion,
-                                 const Handler& handler,
-                                 std::mutex& notification);
-        IoAction        close(KiottyNetCode reason, const Handler& handler);
-        ConnectionState  state() const;
-        ConnectionStatus status() const;
-        ConnectionFlows  flows();
-
-        SocketHandle socket() const override;
-        int32_t      slot() const override;
-        IoEvent&     eventFor(const IoAction& action) override;
-        IoPayload    resolve(const IoAction& action) override;
-        SocketCode   attach(EventListener& listener) override;
-        void         detach(EventListener& listener) override;
-        void         shutdown() override;
-
-    private:
-        KiottyNetCode   open(TlsProfile& profile, Span<const char> hostname, TlsCapacity capacity);
-        IoAction        react(const IoCompletion& completion,
-                              const Handler& handler,
-                              std::mutex& notification);
-        IoAction        onReceived(const IoCompletion& completion, const Handler& handler);
-        IoAction        onSent(const IoCompletion& completion,
-                               const Handler& handler,
-                               std::mutex& notification);
-        IoAction        onFlushing(const IoCompletion& completion, std::mutex& notification);
-        IoAction        onWritten(size_t length, const Handler& handler);
-        IoAction        onTimeout(const Handler& handler);
-        IoAction        onWorkReady(const Handler& handler);
-        IoAction        onHandshake(const Handler& handler);
-        IoAction        onReady(const Handler& handler);
-        IoAction        extend(const KiottyNetConnectionAction& returned, const Caller& caller);
-        IoAction        apply(IoAction action, const Handler& handler);
-        void            enterClosing(KiottyNetCode reason, const Handler& handler);
-        void            enterFlushing(KiottyNetCode reason);
-        bool            isUserActionPending();
-        void            setDeadline(uint32_t timeout_milliseconds);
-        Caller          callerFor(const Handler& handler);
-        ConnectionParts parts();
-
-        StageSet                   _plain;
-        TlsEngine                  _tls;
-        ActiveSocket               _socket;
-        KiottyNetConnectionInfo    _info;
-        IoEvent                    _read_event;
-        IoEvent                    _write_event;
-        WorkContext                _work;
-        WorkFlow                   _work_flow;
-        SendFlow                   _send_flow;
-        ReceiveFlow                _receive_flow;
-        std::atomic<uint64_t>      _deadline;
-        KiottyNetConnectionContext _context;
-        PoolHandle                 _id;
-        int32_t                    _machine_state;
-        KiottyNetCode              _flush_reason;
-        std::atomic<Phase>         _phase;
-    };
-
-    inline ConnectionStatus Connection::status() const
-    {
-        ConnectionStatus snapshot{};
-        snapshot.deadline = _deadline.load();
-        snapshot.send_deadline = _send_flow.deadline();
-        snapshot.phase = _phase.load();
-        snapshot.pending = _work_flow.pending();
-        return snapshot;
-    }
-
-    using ConnectionResult = Result<Connection&, KiottyNetCode>;
-}
-
-#endif
-
-#include <mutex>
-
-namespace kiotty::net::implementation
-{
-    class NotificationDesk
-    {
-    public:
-        NotificationDesk(ReusablePoolBase<Connection>& connections, std::mutex& notification);
-        NotificationDesk(const NotificationDesk&) = delete;
-        NotificationDesk& operator=(const NotificationDesk&) = delete;
-
-        KiottyNetCode           notify(PoolHandle id, KiottyNetSpan data);
-        KiottyNetCode           notify(PoolHandle id, Span<const KiottyNetSpan> pieces);
-        KiottyNetCode           broadcast(KiottyNetSpan data);
-        KiottyNetCode           broadcast(Span<const KiottyNetSpan> pieces);
-        KiottyNetConnectionInfo info(PoolHandle id) const;
-        ConnectionResult        working(PoolHandle id);
-        KiottyNetCode           closeStream(PoolHandle id, const KiottyNetConnectionAction& then);
-        PoolHandle              findReady() const;
-
-    private:
-        ConnectionResult find(PoolHandle id);
-        bool             isTarget(size_t index);
-        bool             canTakeAll(size_t length);
-
-        ReusablePoolBase<Connection>& _connections;
-        std::mutex&                   _notification;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_IO_LOOP_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_IO_LOOP_H
-
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_ACCEPTOR_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_ACCEPTOR_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class Acceptor : public IoSource
-    {
-    public:
-        Acceptor();
-        ~Acceptor() override;
-
-        Acceptor(const Acceptor&) = delete;
-        Acceptor& operator=(const Acceptor&) = delete;
-        Acceptor(Acceptor&&) = delete;
-        Acceptor& operator=(Acceptor&&) = delete;
-
-        SocketCode         open(const KiottyNetAddress& address, int backlog, NoDelay no_delay);
-        void               close();
-        ActiveSocketResult accept();
-        bool               listening() const;
-        bool               isPending() const;
-        uint16_t           port() const;
-
-        SocketHandle socket() const override;
-        int32_t      slot() const override;
-        IoEvent&     eventFor(const IoAction& action) override;
-        IoPayload    resolve(const IoAction& action) override;
-        SocketCode   attach(EventListener& listener) override;
-        void         detach(EventListener& listener) override;
-        void         shutdown() override;
-
-    private:
-        IoPayload acceptPayload();
-
-        AcceptBuffer  _buffer;
-        IoEvent       _event;
-        ActiveSocket  _prepared;
-        PassiveSocket _socket;
-        NoDelay       _no_delay;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_HOST_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CONNECTION_HOST_H
 
 #include <cstddef>
 #include <cstdint>
@@ -6754,6 +6793,48 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_NOTIFICATION_DESK_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_NOTIFICATION_DESK_H
+
+#include <mutex>
+
+namespace kiotty::net::implementation
+{
+    class NotificationDesk
+    {
+    public:
+        NotificationDesk(ReusablePoolBase<Connection>& connections, std::mutex& notification);
+        NotificationDesk(const NotificationDesk&) = delete;
+        NotificationDesk& operator=(const NotificationDesk&) = delete;
+
+        KiottyNetCode           notify(PoolHandle id, KiottyNetSpan data);
+        KiottyNetCode           notify(PoolHandle id, Span<const KiottyNetSpan> pieces);
+        KiottyNetCode           broadcast(KiottyNetSpan data);
+        KiottyNetCode           broadcast(Span<const KiottyNetSpan> pieces);
+        KiottyNetConnectionInfo info(PoolHandle id) const;
+        ConnectionResult        working(PoolHandle id);
+        KiottyNetCode           closeStream(PoolHandle id, const KiottyNetConnectionAction& then);
+        PoolHandle              findReady() const;
+
+    private:
+        ConnectionResult find(PoolHandle id);
+        bool             isTarget(size_t index);
+        bool             canTakeAll(size_t length);
+
+        ReusablePoolBase<Connection>& _connections;
+        std::mutex&                   _notification;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_CONNECTION_ACCESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_CONNECTION_ACCESS_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_IO_LOOP_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_IO_LOOP_H
+
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
 
 namespace kiotty::net::implementation
 {
@@ -6770,8 +6851,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_STOP_POLICY_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_IO_LOOP_STOP_POLICY_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_STOP_POLICY_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_STOP_POLICY_H
 
 #include <cstdint>
 
@@ -6871,8 +6952,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_ENDPOINT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_ENDPOINT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_ENDPOINT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_ENDPOINT_H
 
 #include <cstddef>
 #include <cstdint>
@@ -6913,8 +6994,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_RUN_GATE_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_RUN_GATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_RUN_GATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_RUN_GATE_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_PARKER_H
 #define KIOTTY_NET_INTERNAL_CORE_PARKER_H
@@ -7020,8 +7101,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_RUN_LIFETIME_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_RUN_LIFETIME_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_RUN_LIFETIME_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_RUN_LIFETIME_H
 
 #include <atomic>
 
@@ -7120,207 +7201,150 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_SERVER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_SERVER_H
 
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_EXCHANGE_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_EXCHANGE_H
+#ifndef KIOTTY_NET_INTERNAL_CORE_POOL_SIZED_REUSABLE_POOL_H
+#define KIOTTY_NET_INTERNAL_CORE_POOL_SIZED_REUSABLE_POOL_H
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace kiotty::net::implementation
 {
-    class HttpClient;
-    struct ClientRequest;
+    template <class T>
+    struct SizedReusablePoolStorage
+    {
+        SizedReusablePoolStorage();
 
-    class HttpClientExchange
+        std::vector<T>         objects;
+        std::vector<SlotState> states;
+        std::vector<int32_t>   generations;
+    };
+
+    template <class T>
+    class SizedReusablePool : private SizedReusablePoolStorage<T>, public ReusablePoolBase<T>
     {
     public:
-        explicit HttpClientExchange(HttpClient& client);
+        SizedReusablePool();
 
-        KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
-        KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
-        KiottyNetCode      begin(const ClientRequest& request,
-                                 uint64_t body_length,
-                                 uint32_t timeout_milliseconds);
-        KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
-        KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
-
-    private:
-        struct Attempt
-        {
-            KiottyNetCode code;
-            bool          is_stale;
-        };
-
-        KiottyNetHttpReply run(const ClientRequest& request, uint32_t timeout_milliseconds);
-        Attempt            attempt(const ClientRequest& request,
-                                   size_t head_length,
-                                   const Deadline& deadline);
-        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
-        KiottyNetCode      checkStart(const ClientRequest& request);
-        KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
-        KiottyNetCode      sendEnd(const Deadline& deadline);
-        void               settleUpload();
-        void               dropUpload();
-
-        HttpClient& _client;
+        bool resize(size_t slots);
     };
+
+    template <class T>
+    SizedReusablePoolStorage<T>::SizedReusablePoolStorage()
+        : objects()
+        , states()
+        , generations()
+    {
+    }
+
+    template <class T>
+    SizedReusablePool<T>::SizedReusablePool()
+        : SizedReusablePoolStorage<T>()
+        , ReusablePoolBase<T>(Span<T>{ nullptr, 0 },
+                              Span<SlotState>{ nullptr, 0 },
+                              Span<int32_t>{ nullptr, 0 })
+    {
+    }
+
+    template <class T>
+    bool SizedReusablePool<T>::resize(size_t slots)
+    {
+        if (this->count() != 0) { return false; }
+        if (slots == 0 || slots > REUSABLE_POOL_MAX_SLOTS) { return false; }
+        if (slots <= this->objects.size()) { return true; }
+        this->objects = std::vector<T>(slots);
+        this->states.assign(slots, SlotState::EMPTY);
+        this->generations.resize(slots, 0);
+        this->bind(Span<T>{ this->objects.data(), slots },
+                   Span<SlotState>{ this->states.data(), slots },
+                   Span<int32_t>{ this->generations.data(), slots });
+        return true;
+    }
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_HEADERS_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_HEADERS_H
-
-#ifndef KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
-#define KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
 
 #include <atomic>
-#include <cstdint>
-#include <thread>
-
-namespace kiotty::net::implementation
-{
-    class BusyFlag
-    {
-    public:
-        BusyFlag();
-
-        BusyFlag(const BusyFlag&) = delete;
-        BusyFlag& operator=(const BusyFlag&) = delete;
-
-        bool enterCall();
-        bool enterClose();
-        void leave();
-
-    private:
-        static constexpr uint8_t IDLE = 0;
-        static constexpr uint8_t CALL = 1;
-        static constexpr uint8_t CLOSE = 2;
-
-        std::atomic<uint8_t> _state;
-    };
-
-    class BusyGuard
-    {
-    public:
-        explicit BusyGuard(BusyFlag& flag);
-        ~BusyGuard();
-
-        BusyGuard(const BusyGuard&) = delete;
-        BusyGuard& operator=(const BusyGuard&) = delete;
-
-        bool isHeld() const;
-
-    private:
-        BusyFlag& _flag;
-        bool      _is_held;
-    };
-
-    inline BusyFlag::BusyFlag()
-        : _state(IDLE)
-    {
-    }
-
-    inline bool BusyFlag::enterCall()
-    {
-        for (;;)
-        {
-            uint8_t expected = IDLE;
-            if (_state.compare_exchange_strong(expected, CALL)) { return true; }
-            if (expected == CALL) { return false; }
-            std::this_thread::yield();
-        }
-    }
-
-    inline bool BusyFlag::enterClose()
-    {
-        uint8_t expected = IDLE;
-        return _state.compare_exchange_strong(expected, CLOSE);
-    }
-
-    inline void BusyFlag::leave()
-    {
-        _state.store(IDLE);
-    }
-
-    inline BusyGuard::BusyGuard(BusyFlag& flag)
-        : _flag(flag)
-        , _is_held(flag.enterCall())
-    {
-    }
-
-    inline BusyGuard::~BusyGuard()
-    {
-        if (_is_held) { _flag.leave(); }
-    }
-
-    inline bool BusyGuard::isHeld() const
-    {
-        return _is_held;
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SHARED_HEADERS_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SHARED_HEADERS_H
-
 #include <cstddef>
+#include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    class HttpSharedHeaders
+    class Server : public Endpoint
     {
     public:
-        HttpSharedHeaders(Span<char> text, Span<KiottyNetHttpHeader> entries);
+        using code_type = KiottyNetCode;
+        using configuration_type = KiottyNetServerConfiguration;
 
-        KiottyNetCode                   set(Span<const char> name, Span<const char> value);
-        KiottyNetCode                   remove(Span<const char> name);
-        void                            clear();
-        Span<const KiottyNetHttpHeader> list() const;
+        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
+        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+        static constexpr KiottyNetCode INVALID_ARGUMENT = KIOTTY_NET_CODE_INVALID_ARGUMENT;
+
+        Server();
+        ~Server() override;
+
+        Server(const Server&) = delete;
+        Server& operator=(const Server&) = delete;
+        Server(Server&&) = delete;
+        Server& operator=(Server&&) = delete;
+
+        KiottyNetCode initialize(PoolHandle id, const KiottyNetServerConfiguration& configuration);
+        void          reset() noexcept;
+        KiottyNetCode run(const Handler& handler,
+                          const KiottyNetAddress& address,
+                          const KiottyNetTlsServerConfiguration* tls);
+        void          close();
+        KiottyNetCode await(uint64_t timeout_milliseconds);
+        KiottyNetCode broadcast(KiottyNetSpan data);
+        RunLifetime   lifetime();
+
+        KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
+        KiottyNetCode           notify(int64_t id, Span<const KiottyNetSpan> pieces) override;
+        KiottyNetConnectionInfo info(int64_t id) const override;
+        KiottyNetResult         readStream(int64_t id,
+                                           Span<char> buffer,
+                                           uint32_t timeout_milliseconds) override;
+        KiottyNetResult         writeStream(int64_t id,
+                                            KiottyNetSpan data,
+                                            uint32_t timeout_milliseconds) override;
+        KiottyNetCode           writeStreamFile(int64_t id,
+                                                Span<const char> path,
+                                                FileRange range,
+                                                uint32_t timeout_milliseconds) override;
+        bool                    isStreamOpen(int64_t id) override;
+        KiottyNetCode           closeStream(int64_t id,
+                                            const KiottyNetConnectionAction& then) override;
 
     private:
-        size_t        findIndex(Span<const char> name) const;
-        KiottyNetCode checkRoom(size_t index, size_t bytes) const;
-        void          removeAt(size_t index);
-        void          append(Span<const char> name, Span<const char> value);
+        static constexpr int LISTEN_BACKLOG = 128;
 
-        Span<char>                _text;
-        Span<KiottyNetHttpHeader> _entries;
-        size_t                    _text_length;
-        size_t                    _count;
+        KiottyNetCode    openProfile(const KiottyNetTlsServerConfiguration* tls);
+        KiottyNetCode    listen(const KiottyNetAddress& address);
+        KiottyNetCode    leave(KiottyNetCode code);
+        ConnectionAccess access();
+
+        SizedReusablePool<Connection> _connections;
+        ConnectionHost                _host;
+        NotificationDesk              _desk;
+        EventListener                 _listener;
+        Acceptor                      _acceptor;
+        TlsProfile                    _profile;
+        IoLoop                        _loop;
+        RunGate                       _gate;
+        std::atomic<bool>             _is_abandoned;
+        KiottyNetServerConfiguration  _configuration;
     };
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_STREAM_CLIENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_ENDPOINT_STREAM_CLIENT_H
 
-namespace kiotty::net::implementation
-{
-    class HttpClientHeaders
-    {
-    public:
-        HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy);
-
-        KiottyNetCode set(Span<const char> name, Span<const char> value);
-        KiottyNetCode remove(Span<const char> name);
-        KiottyNetCode clear();
-
-    private:
-        HttpSharedHeaders& _shared;
-        BusyFlag&          _is_busy;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_LINK_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CLIENT_LINK_H
-
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_STREAM_CLIENT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_STREAM_CLIENT_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_STOP_SIGNAL_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_STOP_SIGNAL_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_STOP_SIGNAL_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_STOP_SIGNAL_H
 
 #include <atomic>
 #include <cstdint>
@@ -7435,6 +7459,201 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_H
+
+#ifndef KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
+#define KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
+
+#include <atomic>
+#include <cstdint>
+#include <thread>
+
+namespace kiotty::net::implementation
+{
+    class BusyFlag
+    {
+    public:
+        BusyFlag();
+
+        BusyFlag(const BusyFlag&) = delete;
+        BusyFlag& operator=(const BusyFlag&) = delete;
+
+        bool enterCall();
+        bool enterClose();
+        void leave();
+
+    private:
+        static constexpr uint8_t IDLE = 0;
+        static constexpr uint8_t CALL = 1;
+        static constexpr uint8_t CLOSE = 2;
+
+        std::atomic<uint8_t> _state;
+    };
+
+    class BusyGuard
+    {
+    public:
+        explicit BusyGuard(BusyFlag& flag);
+        ~BusyGuard();
+
+        BusyGuard(const BusyGuard&) = delete;
+        BusyGuard& operator=(const BusyGuard&) = delete;
+
+        bool isHeld() const;
+
+    private:
+        BusyFlag& _flag;
+        bool      _is_held;
+    };
+
+    inline BusyFlag::BusyFlag()
+        : _state(IDLE)
+    {
+    }
+
+    inline bool BusyFlag::enterCall()
+    {
+        for (;;)
+        {
+            uint8_t expected = IDLE;
+            if (_state.compare_exchange_strong(expected, CALL)) { return true; }
+            if (expected == CALL) { return false; }
+            std::this_thread::yield();
+        }
+    }
+
+    inline bool BusyFlag::enterClose()
+    {
+        uint8_t expected = IDLE;
+        return _state.compare_exchange_strong(expected, CLOSE);
+    }
+
+    inline void BusyFlag::leave()
+    {
+        _state.store(IDLE);
+    }
+
+    inline BusyGuard::BusyGuard(BusyFlag& flag)
+        : _flag(flag)
+        , _is_held(flag.enterCall())
+    {
+    }
+
+    inline BusyGuard::~BusyGuard()
+    {
+        if (_is_held) { _flag.leave(); }
+    }
+
+    inline bool BusyGuard::isHeld() const
+    {
+        return _is_held;
+    }
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_EXCHANGE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_EXCHANGE_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class HttpClient;
+    struct ClientRequest;
+
+    class HttpClientExchange
+    {
+    public:
+        explicit HttpClientExchange(HttpClient& client);
+
+        KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
+        KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
+        KiottyNetCode      begin(const ClientRequest& request,
+                                 uint64_t body_length,
+                                 uint32_t timeout_milliseconds);
+        KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
+        KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+
+    private:
+        struct Attempt
+        {
+            KiottyNetCode code;
+            bool          is_stale;
+        };
+
+        KiottyNetHttpReply run(const ClientRequest& request, uint32_t timeout_milliseconds);
+        Attempt            attempt(const ClientRequest& request,
+                                   size_t head_length,
+                                   const Deadline& deadline);
+        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
+        KiottyNetCode      checkStart(const ClientRequest& request);
+        KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
+        KiottyNetCode      sendEnd(const Deadline& deadline);
+        void               settleUpload();
+        void               dropUpload();
+
+        HttpClient& _client;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_HEADERS_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SHARED_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SHARED_HEADERS_H
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    class HttpSharedHeaders
+    {
+    public:
+        HttpSharedHeaders(Span<char> text, Span<KiottyNetHttpHeader> entries);
+
+        KiottyNetCode                   set(Span<const char> name, Span<const char> value);
+        KiottyNetCode                   remove(Span<const char> name);
+        void                            clear();
+        Span<const KiottyNetHttpHeader> list() const;
+
+    private:
+        size_t        findIndex(Span<const char> name) const;
+        KiottyNetCode checkRoom(size_t index, size_t bytes) const;
+        void          removeAt(size_t index);
+        void          append(Span<const char> name, Span<const char> value);
+
+        Span<char>                _text;
+        Span<KiottyNetHttpHeader> _entries;
+        size_t                    _text_length;
+        size_t                    _count;
+    };
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    class HttpClientHeaders
+    {
+    public:
+        HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy);
+
+        KiottyNetCode set(Span<const char> name, Span<const char> value);
+        KiottyNetCode remove(Span<const char> name);
+        KiottyNetCode clear();
+
+    private:
+        HttpSharedHeaders& _shared;
+        BusyFlag&          _is_busy;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_LINK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_LINK_H
 
 namespace kiotty::net::implementation
 {
@@ -7454,17 +7673,17 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REPLY_STORE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REPLY_STORE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REPLY_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REPLY_STORE_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REPLY_FRAMING_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REPLY_FRAMING_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_MESSAGE_FRAMING_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_MESSAGE_FRAMING_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_LINE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_LINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
 
 #include <cstdint>
 
@@ -7529,8 +7748,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_STATUS_LINE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_STATUS_LINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
 
 #include <cstdint>
 
@@ -7620,8 +7839,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_BODY_READER_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_BODY_READER_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_READER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_READER_H
 
 #include <array>
 #include <cstddef>
@@ -7691,8 +7910,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_HEAD_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_HEAD_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
 #define KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
@@ -7830,8 +8049,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_UPLOAD_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_UPLOAD_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_UPLOAD_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_UPLOAD_H
 
 #include <cstddef>
 #include <cstdint>
@@ -7955,17 +8174,17 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_SERVER_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_SERVER_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SERVER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SERVER_H
 
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CONFIGURATION_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_CONFIGURATION_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CONFIGURATION_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CONFIGURATION_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_RESPONSE_TEXT_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_RESPONSE_TEXT_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CALENDAR_TIME_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CALENDAR_TIME_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CALENDAR_TIME_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CALENDAR_TIME_H
 
 #include <cstdint>
 
@@ -8046,20 +8265,20 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_HTTP_WORK_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_HTTP_WORK_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SITE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SITE_H
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SESSION_POOL_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SESSION_POOL_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SESSION_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SESSION_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SESSION_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SESSION_H
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REQUEST_STORE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REQUEST_STORE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REQUEST_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REQUEST_STORE_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_FRAME_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_FRAME_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_H
 
 #include <atomic>
 #include <cstddef>
@@ -8171,8 +8390,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_RESPONSE_STORE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_RESPONSE_STORE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_RESPONSE_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_RESPONSE_STORE_H
 
 #include <cstddef>
 #include <cstdint>
@@ -8261,8 +8480,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_WEBSOCKET_WEBSOCKET_SOCKET_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_WEBSOCKET_WEBSOCKET_SOCKET_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SOCKET_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SOCKET_H
 
 #include <atomic>
 #include <cstddef>
@@ -8490,11 +8709,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SITE_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_SITE_H
-
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_NOTICES_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_NOTICES_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_NOTICES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_NOTICES_H
 
 namespace kiotty::net::implementation
 {
@@ -8521,11 +8737,11 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REGISTRY_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_REGISTRY_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REGISTRY_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REGISTRY_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_ROUTE_PATH_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_ROUTE_PATH_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
 
 #include <cstdint>
 
@@ -8712,6 +8928,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_WORK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_WORK_H
 
 #include <cstdint>
 
@@ -8737,147 +8955,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_SERVER_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_SERVER_H
-
-#ifndef KIOTTY_NET_INTERNAL_CORE_POOL_SIZED_REUSABLE_POOL_H
-#define KIOTTY_NET_INTERNAL_CORE_POOL_SIZED_REUSABLE_POOL_H
-
-#include <cstddef>
-#include <cstdint>
-#include <vector>
-
-namespace kiotty::net::implementation
-{
-    template <class T>
-    struct SizedReusablePoolStorage
-    {
-        SizedReusablePoolStorage();
-
-        std::vector<T>         objects;
-        std::vector<SlotState> states;
-        std::vector<int32_t>   generations;
-    };
-
-    template <class T>
-    class SizedReusablePool : private SizedReusablePoolStorage<T>, public ReusablePoolBase<T>
-    {
-    public:
-        SizedReusablePool();
-
-        bool resize(size_t slots);
-    };
-
-    template <class T>
-    SizedReusablePoolStorage<T>::SizedReusablePoolStorage()
-        : objects()
-        , states()
-        , generations()
-    {
-    }
-
-    template <class T>
-    SizedReusablePool<T>::SizedReusablePool()
-        : SizedReusablePoolStorage<T>()
-        , ReusablePoolBase<T>(Span<T>{ nullptr, 0 },
-                              Span<SlotState>{ nullptr, 0 },
-                              Span<int32_t>{ nullptr, 0 })
-    {
-    }
-
-    template <class T>
-    bool SizedReusablePool<T>::resize(size_t slots)
-    {
-        if (this->count() != 0) { return false; }
-        if (slots == 0 || slots > REUSABLE_POOL_MAX_SLOTS) { return false; }
-        if (slots <= this->objects.size()) { return true; }
-        this->objects = std::vector<T>(slots);
-        this->states.assign(slots, SlotState::EMPTY);
-        this->generations.resize(slots, 0);
-        this->bind(Span<T>{ this->objects.data(), slots },
-                   Span<SlotState>{ this->states.data(), slots },
-                   Span<int32_t>{ this->generations.data(), slots });
-        return true;
-    }
-}
-
-#endif
-
-#include <atomic>
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class Server : public Endpoint
-    {
-    public:
-        using code_type = KiottyNetCode;
-        using configuration_type = KiottyNetServerConfiguration;
-
-        static constexpr KiottyNetCode TABLE_FULL = KIOTTY_NET_CODE_TABLE_FULL;
-        static constexpr KiottyNetCode INVALID_HANDLE = KIOTTY_NET_CODE_INVALID_ARGUMENT;
-        static constexpr KiottyNetCode INVALID_ARGUMENT = KIOTTY_NET_CODE_INVALID_ARGUMENT;
-
-        Server();
-        ~Server() override;
-
-        Server(const Server&) = delete;
-        Server& operator=(const Server&) = delete;
-        Server(Server&&) = delete;
-        Server& operator=(Server&&) = delete;
-
-        KiottyNetCode initialize(PoolHandle id, const KiottyNetServerConfiguration& configuration);
-        void          reset() noexcept;
-        KiottyNetCode run(const Handler& handler,
-                          const KiottyNetAddress& address,
-                          const KiottyNetTlsServerConfiguration* tls);
-        void          close();
-        KiottyNetCode await(uint64_t timeout_milliseconds);
-        KiottyNetCode broadcast(KiottyNetSpan data);
-        RunLifetime   lifetime();
-
-        KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
-        KiottyNetCode           notify(int64_t id, Span<const KiottyNetSpan> pieces) override;
-        KiottyNetConnectionInfo info(int64_t id) const override;
-        KiottyNetResult         readStream(int64_t id,
-                                           Span<char> buffer,
-                                           uint32_t timeout_milliseconds) override;
-        KiottyNetResult         writeStream(int64_t id,
-                                            KiottyNetSpan data,
-                                            uint32_t timeout_milliseconds) override;
-        KiottyNetCode           writeStreamFile(int64_t id,
-                                                Span<const char> path,
-                                                FileRange range,
-                                                uint32_t timeout_milliseconds) override;
-        bool                    isStreamOpen(int64_t id) override;
-        KiottyNetCode           closeStream(int64_t id,
-                                            const KiottyNetConnectionAction& then) override;
-
-    private:
-        static constexpr int LISTEN_BACKLOG = 128;
-
-        KiottyNetCode    openProfile(const KiottyNetTlsServerConfiguration* tls);
-        KiottyNetCode    listen(const KiottyNetAddress& address);
-        KiottyNetCode    leave(KiottyNetCode code);
-        ConnectionAccess access();
-
-        SizedReusablePool<Connection> _connections;
-        ConnectionHost                _host;
-        NotificationDesk              _desk;
-        EventListener                 _listener;
-        Acceptor                      _acceptor;
-        TlsProfile                    _profile;
-        IoLoop                        _loop;
-        RunGate                       _gate;
-        std::atomic<bool>             _is_abandoned;
-        KiottyNetServerConfiguration  _configuration;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_WEBSOCKET_ENDPOINT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_WEBSOCKET_ENDPOINT_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_ENDPOINT_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_ENDPOINT_H
 
 #include <cstdint>
 
@@ -8957,11 +9036,11 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_WEBSOCKET_CLIENT_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_WEBSOCKET_CLIENT_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_HANDSHAKE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_HANDSHAKE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_HANDSHAKE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_HANDSHAKE_H
 
 #include <cstddef>
 
@@ -9327,87 +9406,6 @@ namespace kiotty::net::implementation
 struct KiottyNetContextImpl final : kiotty::net::implementation::Context
 {
 };
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_CONTEXT_TLS_CONFIGURATION_H
-#define KIOTTY_NET_INTERNAL_CONTEXT_TLS_CONFIGURATION_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    struct TlsIdentityText
-    {
-        Span<const char> certificate_file;
-        Span<const char> key_file;
-        Span<const char> key_password;
-    };
-
-    KiottyNetCode initializeTlsServerConfiguration(KiottyNetTlsServerConfiguration& configuration,
-                                                   const TlsIdentityText& identity);
-    KiottyNetCode configureTlsServerVersions(KiottyNetTlsServerConfiguration& configuration,
-                                             uint32_t versions);
-    KiottyNetCode configureTlsServerV12CipherSuites(KiottyNetTlsServerConfiguration& configuration,
-                                                    uint32_t suites);
-    KiottyNetCode configureTlsServerV13CipherSuites(KiottyNetTlsServerConfiguration& configuration,
-                                                    uint32_t suites);
-    KiottyNetCode configureTlsServerClientAuthentication(
-        KiottyNetTlsServerConfiguration& configuration,
-        KiottyNetClientAuthentication mode,
-        Span<const char> trust_store_path);
-
-    KiottyNetCode initializeTlsClientConfiguration(KiottyNetTlsClientConfiguration& configuration);
-    KiottyNetCode configureTlsClientVersions(KiottyNetTlsClientConfiguration& configuration,
-                                             uint32_t versions);
-    KiottyNetCode configureTlsClientV12CipherSuites(KiottyNetTlsClientConfiguration& configuration,
-                                                    uint32_t suites);
-    KiottyNetCode configureTlsClientV13CipherSuites(KiottyNetTlsClientConfiguration& configuration,
-                                                    uint32_t suites);
-    KiottyNetCode configureTlsClientTrustStore(KiottyNetTlsClientConfiguration& configuration,
-                                               Span<const char> trust_store_path);
-    KiottyNetCode configureTlsClientVerification(KiottyNetTlsClientConfiguration& configuration,
-                                                 KiottyNetTlsVerification verification);
-    KiottyNetCode configureTlsClientIdentity(KiottyNetTlsClientConfiguration& configuration,
-                                             const TlsIdentityText& identity);
-
-    bool isInitialized(const KiottyNetTlsServerConfiguration& configuration);
-    bool isInitialized(const KiottyNetTlsClientConfiguration& configuration);
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CALLBACK_HANDLER_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_CALLBACK_HANDLER_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class CallbackHandler final : public Handler
-    {
-    public:
-        CallbackHandler(const KiottyNetConnectionHandler& callbacks,
-                        KiottyNetAppContext app_context,
-                        KiottyNetEndpoint& connection_owner);
-
-        KiottyNetCode               validate() const override;
-        int32_t                     initialState() const override;
-        KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const override;
-        KiottyNetConnectionAction   dispatch(const Caller& caller,
-                                             const KiottyNetConnectionEvent& event) const override;
-        void                        report(const KiottyNetConnectionInfo& info,
-                                           KiottyNetCode code,
-                                           const char* message) const override;
-
-    private:
-        KiottyNetConnectionAction startWork(const KiottyNetConnectionEvent& event,
-                                            const Caller& caller) const;
-        KiottyNetConnectionAction disconnect(const KiottyNetConnectionEvent& event,
-                                             const Caller& caller) const;
-
-        const KiottyNetConnectionHandler& _callbacks;
-        KiottyNetAppContext               _app_context;
-    };
-}
 
 #endif
 #ifndef KIOTTY_NET_INTERNAL_CORE_CODES_H
@@ -10013,11 +10011,11 @@ KiottyNetCode KiottyNet_broadcastServer(KiottyNetServerHandle server, KiottyNetS
     return server->broadcast(data);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_STATEMACHINE_STATEFUL_HANDLER_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_STATEMACHINE_STATEFUL_HANDLER_H
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATEFUL_HANDLER_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATEFUL_HANDLER_H
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_STATEMACHINE_RULE_TABLE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_STATEMACHINE_RULE_TABLE_H
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_RULE_TABLE_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_RULE_TABLE_H
 
 #include <cstdint>
 
@@ -10106,8 +10104,8 @@ KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client
     return client->run(handler, copied, tls);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_FILE_BODY_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_HTTP_HTTP_FILE_BODY_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_FILE_BODY_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_FILE_BODY_H
 
 #include <cstddef>
 
@@ -10438,8 +10436,8 @@ KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server,
     return server->await(timeout_milliseconds);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REPLY_HEADERS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REPLY_HEADERS_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_HEADERS_H
 
 #include <cstdint>
 
@@ -10450,8 +10448,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_TOKEN_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_TOKEN_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_TOKEN_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_TOKEN_H
 
 #include <cstddef>
 
@@ -10772,8 +10770,8 @@ uint32_t KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply)
     return net::allowedMethodsOf(replyHeadersOf(*reply));
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_ACCESS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_ACCESS_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ACCESS_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ACCESS_H
 
 #include <cstdint>
 
@@ -11801,8 +11799,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CONNECTION_EVENT_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_ENTITY_CONNECTION_EVENT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CONNECTION_EVENT_H
+#define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CONNECTION_EVENT_H
 
 #include <cstddef>
 
@@ -11874,8 +11872,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_ERROR_SOCKET_ERROR_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_ERROR_SOCKET_ERROR_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_ERROR_SOCKET_ERROR_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_ERROR_SOCKET_ERROR_H
 
 namespace kiotty::net::implementation
 {
@@ -12033,8 +12031,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_CONNECT_WITH_RETRY_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_CONNECT_WITH_RETRY_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_CONNECT_WITH_RETRY_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_CONNECT_WITH_RETRY_H
 
 #include <atomic>
 
@@ -12223,8 +12221,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
 
 namespace kiotty::net::implementation
 {
@@ -12250,8 +12248,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -12307,8 +12305,8 @@ namespace kiotty::net::implementation
 #endif
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
 
 namespace kiotty::net::implementation
 {
@@ -12343,8 +12341,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -12582,8 +12580,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -12769,8 +12767,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -12968,8 +12966,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -13105,8 +13103,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -13375,8 +13373,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -13577,8 +13575,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -13813,8 +13811,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -14035,8 +14033,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_WINDOWS_ADDRESS_H
 
 #if defined(_WIN32)
 
@@ -14324,8 +14322,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_READINESS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -14512,8 +14510,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_READINESS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -14727,8 +14725,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_READINESS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -14796,8 +14794,8 @@ namespace kiotty::net::implementation
 #endif
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -14985,8 +14983,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_READINESS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -15204,13 +15202,13 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -15458,13 +15456,13 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -15630,8 +15628,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_KQUEUE
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -15811,18 +15809,18 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -16124,18 +16122,18 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -16451,18 +16449,18 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_PARTS_H
 
 #if KIOTTY_NET_EVENT_URING
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_RING_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_EPOLL
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -16770,8 +16768,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_EVENT_KQUEUE
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_READINESS_EVENT_STATE_H
 
 #if KIOTTY_NET_EVENT_READINESS
 
@@ -16919,8 +16917,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
 
 #if defined(_WIN32)
 
@@ -17120,8 +17118,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
 
 #if defined(_WIN32)
 
@@ -17375,8 +17373,8 @@ namespace kiotty::net::implementation
 
 #if defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_EVENT_BACKEND_IOCP_EVENT_STATE_H
 
 #if defined(_WIN32)
 
@@ -17719,8 +17717,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_USE_TLS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
 
 #include <openssl/ssl.h>
 
@@ -18042,8 +18040,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_USE_TLS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
 
 #include <openssl/ssl.h>
 
@@ -18216,8 +18214,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_USE_TLS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
 
 #include <openssl/ssl.h>
 
@@ -18504,8 +18502,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_USE_TLS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_SESSION_H
 
 #include <openssl/ssl.h>
 
@@ -18610,8 +18608,8 @@ namespace kiotty::net::implementation
 
 #if KIOTTY_NET_USE_TLS
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_TLS_BACKEND_OPENSSL_CONTEXT_H
 
 #include <openssl/ssl.h>
 
@@ -19298,8 +19296,8 @@ namespace kiotty::net::implementation
 
 #if !defined(_WIN32)
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_BACKEND_POSIX_ADDRESS_H
 
 #if !defined(_WIN32)
 
@@ -19960,8 +19958,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_ADOPT_ACTION_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_ADOPT_ACTION_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_ADOPT_ACTION_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_ADOPT_ACTION_H
 
 namespace kiotty::net::implementation
 {
@@ -19972,8 +19970,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_SENDER_H
-#define KIOTTY_NET_INTERNAL_DATA_REPOSITORY_CONNECTION_SENDER_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_SENDER_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_REPOSITORY_CONNECTION_SENDER_H
 
 #include <cstddef>
 
@@ -22118,8 +22116,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_CONSTANTS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_CONSTANTS_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONSTANTS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONSTANTS_H
 
 #include <cstdint>
 
@@ -22285,8 +22283,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_HEADER_LINE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_HEADER_LINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_HEADER_LINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_HEADER_LINE_H
 
 #include <cstddef>
 
@@ -22629,8 +22627,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_STATIC_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_STATIC_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATIC_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATIC_H
 
 namespace kiotty::net::implementation
 {
@@ -22705,8 +22703,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_CONTENT_TYPE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_CONTENT_TYPE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONTENT_TYPE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONTENT_TYPE_H
 
 #include <cstdint>
 
@@ -23189,8 +23187,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_EXCHANGE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_EXCHANGE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_EXCHANGE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_EXCHANGE_H
 
 #include <cstdint>
 
@@ -23237,8 +23235,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_UPGRADE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_UPGRADE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_UPGRADE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_UPGRADE_H
 
 namespace kiotty::net::implementation
 {
@@ -23837,8 +23835,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_CHECK_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_REQUEST_CHECK_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_CHECK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_CHECK_H
 
 namespace kiotty::net::implementation
 {
@@ -24460,8 +24458,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_CLOSE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_CLOSE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLOSE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLOSE_H
 
 #include <cstdint>
 
@@ -24578,8 +24576,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_LANE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_LANE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_LANE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_LANE_H
 
 #include <cstdint>
 
@@ -24838,8 +24836,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_ROWS_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_ROWS_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ROWS_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ROWS_H
 
 namespace kiotty::net::implementation
 {
@@ -24867,8 +24865,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_TIMING_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_TIMING_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TIMING_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TIMING_H
 
 #include <cstdint>
 
@@ -25322,8 +25320,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_CLIENT_MACHINE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_WEBSOCKET_WEBSOCKET_CLIENT_MACHINE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLIENT_MACHINE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLIENT_MACHINE_H
 
 namespace kiotty::net::implementation
 {
@@ -25332,8 +25330,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_RULE_NAMES_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_RULE_NAMES_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RULE_NAMES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RULE_NAMES_H
 
 namespace kiotty::net::implementation
 {
@@ -25757,8 +25755,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_MACHINE_H
-#define KIOTTY_NET_INTERNAL_DOMAIN_USECASES_HTTP_HTTP_MACHINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MACHINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MACHINE_H
 
 namespace kiotty::net::implementation
 {
@@ -26097,8 +26095,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_CLOCK_WALL_CLOCK_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_CLOCK_WALL_CLOCK_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_CLOCK_WALL_CLOCK_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_CLOCK_WALL_CLOCK_H
 
 namespace kiotty::net::implementation
 {
@@ -30219,8 +30217,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
-#define KIOTTY_NET_INTERNAL_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#ifndef KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
+#define KIOTTY_NET_INTERNAL_BASE_DATA_INFRA_SOCKET_SOCKET_STARTUP_H
 
 namespace kiotty::net::implementation
 {
