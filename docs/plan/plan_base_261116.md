@@ -44,7 +44,7 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → U2 → U3
 | R2 statemachine | entity `StateMachine` (앱 배열을 가리킴), repository 에 규칙 찾기와 `StatefulHandler`, usecases 에 run 의 조합 | 끝 (`2cfc0a4`) |
 | R3 upgrade | http 의 `HttpUpgradeHandler`, `UPGRADED` 상태, websocket 이 frame 상태 / 연결별 병렬 배열 / 라우트 대상을 가짐, `WebSocketServerEndpoint` | 끝 (`4b8c635`) |
 | R4a http 폴더 | repository 하위 폴더 8, state/session, entity 는 값만 (`_parser` / `_builder` / `_rules`) | 끝 (`880ec3f`) |
-| R4b http 흐름 | R4b-1 요청 머리 (`RequestFraming`), R4b-2 body (`BodyPlan`), R4b-3 답 고르기 (`Answer`), R4b-4 보내기 (`ResponseFrame`, `AfterResponse`). 숨은 쓰기를 돌려주는 값으로 | http 서버 테스트 그대로, 숨은 쓰기 목록 비움 |
+| R4b http 흐름 | R4b-1 요청 머리 (`RequestFraming`), R4b-2 body (`BodyPlan`), R4b-3 답 고르기 (`Answer`), R4b-4 보내기 (`ResponseFrame`, `AfterResponse`). 숨은 쓰기를 돌려주는 값으로 | http 서버 테스트 그대로, 숨은 쓰기 목록 비움. R4b-1, R4b-2 끝 (`27e0e8d`) |
 | R4w websocket | entity 는 값만, repository 하위 폴더, state 둘, datasource (socket table), 서버와 클라이언트가 함께 쓰는 frame 읽기 | websocket 테스트 그대로 |
 | R5 client State | `HttpClientState`, `ConnectionStream` 의 peek / consume, StreamClient 공개 메서드 정리, `HttpClientStream` (friend 제거), 값으로 잇는 client 흐름 | HttpClient 테스트 그대로, friend 0 |
 | R6 usecases | 모든 모듈의 C ABI 를 usecases 함수로, `src/kiotty_net_*.cpp` 는 인자 변환만 | adapter 에 조합 로직 없음 |
@@ -66,3 +66,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → U2 → U3
 2026-11-16 모듈 정리 R3 (`4b8c635`, `docs/progress/261116_progress_module_layout_r3.md`): http 는 `HttpUpgradeHandler` 만 안다, websocket 상태 / 라우트 대상은 `WebSocketHandler`, `WebSocketServer : HttpServer`. LAYER 0. MSVC 847, WSL 848 × 6, release-tls 847.
 
 2026-11-16 모듈 정리 R4a (`880ec3f`, `docs/progress/261116_progress_module_layout_r4a.md`): http 를 관심사별 폴더로, entity 는 값만. MSVC 847, WSL 848 × 6, release-tls 847.
+
+2026-11-16 모듈 정리 R4b-1, R4b-2 (`27e0e8d`, `docs/progress/261116_progress_module_layout_r4b_1_2.md`): 요청 머리를 `RequestFraming` 값으로, body 남은 길이를 `BodyPlan` 규칙으로. MSVC 847, WSL 848 × 6, release-tls 847.

@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 880ec3f
+    KiottyNet single header, generated from commit 27e0e8d
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -8231,6 +8231,21 @@ namespace kiotty::net::implementation
     FramingResult selectBodyFraming(Span<const KiottyNetHttpHeader> headers);
     Persistence   decidePersistence(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
     bool          expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
+    bool          hasBody(const BodyFraming& framing);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_FRAMING_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_FRAMING_H
+
+namespace kiotty::net::implementation
+{
+    struct RequestFraming
+    {
+        BodyFraming body;
+        Persistence persistence;
+        bool        expects_continue;
+    };
 }
 
 #endif
@@ -8242,6 +8257,7 @@ namespace kiotty::net::implementation
     inline constexpr KiottyNetHttpStatus NO_ERROR_STATUS = static_cast<KiottyNetHttpStatus>(0);
 
     using AppendedBodyResult = Result<Span<char>, KiottyNetHttpStatus>;
+    using RequestFramingResult = Result<RequestFraming, KiottyNetHttpStatus>;
 
     class HttpRequestStore
     {
@@ -8253,9 +8269,8 @@ namespace kiotty::net::implementation
         void                        begin(KiottyNetConnectionHandle connection);
         KiottyNetHttpStatus         takeRequestLine(Span<const char> line);
         KiottyNetHttpStatus         takeHeader(Span<const char> line);
-        FramingResult               finishHeaders();
+        RequestFramingResult        finishHeaders();
         AppendedBodyResult          appendBody(Span<const char> data);
-        bool                        expectsContinue() const;
         const KiottyNetHttpRequest& request() const;
 
     private:
@@ -8372,6 +8387,20 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_PLAN_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_PLAN_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct BodyPlan
+    {
+        uint64_t remaining;
+    };
+}
+
+#endif
 
 #include <atomic>
 #include <cstddef>
@@ -8421,7 +8450,8 @@ namespace kiotty::net::implementation
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;
-        uint64_t                  body_remaining;
+        RequestFraming            framing;
+        BodyPlan                  body;
         uint64_t                  header_deadline;
         size_t                    sent;
         PoolHandle                id;
@@ -8432,7 +8462,6 @@ namespace kiotty::net::implementation
         bool                      is_work_requested;
         bool                      is_worker_owned;
         bool                      is_orphaned;
-        bool                      has_body;
     };
 }
 
@@ -22676,6 +22705,12 @@ namespace kiotty::net::implementation
         return Persistence::CLOSE;
     }
 
+    bool hasBody(const BodyFraming& framing)
+    {
+        const bool is_chunked = framing.kind == BodyKind::CHUNKED;
+        return is_chunked || framing.length > 0;
+    }
+
     bool expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers)
     {
         if (version != HttpVersion::V11) { return false; }
@@ -23523,6 +23558,24 @@ namespace kiotty::net::implementation
 
 #endif
 
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_BODY_PLAN_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_BODY_PLAN_RULES_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using BodyPlanResult = Result<BodyPlan, KiottyNetHttpStatus>;
+
+    BodyPlanResult planBody(uint64_t length, uint64_t room);
+    BodyPlan       takeBodyPiece(const BodyPlan& plan, size_t length);
+    size_t         nextReadOf(const BodyPlan& plan, size_t capacity);
+    bool           hasMoreBody(const BodyPlan& plan);
+}
+
+#endif
+
 #include <limits>
 
 namespace kiotty::net::implementation
@@ -23569,13 +23622,14 @@ namespace kiotty::net::implementation
         detachFile(session);
         session.request.begin(connection);
         session.response.begin();
-        session.body_remaining = 0;
+        session.body = BodyPlan{ 0 };
         session.sent = 0;
         session.close_reason = KIOTTY_NET_CODE_SUCCESS;
         session.stream = KiottyNetConnectionStream{ nullptr, 0 };
         session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
         session.is_work_requested = false;
-        session.has_body = false;
+        const BodyFraming no_body{ 0, BodyKind::NONE };
+        session.framing = RequestFraming{ no_body, Persistence::KEEP_ALIVE, false };
         session.phase = SessionPhase::READING;
         session.persistence = Persistence::KEEP_ALIVE;
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
@@ -23593,10 +23647,9 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition readBody(HttpSession& session, HttpState state)
     {
-        const uint64_t capacity = session.site.receive_capacity;
-        const uint64_t step = session.body_remaining < capacity ? session.body_remaining : capacity;
+        const size_t step = nextReadOf(session.body, session.site.receive_capacity);
         const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
-        const KiottyNetConnectionAction action = thenRead(static_cast<size_t>(step), timeout);
+        const KiottyNetConnectionAction action = thenRead(step, timeout);
         return Next::moveToNextState(state, action);
     }
 
@@ -23906,6 +23959,32 @@ namespace kiotty::net::implementation
             if (status < FIRST_SUCCESS_STATUS) { return true; }
             return status == NO_CONTENT_STATUS || status == NOT_MODIFIED_STATUS;
         }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    BodyPlanResult planBody(uint64_t length, uint64_t room)
+    {
+        const bool is_too_large = length > room;
+        if (is_too_large) { return BodyPlanResult::failure(CONTENT_TOO_LARGE); }
+        return BodyPlanResult::success(BodyPlan{ length });
+    }
+
+    BodyPlan takeBodyPiece(const BodyPlan& plan, size_t length)
+    {
+        return BodyPlan{ plan.remaining - length };
+    }
+
+    size_t nextReadOf(const BodyPlan& plan, size_t capacity)
+    {
+        const bool is_short = plan.remaining < capacity;
+        return is_short ? static_cast<size_t>(plan.remaining) : capacity;
+    }
+
+    bool hasMoreBody(const BodyPlan& plan)
+    {
+        return plan.remaining > 0;
     }
 }
 
@@ -24981,7 +25060,8 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest& request = session.request.request();
         const bool is_get = request.method == KIOTTY_NET_HTTP_METHOD_GET;
         if (!is_get) { return refuse(session, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
-        if (session.has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
+        const bool has_body = hasBody(session.framing.body);
+        if (has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
         const UpgradeCheck check = checkUpgrade(request);
         switch (check)
         {
@@ -26285,8 +26365,9 @@ namespace kiotty::net::implementation
             if (size.value == 0) { return readLine(session, TRAILER, bodyTimeOf(session)); }
             const uint64_t used = session.request.request().body.length;
             const uint64_t room = session.site.limits.max_body_bytes - used;
-            if (size.value > room) { return reject(session, CONTENT_TOO_LARGE); }
-            session.body_remaining = size.value;
+            const BodyPlanResult plan = planBody(size.value, room);
+            if (!plan) { return reject(session, plan.code); }
+            session.body = plan.value;
             return readBody(session, CHUNK_DATA);
         }
 
@@ -26351,18 +26432,17 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterHeaders(HttpSession& session)
         {
-            const FramingResult framing = session.request.finishHeaders();
+            const RequestFramingResult framing = session.request.finishHeaders();
             if (!framing) { return reject(session, framing.code); }
-            const bool is_kept = session.request.request().keep_alive != 0;
-            session.persistence = is_kept ? Persistence::KEEP_ALIVE : Persistence::CLOSE;
-            const bool is_chunked = framing.value.kind == BodyKind::CHUNKED;
-            session.has_body = is_chunked || framing.value.length > 0;
-            switch (framing.value.kind)
+            session.framing = framing.value;
+            session.persistence = framing.value.persistence;
+            const BodyFraming& body = framing.value.body;
+            switch (body.kind)
             {
             case BodyKind::NONE:
                 return dispatch(session);
             case BodyKind::LENGTH:
-                return afterLength(session, framing.value.length);
+                return afterLength(session, body.length);
             case BodyKind::CHUNKED:
                 return beginBody(session);
             }
@@ -26371,22 +26451,22 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length)
         {
-            const bool is_too_large = length > session.site.limits.max_body_bytes;
-            if (is_too_large) { return reject(session, KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE); }
-            if (length == 0) { return dispatch(session); }
-            session.body_remaining = length;
+            const BodyPlanResult plan = planBody(length, session.site.limits.max_body_bytes);
+            if (!plan) { return reject(session, plan.code); }
+            if (!hasMoreBody(plan.value)) { return dispatch(session); }
+            session.body = plan.value;
             return beginBody(session);
         }
 
         KiottyNetTransition beginBody(HttpSession& session)
         {
-            if (!session.request.expectsContinue()) { return readFirstBody(session); }
+            if (!session.framing.expects_continue) { return readFirstBody(session); }
             return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
         }
 
         KiottyNetTransition readFirstBody(HttpSession& session)
         {
-            if (session.body_remaining > 0) { return readBody(session, BODY); }
+            if (hasMoreBody(session.body)) { return readBody(session, BODY); }
             return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
@@ -26395,8 +26475,8 @@ namespace kiotty::net::implementation
             const Span<const char> piece{ data.data, data.length };
             const AppendedBodyResult appended = session.request.appendBody(piece);
             if (!appended) { return reject(session, appended.code); }
-            session.body_remaining -= data.length;
-            if (session.body_remaining > 0) { return readBody(session, more); }
+            session.body = takeBodyPiece(session.body, data.length);
+            if (hasMoreBody(session.body)) { return readBody(session, more); }
             const bool is_chunk = more == CHUNK_DATA;
             const uint32_t timeout = bodyTimeOf(session);
             const KiottyNetConnectionAction line_end = thenRead(CHUNK_END_BYTES, timeout);
@@ -26542,12 +26622,16 @@ namespace kiotty::net::implementation
         return NO_ERROR_STATUS;
     }
 
-    FramingResult HttpRequestStore::finishHeaders()
+    RequestFramingResult HttpRequestStore::finishHeaders()
     {
         const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };
         const Persistence persistence = decidePersistence(_version, found);
         _request.keep_alive = persistence == Persistence::KEEP_ALIVE ? 1 : 0;
-        return selectBodyFraming(found);
+        const FramingResult body = selectBodyFraming(found);
+        if (!body) { return RequestFramingResult::failure(body.code); }
+        const bool is_continuing = expectsContinue(_version, found);
+        const RequestFraming framing{ body.value, persistence, is_continuing };
+        return RequestFramingResult::success(framing);
     }
 
     AppendedBodyResult HttpRequestStore::appendBody(Span<const char> data)
@@ -26559,12 +26643,6 @@ namespace kiotty::net::implementation
         (void)target.copyFrom(data);
         _request.body.length = used + data.length;
         return AppendedBodyResult::success(target);
-    }
-
-    bool HttpRequestStore::expectsContinue() const
-    {
-        const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };
-        return implementation::expectsContinue(_version, found);
     }
 
     const KiottyNetHttpRequest& HttpRequestStore::request() const
@@ -27335,7 +27413,8 @@ namespace kiotty::net::implementation
         , info{}
         , route{}
         , stream{ nullptr, 0 }
-        , body_remaining(0)
+        , framing{ BodyFraming{ 0, BodyKind::NONE }, Persistence::KEEP_ALIVE, false }
+        , body{ 0 }
         , header_deadline(0)
         , sent(0)
         , id{ 0, index }
@@ -27346,7 +27425,6 @@ namespace kiotty::net::implementation
         , is_work_requested(false)
         , is_worker_owned(false)
         , is_orphaned(false)
-        , has_body(false)
     {
     }
 }
