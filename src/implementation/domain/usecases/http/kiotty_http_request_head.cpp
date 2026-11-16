@@ -8,6 +8,7 @@
 #include "domain/usecases/http/kiotty_http_request_line.h"
 #include "domain/usecases/http/kiotty_http_response_text.h"
 #include "domain/usecases/http/kiotty_http_token.h"
+#include "domain/usecases/http/kiotty_http_upload.h"
 
 namespace kiotty::net::implementation
 {
@@ -24,6 +25,7 @@ namespace kiotty::net::implementation
             size_t line_count;
             bool   has_content_type;
             bool   has_content_length;
+            bool   is_chunked;
         };
 
         constexpr size_t        HOST_LINE_COUNT = 1;
@@ -36,6 +38,7 @@ namespace kiotty::net::implementation
         constexpr char          HOST[] = "Host";
         constexpr char          PIPE_HOST[] = "localhost";
         constexpr char          CONTENT_TYPE[] = "Content-Type";
+        constexpr char          CHUNKED_CODING[] = "chunked";
 
         bool          isHostText(Span<const char> host);
         bool          isLiteralV6(Span<const char> host);
@@ -132,16 +135,18 @@ namespace kiotty::net::implementation
 
         HeadPlan planHead(const RequestHead& head)
         {
+            const bool is_chunked = head.body_length == CHUNKED_BODY_LENGTH;
             const bool has_body = head.body_length > 0;
             const bool is_custom = head.type == KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM;
             const bool has_own_type = hasHeaderNamed(head.extra_headers, textOf(CONTENT_TYPE));
             const bool has_content_type = has_body && !is_custom && !has_own_type;
-            const bool has_content_length = has_body || needsLength(head.method);
-            HeadPlan plan{ 0, has_content_type, has_content_length };
+            const bool is_counted = has_body || needsLength(head.method);
+            const bool has_content_length = is_counted && !is_chunked;
+            HeadPlan plan{ 0, has_content_type, has_content_length, is_chunked };
             plan.line_count = HOST_LINE_COUNT + countSharedSent(head, plan);
             plan.line_count += head.extra_headers.length;
             plan.line_count += has_content_type ? 1 : 0;
-            plan.line_count += has_content_length ? 1 : 0;
+            plan.line_count += has_content_length || is_chunked ? 1 : 0;
             return plan;
         }
 
@@ -220,6 +225,10 @@ namespace kiotty::net::implementation
             const bool is_typed = !plan.has_content_type
                                   || putField(cursor, textOf(CONTENT_TYPE), type);
             if (!is_typed) { return false; }
+            if (plan.is_chunked)
+            {
+                return putField(cursor, textOf(TRANSFER_ENCODING), textOf(CHUNKED_CODING));
+            }
             return !plan.has_content_length
                    || putField(cursor, textOf(CONTENT_LENGTH), length.span());
         }

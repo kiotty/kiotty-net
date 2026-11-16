@@ -1,5 +1,6 @@
 #pragma once
 
+#include "context/kiotty_http_client_exchange.h"
 #include "context/kiotty_http_client_headers.h"
 #include "context/kiotty_http_client_link.h"
 #include "context/kiotty_stream_client.h"
@@ -10,6 +11,7 @@
 #include "data/repository/http/kiotty_http_shared_headers.h"
 #include "domain/usecases/http/kiotty_http_body_reader.h"
 #include "domain/usecases/http/kiotty_http_request_head.h"
+#include "domain/usecases/http/kiotty_http_upload.h"
 #include "kiotty_net_http.h"
 
 #include <cstddef>
@@ -56,25 +58,16 @@ namespace kiotty::net::implementation
         void               reset() noexcept;
         KiottyNetCode      connect(const KiottyNetAddress& address,
                                    const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
-        KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
+        HttpClientExchange exchange();
         HttpClientHeaders  headers();
         HttpClientLink     link();
 
     private:
-        struct Attempt
-        {
-            KiottyNetCode code;
-            bool          is_stale;
-        };
+        friend class HttpClientExchange;
 
         void               settleStop();
-        KiottyNetHttpReply exchange(const ClientRequest& request, uint32_t timeout_milliseconds);
-        Attempt            attempt(const ClientRequest& request,
-                                   size_t head_length,
-                                   const Deadline& deadline);
-        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
-        HeadLengthResult   writeHead(const ClientRequest& request);
+        HeadLengthResult   writeHead(const ClientRequest& request, uint64_t body_length);
+        void               dropUnreadReply();
         KiottyNetCode      transmit(size_t head_length,
                                     Span<const char> body,
                                     const Deadline& deadline);
@@ -85,6 +78,7 @@ namespace kiotty::net::implementation
         void               startBody(const ReplyFraming& framing);
         void               finishBody();
         void               dropReply();
+        KiottyNetHttpReply replyOf(KiottyNetCode code);
         KiottyNetResult    pumpBody(Span<char> buffer, const Deadline& deadline);
         KiottyNetResult    endInput(KiottyNetCode code);
         Span<char>         sharedArea();
@@ -97,6 +91,7 @@ namespace kiotty::net::implementation
         HttpSharedHeaders                _shared;
         HttpReplyStore                   _reply;
         HttpBodyReader                   _body;
+        HttpUpload                       _upload;
         KiottyNetAddress                 _address;
         HostField                        _host;
         size_t                           _max_headers;

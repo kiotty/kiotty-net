@@ -37,7 +37,7 @@ namespace
         std::vector<Field>       shared;
         std::vector<Field>       extra;
         KiottyNetHttpContentType type = KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM;
-        size_t                   body_length = 0;
+        uint64_t                 body_length = 0;
         size_t                   max_headers = 16;
     };
 
@@ -150,6 +150,50 @@ TEST(HttpRequestHead, PostPutPatchWithoutBodySendContentLengthZero)
         EXPECT_NE(std::string::npos, head.find("\r\nContent-Length: 0\r\n\r\n"));
         EXPECT_EQ(std::string::npos, head.find("Content-Type"));
     }
+}
+
+TEST(HttpRequestHead, UnknownLengthIsChunkedWithContentTypeAndNoLength)
+{
+    Request request;
+    request.method = KIOTTY_NET_HTTP_METHOD_POST;
+    request.path = "/v1/samples";
+    request.type = KIOTTY_NET_HTTP_CONTENT_TYPE_JSON;
+    request.body_length = KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN;
+    EXPECT_EQ("POST /v1/samples HTTP/1.1\r\nHost: example.com\r\n"
+              "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n",
+              headOf(request));
+}
+
+TEST(HttpRequestHead, ChunkedCustomTypeSendsOnlyTransferEncoding)
+{
+    Request request;
+    request.method = KIOTTY_NET_HTTP_METHOD_PUT;
+    request.type = KIOTTY_NET_HTTP_CONTENT_TYPE_CUSTOM;
+    request.body_length = KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN;
+    EXPECT_EQ("PUT / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n",
+              headOf(request));
+}
+
+TEST(HttpRequestHead, LengthBeyondFourGigabytesIsWrittenInFull)
+{
+    Request request;
+    request.method = KIOTTY_NET_HTTP_METHOD_PUT;
+    request.body_length = 5000000000ull;
+    const std::string head = headOf(request);
+    EXPECT_NE(std::string::npos, head.find("\r\nContent-Length: 5000000000\r\n\r\n"));
+    EXPECT_NE(std::string::npos, head.find("Content-Type: application/octet-stream\r\n"));
+}
+
+TEST(HttpRequestHead, ChunkedLineCountsTowardMaxHeaders)
+{
+    Request request;
+    request.method = KIOTTY_NET_HTTP_METHOD_POST;
+    request.type = KIOTTY_NET_HTTP_CONTENT_TYPE_JSON;
+    request.body_length = KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN;
+    request.max_headers = 3;
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, codeOf(request));
+    request.max_headers = 2;
+    EXPECT_EQ(KIOTTY_NET_CODE_TABLE_FULL, codeOf(request));
 }
 
 TEST(HttpRequestHead, DeleteWithBodySendsItsLength)

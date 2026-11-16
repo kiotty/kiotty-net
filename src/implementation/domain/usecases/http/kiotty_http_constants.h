@@ -13,4 +13,5 @@ namespace kiotty::net::implementation
         KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE;
     inline constexpr int32_t NOT_FOUND = KIOTTY_NET_HTTP_STATUS_NOT_FOUND;
     inline constexpr char    CONTENT_LENGTH[] = "Content-Length";
+    inline constexpr char    TRANSFER_ENCODING[] = "Transfer-Encoding";
 }

@@ -27,14 +27,14 @@ namespace kiotty::net::implementation
         Span<const KiottyNetHttpHeader> extra_headers;
         Span<const char>                path;
         Span<const char>                host_field;
-        size_t                          body_length;
+        uint64_t                        body_length;
         size_t                          max_headers;
         KiottyNetHttpMethod             method;
         KiottyNetHttpContentType        type;
     };
 
-    static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + 2 * sizeof(size_t)
-                                             + 2 * sizeof(int32_t),
+    static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + sizeof(uint64_t)
+                                             + sizeof(size_t) + 2 * sizeof(int32_t),
                   "RequestHead: unexpected padding");
 
     HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);

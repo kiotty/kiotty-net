@@ -129,6 +129,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/domain/usecases/http/kiotty_http_body_reader.cpp
     src/implementation/domain/usecases/http/kiotty_http_request_check.cpp
     src/implementation/domain/usecases/http/kiotty_http_request_head.cpp
+    src/implementation/domain/usecases/http/kiotty_http_upload.cpp
     src/implementation/domain/usecases/http/kiotty_http_reply_headers.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_frame.cpp
     src/implementation/domain/usecases/websocket/kiotty_websocket_close.cpp
@@ -169,6 +170,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/context/kiotty_http_client_headers.cpp
     src/implementation/context/kiotty_http_client_link.cpp
     src/implementation/context/kiotty_http_client.cpp
+    src/implementation/context/kiotty_http_client_exchange.cpp
     src/implementation/context/kiotty_context.cpp
 )
 

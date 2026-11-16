@@ -24,7 +24,6 @@ namespace kiotty::net::implementation
             KEEP_ALIVE
         };
 
-        constexpr char TRANSFER_ENCODING[] = "Transfer-Encoding";
         constexpr char CONNECTION[] = "Connection";
         constexpr char CHUNKED[] = "chunked";
         constexpr char CLOSE_OPTION[] = "close";

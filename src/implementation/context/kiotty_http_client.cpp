@@ -20,13 +20,9 @@ namespace kiotty::net::implementation
         constexpr size_t MAX_INTERIM_REPLIES = 16;
 
         TimeLeftResult     timeLeftOf(const Deadline& deadline);
-        KiottyNetHttpReply failedReply(KiottyNetCode code);
         KiottyNetCode      checkLimits(const KiottyNetHttpLimits& limits);
         uint16_t           defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
-        Span<char>         cappedOf(Span<char> buffer);
-        bool               isIdempotent(KiottyNetHttpMethod method);
-        bool               isConnectionLoss(KiottyNetCode code);
     }
 
     HttpClient::HttpClient()
@@ -38,6 +34,7 @@ namespace kiotty::net::implementation
         , _shared(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
         , _reply(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
         , _body()
+        , _upload(idleUpload())
         , _address()
         , _host()
         , _max_headers(0)
@@ -67,6 +64,7 @@ namespace kiotty::net::implementation
         _shared = HttpSharedHeaders(sharedArea(), shared);
         _reply = HttpReplyStore(Span<char>{ _reply_bytes.data(), _reply_bytes.size() }, reply);
         _body = HttpBodyReader();
+        _upload = idleUpload();
         _max_headers = limits.max_headers;
         _has_target = false;
         return KIOTTY_NET_CODE_SUCCESS;
@@ -78,6 +76,7 @@ namespace kiotty::net::implementation
         _shared.clear();
         requestArea().fill('\0');
         dropReply();
+        _upload = idleUpload();
         _has_target = false;
     }
 
@@ -88,6 +87,7 @@ namespace kiotty::net::implementation
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
         settleStop();
         dropReply();
+        _upload = idleUpload();
         _has_target = false;
         const KiottyNetCode prepared = prepare(address, tls);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
@@ -99,26 +99,9 @@ namespace kiotty::net::implementation
         return reconnect(_address, Deadline(0));
     }
 
-    KiottyNetHttpReply HttpClient::send(const ClientRequest& request,
-                                        uint32_t timeout_milliseconds)
+    HttpClientExchange HttpClient::exchange()
     {
-        const BusyGuard guard(_busy);
-        if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
-        settleStop();
-        return exchange(request, timeout_milliseconds);
-    }
-
-    KiottyNetResult HttpClient::readBody(Span<char> buffer, uint32_t timeout_milliseconds)
-    {
-        const BusyGuard guard(_busy);
-        if (!guard.isHeld()) { return resultOf(0, KIOTTY_NET_CODE_BUSY); }
-        settleStop();
-        const Span<char> target = cappedOf(buffer);
-        const BodyStep idle = _body.take(Span<const char>{ nullptr, 0 }, target);
-        const bool is_settled = idle.code != KIOTTY_NET_CODE_SUCCESS || idle.is_finished;
-        if (is_settled) { return resultOf(0, idle.code); }
-        const Deadline deadline(timeout_milliseconds);
-        return pumpBody(target, deadline);
+        return HttpClientExchange(*this);
     }
 
     HttpClientHeaders HttpClient::headers()
@@ -137,55 +120,10 @@ namespace kiotty::net::implementation
         if (stopSignal().accept()) { StreamClient::disconnect(); }
     }
 
-    KiottyNetHttpReply HttpClient::exchange(const ClientRequest& request,
-                                            uint32_t timeout_milliseconds)
+    HeadLengthResult HttpClient::writeHead(const ClientRequest& request, uint64_t body_length)
     {
-        if (!_has_target) { return failedReply(KIOTTY_NET_CODE_INVALID_ARGUMENT); }
-        const KiottyNetCode body = checkRequestBody(request.type, request.body);
-        if (body != KIOTTY_NET_CODE_SUCCESS) { return failedReply(body); }
-        const HeadLengthResult head = writeHead(request);
-        if (!head) { return failedReply(head.code); }
-        const Deadline deadline(timeout_milliseconds);
-        const Attempt first = attempt(request, head.value, deadline);
-        const KiottyNetCode received = first.is_stale ? resend(request, deadline) : first.code;
-        if (received != KIOTTY_NET_CODE_SUCCESS)
-        {
-            StreamClient::disconnect();
-            return failedReply(received);
-        }
-        const Span<const KiottyNetHttpHeader> headers = _reply.headers();
-        return KiottyNetHttpReply{ received, _reply.status(), headers.data, headers.length };
-    }
-
-    HttpClient::Attempt HttpClient::attempt(const ClientRequest& request,
-                                            size_t head_length,
-                                            const Deadline& deadline)
-    {
-        if (!_body.isFinished()) { StreamClient::disconnect(); }
-        dropReply();
-        const bool is_reused = isConnected();
-        _has_reply_bytes = false;
-        const KiottyNetCode sent = transmit(head_length, request.body, deadline);
-        const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode received = is_sent ? receiveReply(request.method, deadline) : sent;
-        const bool is_unanswered = !_has_reply_bytes && stagedBytes() == 0;
-        const bool is_stale = is_reused && is_unanswered && isConnectionLoss(received);
-        return Attempt{ received, is_stale };
-    }
-
-    KiottyNetCode HttpClient::resend(const ClientRequest& request, const Deadline& deadline)
-    {
-        StreamClient::disconnect();
-        if (!isIdempotent(request.method)) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        const HeadLengthResult head = writeHead(request);
-        if (!head) { return head.code; }
-        return attempt(request, head.value, deadline).code;
-    }
-
-    HeadLengthResult HttpClient::writeHead(const ClientRequest& request)
-    {
-        const RequestHead head{ _shared.list(), request.headers,      request.path,
-                                _host.span(),   request.body.length, _max_headers,
+        const RequestHead head{ _shared.list(), request.headers, request.path,
+                                _host.span(),   body_length,     _max_headers,
                                 request.method, request.type };
         const HeadLengthResult written = writeRequestHead(requestArea(), head);
         if (!written) { requestArea().fill('\0'); }
@@ -278,6 +216,24 @@ namespace kiotty::net::implementation
         _persistence = Persistence::CLOSE;
     }
 
+    void HttpClient::dropUnreadReply()
+    {
+        if (!_body.isFinished()) { StreamClient::disconnect(); }
+        dropReply();
+        _has_reply_bytes = false;
+    }
+
+    KiottyNetHttpReply HttpClient::replyOf(KiottyNetCode code)
+    {
+        if (code != KIOTTY_NET_CODE_SUCCESS)
+        {
+            StreamClient::disconnect();
+            return KiottyNetHttpReply{ code, 0, nullptr, 0 };
+        }
+        const Span<const KiottyNetHttpHeader> headers = _reply.headers();
+        return KiottyNetHttpReply{ code, _reply.status(), headers.data, headers.length };
+    }
+
     KiottyNetResult HttpClient::pumpBody(Span<char> buffer, const Deadline& deadline)
     {
         for (;;)
@@ -330,11 +286,6 @@ namespace kiotty::net::implementation
             return TimeLeftResult::success(left);
         }
 
-        KiottyNetHttpReply failedReply(KiottyNetCode code)
-        {
-            return KiottyNetHttpReply{ code, 0, nullptr, 0 };
-        }
-
         KiottyNetCode checkLimits(const KiottyNetHttpLimits& limits)
         {
             KiottyNetHttpLimits checked = limits;
@@ -354,27 +305,6 @@ namespace kiotty::net::implementation
         uint16_t defaultPortOf(const KiottyNetTlsClientConfiguration* tls)
         {
             return tls == nullptr ? HTTP_DEFAULT_PORT : HTTPS_DEFAULT_PORT;
-        }
-
-        Span<char> cappedOf(Span<char> buffer)
-        {
-            const bool is_large = buffer.length > RESULT_MAXIMUM_BYTES;
-            return Span<char>{ buffer.data, is_large ? RESULT_MAXIMUM_BYTES : buffer.length };
-        }
-
-        bool isIdempotent(KiottyNetHttpMethod method)
-        {
-            const bool is_reading = method == KIOTTY_NET_HTTP_METHOD_GET
-                                    || method == KIOTTY_NET_HTTP_METHOD_HEAD
-                                    || method == KIOTTY_NET_HTTP_METHOD_OPTIONS;
-            const bool is_replacing = method == KIOTTY_NET_HTTP_METHOD_PUT
-                                      || method == KIOTTY_NET_HTTP_METHOD_DELETE;
-            return is_reading || is_replacing;
-        }
-
-        bool isConnectionLoss(KiottyNetCode code)
-        {
-            return code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
         }
     }
 }

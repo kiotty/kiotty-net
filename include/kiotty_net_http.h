@@ -406,6 +406,24 @@ KIOTTY_NET_API KiottyNetHttpReply KiottyNet_optionsHttp(
     size_t header_count,
     uint32_t timeout_milliseconds);
 
+#define KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN UINT64_MAX
+
+KIOTTY_NET_API KiottyNetCode      KiottyNet_beginHttpRequest(
+    KiottyNetHttpClientHandle client,
+    const KiottyNetHttpClientRequest* request,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    uint64_t body_length,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetResult    KiottyNet_writeHttpRequestBody(
+    KiottyNetHttpClientHandle client,
+    const void* data,
+    size_t length,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_finishHttpRequest(
+    KiottyNetHttpClientHandle client,
+    uint32_t timeout_milliseconds);
+
 KIOTTY_NET_API KiottyNetResult KiottyNet_readHttpReplyBody(
     KiottyNetHttpClientHandle client,
     void* buffer,
