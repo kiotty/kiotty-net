@@ -3,7 +3,7 @@
 #include "base/domain/entity/kiotty_handler.h"
 #include "kiotty_net_base.h"
 #include "kiotty_net_statemachine.h"
-#include "statemachine/domain/entity/kiotty_rule_table.h"
+#include "statemachine/data/repository/kiotty_rule_table.h"
 
 #include <cstdint>
 

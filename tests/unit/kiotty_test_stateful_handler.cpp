@@ -1,4 +1,4 @@
-#include "statemachine/domain/entity/kiotty_stateful_handler.h"
+#include "statemachine/data/repository/kiotty_stateful_handler.h"
 
 #include "base/data/repository/connection/kiotty_connection.h"
 #include "support/kiotty_test_completion.h"

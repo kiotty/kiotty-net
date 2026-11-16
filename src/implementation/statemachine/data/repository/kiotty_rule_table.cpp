@@ -1,4 +1,4 @@
-#include "statemachine/domain/entity/kiotty_rule_table.h"
+#include "statemachine/data/repository/kiotty_rule_table.h"
 
 #include "core/kiotty_span.h"
 
@@ -21,13 +21,19 @@ namespace kiotty::net::implementation
         bool isSameKey(const KiottyNetRule& left, const KiottyNetRule& right);
     }
 
-    RuleResult findRule(const KiottyNetStateMachine& machine,
+    StateMachine stateMachineOf(const KiottyNetStateMachine* machine)
+    {
+        const bool has_rules = machine != nullptr && machine->rules != nullptr;
+        if (!has_rules) { return StateMachine{ Rules{ nullptr, 0 }, 0 }; }
+        return StateMachine{ Rules{ machine->rules, machine->count }, machine->initial };
+    }
+
+    RuleResult findRule(const StateMachine& machine,
                         int32_t state,
                         KiottyNetConnectionEventType event)
     {
-        const Rules rules{ machine.rules, machine.count };
         const KiottyNetRule* fallback = nullptr;
-        for (const KiottyNetRule& rule : rules)
+        for (const KiottyNetRule& rule : machine.rules)
         {
             if (rule.event != event) { continue; }
             if (rule.state == state) { return RuleResult::success(rule); }

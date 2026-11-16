@@ -1,7 +1,7 @@
 #include "kiotty_net_statemachine.h"
 
 #include "context/kiotty_context.h"
-#include "statemachine/domain/entity/kiotty_stateful_handler.h"
+#include "statemachine/domain/usecases/kiotty_statemachine_usecases.h"
 
 namespace net = kiotty::net::implementation;
 
@@ -23,8 +23,7 @@ KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server,
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
     const KiottyNetAddress copied = *address;
-    const net::StatefulHandler handler(*app_context, *server);
-    return server->run(handler, copied, tls);
+    return net::runStatefulServer(*server, copied, tls, *app_context);
 }
 
 KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client,
@@ -37,6 +36,5 @@ KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
     const KiottyNetAddress copied = *address;
-    const net::StatefulHandler handler(*app_context, *client);
-    return client->run(handler, copied, tls);
+    return net::runStatefulEventClient(*client, copied, tls, *app_context);
 }

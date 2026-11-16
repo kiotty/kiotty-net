@@ -5,7 +5,7 @@
 #include "http/data/repository/kiotty_http_configuration.h"
 #include "http/domain/entity/kiotty_http_request_head.h"
 #include "http/domain/entity/kiotty_http_token.h"
-#include "statemachine/domain/entity/kiotty_stateful_handler.h"
+#include "statemachine/data/repository/kiotty_stateful_handler.h"
 #include "websocket/domain/entity/kiotty_websocket_access.h"
 #include "websocket/domain/entity/kiotty_websocket_client_machine.h"
 

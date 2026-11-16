@@ -1,4 +1,4 @@
-#include "statemachine/domain/entity/kiotty_rule_table.h"
+#include "statemachine/data/repository/kiotty_rule_table.h"
 
 #include <gtest/gtest.h>
 
@@ -50,7 +50,7 @@ TEST(RuleTable, FindRulePrefersExactStateOverAny)
         ruleOf(BUSY, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ, other),
     };
     const KiottyNetStateMachine machine = machineOf(rules);
-    const net::RuleResult found = net::findRule(machine, BUSY, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
+    const net::RuleResult found = net::findRule(net::stateMachineOf(&machine), BUSY, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
     ASSERT_TRUE(found);
     EXPECT_EQ(&rules[1], &found.value());
 }
@@ -62,7 +62,7 @@ TEST(RuleTable, FindRuleFallsBackToAny)
         ruleOf(KIOTTY_NET_ANY_STATE, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ, stay),
     };
     const KiottyNetStateMachine machine = machineOf(rules);
-    const net::RuleResult found = net::findRule(machine, IDLE, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
+    const net::RuleResult found = net::findRule(net::stateMachineOf(&machine), IDLE, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
     ASSERT_TRUE(found);
     EXPECT_EQ(&rules[1], &found.value());
 }
@@ -74,7 +74,7 @@ TEST(RuleTable, FindRuleWithoutARowIsUnhandledEvent)
         ruleOf(IDLE, KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN, stay),
     };
     const KiottyNetStateMachine machine = machineOf(rules);
-    const net::RuleResult found = net::findRule(machine, IDLE, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
+    const net::RuleResult found = net::findRule(net::stateMachineOf(&machine), IDLE, KIOTTY_NET_CONNECTION_EVENT_TYPE_READ);
     EXPECT_EQ(KIOTTY_NET_CODE_UNHANDLED_EVENT, found.code);
 }
 

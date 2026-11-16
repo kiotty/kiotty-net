@@ -1,4 +1,4 @@
-#include "statemachine/domain/entity/kiotty_stateful_handler.h"
+#include "statemachine/data/repository/kiotty_stateful_handler.h"
 
 #include "base/data/repository/connection/kiotty_caller.h"
 
@@ -30,7 +30,8 @@ namespace kiotty::net::implementation
 
     int32_t StatefulHandler::initialState() const
     {
-        return _stateful.machine->initial;
+        const StateMachine machine = stateMachineOf(_stateful.machine);
+        return machine.initial;
     }
 
     KiottyNetConnectionDecision StatefulHandler::admit(const KiottyNetConnectionInfo& info) const
@@ -49,7 +50,8 @@ namespace kiotty::net::implementation
     KiottyNetConnectionAction StatefulHandler::dispatch(const Caller& caller,
                                                         const KiottyNetConnectionEvent& event) const
     {
-        const RuleResult found = findRule(*_stateful.machine, caller.machine_state, event.type);
+        const StateMachine machine = stateMachineOf(_stateful.machine);
+        const RuleResult found = findRule(machine, caller.machine_state, event.type);
         const bool is_closed = event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED;
         if (is_closed) { return finish(caller, event, found); }
         if (!found)
