@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 75b66c1
+    KiottyNet single header, generated from commit 2cfc0a4
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -10012,57 +10012,19 @@ KiottyNetCode KiottyNet_broadcastServer(KiottyNetServerHandle server, KiottyNetS
     return server->broadcast(data);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATEFUL_HANDLER_H
-#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATEFUL_HANDLER_H
-
-#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_RULE_TABLE_H
-#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_RULE_TABLE_H
-
-#include <cstdint>
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_USECASES_STATEMACHINE_USECASES_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_USECASES_STATEMACHINE_USECASES_H
 
 namespace kiotty::net::implementation
 {
-    using RuleResult = Result<const KiottyNetRule&, KiottyNetCode>;
-
-    RuleResult    findRule(const KiottyNetStateMachine& machine,
-                           int32_t state,
-                           KiottyNetConnectionEventType event);
-    bool          isAllowed(const KiottyNetRule& rule, int32_t next);
-    KiottyNetCode checkRules(const KiottyNetStateMachine* machine);
-}
-
-#endif
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class StatefulHandler final : public Handler
-    {
-    public:
-        StatefulHandler(const KiottyNetStatefulAppContext& stateful,
-                        KiottyNetEndpoint& connection_owner);
-
-        KiottyNetCode               validate() const override;
-        int32_t                     initialState() const override;
-        KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const override;
-        KiottyNetConnectionAction   dispatch(const Caller& caller,
-                                             const KiottyNetConnectionEvent& event) const override;
-        void                        report(const KiottyNetConnectionInfo& info,
-                                           KiottyNetCode code,
-                                           const char* message) const override;
-
-    private:
-        KiottyNetConnectionAction finish(const Caller& caller,
-                                         const KiottyNetConnectionEvent& event,
-                                         const RuleResult& found) const;
-        KiottyNetConnectionAction refuse(const Caller& caller,
-                                         KiottyNetCode code,
-                                         const char* message) const;
-        void                      release(const Caller& caller) const;
-
-        const KiottyNetStatefulAppContext& _stateful;
-    };
+    KiottyNetCode runStatefulServer(Server& server,
+                                    const KiottyNetAddress& address,
+                                    const KiottyNetTlsServerConfiguration* tls,
+                                    const KiottyNetStatefulAppContext& stateful);
+    KiottyNetCode runStatefulEventClient(EventClient& client,
+                                         const KiottyNetAddress& address,
+                                         const KiottyNetTlsClientConfiguration* tls,
+                                         const KiottyNetStatefulAppContext& stateful);
 }
 
 #endif
@@ -10087,8 +10049,7 @@ KiottyNetCode KiottyNet_runStatefulServer(KiottyNetServerHandle server,
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
     const KiottyNetAddress copied = *address;
-    const net::StatefulHandler handler(*app_context, *server);
-    return server->run(handler, copied, tls);
+    return net::runStatefulServer(*server, copied, tls, *app_context);
 }
 
 KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client,
@@ -10101,8 +10062,7 @@ KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client
         return KIOTTY_NET_CODE_INVALID_ARGUMENT;
     }
     const KiottyNetAddress copied = *address;
-    const net::StatefulHandler handler(*app_context, *client);
-    return client->run(handler, copied, tls);
+    return net::runStatefulEventClient(*client, copied, tls, *app_context);
 }
 
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_FILE_BODY_H
@@ -21745,6 +21705,41 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DATA_REPOSITORY_RULE_TABLE_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DATA_REPOSITORY_RULE_TABLE_H
+
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATE_MACHINE_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DOMAIN_ENTITY_STATE_MACHINE_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct StateMachine
+    {
+        Span<const KiottyNetRule> rules;
+        int32_t                   initial;
+    };
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using RuleResult = Result<const KiottyNetRule&, KiottyNetCode>;
+
+    StateMachine  stateMachineOf(const KiottyNetStateMachine* machine);
+    RuleResult    findRule(const StateMachine& machine,
+                           int32_t state,
+                           KiottyNetConnectionEventType event);
+    bool          isAllowed(const KiottyNetRule& rule, int32_t next);
+    KiottyNetCode checkRules(const KiottyNetStateMachine* machine);
+}
+
+#endif
+
 #include <cstddef>
 
 namespace kiotty::net::implementation
@@ -21764,13 +21759,19 @@ namespace kiotty::net::implementation
         bool isSameKey(const KiottyNetRule& left, const KiottyNetRule& right);
     }
 
-    RuleResult findRule(const KiottyNetStateMachine& machine,
+    StateMachine stateMachineOf(const KiottyNetStateMachine* machine)
+    {
+        const bool has_rules = machine != nullptr && machine->rules != nullptr;
+        if (!has_rules) { return StateMachine{ Rules{ nullptr, 0 }, 0 }; }
+        return StateMachine{ Rules{ machine->rules, machine->count }, machine->initial };
+    }
+
+    RuleResult findRule(const StateMachine& machine,
                         int32_t state,
                         KiottyNetConnectionEventType event)
     {
-        const Rules rules{ machine.rules, machine.count };
         const KiottyNetRule* fallback = nullptr;
-        for (const KiottyNetRule& rule : rules)
+        for (const KiottyNetRule& rule : machine.rules)
         {
             if (rule.event != event) { continue; }
             if (rule.state == state) { return RuleResult::success(rule); }
@@ -21866,6 +21867,43 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_STATEMACHINE_DATA_REPOSITORY_STATEFUL_HANDLER_H
+#define KIOTTY_NET_INTERNAL_STATEMACHINE_DATA_REPOSITORY_STATEFUL_HANDLER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class StatefulHandler final : public Handler
+    {
+    public:
+        StatefulHandler(const KiottyNetStatefulAppContext& stateful,
+                        KiottyNetEndpoint& connection_owner);
+
+        KiottyNetCode               validate() const override;
+        int32_t                     initialState() const override;
+        KiottyNetConnectionDecision admit(const KiottyNetConnectionInfo& info) const override;
+        KiottyNetConnectionAction   dispatch(const Caller& caller,
+                                             const KiottyNetConnectionEvent& event) const override;
+        void                        report(const KiottyNetConnectionInfo& info,
+                                           KiottyNetCode code,
+                                           const char* message) const override;
+
+    private:
+        KiottyNetConnectionAction finish(const Caller& caller,
+                                         const KiottyNetConnectionEvent& event,
+                                         const RuleResult& found) const;
+        KiottyNetConnectionAction refuse(const Caller& caller,
+                                         KiottyNetCode code,
+                                         const char* message) const;
+        void                      release(const Caller& caller) const;
+
+        const KiottyNetStatefulAppContext& _stateful;
+    };
+}
+
+#endif
+
 namespace kiotty::net::implementation
 {
     namespace
@@ -21894,7 +21932,8 @@ namespace kiotty::net::implementation
 
     int32_t StatefulHandler::initialState() const
     {
-        return _stateful.machine->initial;
+        const StateMachine machine = stateMachineOf(_stateful.machine);
+        return machine.initial;
     }
 
     KiottyNetConnectionDecision StatefulHandler::admit(const KiottyNetConnectionInfo& info) const
@@ -21913,7 +21952,8 @@ namespace kiotty::net::implementation
     KiottyNetConnectionAction StatefulHandler::dispatch(const Caller& caller,
                                                         const KiottyNetConnectionEvent& event) const
     {
-        const RuleResult found = findRule(*_stateful.machine, caller.machine_state, event.type);
+        const StateMachine machine = stateMachineOf(_stateful.machine);
+        const RuleResult found = findRule(machine, caller.machine_state, event.type);
         const bool is_closed = event.type == KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED;
         if (is_closed) { return finish(caller, event, found); }
         if (!found)
@@ -21998,6 +22038,27 @@ namespace kiotty::net::implementation
             decision.accepted = 0;
             return decision;
         }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    KiottyNetCode runStatefulServer(Server& server,
+                                    const KiottyNetAddress& address,
+                                    const KiottyNetTlsServerConfiguration* tls,
+                                    const KiottyNetStatefulAppContext& stateful)
+    {
+        const StatefulHandler handler(stateful, server);
+        return server.run(handler, address, tls);
+    }
+
+    KiottyNetCode runStatefulEventClient(EventClient& client,
+                                         const KiottyNetAddress& address,
+                                         const KiottyNetTlsClientConfiguration* tls,
+                                         const KiottyNetStatefulAppContext& stateful)
+    {
+        const StatefulHandler handler(stateful, client);
+        return client.run(handler, address, tls);
     }
 }
 
