@@ -18,4 +18,5 @@ namespace kiotty::net::implementation
     FramingResult selectBodyFraming(Span<const KiottyNetHttpHeader> headers);
     Persistence   decidePersistence(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
     bool          expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
+    bool          hasBody(const BodyFraming& framing);
 }

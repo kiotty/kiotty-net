@@ -74,6 +74,12 @@ namespace kiotty::net::implementation
         return Persistence::CLOSE;
     }
 
+    bool hasBody(const BodyFraming& framing)
+    {
+        const bool is_chunked = framing.kind == BodyKind::CHUNKED;
+        return is_chunked || framing.length > 0;
+    }
+
     bool expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers)
     {
         if (version != HttpVersion::V11) { return false; }

@@ -3,6 +3,7 @@
 #include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "http/data/repository/body/kiotty_http_message_framing_parser.h"
+#include "http/domain/entity/kiotty_http_request_framing.h"
 #include "http/domain/entity/kiotty_http_request_line.h"
 #include "kiotty_net_http.h"
 
@@ -13,6 +14,7 @@ namespace kiotty::net::implementation
     inline constexpr KiottyNetHttpStatus NO_ERROR_STATUS = static_cast<KiottyNetHttpStatus>(0);
 
     using AppendedBodyResult = Result<Span<char>, KiottyNetHttpStatus>;
+    using RequestFramingResult = Result<RequestFraming, KiottyNetHttpStatus>;
 
     class HttpRequestStore
     {
@@ -24,9 +26,8 @@ namespace kiotty::net::implementation
         void                        begin(KiottyNetConnectionHandle connection);
         KiottyNetHttpStatus         takeRequestLine(Span<const char> line);
         KiottyNetHttpStatus         takeHeader(Span<const char> line);
-        FramingResult               finishHeaders();
+        RequestFramingResult        finishHeaders();
         AppendedBodyResult          appendBody(Span<const char> data);
-        bool                        expectsContinue() const;
         const KiottyNetHttpRequest& request() const;
 
     private:

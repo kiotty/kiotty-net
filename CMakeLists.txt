@@ -127,6 +127,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/machine/kiotty_http_exchange.cpp
     src/implementation/http/data/repository/response/kiotty_http_status_line_parser.cpp
     src/implementation/http/data/repository/response/kiotty_http_reply_framing_rules.cpp
+    src/implementation/http/data/repository/body/kiotty_http_body_plan_rules.cpp
     src/implementation/http/data/repository/body/kiotty_http_body_reader.cpp
     src/implementation/http/data/repository/request/kiotty_http_request_check_rules.cpp
     src/implementation/http/data/repository/request/kiotty_http_request_head_builder.cpp

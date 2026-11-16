@@ -1,6 +1,7 @@
 #include "http/data/repository/machine/kiotty_http_machine.h"
 
 #include "base/domain/entity/kiotty_action.h"
+#include "http/data/repository/body/kiotty_http_body_plan_rules.h"
 #include "http/data/repository/body/kiotty_http_message_framing_parser.h"
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "http/data/repository/machine/kiotty_http_rule_names.h"
@@ -194,8 +195,9 @@ namespace kiotty::net::implementation
             if (size.value == 0) { return readLine(session, TRAILER, bodyTimeOf(session)); }
             const uint64_t used = session.request.request().body.length;
             const uint64_t room = session.site.limits.max_body_bytes - used;
-            if (size.value > room) { return reject(session, CONTENT_TOO_LARGE); }
-            session.body_remaining = size.value;
+            const BodyPlanResult plan = planBody(size.value, room);
+            if (!plan) { return reject(session, plan.code); }
+            session.body = plan.value;
             return readBody(session, CHUNK_DATA);
         }
 
@@ -260,18 +262,17 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterHeaders(HttpSession& session)
         {
-            const FramingResult framing = session.request.finishHeaders();
+            const RequestFramingResult framing = session.request.finishHeaders();
             if (!framing) { return reject(session, framing.code); }
-            const bool is_kept = session.request.request().keep_alive != 0;
-            session.persistence = is_kept ? Persistence::KEEP_ALIVE : Persistence::CLOSE;
-            const bool is_chunked = framing.value.kind == BodyKind::CHUNKED;
-            session.has_body = is_chunked || framing.value.length > 0;
-            switch (framing.value.kind)
+            session.framing = framing.value;
+            session.persistence = framing.value.persistence;
+            const BodyFraming& body = framing.value.body;
+            switch (body.kind)
             {
             case BodyKind::NONE:
                 return dispatch(session);
             case BodyKind::LENGTH:
-                return afterLength(session, framing.value.length);
+                return afterLength(session, body.length);
             case BodyKind::CHUNKED:
                 return beginBody(session);
             }
@@ -280,22 +281,22 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length)
         {
-            const bool is_too_large = length > session.site.limits.max_body_bytes;
-            if (is_too_large) { return reject(session, KIOTTY_NET_HTTP_STATUS_CONTENT_TOO_LARGE); }
-            if (length == 0) { return dispatch(session); }
-            session.body_remaining = length;
+            const BodyPlanResult plan = planBody(length, session.site.limits.max_body_bytes);
+            if (!plan) { return reject(session, plan.code); }
+            if (!hasMoreBody(plan.value)) { return dispatch(session); }
+            session.body = plan.value;
             return beginBody(session);
         }
 
         KiottyNetTransition beginBody(HttpSession& session)
         {
-            if (!session.request.expectsContinue()) { return readFirstBody(session); }
+            if (!session.framing.expects_continue) { return readFirstBody(session); }
             return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
         }
 
         KiottyNetTransition readFirstBody(HttpSession& session)
         {
-            if (session.body_remaining > 0) { return readBody(session, BODY); }
+            if (hasMoreBody(session.body)) { return readBody(session, BODY); }
             return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
@@ -304,8 +305,8 @@ namespace kiotty::net::implementation
             const Span<const char> piece{ data.data, data.length };
             const AppendedBodyResult appended = session.request.appendBody(piece);
             if (!appended) { return reject(session, appended.code); }
-            session.body_remaining -= data.length;
-            if (session.body_remaining > 0) { return readBody(session, more); }
+            session.body = takeBodyPiece(session.body, data.length);
+            if (hasMoreBody(session.body)) { return readBody(session, more); }
             const bool is_chunk = more == CHUNK_DATA;
             const uint32_t timeout = bodyTimeOf(session);
             const KiottyNetConnectionAction line_end = thenRead(CHUNK_END_BYTES, timeout);

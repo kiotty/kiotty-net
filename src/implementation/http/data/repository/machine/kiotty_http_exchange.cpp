@@ -3,6 +3,7 @@
 #include "base/domain/entity/kiotty_action.h"
 #include "core/kiotty_clock.h"
 #include "core/kiotty_text.h"
+#include "http/data/repository/body/kiotty_http_body_plan_rules.h"
 #include "http/data/repository/body/kiotty_http_file_body.h"
 #include "http/data/repository/machine/kiotty_http_static.h"
 #include "http/data/repository/response/kiotty_http_response_text_builder.h"
@@ -55,13 +56,14 @@ namespace kiotty::net::implementation
         detachFile(session);
         session.request.begin(connection);
         session.response.begin();
-        session.body_remaining = 0;
+        session.body = BodyPlan{ 0 };
         session.sent = 0;
         session.close_reason = KIOTTY_NET_CODE_SUCCESS;
         session.stream = KiottyNetConnectionStream{ nullptr, 0 };
         session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
         session.is_work_requested = false;
-        session.has_body = false;
+        const BodyFraming no_body{ 0, BodyKind::NONE };
+        session.framing = RequestFraming{ no_body, Persistence::KEEP_ALIVE, false };
         session.phase = SessionPhase::READING;
         session.persistence = Persistence::KEEP_ALIVE;
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
@@ -79,10 +81,9 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition readBody(HttpSession& session, HttpState state)
     {
-        const uint64_t capacity = session.site.receive_capacity;
-        const uint64_t step = session.body_remaining < capacity ? session.body_remaining : capacity;
+        const size_t step = nextReadOf(session.body, session.site.receive_capacity);
         const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
-        const KiottyNetConnectionAction action = thenRead(static_cast<size_t>(step), timeout);
+        const KiottyNetConnectionAction action = thenRead(step, timeout);
         return Next::moveToNextState(state, action);
     }
 

@@ -14,7 +14,8 @@ namespace kiotty::net::implementation
         , info{}
         , route{}
         , stream{ nullptr, 0 }
-        , body_remaining(0)
+        , framing{ BodyFraming{ 0, BodyKind::NONE }, Persistence::KEEP_ALIVE, false }
+        , body{ 0 }
         , header_deadline(0)
         , sent(0)
         , id{ 0, index }
@@ -25,7 +26,6 @@ namespace kiotty::net::implementation
         , is_work_requested(false)
         , is_worker_owned(false)
         , is_orphaned(false)
-        , has_body(false)
     {
     }
 }

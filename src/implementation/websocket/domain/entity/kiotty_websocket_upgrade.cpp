@@ -2,6 +2,7 @@
 
 #include "base/domain/entity/kiotty_action.h"
 #include "core/kiotty_text.h"
+#include "http/data/repository/body/kiotty_http_message_framing_parser.h"
 #include "http/data/repository/header/kiotty_http_token_rules.h"
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/data/repository/kiotty_websocket_handler.h"
@@ -56,7 +57,8 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest& request = session.request.request();
         const bool is_get = request.method == KIOTTY_NET_HTTP_METHOD_GET;
         if (!is_get) { return refuse(session, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
-        if (session.has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
+        const bool has_body = hasBody(session.framing.body);
+        if (has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
         const UpgradeCheck check = checkUpgrade(request);
         switch (check)
         {

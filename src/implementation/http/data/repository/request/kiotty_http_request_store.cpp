@@ -62,12 +62,16 @@ namespace kiotty::net::implementation
         return NO_ERROR_STATUS;
     }
 
-    FramingResult HttpRequestStore::finishHeaders()
+    RequestFramingResult HttpRequestStore::finishHeaders()
     {
         const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };
         const Persistence persistence = decidePersistence(_version, found);
         _request.keep_alive = persistence == Persistence::KEEP_ALIVE ? 1 : 0;
-        return selectBodyFraming(found);
+        const FramingResult body = selectBodyFraming(found);
+        if (!body) { return RequestFramingResult::failure(body.code); }
+        const bool is_continuing = expectsContinue(_version, found);
+        const RequestFraming framing{ body.value, persistence, is_continuing };
+        return RequestFramingResult::success(framing);
     }
 
     AppendedBodyResult HttpRequestStore::appendBody(Span<const char> data)
@@ -79,12 +83,6 @@ namespace kiotty::net::implementation
         (void)target.copyFrom(data);
         _request.body.length = used + data.length;
         return AppendedBodyResult::success(target);
-    }
-
-    bool HttpRequestStore::expectsContinue() const
-    {
-        const Span<const KiottyNetHttpHeader> found{ _headers.data, _request.header_count };
-        return implementation::expectsContinue(_version, found);
     }
 
     const KiottyNetHttpRequest& HttpRequestStore::request() const
