@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 4b8c635
+    KiottyNet single header, generated from commit 880ec3f
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -7459,8 +7459,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
 #define KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
@@ -7552,8 +7552,153 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_EXCHANGE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_EXCHANGE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_BODY_READER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_BODY_READER_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_STEP_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_STEP_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    inline constexpr size_t CHUNK_LINE_BYTES = 256;
+
+    struct BodyStep
+    {
+        size_t        consumed;
+        size_t        produced;
+        KiottyNetCode code;
+        bool          is_finished;
+    };
+
+    static_assert(sizeof(BodyStep) == 2 * sizeof(size_t) + 2 * sizeof(int32_t),
+                  "BodyStep: unexpected padding");
+
+    enum class BodyState : uint8_t
+    {
+        DONE,
+        FAILED,
+        CUT_SHORT,
+        LENGTH,
+        UNTIL_CLOSE,
+        CHUNK_SIZE,
+        CHUNK_DATA,
+        CHUNK_DATA_END,
+        CHUNK_DATA_LINE_FEED,
+        TRAILER_LINE_START,
+        TRAILER_LINE_REST
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class BodyKind : uint8_t
+    {
+        NONE,
+        LENGTH,
+        CHUNKED
+    };
+
+    enum class Persistence : uint8_t
+    {
+        CLOSE,
+        KEEP_ALIVE,
+        UPGRADE
+    };
+
+    struct BodyFraming
+    {
+        uint64_t length;
+        BodyKind kind;
+    };
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class ReplyBodyKind : uint8_t
+    {
+        NONE,
+        LENGTH,
+        CHUNKED,
+        UNTIL_CLOSE
+    };
+
+    enum class ReplyPhase : uint8_t
+    {
+        FINAL,
+        INTERIM
+    };
+
+    struct ReplyFraming
+    {
+        uint64_t      length;
+        ReplyBodyKind kind;
+        Persistence   persistence;
+        ReplyPhase    phase;
+    };
+
+    static_assert(sizeof(ReplyFraming) == 2 * sizeof(uint64_t), "ReplyFraming: unexpected padding");
+}
+
+#endif
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class HttpBodyReader
+    {
+    public:
+        HttpBodyReader();
+        explicit HttpBodyReader(const ReplyFraming& framing);
+
+        BodyStep      take(Span<const char> input, Span<char> output);
+        KiottyNetCode closeInput();
+        bool          isFinished() const;
+
+    private:
+        struct Moved
+        {
+            size_t consumed;
+            size_t produced;
+        };
+
+        Moved     move(Span<const char> rest, Span<char> room);
+        Moved     moveAll(Span<const char> rest, Span<char> room);
+        Moved     moveCounted(Span<const char> rest, Span<char> room);
+        BodyState takeSizeByte(char byte);
+        BodyState endSizeLine();
+
+        std::array<char, CHUNK_LINE_BYTES> _line;
+        uint64_t                           _remaining;
+        size_t                             _line_length;
+        BodyState                          _state;
+    };
+
+    static_assert(sizeof(HttpBodyReader) <= CHUNK_LINE_BYTES + 3 * sizeof(uint64_t),
+                  "HttpBodyReader: unexpected padding");
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
 
 #include <cstddef>
 #include <cstdint>
@@ -7599,11 +7744,11 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_HEADERS_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_HEADERS_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SHARED_HEADERS_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SHARED_HEADERS_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_SHARED_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_SHARED_HEADERS_H
 
 #include <cstddef>
 
@@ -7652,8 +7797,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_LINK_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CLIENT_LINK_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
 
 namespace kiotty::net::implementation
 {
@@ -7673,245 +7818,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REPLY_STORE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REPLY_STORE_H
-
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_FRAMING_H
-
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MESSAGE_FRAMING_H
-
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class HttpVersion : uint8_t
-    {
-        V10,
-        V11
-    };
-
-    struct RequestLine
-    {
-        Span<const char>    path;
-        Span<const char>    query;
-        KiottyNetHttpMethod method;
-        HttpVersion         version;
-    };
-
-    using RequestLineResult = Result<RequestLine, KiottyNetHttpStatus>;
-    using HttpVersionResult = Result<HttpVersion, KiottyNetCode>;
-
-    RequestLineResult parseRequestLine(Span<const char> line);
-    HttpVersionResult parseHttpVersion(Span<const char> text);
-    Span<const char>  methodTextOf(KiottyNetHttpMethod method);
-}
-
-#endif
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class BodyKind : uint8_t
-    {
-        NONE,
-        LENGTH,
-        CHUNKED
-    };
-
-    enum class Persistence : uint8_t
-    {
-        CLOSE,
-        KEEP_ALIVE,
-        UPGRADE
-    };
-
-    struct BodyFraming
-    {
-        uint64_t length;
-        BodyKind kind;
-    };
-
-    using LengthResult = Result<uint64_t, KiottyNetHttpStatus>;
-    using FramingResult = Result<BodyFraming, KiottyNetHttpStatus>;
-
-    LengthResult  parseContentLength(Span<const char> value);
-    LengthResult  parseChunkSize(Span<const char> line);
-    FramingResult selectBodyFraming(Span<const KiottyNetHttpHeader> headers);
-    Persistence   decidePersistence(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
-    bool          expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    inline constexpr int32_t FIRST_STATUS = 100;
-    inline constexpr int32_t LAST_STATUS = 599;
-
-    struct StatusLine
-    {
-        int32_t     status;
-        HttpVersion version;
-    };
-
-    static_assert(sizeof(StatusLine) == 2 * sizeof(int32_t), "StatusLine: unexpected padding");
-
-    using StatusLineResult = Result<StatusLine, KiottyNetCode>;
-
-    StatusLineResult parseStatusLine(Span<const char> line);
-}
-
-#endif
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class ReplyBodyKind : uint8_t
-    {
-        NONE,
-        LENGTH,
-        CHUNKED,
-        UNTIL_CLOSE
-    };
-
-    enum class ReplyPhase : uint8_t
-    {
-        FINAL,
-        INTERIM
-    };
-
-    struct ReplyFraming
-    {
-        uint64_t      length;
-        ReplyBodyKind kind;
-        Persistence   persistence;
-        ReplyPhase    phase;
-    };
-
-    static_assert(sizeof(ReplyFraming) == 2 * sizeof(uint64_t), "ReplyFraming: unexpected padding");
-
-    using ReplyFramingResult = Result<ReplyFraming, KiottyNetCode>;
-
-    ReplyFramingResult selectReplyFraming(KiottyNetHttpMethod method,
-                                          const StatusLine& status_line,
-                                          Span<const KiottyNetHttpHeader> headers);
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class HttpReplyStore
-    {
-    public:
-        HttpReplyStore(Span<char> header_buffer, Span<KiottyNetHttpHeader> headers);
-
-        void                            begin();
-        KiottyNetCode                   takeStatusLine(Span<const char> line);
-        KiottyNetCode                   takeHeader(Span<const char> line);
-        ReplyFramingResult              finish(KiottyNetHttpMethod method) const;
-        int32_t                         status() const;
-        Span<const KiottyNetHttpHeader> headers() const;
-
-    private:
-        Span<char> claimHeaderRoom(Span<const char> line);
-
-        Span<char>                _header_buffer;
-        Span<KiottyNetHttpHeader> _headers;
-        size_t                    _header_length;
-        size_t                    _header_count;
-        StatusLine                _status_line;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_READER_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_READER_H
-
-#include <array>
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    inline constexpr size_t CHUNK_LINE_BYTES = 256;
-
-    struct BodyStep
-    {
-        size_t        consumed;
-        size_t        produced;
-        KiottyNetCode code;
-        bool          is_finished;
-    };
-
-    static_assert(sizeof(BodyStep) == 2 * sizeof(size_t) + 2 * sizeof(int32_t),
-                  "BodyStep: unexpected padding");
-
-    enum class BodyState : uint8_t
-    {
-        DONE,
-        FAILED,
-        CUT_SHORT,
-        LENGTH,
-        UNTIL_CLOSE,
-        CHUNK_SIZE,
-        CHUNK_DATA,
-        CHUNK_DATA_END,
-        CHUNK_DATA_LINE_FEED,
-        TRAILER_LINE_START,
-        TRAILER_LINE_REST
-    };
-
-    class HttpBodyReader
-    {
-    public:
-        HttpBodyReader();
-        explicit HttpBodyReader(const ReplyFraming& framing);
-
-        BodyStep      take(Span<const char> input, Span<char> output);
-        KiottyNetCode closeInput();
-        bool          isFinished() const;
-
-    private:
-        struct Moved
-        {
-            size_t consumed;
-            size_t produced;
-        };
-
-        Moved     move(Span<const char> rest, Span<char> room);
-        Moved     moveAll(Span<const char> rest, Span<char> room);
-        Moved     moveCounted(Span<const char> rest, Span<char> room);
-        BodyState takeSizeByte(char byte);
-        BodyState endSizeLine();
-
-        std::array<char, CHUNK_LINE_BYTES> _line;
-        uint64_t                           _remaining;
-        size_t                             _line_length;
-        BodyState                          _state;
-    };
-
-    static_assert(sizeof(HttpBodyReader) <= CHUNK_LINE_BYTES + 3 * sizeof(uint64_t),
-                  "HttpBodyReader: unexpected padding");
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
 #define KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
@@ -8010,6 +7918,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
 
 #include <cstddef>
 #include <cstdint>
@@ -8024,8 +7934,6 @@ namespace kiotty::net::implementation
         KIOTTY_NET_MAX_HOST_LENGTH + HOST_BRACKET_BYTES + HOST_PORT_BYTES;
 
     using HostField = FixedString<HOST_FIELD_BYTES + 1>;
-    using HostFieldResult = Result<HostField, KiottyNetCode>;
-    using HeadLengthResult = Result<size_t, KiottyNetCode>;
 
     struct RequestHead
     {
@@ -8042,6 +7950,17 @@ namespace kiotty::net::implementation
     static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + sizeof(uint64_t)
                                              + sizeof(size_t) + 2 * sizeof(int32_t),
                   "RequestHead: unexpected padding");
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using HostFieldResult = Result<HostField, KiottyNetCode>;
+    using HeadLengthResult = Result<size_t, KiottyNetCode>;
 
     HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);
     HostFieldResult  hostFieldOf(const KiottyNetAddress& address, uint16_t default_port);
@@ -8049,10 +7968,136 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_REPLY_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_REPLY_STORE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_REPLY_FRAMING_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_REPLY_FRAMING_RULES_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATUS_LINE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_LINE_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class HttpVersion : uint8_t
+    {
+        V10,
+        V11
+    };
+
+    struct RequestLine
+    {
+        Span<const char>    path;
+        Span<const char>    query;
+        KiottyNetHttpMethod method;
+        HttpVersion         version;
+    };
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    inline constexpr int32_t FIRST_STATUS = 100;
+    inline constexpr int32_t LAST_STATUS = 599;
+
+    struct StatusLine
+    {
+        int32_t     status;
+        HttpVersion version;
+    };
+
+    static_assert(sizeof(StatusLine) == 2 * sizeof(int32_t), "StatusLine: unexpected padding");
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using ReplyFramingResult = Result<ReplyFraming, KiottyNetCode>;
+
+    ReplyFramingResult selectReplyFraming(KiottyNetHttpMethod method,
+                                          const StatusLine& status_line,
+                                          Span<const KiottyNetHttpHeader> headers);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_STATUS_LINE_PARSER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_STATUS_LINE_PARSER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using StatusLineResult = Result<StatusLine, KiottyNetCode>;
+
+    StatusLineResult parseStatusLine(Span<const char> line);
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class HttpReplyStore
+    {
+    public:
+        HttpReplyStore(Span<char> header_buffer, Span<KiottyNetHttpHeader> headers);
+
+        void                            begin();
+        KiottyNetCode                   takeStatusLine(Span<const char> line);
+        KiottyNetCode                   takeHeader(Span<const char> line);
+        ReplyFramingResult              finish(KiottyNetHttpMethod method) const;
+        int32_t                         status() const;
+        Span<const KiottyNetHttpHeader> headers() const;
+
+    private:
+        Span<char> claimHeaderRoom(Span<const char> line);
+
+        Span<char>                _header_buffer;
+        Span<KiottyNetHttpHeader> _headers;
+        size_t                    _header_length;
+        size_t                    _header_count;
+        StatusLine                _status_line;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct ClientRequest
+    {
+        Span<const KiottyNetHttpHeader> headers;
+        Span<const char>                path;
+        Span<const char>                body;
+        KiottyNetHttpMethod             method;
+        KiottyNetHttpContentType        type;
+    };
+
+    static_assert(sizeof(ClientRequest) == 3 * sizeof(Span<const char>) + 2 * sizeof(int32_t),
+                  "ClientRequest: unexpected padding");
+}
+
+#endif
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_UPLOAD_H
 #define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_UPLOAD_H
 
-#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -8075,12 +8120,6 @@ namespace kiotty::net::implementation
 
     static_assert(sizeof(HttpUpload) == sizeof(uint64_t) + 2 * sizeof(int32_t),
                   "HttpUpload: unexpected padding");
-
-    HttpUpload    idleUpload();
-    HttpUpload    startUpload(KiottyNetHttpMethod method, uint64_t body_length);
-    KiottyNetCode checkUploadPiece(const HttpUpload& upload, size_t length);
-    HttpUpload    takeUploadPiece(const HttpUpload& upload, size_t length);
-    KiottyNetCode checkUploadEnd(const HttpUpload& upload);
 }
 
 #endif
@@ -8096,18 +8135,6 @@ namespace kiotty::net::implementation
         KiottyNetClientConfiguration client;
         KiottyNetHttpLimits          limits;
     };
-
-    struct ClientRequest
-    {
-        Span<const KiottyNetHttpHeader> headers;
-        Span<const char>                path;
-        Span<const char>                body;
-        KiottyNetHttpMethod             method;
-        KiottyNetHttpContentType        type;
-    };
-
-    static_assert(sizeof(ClientRequest) == 3 * sizeof(Span<const char>) + 2 * sizeof(int32_t),
-                  "ClientRequest: unexpected padding");
 
     class HttpClient : private StreamClient
     {
@@ -8177,17 +8204,36 @@ namespace kiotty::net::implementation
 #ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
 #define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SITE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SITE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SITE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SITE_H
 
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SESSION_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SESSION_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_STATE_HTTP_SESSION_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_STATE_HTTP_SESSION_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REQUEST_STORE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REQUEST_STORE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_STORE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_MESSAGE_FRAMING_PARSER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_MESSAGE_FRAMING_PARSER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using LengthResult = Result<uint64_t, KiottyNetHttpStatus>;
+    using FramingResult = Result<BodyFraming, KiottyNetHttpStatus>;
+
+    LengthResult  parseContentLength(Span<const char> value);
+    LengthResult  parseChunkSize(Span<const char> line);
+    FramingResult selectBodyFraming(Span<const KiottyNetHttpHeader> headers);
+    Persistence   decidePersistence(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
+    bool          expectsContinue(HttpVersion version, Span<const KiottyNetHttpHeader> headers);
+}
+
+#endif
 
 #include <cstddef>
 
@@ -8225,8 +8271,11 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_RESPONSE_STORE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_RESPONSE_STORE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_RESPONSE_STORE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_RESPONSE_STORE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_LAYOUT_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_LAYOUT_H
 
 #include <cstddef>
 #include <cstdint>
@@ -8267,7 +8316,15 @@ namespace kiotty::net::implementation
         uint64_t   file_offset;
         bool       is_file;
     };
+}
 
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     class ResponseFrame
     {
     public:
@@ -8424,8 +8481,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_NOTICES_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_NOTICES_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_NOTICES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_NOTICES_H
 
 namespace kiotty::net::implementation
 {
@@ -8452,42 +8509,13 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REGISTRY_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_REGISTRY_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_REGISTRY_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_REGISTRY_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_MATCH_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_MATCH_H
 
 #include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    enum class PathKind : uint8_t
-    {
-        EXACT,
-        PREFIX
-    };
-
-    struct RoutePath
-    {
-        Span<const char> text;
-        PathKind         kind;
-    };
-
-    using RoutePathResult = Result<RoutePath, KiottyNetCode>;
-
-    RoutePathResult parseRoutePath(const char* text);
-    RoutePathResult parseDirectoryPrefix(const char* text);
-    bool            matchesPath(const RoutePath& route, Span<const char> path);
-    bool            hasParentSegment(Span<const char> path);
-    bool            isSafeRelativePath(Span<const char> path);
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-#include <vector>
 
 namespace kiotty::net::implementation
 {
@@ -8536,7 +8564,37 @@ namespace kiotty::net::implementation
         KiottyNetHttpContentType type;
         StaticKind               kind;
     };
+}
 
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ROUTE_PATH_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class PathKind : uint8_t
+    {
+        EXACT,
+        PREFIX
+    };
+
+    struct RoutePath
+    {
+        Span<const char> text;
+        PathKind         kind;
+    };
+}
+
+#endif
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace kiotty::net::implementation
+{
     using UpgradeIndexResult = Result<int32_t, KiottyNetCode>;
 
     class HttpRegistry
@@ -8592,8 +8650,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_UPGRADE_HANDLER_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_UPGRADE_HANDLER_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_UPGRADE_HTTP_UPGRADE_HANDLER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_UPGRADE_HTTP_UPGRADE_HANDLER_H
 
 #include <cstdint>
 
@@ -9042,14 +9100,14 @@ namespace kiotty::net::implementation
 #ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SERVER_H
 #define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SERVER_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SERVER_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_SERVER_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SERVER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SERVER_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CONFIGURATION_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_CONFIGURATION_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_CONFIGURATION_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_CONFIGURATION_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_RESPONSE_TEXT_BUILDER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_RESPONSE_TEXT_BUILDER_H
 
 #ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CALENDAR_TIME_H
 #define KIOTTY_NET_INTERNAL_BASE_DOMAIN_ENTITY_CALENDAR_TIME_H
@@ -9071,9 +9129,10 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RESPONSE_TEXT_H
 
 #include <cstddef>
-#include <cstdint>
 
 namespace kiotty::net::implementation
 {
@@ -9086,7 +9145,15 @@ namespace kiotty::net::implementation
     using AllowText = FixedString<ALLOW_TEXT_BYTES>;
     using ChunkHead = FixedString<CHUNK_HEAD_BYTES + 1>;
     using DecimalText = FixedString<DECIMAL_DIGITS + 1>;
+}
 
+#endif
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     bool        appendStatusLine(PrefixText& text, int32_t status);
     bool        appendField(PrefixText& text, Span<const char> name, Span<const char> value);
     bool        appendLengthField(PrefixText& text, uint64_t length);
@@ -9133,8 +9200,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_WORK_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_WORK_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_WORK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_WORK_H
 
 #include <cstdint>
 
@@ -10168,8 +10235,8 @@ KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client
     return net::runStatefulEventClient(*client, copied, tls, *app_context);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_FILE_BODY_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HTTP_FILE_BODY_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_FILE_BODY_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_FILE_BODY_H
 
 #include <cstddef>
 
@@ -10182,6 +10249,23 @@ namespace kiotty::net::implementation
                              Span<const char> path);
     PieceResult   pieceAt(HttpSession& session, size_t offset);
     void          detachFile(HttpSession& session);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_ROUTE_PATH_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_ROUTE_PATH_RULES_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using RoutePathResult = Result<RoutePath, KiottyNetCode>;
+
+    RoutePathResult parseRoutePath(const char* text);
+    RoutePathResult parseDirectoryPrefix(const char* text);
+    bool            matchesPath(const RoutePath& route, Span<const char> path);
+    bool            hasParentSegment(Span<const char> path);
+    bool            isSafeRelativePath(Span<const char> path);
 }
 
 #endif
@@ -10500,8 +10584,8 @@ KiottyNetCode KiottyNet_awaitHttpServer(KiottyNetHttpServerHandle server,
     return server->await(timeout_milliseconds);
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_HEADERS_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REPLY_HEADERS_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_REPLY_HEADERS_PARSER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_REPLY_HEADERS_PARSER_H
 
 #include <cstdint>
 
@@ -10512,8 +10596,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_TOKEN_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_TOKEN_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_TOKEN_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_TOKEN_RULES_H
 
 #include <cstddef>
 
@@ -22283,6 +22367,23 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_LINE_PARSER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_LINE_PARSER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using RequestLineResult = Result<RequestLine, KiottyNetHttpStatus>;
+    using HttpVersionResult = Result<HttpVersion, KiottyNetCode>;
+
+    RequestLineResult parseRequestLine(Span<const char> line);
+    HttpVersionResult parseHttpVersion(Span<const char> text);
+    Span<const char>  methodTextOf(KiottyNetHttpMethod method);
+}
+
+#endif
+
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONSTANTS_H
 #define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONSTANTS_H
 
@@ -22450,8 +22551,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_HEADER_LINE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_HEADER_LINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_HEADER_LINE_PARSER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_HEADER_LINE_PARSER_H
 
 #include <cstddef>
 
@@ -22794,8 +22895,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATIC_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATIC_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_STATIC_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_STATIC_H
 
 namespace kiotty::net::implementation
 {
@@ -22870,6 +22971,9 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_CONTENT_TYPE_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_CONTENT_TYPE_RULES_H
+
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONTENT_TYPE_H
 #define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CONTENT_TYPE_H
 
@@ -22883,7 +22987,14 @@ namespace kiotty::net::implementation
         UTF8,
         UTF8_WITH_CHARSET
     };
+}
 
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     Span<const char>         contentTypeTextOf(KiottyNetHttpContentType type);
     TextKind                 textKindOf(KiottyNetHttpContentType type);
     KiottyNetHttpContentType contentTypeOfPath(Span<const char> path);
@@ -23354,8 +23465,11 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_EXCHANGE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_EXCHANGE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_EXCHANGE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_EXCHANGE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_STATE_H
 
 #include <cstdint>
 
@@ -23380,7 +23494,14 @@ namespace kiotty::net::implementation
         FRAME_MASK,
         FRAME_PAYLOAD
     };
+}
 
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     HttpSession&        sessionOf(KiottyNetConnectionContext context);
     Span<const char>    lineOf(KiottyNetSpan data);
     KiottyNetTransition beginExchange(HttpSession& session,
@@ -23988,8 +24109,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_CHECK_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_CHECK_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_CHECK_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_CHECK_RULES_H
 
 namespace kiotty::net::implementation
 {
@@ -24080,6 +24201,23 @@ namespace kiotty::net::implementation
         }
     }
 }
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_UPLOAD_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_UPLOAD_RULES_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    HttpUpload    idleUpload();
+    HttpUpload    startUpload(KiottyNetHttpMethod method, uint64_t body_length);
+    KiottyNetCode checkUploadPiece(const HttpUpload& upload, size_t length);
+    HttpUpload    takeUploadPiece(const HttpUpload& upload, size_t length);
+    KiottyNetCode checkUploadEnd(const HttpUpload& upload);
+}
+
+#endif
 
 namespace kiotty::net::implementation
 {
@@ -25520,8 +25658,8 @@ namespace kiotty::net::implementation
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RULE_NAMES_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_RULE_NAMES_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_RULE_NAMES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_RULE_NAMES_H
 
 namespace kiotty::net::implementation
 {
@@ -25949,8 +26087,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MACHINE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_MACHINE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_MACHINE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_MACHINE_H
 
 namespace kiotty::net::implementation
 {
