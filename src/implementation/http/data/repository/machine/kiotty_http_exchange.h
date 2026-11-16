@@ -24,6 +24,7 @@ namespace kiotty::net::implementation
     KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream);
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection);
     KiottyNetTransition startSending(HttpSession& session);
+    void                sealResponse(HttpSession& session);
     KiottyNetTransition closeWith(KiottyNetCode reason);
     void                startHeaderClock(HttpSession& session);
     uint32_t            headerTimeLeft(const HttpSession& session);

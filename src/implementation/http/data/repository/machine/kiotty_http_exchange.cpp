@@ -7,6 +7,7 @@
 #include "http/data/repository/body/kiotty_http_file_body.h"
 #include "http/data/repository/machine/kiotty_http_answer_writer.h"
 #include "http/data/repository/response/kiotty_http_answer_rules.h"
+#include "http/data/repository/response/kiotty_http_send_rules.h"
 #include "http/data/repository/server/kiotty_http_site.h"
 #include "http/domain/entity/kiotty_http_constants.h"
 
@@ -28,8 +29,7 @@ namespace kiotty::net::implementation
         RouteOutcome                outcomeOf(const HttpSession& session);
         KiottyNetTransition         awaitWork(HttpSession& session);
         void                        answerWithoutWork(HttpSession& session);
-        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk);
-        bool                isLastPiece(const HttpSession& session, size_t end);
+        KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step);
     }
 
     HttpSession& sessionOf(KiottyNetConnectionContext context)
@@ -123,10 +123,11 @@ namespace kiotty::net::implementation
     {
         const PieceResult piece = pieceAt(session, session.sent);
         if (!piece) { return closeWith(piece.code); }
-        const Span<const char> chunk = piece.value;
-        if (!chunk.empty()) { return sendPiece(session, chunk); }
-        const bool is_kept = session.persistence == Persistence::KEEP_ALIVE;
-        if (!is_kept) { return closeWith(session.close_reason); }
+        const ResponseFrame frame = session.response.frame();
+        const SendStep step = sendStepOf(frame, session.sent, piece.value, session.persistence);
+        if (step.kind != SendKind::DONE) { return sendPiece(session, step); }
+        const AfterResponse after = afterResponseOf(session.persistence);
+        if (after == AfterResponse::CLOSE) { return closeWith(session.close_reason); }
         const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
     }
@@ -134,12 +135,18 @@ namespace kiotty::net::implementation
     KiottyNetTransition startSending(HttpSession& session)
     {
         session.phase = SessionPhase::SENDING;
+        sealResponse(session);
+        session.sent = 0;
+        const ResponseFrame frame = session.response.frame();
+        const Span<const char> chunk = frame.chunkAt(0, session.site.send_capacity);
+        const SendStep step = sendStepOf(frame, 0, chunk, session.persistence);
+        return sendPiece(session, step);
+    }
+
+    void sealResponse(HttpSession& session)
+    {
         const KiottyNetHttpMethod method = session.request.request().method;
         session.response.seal(ResponseSeal{ method, session.persistence });
-        session.sent = 0;
-        const size_t capacity = session.site.send_capacity;
-        const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
-        return sendPiece(session, chunk);
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -215,25 +222,14 @@ namespace kiotty::net::implementation
             session.persistence = Persistence::CLOSE;
         }
 
-        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk)
+        KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step)
         {
-            const KiottyNetSpan data{ chunk.data, chunk.length };
-            const size_t end = session.sent + chunk.length;
-            const bool is_closing = session.persistence == Persistence::CLOSE;
-            const bool is_farewell = is_closing && isLastPiece(session, end);
+            const KiottyNetSpan data{ step.chunk.data, step.chunk.length };
+            const bool is_farewell = step.kind == SendKind::FAREWELL;
             const KiottyNetConnectionAction write = thenWrite(data, 0);
             if (!is_farewell) { return Next::moveToNextState(HttpState::SENDING, write); }
             const KiottyNetConnectionAction farewell = thenCloseWith(data, session.close_reason);
             return Next::moveToNextState(HttpState::CLOSING, farewell);
-        }
-
-        bool isLastPiece(const HttpSession& session, size_t end)
-        {
-            const ResponseFrame frame = session.response.frame();
-            const FilePiece file = frame.filePieceAt(end, 1);
-            if (file.is_file) { return false; }
-            const Span<const char> rest = frame.chunkAt(end, 1);
-            return rest.empty();
         }
     }
 }

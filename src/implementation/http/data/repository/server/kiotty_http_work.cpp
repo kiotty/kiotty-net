@@ -6,6 +6,7 @@
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_text.h"
 #include "http/data/repository/machine/kiotty_http_exchange.h"
+#include "http/data/repository/response/kiotty_http_send_rules.h"
 #include "http/data/repository/response/kiotty_http_response_text_builder.h"
 
 #include <limits>
@@ -42,7 +43,6 @@ namespace kiotty::net::implementation
         KiottyNetConnectionAction firstPieceOf(HttpSession& session, size_t sent);
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session);
         size_t                    headerBytesOf(const HttpSession& session);
-        void                      sealFor(HttpSession& session);
     }
 
     HttpWork::HttpWork(HttpSite& site)
@@ -146,7 +146,7 @@ namespace kiotty::net::implementation
         size_t openStream(HttpSession& session)
         {
             if (session.phase == SessionPhase::STREAMING) { return 0; }
-            sealFor(session);
+            sealResponse(session);
             session.phase = SessionPhase::STREAMING;
             return headerBytesOf(session);
         }
@@ -242,7 +242,7 @@ namespace kiotty::net::implementation
 
         KiottyNetConnectionAction sealedPieceOf(HttpSession& session)
         {
-            sealFor(session);
+            sealResponse(session);
             return firstPieceOf(session, 0);
         }
 
@@ -256,8 +256,8 @@ namespace kiotty::net::implementation
 
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session)
         {
-            const bool is_kept = session.persistence == Persistence::KEEP_ALIVE;
-            if (!is_kept) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
+            const AfterResponse after = afterResponseOf(session.persistence);
+            if (after == AfterResponse::CLOSE) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
             const KiottyNetConnectionHandle connection = session.request.request().connection;
             const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
             return beginExchange(session, connection, wait).entry_action;
@@ -266,12 +266,6 @@ namespace kiotty::net::implementation
         size_t headerBytesOf(const HttpSession& session)
         {
             return session.response.frame().chunkAt(0, WHOLE).length;
-        }
-
-        void sealFor(HttpSession& session)
-        {
-            const KiottyNetHttpMethod method = session.request.request().method;
-            session.response.seal(ResponseSeal{ method, session.persistence });
         }
     }
 }
