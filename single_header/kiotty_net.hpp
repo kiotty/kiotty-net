@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit adb6e7f
+    KiottyNet single header, generated from commit 75b66c1
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -321,6 +321,25 @@ typedef struct KiottyNetConnectionStream
     KiottyNetEndpoint* owner;
     int64_t                   id;
 } KiottyNetConnectionStream;
+
+typedef enum KiottyNetConnectionEventType
+{
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT,
+    KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED
+} KiottyNetConnectionEventType;
+
+typedef struct KiottyNetConnectionEvent
+{
+    KiottyNetConnectionEventType type;
+    KiottyNetSpan                data;
+    size_t                       length;
+    KiottyNetConnectionStream    stream;
+    KiottyNetCode                reason;
+} KiottyNetConnectionEvent;
 
 typedef void*   KiottyNetAppContext;
 typedef void*   KiottyNetConnectionContext;
@@ -1515,25 +1534,6 @@ extern "C" {
 
 #define KIOTTY_NET_ANY_STATE  (-1)
 #define KIOTTY_NET_MAX_NEXT   8
-
-typedef enum KiottyNetConnectionEventType
-{
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_READ,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT,
-    KIOTTY_NET_CONNECTION_EVENT_TYPE_CLOSED
-} KiottyNetConnectionEventType;
-
-typedef struct KiottyNetConnectionEvent
-{
-    KiottyNetConnectionEventType type;
-    KiottyNetSpan                data;
-    size_t                       length;
-    KiottyNetConnectionStream    stream;
-    KiottyNetCode                reason;
-} KiottyNetConnectionEvent;
 
 typedef struct KiottyNetTransition
 {
@@ -9006,7 +9006,8 @@ namespace kiotty::net::implementation
 
         KiottyNetCode  initialize(PoolHandle id, const HttpServerConfiguration& configuration);
         void           reset() noexcept;
-        KiottyNetCode  run(const KiottyNetAddress& address,
+        KiottyNetCode  run(KiottyNetHttpServerHandle self,
+                           const KiottyNetAddress& address,
                            const KiottyNetTlsServerConfiguration* tls,
                            KiottyNetAppContext app_context);
         RegistryResult registry();
@@ -10420,7 +10421,7 @@ KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server,
 {
     if (server == nullptr || address == nullptr) { return INVALID; }
     const KiottyNetAddress copied = *address;
-    return server->run(copied, tls, app_context);
+    return server->run(server, copied, tls, app_context);
 }
 
 void KiottyNet_closeHttpServer(KiottyNetHttpServerHandle server)
@@ -27582,7 +27583,8 @@ namespace kiotty::net::implementation
         _site.notices.clear();
     }
 
-    KiottyNetCode HttpServer::run(const KiottyNetAddress& address,
+    KiottyNetCode HttpServer::run(KiottyNetHttpServerHandle self,
+                                  const KiottyNetAddress& address,
                                   const KiottyNetTlsServerConfiguration* tls,
                                   KiottyNetAppContext app_context)
     {
@@ -27590,6 +27592,7 @@ namespace kiotty::net::implementation
         _runs.fetch_add(1);
         _site.is_closing.store(false);
         _site.app_context = app_context;
+        _site.owner = self;
         const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);
@@ -27667,7 +27670,6 @@ namespace kiotty::net::implementation
         _site.receive_capacity = configuration.server.receive_capacity;
         _site.send_capacity = configuration.server.send_capacity;
         _site.push_capacity = configuration.server.push_capacity;
-        _site.owner = static_cast<KiottyNetHttpServer*>(this);
         _site.socket_owner = this;
         _site.lane = this;
         _site.registry.initialize(limits.max_routes);
@@ -28236,6 +28238,10 @@ namespace kiotty::net::implementation
     }
 }
 
+KiottyNetWebSocketEndpoint::~KiottyNetWebSocketEndpoint()
+{
+}
+
 namespace kiotty::net::implementation
 {
     SocketCode IoLoop::submit(IoSource& source, const IoAction& action, EventListener& listener)
@@ -28270,10 +28276,6 @@ namespace kiotty::net::implementation
 }
 
 KiottyNetEndpoint::~KiottyNetEndpoint()
-{
-}
-
-KiottyNetWebSocketEndpoint::~KiottyNetWebSocketEndpoint()
 {
 }
 
