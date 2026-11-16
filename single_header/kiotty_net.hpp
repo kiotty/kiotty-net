@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 27e0e8d
+    KiottyNet single header, generated from commit 79b1297
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -22930,12 +22930,58 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_STATIC_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_STATIC_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_ANSWER_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_ANSWER_RULES_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ANSWER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_ANSWER_H
+
+#include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    void answerStatic(HttpSession& session, const StaticTarget& target);
+    using AnswerPath = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
+
+    enum class AnswerKind : uint8_t
+    {
+        NONE,
+        STATUS,
+        ALLOW,
+        MEMORY,
+        FILE
+    };
+
+    struct Answer
+    {
+        AnswerPath               location;
+        KiottyNetSpan            memory;
+        KiottyNetHttpContentType type;
+        uint32_t                 allowed;
+        int32_t                  status;
+        AnswerKind               kind;
+    };
+
+    struct RouteOutcome
+    {
+        bool is_stream;
+        bool is_head;
+        bool is_work_requested;
+    };
+
+    enum class AfterRoute : uint8_t
+    {
+        SEND,
+        AWAIT_WORK,
+        REFUSE_STREAM
+    };
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    Answer     answerOf(const RouteMatch& match, Span<const char> path);
+    AfterRoute afterRouteOf(const RouteOutcome& outcome);
 }
 
 #endif
@@ -22944,64 +22990,264 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr int32_t FORBIDDEN = KIOTTY_NET_HTTP_STATUS_FORBIDDEN;
+        constexpr int32_t ANSWER_FORBIDDEN = KIOTTY_NET_HTTP_STATUS_FORBIDDEN;
+        constexpr int32_t ANSWER_NOT_ALLOWED = KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
+        constexpr int32_t ANSWER_NO_CONTENT = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
 
-        using JoinedPath = FixedString<KIOTTY_NET_MAX_PATH_LENGTH>;
-
-        void answerFile(HttpSession& session,
-                        KiottyNetHttpContentType type,
-                        Span<const char> location);
-        void answerDirectory(HttpSession& session, const StaticTarget& target);
-        void answerStatus(HttpSession& session, int32_t status);
+        Answer answerWith(AnswerKind kind, int32_t status);
+        Answer allowAnswerOf(int32_t status, uint32_t allowed);
+        Answer staticAnswerOf(const StaticTarget& target, Span<const char> path);
+        Answer memoryAnswerOf(const StaticTarget& target);
+        Answer fileAnswerOf(KiottyNetHttpContentType type, Span<const char> location);
+        Answer directoryAnswerOf(const StaticTarget& target, Span<const char> path);
     }
 
-    void answerStatic(HttpSession& session, const StaticTarget& target)
+    Answer answerOf(const RouteMatch& match, Span<const char> path)
     {
-        switch (target.kind)
+        switch (match.kind)
         {
-        case StaticKind::NONE:
+        case MatchKind::ROUTE:
+            return answerWith(AnswerKind::NONE, 0);
+        case MatchKind::STATIC:
+            return staticAnswerOf(match.target, path);
+        case MatchKind::UPGRADE:
+        case MatchKind::NOT_FOUND:
+            return answerWith(AnswerKind::STATUS, NOT_FOUND);
+        case MatchKind::NOT_ALLOWED:
+            return allowAnswerOf(ANSWER_NOT_ALLOWED, match.allowed);
+        case MatchKind::OPTIONS:
+            return allowAnswerOf(ANSWER_NO_CONTENT, match.allowed);
+        }
+        return answerWith(AnswerKind::NONE, 0);
+    }
+
+    AfterRoute afterRouteOf(const RouteOutcome& outcome)
+    {
+        const bool is_head_stream = outcome.is_head && outcome.is_stream;
+        const bool is_working = outcome.is_work_requested && !is_head_stream;
+        if (is_working) { return AfterRoute::AWAIT_WORK; }
+        const bool is_orphan_stream = outcome.is_stream && !outcome.is_work_requested;
+        return is_orphan_stream ? AfterRoute::REFUSE_STREAM : AfterRoute::SEND;
+    }
+
+    namespace
+    {
+        Answer answerWith(AnswerKind kind, int32_t status)
+        {
+            Answer answer{};
+            answer.kind = kind;
+            answer.status = status;
+            return answer;
+        }
+
+        Answer allowAnswerOf(int32_t status, uint32_t allowed)
+        {
+            Answer answer = answerWith(AnswerKind::ALLOW, status);
+            answer.allowed = allowed;
+            return answer;
+        }
+
+        Answer staticAnswerOf(const StaticTarget& target, Span<const char> path)
+        {
+            switch (target.kind)
+            {
+            case StaticKind::NONE:
+                return answerWith(AnswerKind::NONE, 0);
+            case StaticKind::MEMORY:
+                return memoryAnswerOf(target);
+            case StaticKind::FILE:
+                return fileAnswerOf(target.type, target.location);
+            case StaticKind::DIRECTORY:
+                return directoryAnswerOf(target, path);
+            }
+            return answerWith(AnswerKind::NONE, 0);
+        }
+
+        Answer memoryAnswerOf(const StaticTarget& target)
+        {
+            Answer answer = answerWith(AnswerKind::MEMORY, 0);
+            answer.type = target.type;
+            answer.memory = target.memory;
+            return answer;
+        }
+
+        Answer fileAnswerOf(KiottyNetHttpContentType type, Span<const char> location)
+        {
+            Answer answer = answerWith(AnswerKind::FILE, 0);
+            answer.type = type;
+            const bool is_kept = answer.location.assign(location);
+            if (!is_kept) { return answerWith(AnswerKind::STATUS, NOT_FOUND); }
+            return answer;
+        }
+
+        Answer directoryAnswerOf(const StaticTarget& target, Span<const char> path)
+        {
+            const Span<const char> rest = path.skip(target.prefix.length);
+            const bool is_safe = isSafeRelativePath(rest);
+            if (!is_safe) { return answerWith(AnswerKind::STATUS, ANSWER_FORBIDDEN); }
+            Answer answer = answerWith(AnswerKind::FILE, 0);
+            answer.type = KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION;
+            const bool is_started = answer.location.assign(target.location);
+            const bool is_joined = is_started && answer.location.append(rest);
+            if (!is_joined) { return answerWith(AnswerKind::STATUS, NOT_FOUND); }
+            return answer;
+        }
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_SEND_RULES_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_RESPONSE_HTTP_SEND_RULES_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_SEND_STEP_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_SEND_STEP_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    enum class SendKind : uint8_t
+    {
+        WRITE,
+        FAREWELL,
+        DONE
+    };
+
+    struct SendStep
+    {
+        Span<const char> chunk;
+        SendKind         kind;
+    };
+
+    enum class AfterResponse : uint8_t
+    {
+        NEXT_EXCHANGE,
+        CLOSE
+    };
+}
+
+#endif
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    SendStep      sendStepOf(const ResponseFrame& frame,
+                             size_t sent,
+                             Span<const char> chunk,
+                             Persistence persistence);
+    AfterResponse afterResponseOf(Persistence persistence);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        bool isFinalPiece(const ResponseFrame& frame, size_t end);
+    }
+
+    SendStep sendStepOf(const ResponseFrame& frame,
+                        size_t sent,
+                        Span<const char> chunk,
+                        Persistence persistence)
+    {
+        if (chunk.empty()) { return SendStep{ chunk, SendKind::DONE }; }
+        const bool is_closing = persistence == Persistence::CLOSE;
+        const size_t end = sent + chunk.length;
+        const bool is_farewell = is_closing && isFinalPiece(frame, end);
+        const SendKind kind = is_farewell ? SendKind::FAREWELL : SendKind::WRITE;
+        return SendStep{ chunk, kind };
+    }
+
+    AfterResponse afterResponseOf(Persistence persistence)
+    {
+        const bool is_kept = persistence == Persistence::KEEP_ALIVE;
+        return is_kept ? AfterResponse::NEXT_EXCHANGE : AfterResponse::CLOSE;
+    }
+
+    namespace
+    {
+        bool isFinalPiece(const ResponseFrame& frame, size_t end)
+        {
+            const FilePiece file = frame.filePieceAt(end, 1);
+            if (file.is_file) { return false; }
+            const Span<const char> rest = frame.chunkAt(end, 1);
+            return rest.empty();
+        }
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_ANSWER_WRITER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_ANSWER_WRITER_H
+
+namespace kiotty::net::implementation
+{
+    void writeAnswer(HttpSession& session, const Answer& answer);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        constexpr char ALLOW_HEADER_NAME[] = "Allow";
+
+        void writeStatusAnswer(HttpSession& session, int32_t status);
+        void writeAllowAnswer(HttpSession& session, const Answer& answer);
+        void writeMemoryAnswer(HttpSession& session, const Answer& answer);
+        void writeFileAnswer(HttpSession& session, const Answer& answer);
+    }
+
+    void writeAnswer(HttpSession& session, const Answer& answer)
+    {
+        switch (answer.kind)
+        {
+        case AnswerKind::NONE:
             return;
-        case StaticKind::MEMORY:
-            (void)session.response.setBody(target.type, target.memory, BodyStorage::REFERENCE);
+        case AnswerKind::STATUS:
+            writeStatusAnswer(session, answer.status);
             return;
-        case StaticKind::FILE:
-            answerFile(session, target.type, target.location);
+        case AnswerKind::ALLOW:
+            writeAllowAnswer(session, answer);
             return;
-        case StaticKind::DIRECTORY:
-            answerDirectory(session, target);
+        case AnswerKind::MEMORY:
+            writeMemoryAnswer(session, answer);
+            return;
+        case AnswerKind::FILE:
+            writeFileAnswer(session, answer);
             return;
         }
     }
 
     namespace
     {
-        void answerFile(HttpSession& session,
-                        KiottyNetHttpContentType type,
-                        Span<const char> location)
-        {
-            const KiottyNetCode attached = attachFile(session, type, location);
-            if (attached != KIOTTY_NET_CODE_SUCCESS) { answerStatus(session, NOT_FOUND); }
-        }
-
-        void answerDirectory(HttpSession& session, const StaticTarget& target)
-        {
-            const KiottyNetSpan path = session.request.request().path;
-            const Span<const char> request_path{ path.data, path.length };
-            const Span<const char> rest = request_path.skip(target.prefix.length);
-            const bool is_safe = isSafeRelativePath(rest);
-            JoinedPath joined;
-            const bool is_joined = is_safe && joined.assign(target.location) && joined.append(rest);
-            const bool is_missing = is_safe && !is_joined;
-            const KiottyNetHttpContentType type = KIOTTY_NET_HTTP_CONTENT_TYPE_BY_EXTENSION;
-            if (!is_safe) { answerStatus(session, FORBIDDEN); }
-            if (is_missing) { answerStatus(session, NOT_FOUND); }
-            if (is_joined) { answerFile(session, type, joined.span()); }
-        }
-
-        void answerStatus(HttpSession& session, int32_t status)
+        void writeStatusAnswer(HttpSession& session, int32_t status)
         {
             session.response.begin();
             (void)session.response.setStatus(status);
+        }
+
+        void writeAllowAnswer(HttpSession& session, const Answer& answer)
+        {
+            const AllowText allow = allowListOf(answer.allowed);
+            (void)session.response.setStatus(answer.status);
+            const Span<const char> name{ ALLOW_HEADER_NAME, sizeof(ALLOW_HEADER_NAME) - 1 };
+            (void)session.response.addHeader(name, allow.span());
+        }
+
+        void writeMemoryAnswer(HttpSession& session, const Answer& answer)
+        {
+            const BodyStorage storage = BodyStorage::REFERENCE;
+            (void)session.response.setBody(answer.type, answer.memory, storage);
+        }
+
+        void writeFileAnswer(HttpSession& session, const Answer& answer)
+        {
+            const Span<const char> location = answer.location.span();
+            const KiottyNetCode attached = attachFile(session, answer.type, location);
+            if (attached != KIOTTY_NET_CODE_SUCCESS) { writeStatusAnswer(session, NOT_FOUND); }
         }
     }
 }
@@ -23551,6 +23797,7 @@ namespace kiotty::net::implementation
     KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream stream);
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection);
     KiottyNetTransition startSending(HttpSession& session);
+    void                sealResponse(HttpSession& session);
     KiottyNetTransition closeWith(KiottyNetCode reason);
     void                startHeaderClock(HttpSession& session);
     uint32_t            headerTimeLeft(const HttpSession& session);
@@ -23585,21 +23832,16 @@ namespace kiotty::net::implementation
         using Next = KiottyNet_Transition<HttpState>;
 
         constexpr KiottyNetSpan LINE_END_SPAN{ LINE_END, 2 };
-        constexpr int32_t       NOT_ALLOWED = KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
-        constexpr int32_t       NO_CONTENT = KIOTTY_NET_HTTP_STATUS_NO_CONTENT;
         constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;
-        constexpr char          ALLOW_NAME[] = "Allow";
 
         size_t                      lineLimitOf(const HttpSite& site);
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session);
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route);
         KiottyNetTransition         afterRoute(HttpSession& session);
+        RouteOutcome                outcomeOf(const HttpSession& session);
         KiottyNetTransition         awaitWork(HttpSession& session);
-        void answerAutomatically(HttpSession& session, const RouteMatch& match);
-        void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed);
-        void answerWithoutWork(HttpSession& session);
-        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk);
-        bool                isLastPiece(const HttpSession& session, size_t end);
+        void                        answerWithoutWork(HttpSession& session);
+        KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step);
     }
 
     HttpSession& sessionOf(KiottyNetConnectionContext context)
@@ -23673,7 +23915,8 @@ namespace kiotty::net::implementation
         HttpUpgradeHandler* const upgrade = session.site.upgrade;
         const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
         if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
-        answerAutomatically(session, match);
+        const Answer answer = answerOf(match, path);
+        writeAnswer(session, answer);
         return startSending(session);
     }
 
@@ -23692,10 +23935,11 @@ namespace kiotty::net::implementation
     {
         const PieceResult piece = pieceAt(session, session.sent);
         if (!piece) { return closeWith(piece.code); }
-        const Span<const char> chunk = piece.value;
-        if (!chunk.empty()) { return sendPiece(session, chunk); }
-        const bool is_kept = session.persistence == Persistence::KEEP_ALIVE;
-        if (!is_kept) { return closeWith(session.close_reason); }
+        const ResponseFrame frame = session.response.frame();
+        const SendStep step = sendStepOf(frame, session.sent, piece.value, session.persistence);
+        if (step.kind != SendKind::DONE) { return sendPiece(session, step); }
+        const AfterResponse after = afterResponseOf(session.persistence);
+        if (after == AfterResponse::CLOSE) { return closeWith(session.close_reason); }
         const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
     }
@@ -23703,12 +23947,18 @@ namespace kiotty::net::implementation
     KiottyNetTransition startSending(HttpSession& session)
     {
         session.phase = SessionPhase::SENDING;
+        sealResponse(session);
+        session.sent = 0;
+        const ResponseFrame frame = session.response.frame();
+        const Span<const char> chunk = frame.chunkAt(0, session.site.send_capacity);
+        const SendStep step = sendStepOf(frame, 0, chunk, session.persistence);
+        return sendPiece(session, step);
+    }
+
+    void sealResponse(HttpSession& session)
+    {
         const KiottyNetHttpMethod method = session.request.request().method;
         session.response.seal(ResponseSeal{ method, session.persistence });
-        session.sent = 0;
-        const size_t capacity = session.site.send_capacity;
-        const Span<const char> chunk = session.response.frame().chunkAt(0, capacity);
-        return sendPiece(session, chunk);
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -23756,14 +24006,18 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterRoute(HttpSession& session)
         {
+            const RouteOutcome outcome = outcomeOf(session);
+            const AfterRoute next = afterRouteOf(outcome);
+            if (next == AfterRoute::AWAIT_WORK) { return awaitWork(session); }
+            if (next == AfterRoute::REFUSE_STREAM) { answerWithoutWork(session); }
+            return startSending(session);
+        }
+
+        RouteOutcome outcomeOf(const HttpSession& session)
+        {
             const bool is_stream = session.response.frame().isStream();
             const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
-            const bool is_head_stream = is_head && is_stream;
-            const bool is_working = session.is_work_requested && !is_head_stream;
-            if (is_working) { return awaitWork(session); }
-            const bool is_orphan_stream = is_stream && !session.is_work_requested;
-            if (is_orphan_stream) { answerWithoutWork(session); }
-            return startSending(session);
+            return RouteOutcome{ is_stream, is_head, session.is_work_requested };
         }
 
         KiottyNetTransition awaitWork(HttpSession& session)
@@ -23773,36 +24027,6 @@ namespace kiotty::net::implementation
             return Next::moveToNextState(HttpState::WORKING, thenWork());
         }
 
-        void answerAutomatically(HttpSession& session, const RouteMatch& match)
-        {
-            switch (match.kind)
-            {
-            case MatchKind::ROUTE:
-                return;
-            case MatchKind::STATIC:
-                answerStatic(session, match.target);
-                return;
-            case MatchKind::UPGRADE:
-            case MatchKind::NOT_FOUND:
-                (void)session.response.setStatus(NOT_FOUND);
-                return;
-            case MatchKind::NOT_ALLOWED:
-                answerWithAllow(session, NOT_ALLOWED, match.allowed);
-                return;
-            case MatchKind::OPTIONS:
-                answerWithAllow(session, NO_CONTENT, match.allowed);
-                return;
-            }
-        }
-
-        void answerWithAllow(HttpSession& session, int32_t status, uint32_t allowed)
-        {
-            const AllowText allow = allowListOf(allowed);
-            (void)session.response.setStatus(status);
-            const Span<const char> name{ ALLOW_NAME, sizeof(ALLOW_NAME) - 1 };
-            (void)session.response.addHeader(name, allow.span());
-        }
-
         void answerWithoutWork(HttpSession& session)
         {
             session.response.begin();
@@ -23810,25 +24034,14 @@ namespace kiotty::net::implementation
             session.persistence = Persistence::CLOSE;
         }
 
-        KiottyNetTransition sendPiece(HttpSession& session, Span<const char> chunk)
+        KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step)
         {
-            const KiottyNetSpan data{ chunk.data, chunk.length };
-            const size_t end = session.sent + chunk.length;
-            const bool is_closing = session.persistence == Persistence::CLOSE;
-            const bool is_farewell = is_closing && isLastPiece(session, end);
+            const KiottyNetSpan data{ step.chunk.data, step.chunk.length };
+            const bool is_farewell = step.kind == SendKind::FAREWELL;
             const KiottyNetConnectionAction write = thenWrite(data, 0);
             if (!is_farewell) { return Next::moveToNextState(HttpState::SENDING, write); }
             const KiottyNetConnectionAction farewell = thenCloseWith(data, session.close_reason);
             return Next::moveToNextState(HttpState::CLOSING, farewell);
-        }
-
-        bool isLastPiece(const HttpSession& session, size_t end)
-        {
-            const ResponseFrame frame = session.response.frame();
-            const FilePiece file = frame.filePieceAt(end, 1);
-            if (file.is_file) { return false; }
-            const Span<const char> rest = frame.chunkAt(end, 1);
-            return rest.empty();
         }
     }
 }
@@ -28068,7 +28281,6 @@ namespace kiotty::net::implementation
         KiottyNetConnectionAction firstPieceOf(HttpSession& session, size_t sent);
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session);
         size_t                    headerBytesOf(const HttpSession& session);
-        void                      sealFor(HttpSession& session);
     }
 
     HttpWork::HttpWork(HttpSite& site)
@@ -28172,7 +28384,7 @@ namespace kiotty::net::implementation
         size_t openStream(HttpSession& session)
         {
             if (session.phase == SessionPhase::STREAMING) { return 0; }
-            sealFor(session);
+            sealResponse(session);
             session.phase = SessionPhase::STREAMING;
             return headerBytesOf(session);
         }
@@ -28268,7 +28480,7 @@ namespace kiotty::net::implementation
 
         KiottyNetConnectionAction sealedPieceOf(HttpSession& session)
         {
-            sealFor(session);
+            sealResponse(session);
             return firstPieceOf(session, 0);
         }
 
@@ -28282,8 +28494,8 @@ namespace kiotty::net::implementation
 
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session)
         {
-            const bool is_kept = session.persistence == Persistence::KEEP_ALIVE;
-            if (!is_kept) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
+            const AfterResponse after = afterResponseOf(session.persistence);
+            if (after == AfterResponse::CLOSE) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
             const KiottyNetConnectionHandle connection = session.request.request().connection;
             const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
             return beginExchange(session, connection, wait).entry_action;
@@ -28292,12 +28504,6 @@ namespace kiotty::net::implementation
         size_t headerBytesOf(const HttpSession& session)
         {
             return session.response.frame().chunkAt(0, WHOLE).length;
-        }
-
-        void sealFor(HttpSession& session)
-        {
-            const KiottyNetHttpMethod method = session.request.request().method;
-            session.response.seal(ResponseSeal{ method, session.persistence });
         }
     }
 }
