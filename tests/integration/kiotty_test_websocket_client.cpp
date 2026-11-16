@@ -1,9 +1,9 @@
 #include "kiotty_net_websocket.h"
 
-#include "data/infra/tls/kiotty_tls_profile.h"
-#include "domain/usecases/websocket/kiotty_websocket_handshake.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
+#include "websocket/domain/entity/kiotty_websocket_handshake.h"
 
 #include <gtest/gtest.h>
 

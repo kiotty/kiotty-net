@@ -1,7 +1,7 @@
 #include "kiotty_net_http.h"
 
-#include "context/kiotty_http_configuration.h"
-#include "data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
+#include "http/data/repository/kiotty_http_configuration.h"
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
 

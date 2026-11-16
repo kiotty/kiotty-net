@@ -1,4 +1,4 @@
-#include "domain/usecases/http/kiotty_http_message_framing.h"
+#include "http/domain/entity/kiotty_http_message_framing.h"
 
 #include <gtest/gtest.h>
 

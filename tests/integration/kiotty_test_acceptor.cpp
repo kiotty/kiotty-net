@@ -1,4 +1,4 @@
-#include "data/repository/connection/kiotty_acceptor.h"
+#include "base/data/repository/connection/kiotty_acceptor.h"
 
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"

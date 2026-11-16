@@ -1,4 +1,4 @@
-#include "data/repository/connection/kiotty_sender.h"
+#include "base/data/repository/connection/kiotty_sender.h"
 #include "core/kiotty_stage.h"
 
 #include <gtest/gtest.h>

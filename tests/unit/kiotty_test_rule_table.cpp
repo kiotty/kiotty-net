@@ -1,4 +1,4 @@
-#include "domain/usecases/statemachine/kiotty_rule_table.h"
+#include "statemachine/domain/entity/kiotty_rule_table.h"
 
 #include <gtest/gtest.h>
 

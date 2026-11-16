@@ -1,6 +1,6 @@
-#include "context/kiotty_configuration.h"
-#include "context/kiotty_tls_configuration.h"
-#include "data/datasource/kiotty_memory_limits.h"
+#include "base/data/datasource/kiotty_memory_limits.h"
+#include "base/data/repository/configuration/kiotty_configuration.h"
+#include "base/data/repository/configuration/kiotty_tls_configuration.h"
 
 #include <gtest/gtest.h>
 

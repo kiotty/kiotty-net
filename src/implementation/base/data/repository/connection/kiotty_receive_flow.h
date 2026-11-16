@@ -1,0 +1,39 @@
+#pragma once
+
+#include "base/data/infra/tls/kiotty_tls_engine.h"
+#include "base/data/repository/connection/kiotty_caller.h"
+#include "base/data/repository/connection/kiotty_connection_parts.h"
+#include "base/domain/entity/kiotty_io_action.h"
+#include "base/domain/entity/kiotty_io_payload.h"
+#include "core/kiotty_result.h"
+#include "core/kiotty_stage.h"
+#include "kiotty_net_base.h"
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class ReceiveFlow
+    {
+    public:
+        explicit ReceiveFlow(const ConnectionParts& parts);
+        ReceiveFlow(const ReceiveFlow&) = delete;
+        ReceiveFlow& operator=(const ReceiveFlow&) = delete;
+
+        IoAction  drive(IoAction action, const Caller& caller);
+        IoPayload room(IoPurpose purpose);
+        void      commit(IoPurpose purpose, size_t length);
+
+    private:
+        using RefillResult = Result<size_t, KiottyNetCode>;
+
+        IoAction     deliver(KiottyNetSpan data, const Caller& caller);
+        RefillResult refill();
+        IoAction     refuse(KiottyNetCode code, const Caller& caller);
+        StageBase&   stageFor(IoPurpose purpose);
+
+        StageBase& _receive;
+        TlsEngine& _tls;
+    };
+}

@@ -1,8 +1,8 @@
 #include "core/kiotty_base64.h"
 #include "core/kiotty_sha1.h"
-#include "domain/usecases/websocket/kiotty_websocket_close.h"
-#include "domain/usecases/websocket/kiotty_websocket_frame.h"
-#include "domain/usecases/websocket/kiotty_websocket_handshake.h"
+#include "websocket/domain/entity/kiotty_websocket_close.h"
+#include "websocket/domain/entity/kiotty_websocket_frame.h"
+#include "websocket/domain/entity/kiotty_websocket_handshake.h"
 
 #include <gtest/gtest.h>
 

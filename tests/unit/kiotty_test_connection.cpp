@@ -1,8 +1,8 @@
-#include "data/repository/connection/kiotty_connection.h"
+#include "base/data/repository/connection/kiotty_caller.h"
+#include "base/data/repository/connection/kiotty_connection.h"
+#include "base/domain/entity/kiotty_handler.h"
 #include "core/kiotty_clock.h"
 #include "core/kiotty_deadline.h"
-#include "data/repository/connection/kiotty_caller.h"
-#include "domain/entity/kiotty_handler.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 

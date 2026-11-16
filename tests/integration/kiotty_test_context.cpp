@@ -1,7 +1,7 @@
 #include "context/kiotty_context.h"
 
-#include "context/kiotty_configuration.h"
-#include "context/kiotty_tls_configuration.h"
+#include "base/data/repository/configuration/kiotty_configuration.h"
+#include "base/data/repository/configuration/kiotty_tls_configuration.h"
 #include "support/kiotty_test_peer.h"
 
 #include <gtest/gtest.h>

@@ -1,14 +1,14 @@
 #include "kiotty_net_base.h"
 
-#include "domain/entity/kiotty_action.h"
-#include "context/kiotty_configuration.h"
+#include "base/data/datasource/kiotty_memory_layout.h"
+#include "base/data/repository/configuration/kiotty_configuration.h"
+#include "base/data/repository/configuration/kiotty_tls_configuration.h"
+#include "base/data/repository/connection/kiotty_callback_handler.h"
+#include "base/data/repository/connection/kiotty_connection.h"
+#include "base/domain/entity/kiotty_action.h"
 #include "context/kiotty_context.h"
-#include "context/kiotty_tls_configuration.h"
-#include "data/repository/connection/kiotty_callback_handler.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
-#include "data/datasource/kiotty_memory_layout.h"
-#include "data/repository/connection/kiotty_connection.h"
 
 namespace net = kiotty::net::implementation;
 

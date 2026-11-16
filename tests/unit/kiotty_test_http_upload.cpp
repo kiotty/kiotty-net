@@ -1,5 +1,5 @@
-#include "domain/usecases/http/kiotty_http_response_text.h"
-#include "domain/usecases/http/kiotty_http_upload.h"
+#include "http/domain/entity/kiotty_http_response_text.h"
+#include "http/domain/entity/kiotty_http_upload.h"
 
 #include <gtest/gtest.h>
 

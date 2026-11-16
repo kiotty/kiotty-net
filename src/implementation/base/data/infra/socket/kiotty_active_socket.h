@@ -1,0 +1,58 @@
+#pragma once
+
+#include "base/data/infra/socket/kiotty_socket_handle.h"
+#include "base/domain/entity/kiotty_socket_code.h"
+#include "core/kiotty_result.h"
+#include "kiotty_net_base.h"
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class ActiveSocket;
+    class StopSignal;
+
+    struct SocketTraits
+    {
+        const StopSignal*  stop;
+        KiottyNetTransport transport;
+    };
+
+    using ActiveSocketResult = Result<ActiveSocket, SocketCode>;
+    using TransferResult = Result<size_t, SocketCode>;
+
+    class ActiveSocket
+    {
+    public:
+        ActiveSocket();
+        ~ActiveSocket();
+
+        ActiveSocket(ActiveSocket&& other) noexcept;
+        ActiveSocket& operator=(ActiveSocket&& other) noexcept;
+
+        ActiveSocket(const ActiveSocket&) = delete;
+        ActiveSocket& operator=(const ActiveSocket&) = delete;
+
+        static ActiveSocketResult open(KiottyNetTransport transport);
+        static ActiveSocketResult open(KiottyNetTransport transport, const StopSignal* stop);
+
+        SocketCode connect(const KiottyNetAddress& address, uint32_t timeout_milliseconds);
+        void       close();
+
+        bool                    valid() const;
+        SocketHandle            handle() const;
+        SocketTraits            traits() const;
+        KiottyNetConnectionInfo peer() const;
+
+    private:
+        friend class PassiveSocket;
+
+        ActiveSocket(SocketHandle handle, KiottyNetTransport transport);
+
+        KiottyNetConnectionInfo _peer;
+        const StopSignal*       _stop;
+        SocketHandle            _handle;
+        KiottyNetTransport      _transport;
+    };
+}

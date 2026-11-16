@@ -1,8 +1,8 @@
 #include "context/kiotty_context.h"
 
-#include "data/infra/socket/kiotty_socket_startup.h"
-#include "data/infra/tls/kiotty_tls_profile.h"
-#include "domain/entity/kiotty_socket_code.h"
+#include "base/data/infra/socket/kiotty_socket_startup.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
+#include "base/domain/entity/kiotty_socket_code.h"
 
 #include <cassert>
 

@@ -566,18 +566,29 @@ include/
 src/
     library_name.cpp        # C interface ↔ implementation 얇은 어댑터
     implementation/
-        context/            # 모든 인스턴스 소유 (1.2), C 경계의 커서 상자 (7.4)
-        core/               # 범용 자료구조와 유틸 (7.4)
-        domain/
-            entity/         # 값 객체. 하드웨어 제약을 모른다
-            usecases/       # 사용자 기능 단위. function1/, function2/
-        data/
-            repository/     # 기능 단위 보관 클래스. module1/, module2/
-            states/         # repository 의 상태
-            datasource/     # 메모리 공급. 고정 크기 풀, Local DB, Remote DB
-            infra/          # 플랫폼 구현. class1/backend/, class1/<organization>_class1.h
+        context/            # 모든 인스턴스 소유 (1.2), C 경계의 커서 상자 (7.4). Context 와 handles 만
+        core/               # 범용 자료구조와 유틸 (7.4). 모든 모듈이 쓴다
+        base/               # 모듈이 함께 쓰는 바탕 (연결, 스트림, 서버 / 클라이언트, io loop)
+            domain/
+                entity/
+                usecases/
+            data/
+                repository/
+                datasource/
+                infra/      # 플랫폼 구현. class1/backend/, class1/<organization>_class1.h
+        <module>/           # http, websocket, statemachine
+            domain/
+                entity/     # 값 객체와 그 값을 다루는 순수 규칙 (파서, framing, 머리 조립). C ABI 의 구조체를 그대로 쓸 수 있다
+                usecases/   # C ABI 로 내보낼 기능을 함수로. C ABI 의 모듈 (server, client) 마다 파일 하나
+            data/
+                datasource/ # 메모리 공급. 고정 크기 풀 (Session 풀 등)
+                repository/ # 모듈의 기능을 내는 클래스. usecases 가 handle 이 가진 repository 를 조합한다
+                state/      # repository 의 안 상태
 single_header/              # 스크립트로만 생성
 ```
+
+- 의존 방향 (목표): `core` ← `base` ← `<module>`, 모듈끼리는 websocket → http, `context` 는 모두를 안다. 2026-11-16 정리 때 어긋난 곳: base 의 `kiotty_endpoint.cpp` → websocket, http 서버 (upgrade 를 맡는 8 파일) → websocket, http 서버와 websocket 클라이언트 → statemachine, `kiotty_http_server.cpp` → context.
+- `src/library_name*.cpp` 는 인자 변환만 하는 얇은 어댑터로 남고 `<module>/domain/usecases` 를 부른다.
 
 ### 7.2 GUI · CLI · 서버 데몬
 

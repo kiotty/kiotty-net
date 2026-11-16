@@ -1,6 +1,6 @@
 #include "kiotty_net_http.h"
 
-#include "data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_http_site.h"
 
 #include <gtest/gtest.h>

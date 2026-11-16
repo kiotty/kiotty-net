@@ -41,5 +41,5 @@ clang 은 `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++` 와 `build/wsl
 - 경고는 오류다 (`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-compare -Wshadow -Wswitch`). 경고를 끄지 말고 코드를 고친다.
 - 라이브러리와 테스트 모두 C++17 (`CMAKE_CXX_STANDARD 17`, MSVC `/permissive-`). 라이브러리는 RTTI 와 예외 없이 (`-fno-rtti -fno-exceptions`, MSVC `/GR- /EHs-c- _HAS_EXCEPTIONS=0`), `-fstack-protector-strong`, Release 에서 `_FORTIFY_SOURCE=2`. 테스트는 예외를 켠다.
 - 메모리 상한은 CMake 가 `<build>/generated/kiotty_memory_limits_configuration.h` 로 만든다. 소스는 `KIOTTY_NET_MAX_*` 매크로를 읽지 않는다.
-- 한 사이클 (`docs/plan/plan_base_v0.md` 0절) 은 Windows 와 WSL 둘 다 초록이어야 push 한다. push 뒤 `gh run watch` 로 CI 를 본다.
+- 한 사이클 (`docs/plan/plan_base_261116.md` 0절) 은 Windows 와 WSL 둘 다 초록이어야 push 한다. push 뒤 `gh run watch` 로 CI 를 본다.
 - 헤더만 검사할 때는 memory 의 `header-compile-check` 레시피 (`/Zs`, `-fsyntax-only`).

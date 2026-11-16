@@ -1,9 +1,9 @@
 #include "context/kiotty_context.h"
 
-#include "domain/entity/kiotty_action.h"
-#include "context/kiotty_configuration.h"
-#include "context/kiotty_tls_configuration.h"
-#include "data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/repository/configuration/kiotty_configuration.h"
+#include "base/data/repository/configuration/kiotty_tls_configuration.h"
+#include "base/domain/entity/kiotty_action.h"
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_tls.h"
 #include "support/kiotty_test_wait.h"

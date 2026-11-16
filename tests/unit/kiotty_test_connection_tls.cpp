@@ -1,6 +1,6 @@
-#include "data/repository/connection/kiotty_connection.h"
+#include "base/data/infra/tls/kiotty_tls_pipe.h"
+#include "base/data/repository/connection/kiotty_connection.h"
 #include "core/kiotty_clock.h"
-#include "data/infra/tls/kiotty_tls_pipe.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 #include "support/kiotty_test_tls.h"

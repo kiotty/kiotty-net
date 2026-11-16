@@ -1,4 +1,4 @@
-#include "domain/usecases/http/kiotty_http_route_path.h"
+#include "http/domain/entity/kiotty_http_route_path.h"
 
 #include "kiotty_net_http.h"
 

@@ -1,8 +1,8 @@
-#include "data/infra/socket/kiotty_passive_socket.h"
-#include "data/infra/socket/kiotty_socket_transfer.h"
-#include "data/repository/stream/kiotty_connection_stream.h"
-#include "data/infra/tls/kiotty_tls_engine.h"
-#include "data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/infra/socket/kiotty_passive_socket.h"
+#include "base/data/infra/socket/kiotty_socket_transfer.h"
+#include "base/data/infra/tls/kiotty_tls_engine.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/repository/stream/kiotty_connection_stream.h"
 
 #include "support/kiotty_test_os.h"
 #include "support/kiotty_test_peer.h"

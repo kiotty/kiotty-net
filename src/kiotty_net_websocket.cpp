@@ -2,12 +2,12 @@
 
 #include "context/kiotty_context.h"
 #include "context/kiotty_handles.h"
-#include "context/kiotty_http_configuration.h"
-#include "context/kiotty_websocket_endpoint.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
-#include "domain/usecases/http/kiotty_http_token.h"
-#include "domain/usecases/websocket/kiotty_websocket_access.h"
+#include "http/data/repository/kiotty_http_configuration.h"
+#include "http/domain/entity/kiotty_http_token.h"
+#include "websocket/data/repository/kiotty_websocket_endpoint.h"
+#include "websocket/domain/entity/kiotty_websocket_access.h"
 
 namespace net = kiotty::net::implementation;
 

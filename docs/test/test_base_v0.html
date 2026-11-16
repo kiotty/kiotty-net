@@ -893,7 +893,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p><code>docs/design/design_http_v0.html</code> 11절의 H2 ~ H6 사이클 (2026-11-12) 의 테스트다. progress 는 <code>261112_progress_http_h2 / h3 / h4 / h5.md</code> 와 <code>261112_01_100-continue.md</code>. 파서는 unit, 나머지는 integration 이고 integration 은 공개 C API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 테스트 peer (<code>LoopbackPeer</code>) 가 보내는 날 HTTP 바이트이고, 응답을 바이트로 읽어 status, 헤더, body, chunk 를 본다. 매트릭스는 15절과 같다 (TLS 케이스 하나는 TLS 빌드에서만).</p>
 
 <h3>19.1 파서 (H2 unit)</h3>
-<p><code>domain/usecases/http/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력 (빈 것, 최대 길이, 최대 + 1, 중간 null 바이트, UTF-8 아님) 을 파서마다 넣는다. 할당은 없다.</p>
+<p><code>http/domain/entity/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력 (빈 것, 최대 길이, 최대 + 1, 중간 null 바이트, UTF-8 아님) 을 파서마다 넣는다. 할당은 없다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>HttpRequestLine</td><td>EmptyInputIsBadRequest, TargetOfTheMaximumLengthIsAccepted, TargetOneOverTheMaximumIsUriTooLong, MiddleNullByteIsBadRequest, InvalidUtf8InTheTargetIsBadRequest</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. target 상한은 <code>KIOTTY_NET_MAX_URL_LENGTH</code>, 넘으면 414</td></tr>
@@ -1087,7 +1087,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p><code>docs/design/design_http_client_v0.html</code> 11절의 C1 ~ C5 사이클 (2026-11-15 ~ 16) 의 테스트다. C3 의 몫 (chunked, 닫힘까지의 body, read 의 TIMEOUT, 남긴 body 뒤의 요청) 은 C2 에 들어갔다. progress 는 <code>261115_progress_http_client_c1.md</code>, <code>261116_progress_http_client_c2.md</code>, <code>261116_progress_http_client_c4.md</code>. 파서와 머리는 unit, 나머지는 integration 이고 integration 은 공개 API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 우리 HttpServer (<code>tests/integration/support/kiotty_test_http_site.*</code>) 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (TLS 케이스는 TLS 빌드에서만, MSVC 는 <code>tlsSupported()</code> 로 skip). C5 뒤의 수: MSVC 819, WSL 의 gcc / gcc-notls / clang / clang-notls / clang-asan / clang-tsan 820, clang-release 819.</p>
 
 <h3>25.1 파서와 머리 (C1 unit)</h3>
-<p><code>domain/usecases/http/</code>, <code>data/repository/http/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력을 상태줄에 넣는다. 할당은 없다.</p>
+<p><code>http/domain/entity/</code>, <code>http/data/repository/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력을 상태줄에 넣는다. 할당은 없다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>HttpStatusLine</td><td>EmptyInputIsProtocolError, MiddleNullByteIsProtocolError, InvalidUtf8InTheReasonIsAcceptedAsObsText, LongReasonIsAccepted, StatusBoundsAreOneHundredToFiveNinetyNine, StatusMustBeExactlyThreeDigits</td><td><span class="tag edge">엣지</span></td><td>다섯 입력. 99 / 100 / 599 / 600, 세 자리</td></tr>

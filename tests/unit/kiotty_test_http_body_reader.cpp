@@ -1,4 +1,4 @@
-#include "domain/usecases/http/kiotty_http_body_reader.h"
+#include "http/domain/entity/kiotty_http_body_reader.h"
 
 #include <gtest/gtest.h>
 

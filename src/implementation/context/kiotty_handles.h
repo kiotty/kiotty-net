@@ -1,11 +1,11 @@
 #pragma once
 
-#include "context/kiotty_event_client.h"
-#include "context/kiotty_http_client.h"
-#include "context/kiotty_http_server.h"
-#include "context/kiotty_server.h"
-#include "context/kiotty_stream_client.h"
-#include "context/kiotty_websocket_client.h"
+#include "base/data/repository/endpoint/kiotty_event_client.h"
+#include "base/data/repository/endpoint/kiotty_server.h"
+#include "base/data/repository/endpoint/kiotty_stream_client.h"
+#include "http/data/repository/kiotty_http_client.h"
+#include "http/data/repository/kiotty_http_server.h"
+#include "websocket/data/repository/kiotty_websocket_client.h"
 
 struct KiottyNetServer final : kiotty::net::implementation::Server
 {

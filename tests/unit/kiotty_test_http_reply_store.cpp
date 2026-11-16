@@ -1,4 +1,4 @@
-#include "data/repository/http/kiotty_http_reply_store.h"
+#include "http/data/repository/kiotty_http_reply_store.h"
 
 #include <gtest/gtest.h>
 

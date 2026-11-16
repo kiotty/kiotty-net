@@ -1,6 +1,6 @@
-#include "domain/usecases/statemachine/kiotty_stateful_handler.h"
+#include "statemachine/domain/entity/kiotty_stateful_handler.h"
 
-#include "data/repository/connection/kiotty_connection.h"
+#include "base/data/repository/connection/kiotty_connection.h"
 #include "support/kiotty_test_completion.h"
 #include "support/kiotty_test_handler.h"
 

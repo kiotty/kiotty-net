@@ -1,4 +1,4 @@
-#include "domain/entity/kiotty_action.h"
+#include "base/domain/entity/kiotty_action.h"
 
 #include <gtest/gtest.h>
 

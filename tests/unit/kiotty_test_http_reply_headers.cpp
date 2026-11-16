@@ -1,4 +1,4 @@
-#include "domain/usecases/http/kiotty_http_reply_headers.h"
+#include "http/domain/entity/kiotty_http_reply_headers.h"
 
 #include <gtest/gtest.h>
 

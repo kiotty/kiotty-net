@@ -1,9 +1,9 @@
-#include "data/infra/event/kiotty_event_listener.h"
+#include "base/data/infra/event/kiotty_event_listener.h"
 
 #if KIOTTY_NET_HAS_EVENT_BACKEND
 
-#include "data/infra/socket/kiotty_passive_socket.h"
-#include "data/infra/socket/kiotty_socket_transfer.h"
+#include "base/data/infra/socket/kiotty_passive_socket.h"
+#include "base/data/infra/socket/kiotty_socket_transfer.h"
 
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"

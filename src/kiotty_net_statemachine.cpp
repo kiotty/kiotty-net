@@ -1,7 +1,7 @@
 #include "kiotty_net_statemachine.h"
 
 #include "context/kiotty_context.h"
-#include "domain/usecases/statemachine/kiotty_stateful_handler.h"
+#include "statemachine/domain/entity/kiotty_stateful_handler.h"
 
 namespace net = kiotty::net::implementation;
 

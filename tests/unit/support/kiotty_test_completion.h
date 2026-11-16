@@ -1,12 +1,12 @@
 #if !defined(KIOTTY_TEST_COMPLETION_H)
 #define KIOTTY_TEST_COMPLETION_H
 
-#include "data/repository/connection/kiotty_connection.h"
-#include "data/repository/connection/kiotty_connection_host.h"
-#include "data/repository/connection/kiotty_notification_desk.h"
+#include "base/data/infra/tls/kiotty_tls_profile.h"
+#include "base/data/repository/connection/kiotty_callback_handler.h"
+#include "base/data/repository/connection/kiotty_connection.h"
+#include "base/data/repository/connection/kiotty_connection_host.h"
+#include "base/data/repository/connection/kiotty_notification_desk.h"
 #include "core/pool/kiotty_reusable_pool.h"
-#include "data/infra/tls/kiotty_tls_profile.h"
-#include "data/repository/connection/kiotty_callback_handler.h"
 #include "support/kiotty_test_handler.h"
 #include "support/kiotty_test_text.h"
 

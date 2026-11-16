@@ -1,7 +1,7 @@
 #if !defined(KIOTTY_TEST_HANDLER_H)
 #define KIOTTY_TEST_HANDLER_H
 
-#include "context/kiotty_endpoint.h"
+#include "base/data/repository/endpoint/kiotty_endpoint.h"
 #include "kiotty_net_base.h"
 
 #include <cstddef>

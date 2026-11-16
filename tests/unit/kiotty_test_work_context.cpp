@@ -1,5 +1,5 @@
-#include "data/repository/connection/kiotty_work_context.h"
-#include "data/repository/connection/kiotty_work_reporter.h"
+#include "base/data/repository/connection/kiotty_work_context.h"
+#include "base/data/repository/connection/kiotty_work_reporter.h"
 
 #include <gtest/gtest.h>
 
