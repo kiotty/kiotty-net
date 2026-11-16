@@ -10,7 +10,7 @@
 
 - 사이클 하나는 설계의 한 덩어리와 그 테스트 전부다.
 - **전체 빌드**: WSL `Ubuntu-24.04` 일곱 벌 (gcc / clang × TLS OFF / ON, release-tls, asan-tls, tsan-tls, `build/b2_wsl.sh <이름들>`) 과 MSVC (`build/b2_all.bat msvc`). 경고 0. 방법은 `.claude/skills/build/SKILL.md`.
-- **수칙 검사**: WSL 에서 `python3 -I tools/check_rules.py`. 기준선 FILE 1, LAYER 9 (R3 에서 0), LINE 4, MACRO 18, PUBLIC 3 보다 늘지 않는다.
+- **수칙 검사**: WSL 에서 `python3 -I tools/check_rules.py`. 기준선 FILE 1, LINE 4, MACRO 18, PUBLIC 3 보다 늘지 않는다.
 - **단일 헤더**: 번역 단위 하나로 컴파일되는지 본다. 소스를 commit 한 뒤 `python3 tools/make_single_header.py` 로 다시 만들어 따로 commit 한다 (머리의 버전이 `+modified` 없이 찍히게).
 - commit / push 는 사용자 승인 뒤. main 에 바로. commit 메시지 끝에 `Co-Authored-By` 줄. push 뒤 `gh run watch` 로 CI.
 - 작업 트리를 바꾸는 git 명령 (`stash`, `checkout -- .`, `reset`) 은 쓰지 않는다.
@@ -42,7 +42,7 @@ R0 → R1 → R2 → R3 → R4 → R4w → R5 → R6 → U2 → U3
 | R0 파일 정리 | 242 개 파일을 `base / http / websocket / statemachine` 로 옮김, include / CMake / 살아 있는 문서의 경로, 수칙 7.1 의 트리 | 끝 (`2b9aa04`) |
 | R1 작은 방향 | websocket endpoint 소멸자를 websocket 으로, `KiottyNetConnectionEvent` 를 `kiotty_net_base.h` 로, http → context, 수칙 검사의 `LAYER` | 끝 (`75b66c1`) |
 | R2 statemachine | entity `StateMachine` (앱 배열을 가리킴), repository 에 규칙 찾기와 `StatefulHandler`, usecases 에 run 의 조합 | 끝 (`2cfc0a4`) |
-| R3 upgrade | http 의 `HttpUpgradeHandler`, `UPGRADED` 상태, websocket 이 frame 상태 / 연결별 병렬 배열 / 라우트 대상을 가짐, `WebSocketServerEndpoint` | `LAYER` 위반 0, websocket 테스트 그대로 |
+| R3 upgrade | http 의 `HttpUpgradeHandler`, `UPGRADED` 상태, websocket 이 frame 상태 / 연결별 병렬 배열 / 라우트 대상을 가짐, `WebSocketServerEndpoint` | 끝 (`4b8c635`) |
 | R4 http | entity 는 값만, repository 하위 폴더 (machine, header, body, request, response, upgrade, server, client), `HttpSessionState`, 값으로 잇는 서버 흐름 | http 서버 테스트 그대로, 숨은 쓰기 목록 비움 |
 | R4w websocket | entity 는 값만, repository 하위 폴더, state 둘, datasource (socket table), 서버와 클라이언트가 함께 쓰는 frame 읽기 | websocket 테스트 그대로 |
 | R5 client State | `HttpClientState`, `ConnectionStream` 의 peek / consume, StreamClient 공개 메서드 정리, `HttpClientStream` (friend 제거), 값으로 잇는 client 흐름 | HttpClient 테스트 그대로, friend 0 |
@@ -61,3 +61,5 @@ R0 → R1 → R2 → R3 → R4 → R4w → R5 → R6 → U2 → U3
 2026-11-16 모듈 정리 R0 (`2b9aa04`, 단일 헤더 `d74963e`), R1 (`75b66c1`) (`docs/progress/261116_progress_module_layout_r0_r1.md`): 파일 242 개를 모듈로, 거꾸로 된 의존 셋 (base → websocket, base → statemachine 헤더, http → context) 을 없앰, 수칙 검사 `LAYER`. 남은 LAYER 9 은 http → websocket (R3). MSVC 847, WSL 848 × 6, release-tls 847. 수칙 검사 기준선 FILE 1, LAYER 9, LINE 4, MACRO 18, PUBLIC 3.
 
 2026-11-16 모듈 정리 R2 (`2cfc0a4`, `docs/progress/261116_progress_module_layout_r2.md`): statemachine 을 entity (`StateMachine` view) / repository (규칙 찾기, `StatefulHandler`) / usecases (run) 로. MSVC 847, WSL 848 × 6, release-tls 847.
+
+2026-11-16 모듈 정리 R3 (`4b8c635`, `docs/progress/261116_progress_module_layout_r3.md`): http 는 `HttpUpgradeHandler` 만 안다, websocket 상태 / 라우트 대상은 `WebSocketHandler`, `WebSocketServer : HttpServer`. LAYER 0. MSVC 847, WSL 848 × 6, release-tls 847.
