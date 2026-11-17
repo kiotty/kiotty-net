@@ -3,36 +3,16 @@
 #include "context/kiotty_context.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/body/kiotty_http_file_body.h"
 #include "http/data/repository/server/kiotty_http_configuration.h"
-#include "http/data/repository/server/kiotty_http_route_path_rules.h"
-#include "http/data/state/kiotty_http_session.h"
+#include "http/domain/usecases/kiotty_http_server_usecases.h"
 
 namespace net = kiotty::net::implementation;
 
 namespace
 {
     using net::INVALID;
-    constexpr size_t        MAX_FILE_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
-    constexpr KiottyNetSpan STREAM_PLACEHOLDER = { nullptr, 0 };
-
-    using FillingResult = net::Result<net::HttpSession&, KiottyNetCode>;
-
-    FillingResult fillingOf(KiottyNetHttpResponseHandle response)
-    {
-        if (response.server == nullptr) { return FillingResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
-        return net::HttpWork(response.server->host()).fill(response.id);
-    }
-
-    KiottyNetCode setBody(KiottyNetHttpResponseHandle response,
-                          KiottyNetHttpContentType type,
-                          KiottyNetSpan data,
-                          net::BodyStorage storage)
-    {
-        const FillingResult filling = fillingOf(response);
-        if (!filling) { return filling.code; }
-        return filling.value().response.setBody(type, data, storage);
-    }
+    constexpr KiottyNetCode RESPONSE_CLOSED = KIOTTY_NET_CODE_PEER_CLOSED;
+    constexpr KiottyNetSpan NO_HEADER = { nullptr, 0 };
 }
 
 KiottyNetCode KiottyNet_initializeHttpLimits(KiottyNetHttpLimits* limits)
@@ -92,112 +72,95 @@ KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits
 
 KiottyNetSpan KiottyNet_findHttpHeader(const KiottyNetHttpRequest* request, const char* name)
 {
-    const KiottyNetSpan none = { nullptr, 0 };
-    if (request == nullptr || request->headers == nullptr) { return none; }
+    if (request == nullptr) { return NO_HEADER; }
     const net::TextResult wanted = net::parseText(name, net::MAX_HEADER_NAME_TEXT);
-    if (!wanted) { return none; }
-    for (size_t i = 0; i < request->header_count; ++i)
-    {
-        const KiottyNetHttpHeader& header = request->headers[i];
-        const net::Span<const char> found{ header.name.data, header.name.length };
-        if (net::equalsIgnoreCase(found, wanted.value)) { return header.value; }
-    }
-    return none;
+    if (!wanted) { return NO_HEADER; }
+    return net::findHttpHeader(*request, wanted.value);
 }
 
 KiottyNetCode KiottyNet_setHttpStatus(KiottyNetHttpResponseHandle response, int32_t status)
 {
-    const FillingResult filling = fillingOf(response);
-    if (!filling) { return filling.code; }
-    return filling.value().response.setStatus(status);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpStatus(response.server->host(), response.id, status);
 }
 
 KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response,
                                       const char* name,
                                       const char* value)
 {
-    const FillingResult filling = fillingOf(response);
-    if (!filling) { return filling.code; }
-    net::HttpSession& session = filling.value();
-    const size_t limit = session.host.limits.response_bytes;
-    const net::TextResult parsed_name = net::parseText(name, limit);
-    if (!parsed_name) { return parsed_name.code; }
-    const net::TextResult parsed_value = net::parseText(value, limit);
-    if (!parsed_value) { return parsed_value.code; }
-    return session.response.addHeader(parsed_name.value, parsed_value.value);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpHeader(response.server->host(), response.id, name, value);
 }
 
 KiottyNetCode KiottyNet_setHttpCustomContentType(KiottyNetHttpResponseHandle response,
                                                  const char* content_type)
 {
-    const FillingResult filling = fillingOf(response);
-    if (!filling) { return filling.code; }
-    return filling.value().response.setCustomContentType(content_type);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpCustomContentType(response.server->host(), response.id, content_type);
 }
 
 KiottyNetCode KiottyNet_setHttpBody(KiottyNetHttpResponseHandle response,
                                     KiottyNetHttpContentType type,
                                     KiottyNetSpan data)
 {
-    return setBody(response, type, data, net::BodyStorage::COPY);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpBody(response.server->host(), response.id, type, data);
 }
 
 KiottyNetCode KiottyNet_setHttpBodyRef(KiottyNetHttpResponseHandle response,
                                        KiottyNetHttpContentType type,
                                        KiottyNetSpan data)
 {
-    return setBody(response, type, data, net::BodyStorage::REFERENCE);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpBodyRef(response.server->host(), response.id, type, data);
 }
 
 KiottyNetCode KiottyNet_setHttpFile(KiottyNetHttpResponseHandle response,
                                     KiottyNetHttpContentType type,
                                     const char* path)
 {
-    const FillingResult filling = fillingOf(response);
-    if (!filling) { return filling.code; }
-    const net::TextResult parsed = net::parseText(path, MAX_FILE_PATH_TEXT);
-    if (!parsed) { return parsed.code; }
-    if (net::hasParentSegment(parsed.value)) { return INVALID; }
-    return net::attachFile(filling.value(), type, parsed.value);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpFile(response.server->host(), response.id, type, path);
 }
 
 KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response,
                                           KiottyNetHttpContentType type)
 {
-    return setBody(response, type, STREAM_PLACEHOLDER, net::BodyStorage::STREAM);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::setHttpBodyStream(response.server->host(), response.id, type);
 }
 
 KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response)
 {
-    if (response.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(response.server->host()).start(response.id);
+    if (response.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::startHttpWork(response.server->host(), response.id);
 }
 
 KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
                                              KiottyNetSpan data,
                                              uint32_t timeout_milliseconds)
 {
-    const KiottyNetResult closed = { 0, KIOTTY_NET_CODE_PEER_CLOSED };
+    const KiottyNetResult closed = { 0, RESPONSE_CLOSED };
     if (work.server == nullptr) { return closed; }
-    return net::HttpWork(work.server->host()).write(work.id, data, timeout_milliseconds);
+    return net::writeHttpWorkChunk(work.server->host(), work.id, data, timeout_milliseconds);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work)
 {
-    if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->host()).finishWithResponse(work.id);
+    if (work.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::finishHttpWorkWithResponse(work.server->host(), work.id);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason)
 {
-    if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->host()).finishWithClose(work.id, reason);
+    if (work.server == nullptr) { return RESPONSE_CLOSED; }
+    return net::finishHttpWorkWithClose(work.server->host(), work.id, reason);
 }
 
 KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work)
 {
     if (work.server == nullptr) { return 0; }
-    const bool is_connected = net::HttpWork(work.server->host()).isConnected(work.id);
+    const bool is_connected = net::isHttpWorkConnected(work.server->host(), work.id);
     return is_connected ? 1 : 0;
 }
 
@@ -235,37 +198,27 @@ KiottyNetCode KiottyNet_addHttpRoute(KiottyNetHttpServerHandle server,
                                      KiottyNetHttpRoute route)
 {
     if (server == nullptr) { return INVALID; }
-    const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().addRoute(method, path, route);
+    return net::addHttpRoute(*server, method, path, route);
 }
 
 KiottyNetCode KiottyNet_setHttpNotFound(KiottyNetHttpServerHandle server, KiottyNetHttpRoute route)
 {
     if (server == nullptr) { return INVALID; }
-    const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().setNotFound(route);
+    return net::setHttpNotFound(*server, route);
 }
 
 KiottyNetCode KiottyNet_onHttpDisconnected(KiottyNetHttpServerHandle server,
                                            KiottyNetHttpDisconnectedAction on_disconnected)
 {
     if (server == nullptr) { return INVALID; }
-    const net::NoticesResult notices = server->notices();
-    if (!notices) { return notices.code; }
-    notices.value().setDisconnected(on_disconnected);
-    return KIOTTY_NET_CODE_SUCCESS;
+    return net::onHttpDisconnected(*server, on_disconnected);
 }
 
 KiottyNetCode KiottyNet_onHttpError(KiottyNetHttpServerHandle server,
                                     KiottyNetHttpErrorAction on_error)
 {
     if (server == nullptr) { return INVALID; }
-    const net::NoticesResult notices = server->notices();
-    if (!notices) { return notices.code; }
-    notices.value().setError(on_error);
-    return KIOTTY_NET_CODE_SUCCESS;
+    return net::onHttpError(*server, on_error);
 }
 
 KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server,
@@ -273,9 +226,7 @@ KiottyNetCode KiottyNet_serveHttpDirectory(KiottyNetHttpServerHandle server,
                                            const char* directory)
 {
     if (server == nullptr) { return INVALID; }
-    const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().addDirectory(url_prefix, directory);
+    return net::serveHttpDirectory(*server, url_prefix, directory);
 }
 
 KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server,
@@ -283,9 +234,7 @@ KiottyNetCode KiottyNet_serveHttpFile(KiottyNetHttpServerHandle server,
                                       const char* file_path)
 {
     if (server == nullptr) { return INVALID; }
-    const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().addFile(url_path, file_path);
+    return net::serveHttpFile(*server, url_path, file_path);
 }
 
 KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server,
@@ -294,9 +243,7 @@ KiottyNetCode KiottyNet_serveHttpMemory(KiottyNetHttpServerHandle server,
                                         KiottyNetSpan data)
 {
     if (server == nullptr) { return INVALID; }
-    const net::RegistryResult registry = server->registry();
-    if (!registry) { return registry.code; }
-    return registry.value().addMemory(url_path, type, data);
+    return net::serveHttpMemory(*server, url_path, type, data);
 }
 
 KiottyNetCode KiottyNet_runHttpServer(KiottyNetHttpServerHandle server,

@@ -1,11 +1,11 @@
 #include "kiotty_net_base.h"
 
-#include "base/data/datasource/kiotty_memory_layout.h"
 #include "base/data/repository/configuration/kiotty_configuration.h"
 #include "base/data/repository/configuration/kiotty_tls_configuration.h"
 #include "base/data/repository/connection/kiotty_callback_handler.h"
-#include "base/data/repository/connection/kiotty_connection.h"
 #include "base/domain/entity/kiotty_action.h"
+#include "base/domain/usecases/kiotty_client_usecases.h"
+#include "base/domain/usecases/kiotty_server_usecases.h"
 #include "context/kiotty_context.h"
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
@@ -45,24 +45,6 @@ namespace
     {
         KiottyNetResult result = { 0, INVALID };
         return result;
-    }
-
-    size_t cipherStagesOf(size_t receive, size_t send, size_t push)
-    {
-        if (!net::MemoryLimits::TLS) { return 0; }
-        const size_t gathered = net::gatheredPlainBytes(send, push);
-        const size_t cipher_send = net::alignStage(net::cipherSendBytes(gathered));
-        return receive + cipher_send;
-    }
-
-    template <typename Configuration>
-    size_t stagesOf(const Configuration& configuration)
-    {
-        const size_t receive = configuration.receive_capacity;
-        const size_t send = configuration.send_capacity;
-        const size_t push = configuration.push_capacity;
-        const size_t cipher = cipherStagesOf(receive, send, push);
-        return receive + send + push + cipher;
     }
 
     bool isUsable(const void* buffer, size_t length)
@@ -396,19 +378,14 @@ void KiottyNet_releaseContext(KiottyNetContext context)
 
 size_t KiottyNet_serverMemorySize(const KiottyNetServerConfiguration* configuration)
 {
-    if (configuration == nullptr || !net::isInitialized(*configuration)) { return 0; }
-    const size_t stages = stagesOf(*configuration);
-    const size_t connection = sizeof(net::Connection) + stages;
-    return sizeof(KiottyNetServer) + configuration->max_clients * connection;
+    if (configuration == nullptr) { return 0; }
+    return net::serverMemorySize(*configuration);
 }
 
 size_t KiottyNet_clientMemorySize(const KiottyNetClientConfiguration* configuration)
 {
-    if (configuration == nullptr || !net::isInitialized(*configuration)) { return 0; }
-    const size_t event = sizeof(KiottyNetEventClient);
-    const size_t stream = sizeof(KiottyNetStreamClient);
-    const size_t largest = event > stream ? event : stream;
-    return largest + stagesOf(*configuration);
+    if (configuration == nullptr) { return 0; }
+    return net::clientMemorySize(*configuration);
 }
 
 KiottyNetStreamClientResult KiottyNet_createStreamClient(
@@ -451,9 +428,7 @@ KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client,
 {
     if (client == nullptr || !isUsable(buffer, length)) { return invalidResult(); }
     const net::Span<char> target{ static_cast<char*>(buffer), length };
-    const net::StreamResult stream = client->stream();
-    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
-    return stream.value().read(target, timeout_milliseconds);
+    return net::readStreamClient(*client, target, timeout_milliseconds);
 }
 
 KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
@@ -461,9 +436,7 @@ KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
                                             uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return invalidResult(); }
-    const net::StreamResult stream = client->stream();
-    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
-    return stream.value().write(data, timeout_milliseconds);
+    return net::writeStreamClient(*client, data, timeout_milliseconds);
 }
 
 KiottyNetEventClientResult KiottyNet_createEventClient(
@@ -518,7 +491,7 @@ KiottyNetConnectionHandle KiottyNet_getEventClientConnection(KiottyNetEventClien
 KiottyNetCode KiottyNet_notifyEventClient(KiottyNetEventClientHandle client, KiottyNetSpan data)
 {
     if (client == nullptr) { return INVALID; }
-    return client->notify(client->connection().id, data);
+    return net::notifyEventClient(*client, data);
 }
 
 KiottyNetServerResult KiottyNet_createServer(KiottyNetContext context,

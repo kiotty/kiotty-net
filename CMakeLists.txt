@@ -190,6 +190,12 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/client/kiotty_http_client_send.cpp
     src/implementation/http/data/repository/client/kiotty_http_client_reply.cpp
     src/implementation/http/data/state/kiotty_http_client_state.cpp
+    src/implementation/base/domain/usecases/kiotty_server_usecases.cpp
+    src/implementation/base/domain/usecases/kiotty_client_usecases.cpp
+    src/implementation/http/domain/usecases/kiotty_http_server_usecases.cpp
+    src/implementation/http/domain/usecases/kiotty_http_client_usecases.cpp
+    src/implementation/websocket/domain/usecases/kiotty_websocket_server_usecases.cpp
+    src/implementation/websocket/domain/usecases/kiotty_websocket_client_usecases.cpp
     src/implementation/context/kiotty_context.cpp
 )
 

@@ -588,7 +588,7 @@ single_header/              # 스크립트로만 생성
 ```
 
 - 의존 방향: `core` ← `base` ← `statemachine` ← `http` ← `websocket` ← `context`. 공개 헤더도 같은 순서다 (`core` 는 `kiotty_net_base.h` 의 code 만). `tools/check_rules.py` 의 `LAYER` 가 본다. 2026-11-16 R3 뒤 위반 0.
-- `src/library_name*.cpp` 는 인자 변환만 하는 얇은 어댑터로 남고 `<module>/domain/usecases` 를 부른다.
+- `src/library_name*.cpp` 는 인자 변환만 하는 얇은 어댑터로 남고 `<module>/domain/usecases` 를 부른다. 어댑터가 하는 것: handle / 포인터의 null 검사, C 문자열을 `parseText` 로 Span 에, C 구조체를 C++ 값으로 (`CallbackHandler`, `ClientRequest`, `ClientRun`), 주소 복사, 결과를 C 구조체로, 그리고 handle 메서드 하나나 usecase 함수 하나 부르기. handle 안으로 두 걸음 이상 들어가는 일 (registry / notices 를 꺼내 등록, `HttpWork(host)`, `exchange()`, `stream()`), 규칙 검사, 크기 계산은 usecases 에 둔다 (R6, 2026-11-17).
 
 ### 7.2 GUI · CLI · 서버 데몬
 

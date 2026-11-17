@@ -848,7 +848,8 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 | | `kiotty_http_exchange` | 요청 하나의 흐름: `beginExchange`, `dispatch`, `startWork`, `sendNext`, `reject` |
 | | `kiotty_http_answer_writer` | 고른 답 (`Answer`) 을 응답에 쓴다 (`writeAnswer`) |
 | | `kiotty_http_content_type`, `kiotty_http_response_text` 외 파서 | content type 표 (4.10), 상태줄 / Date / Allow / chunk 머리, H2 의 파서 |
-| C API | `src/kiotty_net_http.cpp` | 번역 층. 문자열 인자를 `parseText` 로 보고 HttpServer 에 넘긴다 |
+| C API | `src/kiotty_net_http.cpp` | 번역 층. null 검사, 문자열 인자를 `parseText` 로, handle 을 `HttpServer&` / `HttpSessionHost&` 로 바꿔 usecase 하나를 부른다 |
+| usecases | `http/domain/usecases/kiotty_http_server_usecases` | C ABI 기능 하나 = 함수 하나 (R6). registry / notices 등록, 응답 setter (`HttpWork(host).fill(id)` 뒤 응답 store), Work, `findHttpHeader` |
 
 ### 4.1 HttpServer 가 잡는 것
 
@@ -1187,7 +1188,7 @@ void HttpResponseStore::seal(const ResponseSeal& seal)                          
 }
 ```
 
-- 공개 setter 는 handle 을 Session 으로 바꾸고 (4.5) `HttpResponseStore` 를 부른다. 번역 층이 이름 / 값을 `parseText` (상한 `response_bytes`) 로 먼저 본다. `setStatus` 는 100..599 만 받는다.
+- 공개 setter 는 handle 을 Session 으로 바꾸고 (4.5) `HttpResponseStore` 를 부른다. usecase (`setHttpHeader`) 가 Session 을 찾은 뒤 이름 / 값을 `parseText` (상한 `response_bytes`) 로 본다. `setStatus` 는 100..599 만 받는다.
 - 자동 응답 (404, 405 + Allow, 204 + Allow, 403 / 404 의 정적 경로) 과 거절 (400 / 413 / 414 / 431 / 501) 도 같은 store 를 쓴다. 다른 길이 없다.
 - HEAD : 라우트는 GET 으로 실행되고 setter 도 다 동작한다. `seal` 이 `Content-Length` 를 GET 과 같게 쓰되 `sendable_body` 가 0 이라 송신 (4.7) 이 body 조각을 내보내지 않는다.
 - 송신 쪽은 `frame()` 이 주는 `ResponseFrame` 으로 읽는다. `chunkAt(offset, max)` (헤더 블록 → body 순서의 조각), `filePieceAt` (4.7), `isStream`, `hasSendableBody`, `checkChunk`, `frameChunk` (4.9).
@@ -1359,7 +1360,7 @@ PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repos
 
 - `attachFile(session, type, path)` 가 Session 의 `InputFile` 을 열고 (실패하면 `NOT_FOUND`), 크기를 `size_t` 로 담을 수 있는지 보고, BY_EXTENSION 이면 경로의 확장자로 type 을 고른 뒤 `setBody(type, { nullptr, size }, FILE)` 한다. setBody 가 실패하면 (EVENT_STREAM 등) 파일을 닫는다.
 - `answerOf(match, path) -> Answer` (`http/data/repository/response/kiotty_http_answer_rules`) 가 라우트가 아닌 답을 값으로 고르고 `writeAnswer` (`http/data/repository/machine/kiotty_http_answer_writer`) 가 쓴다. 404 / 405 / OPTIONS 는 상태 (와 `Allow`), MEMORY 는 참조 body (`REFERENCE`). FILE 은 `attachFile`, 실패하면 `response.begin()` 뒤 404. DIRECTORY 는 prefix 뒤의 나머지를 `isSafeRelativePath` 로 보고 (`..` 조각, `\`, `:`, NUL 이면 403), 디렉토리 경로에 붙인 `FixedString<KIOTTY_NET_MAX_PATH_LENGTH>` 를 연다. 붙이지 못하면 (길이) 404.
-- `setHttpFile` 은 번역 층이 `parseText` 와 `hasParentSegment` (`/`, `\` 로 나눈 `..` 조각) 를 본 뒤 `attachFile`. Work 중에도 같은 길이다.
+- `setHttpFile` 은 usecase 가 Session 을 찾고 `parseText` 와 `hasParentSegment` (`/`, `\` 로 나눈 `..` 조각) 를 본 뒤 `attachFile`. Work 중에도 같은 길이다.
 - 파일은 다음 요청 (`beginExchange` 의 `detachFile`) 이나 반납 (풀의 `release`) 때 닫는다.
 
 ### 4.8 run
@@ -1573,7 +1574,7 @@ WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
 
 라우트 표 (4.1) 의 WebSocket 항목은 path 의 모든 메서드를 차지하고 (`DUPLICATE_RULE` 검사) 매칭에는 GET 비트 하나로 든다. 그래서 OPTIONS 와 다른 메서드는 4절의 자동 응답 (204 / 405) 이고, GET 과 HEAD 만 `MatchKind::SOCKET` 으로 `answerUpgrade` 에 온다.
 
-등록 (V2). `HttpRegistry::addRoute(path)` 가 빈 `WebSocketTarget { NULL ×4, index }` 를 `_sockets` 에 넣고 index 를 돌려준다 (`SocketIndexResult`). 번역 층의 `KiottyNet_onWebSocket*(route, cb)` 는 `server->registry()` (run 중이면 `BUSY`) 의 `find(route.index)` (`SocketTargetResult`, 범위 밖이면 `INVALID_ARGUMENT`) 로 그 칸을 받아 필드 하나를 채운다. `find(path)` 가 경로 번호를 주는 것과 짝이다. `HttpServer::run` 의 첫 줄이 모든 칸에 `on_message` 가 있는지 보고 (`hasEverySocketMessage`) 없으면 열기 전에 `INVALID_ARGUMENT` 다. 콜백의 app_context 는 칸에 없고 `HttpSessionHost::app_context` (run 이 넣는다, V1) 다.
+등록 (V2). `HttpRegistry::addRoute(path)` 가 빈 `WebSocketTarget { NULL ×4, index }` 를 `_sockets` 에 넣고 index 를 돌려준다 (`SocketIndexResult`). usecase `onWebSocket*(server, index, cb)` (번역 층은 route 의 code 와 server 만 본다) 는 `server.registry()` (run 중이면 `BUSY`) 의 `find(route.index)` (`SocketTargetResult`, 범위 밖이면 `INVALID_ARGUMENT`) 로 그 칸을 받아 필드 하나를 채운다. `find(path)` 가 경로 번호를 주는 것과 짝이다. `HttpServer::run` 의 첫 줄이 모든 칸에 `on_message` 가 있는지 보고 (`hasEverySocketMessage`) 없으면 열기 전에 `INVALID_ARGUMENT` 다. 콜백의 app_context 는 칸에 없고 `HttpSessionHost::app_context` (run 이 넣는다, V1) 다.
 
 ```
 answerUpgrade(session, target)
@@ -1756,7 +1757,7 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 
 `WebSocketClient` 는 `EventClient` 에 HttpSessionHost 하나 (Session 하나, 라우트 표 1 칸, `role = CLIENT`) 를 든 것이다. create 때 잡는 것: Session 의 버퍼 (4.2 와 같은 limits), Upgrade 요청 버퍼 (1024 바이트), Accept 값, subprotocol 후보 (127 바이트), push scratch, mask 상태 (`HttpSessionHost::mask_state`).
 
-등록 (V3). 콜백 넷은 host 에 둔다. Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `HttpNotices::setError` (모양이 `KiottyNetHttpErrorAction` 과 같다). 번역 층이 `client->registration()` (run 중이면 `BUSY`, 아니면 `HttpSessionHost&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (번역 층이 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
+등록 (V3). 콜백 넷은 host 에 둔다. Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `HttpNotices::setError` (모양이 `KiottyNetHttpErrorAction` 과 같다). usecase `onWebSocketClient*` 가 `client.registration()` (run 중이면 `BUSY`, 아니면 `HttpSessionHost&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (usecase `setWebSocketClientProtocols` 가 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
 
 | 상태 | 사건 | 행 |
 |---|---|---|
@@ -1823,7 +1824,8 @@ requirement_v0.md 11절의 HttpClient 와 `include/kiotty_net_http.h` 의 클라
 | | `kiotty_http_request_check` | `checkRequestHeader`, `checkRequestPath`, `checkRequestBody` |
 | | `kiotty_http_request_head` | `buildHostField`, `hostFieldOf`, `writeRequestHead` |
 | | `kiotty_http_reply_headers` | `findHttpReplyHeader`, `getHttpAllowedMethods` 의 몸 |
-| C API | `src/kiotty_net_http_client.cpp` | 번역 층. 문자열을 `parseText` (1 MiB, `MAX_HTTP_HEADER_BYTES`) 로 보고 메서드별 함수를 `sendHttpRequest` 로 |
+| C API | `src/kiotty_net_http_client.cpp` | 번역 층. null 검사, 요청을 `clientRequestOf` 로 `ClientRequest` 에, 메서드별 함수를 `sendHttpRequest` 로 |
+| usecases | `http/domain/usecases/kiotty_http_client_usecases` | `clientRequestOf` (메서드, path 를 `parseText` 1 MiB), 공통 헤더 set / remove / clear, disconnect / close, send / readBody / begin / write / finish (R6) |
 
 ### 6.1 HttpClient 가 잡는 것
 

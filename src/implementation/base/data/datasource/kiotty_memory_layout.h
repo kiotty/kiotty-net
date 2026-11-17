@@ -26,4 +26,13 @@ namespace kiotty::net::implementation
         const size_t records = plain / TLS_RECORD_PLAIN_BYTES + 1;
         return plain + records * TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
     }
+
+    constexpr size_t stageBytesOf(size_t receive, size_t send, size_t push)
+    {
+        const size_t plain = receive + send + push;
+        if (!MemoryLimits::TLS) { return plain; }
+        const size_t gathered = gatheredPlainBytes(send, push);
+        const size_t cipher_send = alignStage(cipherSendBytes(gathered));
+        return plain + receive + cipher_send;
+    }
 }

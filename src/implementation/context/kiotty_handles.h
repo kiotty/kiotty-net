@@ -30,3 +30,10 @@ struct KiottyNetHttpClient final : kiotty::net::implementation::HttpClient
 struct KiottyNetWebSocketClient final : kiotty::net::implementation::WebSocketClient
 {
 };
+
+static_assert(sizeof(KiottyNetServer) == sizeof(kiotty::net::implementation::Server),
+              "KiottyNetServer: the handle adds nothing to Server");
+static_assert(sizeof(KiottyNetStreamClient) == sizeof(kiotty::net::implementation::StreamClient),
+              "KiottyNetStreamClient: the handle adds nothing to StreamClient");
+static_assert(sizeof(KiottyNetEventClient) == sizeof(kiotty::net::implementation::EventClient),
+              "KiottyNetEventClient: the handle adds nothing to EventClient");

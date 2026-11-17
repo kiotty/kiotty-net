@@ -29,7 +29,7 @@
 | W, V1 ~ V4, B3 | `design_websocket_v0.html`, `design_websocket_v1.html` | WebSocket | 끝 |
 | C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1 끝, U2 / U3 남음 |
-| R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R5 끝, R6 / R7 남음 |
+| R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R6 끝, R7 남음 |
 
 ## 2. 앞으로의 순서
 
@@ -47,7 +47,7 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 | R4b http 흐름 | R4b-1 요청 머리 (`RequestFraming`), R4b-2 body (`BodyPlan`), R4b-3 답 고르기 (`Answer`), R4b-4 보내기 (`ResponseFrame`, `AfterResponse`). 숨은 쓰기를 돌려주는 값으로 | http 서버 테스트 그대로, 숨은 쓰기 목록 비움. 끝 (R4b-1, R4b-2 `27e0e8d`, R4b-3 `1fb8238`, R4b-4 `79b1297`) |
 | R4w websocket | R4w-1 자리 옮기기 (entity 는 값만, repository 하위 폴더 8, state 둘, datasource `SocketTable`), R4w-2 frame 읽기를 값으로 (`UPGRADED` 한 상태, `stepFrame`, `WebSocketState`), R4w-3 이름 `HttpSite` → `HttpSessionHost` (`Connection` / `ConnectionHost` 와 짝), R4w-4 `HttpSessionState` (session 의 진행 칸을 한 값으로) | websocket 테스트 그대로. 끝 (R4w-1 `b1bb486`, R4w-2 `ad3e91b`, R4w-3 `69f2c9d`, R4w-4 `6db8054`) |
 | R5 client State | `HttpClientState`, `ConnectionStream` 의 peek / consume, StreamClient 공개 메서드 정리, `HttpClientExchange(state, line)` (friend 제거), 값으로 잇는 client 흐름 (`Connected`, `ReplyHead`) | HttpClient 테스트 그대로, friend 0. 끝 (`5a615f5`) |
-| R6 usecases | 모든 모듈의 C ABI 를 usecases 함수로, `src/kiotty_net_*.cpp` 는 인자 변환만 | adapter 에 조합 로직 없음 |
+| R6 usecases | 모든 모듈의 C ABI 를 usecases 함수로, `src/kiotty_net_*.cpp` 는 인자 변환만 | adapter 에 조합 로직 없음. 끝 (R6 커밋) |
 | R7 http ↔ websocket 경계 | 설계 먼저. `HttpUpgradeHandler` 의 answer / step / end 가 session 통째 대신 필요한 것 (요청 view, 응답 store, body 버퍼, 한도) 만 받음. 클라이언트가 `HttpSessionHost` 를 통째로 빌리지 않고 자기 state 를 가짐. `WebSocketHandler` 의 공개 필드 (owner, lane, client, role, mask_state) 정리 | websocket 이 http 의 session / host 를 include 하지 않음. websocket 테스트 그대로 |
 | U2 연결과 취소 | begin 의 살아 있는지 보기, close 로 깨우기, 송신 오류 정리, TLS, 먼저 온 응답 (`design_http_client_v1.html` 정할 것 1) | integration: idle 연결 뒤 begin, close 가 걸린 write 를 깨움, 413, https 올리기 |
 | U3 도우미, C++, 문서 | `sendHttpFile`, C++ begin / write / finish, user guide / requirement / 구현 가이드 / 테스트 계획, Python `http.server` 외부 확인 | wrapper 테스트, 매트릭스 |

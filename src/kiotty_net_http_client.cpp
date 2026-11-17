@@ -6,6 +6,7 @@
 #include "http/data/repository/header/kiotty_http_reply_headers_parser.h"
 #include "http/data/repository/header/kiotty_http_token_rules.h"
 #include "http/data/repository/server/kiotty_http_configuration.h"
+#include "http/domain/usecases/kiotty_http_client_usecases.h"
 
 namespace net = kiotty::net::implementation;
 
@@ -31,12 +32,6 @@ namespace
         chosen = *limits;
     }
 
-    bool isMethod(KiottyNetHttpMethod method)
-    {
-        const int32_t index = static_cast<int32_t>(method);
-        return index >= 0 && index < KIOTTY_NET_HTTP_METHOD_COUNT;
-    }
-
     KiottyNetHttpClientRequest requestWithBody(KiottyNetHttpMethod method,
                                                const char* path,
                                                KiottyNetHttpContentType type,
@@ -48,21 +43,15 @@ namespace
         return request;
     }
 
-    using ClientRequestResult = net::Result<net::ClientRequest, KiottyNetCode>;
-
-    ClientRequestResult clientRequestOf(const KiottyNetHttpClientRequest* request,
-                                        const KiottyNetHttpHeader* headers,
-                                        size_t header_count)
+    net::ClientRequestResult requestOf(const KiottyNetHttpClientRequest* request,
+                                       const KiottyNetHttpHeader* headers,
+                                       size_t header_count)
     {
-        if (request == nullptr) { return ClientRequestResult::failure(INVALID); }
-        if (headers == nullptr && header_count > 0) { return ClientRequestResult::failure(INVALID); }
-        if (!isMethod(request->method)) { return ClientRequestResult::failure(INVALID); }
-        const net::TextResult path = net::parseText(request->path, MAX_TEXT);
-        if (!path) { return ClientRequestResult::failure(INVALID); }
+        using RequestResult = net::ClientRequestResult;
+        if (request == nullptr) { return RequestResult::failure(INVALID); }
+        if (headers == nullptr && header_count > 0) { return RequestResult::failure(INVALID); }
         const net::Span<const KiottyNetHttpHeader> extra{ headers, header_count };
-        const net::Span<const char> body{ request->body.data, request->body.length };
-        const net::ClientRequest made{ extra, path.value, body, request->method, request->type };
-        return ClientRequestResult::success(made);
+        return net::clientRequestOf(*request, extra);
     }
 
     net::Span<const KiottyNetHttpHeader> replyHeadersOf(const KiottyNetHttpReply& reply)
@@ -105,13 +94,13 @@ KiottyNetCode KiottyNet_connectHttpClient(KiottyNetHttpClientHandle client,
 void KiottyNet_disconnectHttpClient(KiottyNetHttpClientHandle client)
 {
     if (client == nullptr) { return; }
-    client->link().disconnect();
+    net::disconnectHttpClient(*client);
 }
 
 void KiottyNet_closeHttpClient(KiottyNetHttpClientHandle client)
 {
     if (client == nullptr) { return; }
-    client->link().close();
+    net::closeHttpClient(*client);
 }
 
 KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle client,
@@ -119,18 +108,13 @@ KiottyNetCode KiottyNet_setHttpClientHeader(KiottyNetHttpClientHandle client,
                                             const char* value)
 {
     if (client == nullptr) { return INVALID; }
-    const net::TextResult parsed_name = net::parseText(name, MAX_TEXT);
-    if (!parsed_name) { return INVALID; }
-    if (value == nullptr) { return client->headers().remove(parsed_name.value); }
-    const net::TextResult parsed_value = net::parseText(value, MAX_TEXT);
-    if (!parsed_value) { return INVALID; }
-    return client->headers().set(parsed_name.value, parsed_value.value);
+    return net::setHttpClientHeader(*client, name, value);
 }
 
 KiottyNetCode KiottyNet_clearHttpClientHeaders(KiottyNetHttpClientHandle client)
 {
     if (client == nullptr) { return INVALID; }
-    return client->headers().clear();
+    return net::clearHttpClientHeaders(*client);
 }
 
 KiottyNetHttpHeader KiottyNet_makeHttpHeader(const char* name, const char* value)
@@ -161,9 +145,9 @@ KiottyNetHttpReply KiottyNet_sendHttpRequest(KiottyNetHttpClientHandle client,
                                              uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return failedReply(INVALID); }
-    const ClientRequestResult made = clientRequestOf(request, headers, header_count);
+    const net::ClientRequestResult made = requestOf(request, headers, header_count);
     if (!made) { return failedReply(made.code); }
-    return client->exchange().send(made.value, timeout_milliseconds);
+    return net::sendHttpRequest(*client, made.value, timeout_milliseconds);
 }
 
 KiottyNetHttpReply KiottyNet_getHttp(KiottyNetHttpClientHandle client,
@@ -257,7 +241,7 @@ KiottyNetResult KiottyNet_readHttpReplyBody(KiottyNetHttpClientHandle client,
     const KiottyNetResult invalid = { 0, INVALID };
     if (client == nullptr || buffer == nullptr || length == 0) { return invalid; }
     const net::Span<char> target{ static_cast<char*>(buffer), length };
-    return client->exchange().readBody(target, timeout_milliseconds);
+    return net::readHttpReplyBody(*client, target, timeout_milliseconds);
 }
 
 KiottyNetCode KiottyNet_beginHttpRequest(KiottyNetHttpClientHandle client,
@@ -268,9 +252,9 @@ KiottyNetCode KiottyNet_beginHttpRequest(KiottyNetHttpClientHandle client,
                                          uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return INVALID; }
-    const ClientRequestResult made = clientRequestOf(request, headers, header_count);
+    const net::ClientRequestResult made = requestOf(request, headers, header_count);
     if (!made) { return made.code; }
-    return client->exchange().begin(made.value, body_length, timeout_milliseconds);
+    return net::beginHttpRequest(*client, made.value, body_length, timeout_milliseconds);
 }
 
 KiottyNetResult KiottyNet_writeHttpRequestBody(KiottyNetHttpClientHandle client,
@@ -282,14 +266,14 @@ KiottyNetResult KiottyNet_writeHttpRequestBody(KiottyNetHttpClientHandle client,
     if (client == nullptr) { return invalid; }
     if (data == nullptr && length > 0) { return invalid; }
     const net::Span<const char> piece{ static_cast<const char*>(data), length };
-    return client->exchange().write(piece, timeout_milliseconds);
+    return net::writeHttpRequestBody(*client, piece, timeout_milliseconds);
 }
 
 KiottyNetHttpReply KiottyNet_finishHttpRequest(KiottyNetHttpClientHandle client,
                                                uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return failedReply(INVALID); }
-    return client->exchange().finish(timeout_milliseconds);
+    return net::finishHttpRequest(*client, timeout_milliseconds);
 }
 
 KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name)
