@@ -29,7 +29,7 @@
 | W, V1 ~ V4, B3 | `design_websocket_v0.html`, `design_websocket_v1.html` | WebSocket | 끝 |
 | C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1 끝, U2 / U3 남음 |
-| R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R6 끝, R7 진행 (R7-1 끝) |
+| R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R6 끝, R7 진행 (R7-1 `4828405`) |
 
 ## 2. 앞으로의 순서
 
@@ -77,3 +77,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 2026-11-17 모듈 정리 R5 (`5a615f5`, `docs/progress/261117_progress_module_layout_r5.md`): `HttpClientState` (state/), `HttpClientExchange` / Headers / Link 가 (state, StreamClient) 를 받고 StreamClient 공개 메서드만 씀 (friend 0), StreamClient 공개 7 (`stream()` → `StreamResult`, `reconnect(address, deadline)`, `stop()`), `ConnectionStream::peek(wanted, t)` / `consume` 과 자유 함수 `readLine`, send / reply 자유 함수가 `Connected` / `ReplyHead` 값을 돌려줌. MSVC 847, WSL 848 × 6, release-tls 847.
 
 2026-11-17 모듈 정리 R6 (`ce65bd8`, `docs/progress/261117_progress_module_layout_r6.md`): usecases 여섯 파일 (base / http / websocket 의 server, client), 어댑터는 null 검사, 인자 변환, 결과 변환과 부르기 하나만. MSVC 847, WSL 848 × 6, release-tls 847.
+
+2026-11-17 모듈 정리 R7-1 (`4828405`, `docs/progress/261117_progress_module_layout_r7_1.md`): `UpgradeSession` 과 answer / open / step / end, http 가 101 을 보냄, websocket 의 frame / message / control / handshake 가 http session 을 include 하지 않음. MSVC 847, WSL 848 × 6, release-tls 847.
