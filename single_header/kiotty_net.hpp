@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 79b1297
+    KiottyNet single header, generated from commit 6db8054
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -8201,11 +8201,11 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_CLIENT_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CLIENT_WEBSOCKET_CLIENT_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CLIENT_WEBSOCKET_CLIENT_H
 
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SITE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SITE_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SESSION_HOST_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SESSION_HOST_H
 
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_DATASOURCE_HTTP_SESSION_POOL_H
@@ -8387,6 +8387,9 @@ namespace kiotty::net::implementation
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_SESSION_STATE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_SESSION_STATE_H
+
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_PLAN_H
 #define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_BODY_PLAN_H
 
@@ -8402,14 +8405,11 @@ namespace kiotty::net::implementation
 
 #endif
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    struct HttpSite;
-
     enum class SessionPhase : uint8_t
     {
         READING,
@@ -8420,6 +8420,29 @@ namespace kiotty::net::implementation
         UPGRADING,
         SOCKET
     };
+
+    struct HttpSessionState
+    {
+        RequestFraming framing;
+        BodyPlan       body;
+        uint64_t       header_deadline;
+        size_t         sent;
+        KiottyNetCode  close_reason;
+        KiottyNetCode  stream_failure;
+        SessionPhase   phase;
+        Persistence    persistence;
+        bool           is_work_requested;
+    };
+}
+
+#endif
+
+#include <atomic>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct HttpSessionHost;
 
     struct SessionBuffers
     {
@@ -8437,32 +8460,26 @@ namespace kiotty::net::implementation
 
     struct HttpSession
     {
-        HttpSession(HttpSite& owner,
+        HttpSession(HttpSessionHost& owner,
                     const SessionResources& resources,
                     int32_t index,
                     const SessionBuffers& buffers);
 
         HttpRequestStore          request;
         HttpResponseStore         response;
-        HttpSite&                 site;
+        HttpSessionHost&          host;
         InputFile&                file;
         std::atomic<int64_t>&     published;
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;
-        RequestFraming            framing;
-        BodyPlan                  body;
-        uint64_t                  header_deadline;
-        size_t                    sent;
+        HttpSessionState          state;
         PoolHandle                id;
-        KiottyNetCode             close_reason;
-        KiottyNetCode             stream_failure;
-        SessionPhase              phase;
-        Persistence               persistence;
-        bool                      is_work_requested;
         bool                      is_worker_owned;
         bool                      is_orphaned;
     };
+
+    HttpSessionState idleSessionState();
 }
 
 #endif
@@ -8485,7 +8502,9 @@ namespace kiotty::net::implementation
         HttpSessionPool(const HttpSessionPool&) = delete;
         HttpSessionPool& operator=(const HttpSessionPool&) = delete;
 
-        KiottyNetCode initialize(HttpSite& site, size_t count, const KiottyNetHttpLimits& limits);
+        KiottyNetCode initialize(HttpSessionHost& host,
+                                 size_t count,
+                                 const KiottyNetHttpLimits& limits);
         SessionResult acquire(const KiottyNetConnectionInfo& info);
         void          release(HttpSession& session);
         bool          handBack(HttpSession& session);
@@ -8713,12 +8732,12 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
-    struct HttpSite
+    struct HttpSessionHost
     {
-        HttpSite();
+        HttpSessionHost();
 
-        HttpSite(const HttpSite&) = delete;
-        HttpSite& operator=(const HttpSite&) = delete;
+        HttpSessionHost(const HttpSessionHost&) = delete;
+        HttpSessionHost& operator=(const HttpSessionHost&) = delete;
 
         HttpRegistry              registry;
         HttpNotices               notices;
@@ -8733,7 +8752,7 @@ namespace kiotty::net::implementation
         std::atomic<bool>         is_closing;
     };
 
-    inline HttpSite::HttpSite()
+    inline HttpSessionHost::HttpSessionHost()
         : registry()
         , notices()
         , sessions()
@@ -8750,8 +8769,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_ENDPOINT_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_ENDPOINT_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_ENDPOINT_WEBSOCKET_ENDPOINT_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_ENDPOINT_WEBSOCKET_ENDPOINT_H
 
 #include <cstdint>
 
@@ -8777,16 +8796,15 @@ struct KiottyNetWebSocketEndpoint
 };
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_HANDLER_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_HANDLER_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SEND_WEBSOCKET_LANE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SEND_WEBSOCKET_LANE_H
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SOCKET_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SOCKET_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_STATE_WEBSOCKET_SOCKET_STATE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_STATE_WEBSOCKET_SOCKET_STATE_H
 
 #ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_H
 #define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_H
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -8796,6 +8814,15 @@ namespace kiotty::net::implementation
     inline constexpr size_t MASK_KEY_BYTES = 4;
     inline constexpr size_t MAX_FRAME_HEAD_BYTES = 14;
     inline constexpr size_t MAX_CONTROL_PAYLOAD_BYTES = 125;
+
+    inline constexpr uint8_t  FINAL_BIT = 0x80;
+    inline constexpr uint8_t  MASK_BIT = 0x80;
+    inline constexpr uint8_t  SHORT_LENGTH_CODE = 126;
+    inline constexpr uint8_t  LONG_LENGTH_CODE = 127;
+    inline constexpr size_t   SHORT_LENGTH_BYTES = 2;
+    inline constexpr size_t   LONG_LENGTH_BYTES = 8;
+    inline constexpr uint64_t SHORT_LENGTH_MIN = 126;
+    inline constexpr uint64_t LONG_LENGTH_MIN = 0x10000;
 
     inline constexpr KiottyNetWebSocketStatus CLOSE_PROTOCOL =
         KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR;
@@ -8839,35 +8866,82 @@ namespace kiotty::net::implementation
     {
         char   bytes[MAX_FRAME_HEAD_BYTES];
         size_t length;
-
-        Span<const char> span() const;
     };
-
-    using FrameStartResult = Result<FrameStart, KiottyNetWebSocketStatus>;
-    using FrameLengthResult = Result<uint64_t, KiottyNetWebSocketStatus>;
-
-    FrameStartResult  parseFrameStart(Span<const char> bytes);
-    size_t            extendedLengthBytesOf(uint8_t length_code);
-    FrameLengthResult parseExtendedLength(Span<const char> bytes);
-    MaskKey           parseMaskKey(Span<const char> bytes);
-    bool              isControl(FrameOpcode opcode);
-    FrameHead         buildFrameHead(FrameOpcode opcode, uint64_t length);
-    FrameHead         buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key);
-    void              applyMask(Span<char> data, const MaskKey& key, size_t offset);
-    MaskKey           nextMaskKey(std::atomic<uint64_t>& state);
 }
 
 #endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_STEP_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_FRAME_STEP_H
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
+    enum class WebSocketState : uint8_t
+    {
+        OPENING,
+        FRAME_START,
+        FRAME_LENGTH,
+        FRAME_MASK,
+        FRAME_PAYLOAD
+    };
+
+    struct FrameRead
+    {
+        size_t         length;
+        WebSocketState state;
+    };
+
+    struct SocketFrame
+    {
+        uint64_t      remaining;
+        size_t        offset;
+        MaskKey       key;
+        FrameOpcode   opcode;
+        FrameFinality finality;
+        FrameMasking  masking;
+    };
+
+    enum class FrameEnd : uint8_t
+    {
+        PAYLOAD,
+        CONTROL,
+        DATA
+    };
+
+    struct MessageStep
+    {
+        FrameOpcode message;
+        FrameOpcode delivered;
+        bool        is_done;
+    };
+
+    enum class ControlAction : uint8_t
+    {
+        ANSWER_CLOSE,
+        SEND_PONG,
+        CLEAR_PING,
+        NOTHING
+    };
+
+    enum class TimeoutAction : uint8_t
+    {
+        CLOSE,
+        SEND_CLOSE,
+        SEND_PING
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TARGET_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TARGET_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     inline constexpr int32_t NO_SOCKET_PATH = -1;
-    inline constexpr size_t  CLOSE_FRAME_BYTES =
-        FRAME_START_BYTES + MASK_KEY_BYTES + MAX_CONTROL_PAYLOAD_BYTES;
 
     enum class SocketRole : uint8_t
     {
@@ -8884,6 +8958,27 @@ namespace kiotty::net::implementation
         int32_t                         path;
     };
 
+    struct ClientEvents
+    {
+        KiottyNetWebSocketClientOpenAction    on_open;
+        KiottyNetWebSocketClientMessageAction on_message;
+        KiottyNetWebSocketClientCloseAction   on_close;
+    };
+
+    using ProtocolText = FixedString<KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH>;
+}
+
+#endif
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    inline constexpr size_t CLOSE_FRAME_BYTES =
+        FRAME_START_BYTES + MASK_KEY_BYTES + MAX_CONTROL_PAYLOAD_BYTES;
+
     struct SocketLink
     {
         SocketLink();
@@ -8893,44 +8988,6 @@ namespace kiotty::net::implementation
         std::atomic<int32_t>  path;
         std::atomic<uint16_t> closing;
     };
-
-    struct SocketFrame
-    {
-        uint64_t      remaining;
-        size_t        offset;
-        MaskKey       key;
-        FrameOpcode   opcode;
-        FrameFinality finality;
-        FrameMasking  masking;
-    };
-
-    struct SocketRead
-    {
-        size_t  length;
-        int32_t state;
-    };
-
-    struct ClientEvents
-    {
-        KiottyNetWebSocketClientOpenAction    on_open;
-        KiottyNetWebSocketClientMessageAction on_message;
-        KiottyNetWebSocketClientCloseAction   on_close;
-    };
-
-    struct ClientUpgrade
-    {
-        ClientEvents            events;
-        Span<const char>        request;
-        Span<const char>        accept;
-        Span<const char>        protocols;
-        KiottyNetConnectionInfo peer;
-        Parker*                 opened;
-        KiottyNetCode           failure;
-        bool                    has_opened;
-        bool                    has_failed;
-    };
-
-    using ProtocolText = FixedString<KIOTTY_NET_MAX_WEB_SOCKET_PROTOCOL_LENGTH>;
 
     struct SocketState
     {
@@ -8942,7 +8999,7 @@ namespace kiotty::net::implementation
         KiottyNetWebSocketContext context;
         ProtocolText              protocol;
         SocketFrame               frame;
-        SocketRead                read;
+        FrameRead                 read;
         uint64_t                  ping_deadline;
         uint64_t                  close_deadline;
         size_t                    control_length;
@@ -8953,7 +9010,14 @@ namespace kiotty::net::implementation
         bool                      is_open;
         bool                      has_peer_close;
     };
+}
 
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
     class PushLane
     {
     public:
@@ -8967,6 +9031,66 @@ namespace kiotty::net::implementation
 
     protected:
         ~PushLane() = default;
+    };
+
+    KiottyNetCode pushFrame(PushLane& lane,
+                            const SocketLink& link,
+                            FrameOpcode opcode,
+                            Span<const char> payload);
+    KiottyNetCode pushClose(PushLane& lane,
+                            SocketLink& link,
+                            uint16_t status,
+                            Span<const char> reason);
+    bool          isOpenSocket(const SocketLink& link, int64_t socket);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_HANDLER_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_HANDLER_H
+
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_DATASOURCE_WEBSOCKET_SOCKET_TABLE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_DATASOURCE_WEBSOCKET_SOCKET_TABLE_H
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace kiotty::net::implementation
+{
+    class SocketTable
+    {
+    public:
+        SocketTable();
+
+        void             initialize(size_t count);
+        SocketState&     socketAt(int32_t index);
+        SocketLink&      linkAt(int32_t index);
+        Span<SocketLink> links();
+
+    private:
+        std::vector<SocketState> _sockets;
+        std::vector<SocketLink>  _links;
+        size_t                   _count;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_STATE_WEBSOCKET_CLIENT_STATE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_STATE_WEBSOCKET_CLIENT_STATE_H
+
+namespace kiotty::net::implementation
+{
+    struct ClientUpgrade
+    {
+        ClientEvents            events;
+        Span<const char>        request;
+        Span<const char>        accept;
+        Span<const char>        protocols;
+        KiottyNetConnectionInfo peer;
+        Parker*                 opened;
+        KiottyNetCode           failure;
+        bool                    has_opened;
+        bool                    has_failed;
     };
 }
 
@@ -9011,12 +9135,10 @@ namespace kiotty::net::implementation
 
     private:
         std::vector<WebSocketTarget> _targets;
-        std::vector<SocketState>     _sockets;
-        std::vector<SocketLink>      _links;
-        size_t                       _count;
+        SocketTable                  _table;
     };
 
-    WebSocketHandler& handlerOf(const HttpSite& site);
+    WebSocketHandler& handlerOf(const HttpSessionHost& host);
     WebSocketHandler& handlerOf(const HttpSession& session);
     SocketState&      socketOf(const HttpSession& session);
     SocketLink&       linkOf(const HttpSession& session);
@@ -9034,9 +9156,6 @@ namespace kiotty::net::implementation
     inline constexpr size_t WEB_SOCKET_ACCEPT_LENGTH = 28;
 
     using AcceptText = FixedString<WEB_SOCKET_ACCEPT_LENGTH + 1>;
-
-    bool       isWebSocketKey(Span<const char> key);
-    AcceptText acceptOf(Span<const char> key);
 }
 
 #endif
@@ -9052,7 +9171,7 @@ namespace kiotty::net::implementation
 
     using SocketPath = FixedString<KIOTTY_NET_MAX_URL_LENGTH>;
     using UpgradeText = FixedString<MAX_UPGRADE_REQUEST_BYTES>;
-    using RegistrationResult = Result<HttpSite&, KiottyNetCode>;
+    using RegistrationResult = Result<HttpSessionHost&, KiottyNetCode>;
 
     struct WebSocketClientConfiguration
     {
@@ -9112,7 +9231,7 @@ namespace kiotty::net::implementation
         void          reportUnopened(KiottyNetCode code);
         bool          isOpen();
 
-        HttpSite              _site;
+        HttpSessionHost       _host;
         ProtocolText          _protocols;
         UpgradeText           _request;
         AcceptText            _accept;
@@ -9126,8 +9245,8 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SERVER_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_WEBSOCKET_SERVER_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_SERVER_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_SERVER_H
 
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SERVER_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_SERVER_HTTP_SERVER_H
@@ -9239,7 +9358,7 @@ namespace kiotty::net::implementation
     class HttpWork
     {
     public:
-        explicit HttpWork(HttpSite& site);
+        explicit HttpWork(HttpSessionHost& host);
 
         SessionResult   fill(int64_t id);
         KiottyNetCode   start(int64_t id);
@@ -9251,7 +9370,7 @@ namespace kiotty::net::implementation
     private:
         SessionResult working(int64_t id);
 
-        HttpSite& _site;
+        HttpSessionHost& _host;
     };
 }
 
@@ -9284,15 +9403,15 @@ namespace kiotty::net::implementation
                            const KiottyNetAddress& address,
                            const KiottyNetTlsServerConfiguration* tls,
                            KiottyNetAppContext app_context);
-        RegistryResult registry();
-        NoticesResult  notices();
-        HttpSite&      site();
-        void           close();
+        RegistryResult   registry();
+        NoticesResult    notices();
+        HttpSessionHost& host();
+        void             close();
 
     private:
         KiottyNetCode prepare(const HttpServerConfiguration& configuration);
 
-        HttpSite             _site;
+        HttpSessionHost      _host;
         std::atomic<int32_t> _runs;
     };
 }
@@ -10312,7 +10431,7 @@ namespace
     FillingResult fillingOf(KiottyNetHttpResponseHandle response)
     {
         if (response.server == nullptr) { return FillingResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
-        return net::HttpWork(response.server->site()).fill(response.id);
+        return net::HttpWork(response.server->host()).fill(response.id);
     }
 
     KiottyNetCode setBody(KiottyNetHttpResponseHandle response,
@@ -10410,7 +10529,7 @@ KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response,
     const FillingResult filling = fillingOf(response);
     if (!filling) { return filling.code; }
     net::HttpSession& session = filling.value();
-    const size_t limit = session.site.limits.response_bytes;
+    const size_t limit = session.host.limits.response_bytes;
     const net::TextResult parsed_name = net::parseText(name, limit);
     if (!parsed_name) { return parsed_name.code; }
     const net::TextResult parsed_value = net::parseText(value, limit);
@@ -10461,7 +10580,7 @@ KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response,
 KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response)
 {
     if (response.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(response.server->site()).start(response.id);
+    return net::HttpWork(response.server->host()).start(response.id);
 }
 
 KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
@@ -10470,25 +10589,25 @@ KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
 {
     const KiottyNetResult closed = { 0, KIOTTY_NET_CODE_PEER_CLOSED };
     if (work.server == nullptr) { return closed; }
-    return net::HttpWork(work.server->site()).write(work.id, data, timeout_milliseconds);
+    return net::HttpWork(work.server->host()).write(work.id, data, timeout_milliseconds);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work)
 {
     if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->site()).finishWithResponse(work.id);
+    return net::HttpWork(work.server->host()).finishWithResponse(work.id);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason)
 {
     if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->site()).finishWithClose(work.id, reason);
+    return net::HttpWork(work.server->host()).finishWithClose(work.id, reason);
 }
 
 KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work)
 {
     if (work.server == nullptr) { return 0; }
-    const bool is_connected = net::HttpWork(work.server->site()).isConnected(work.id);
+    const bool is_connected = net::HttpWork(work.server->host()).isConnected(work.id);
     return is_connected ? 1 : 0;
 }
 
@@ -10947,8 +11066,8 @@ uint32_t KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply)
     return net::allowedMethodsOf(replyHeadersOf(*reply));
 }
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ACCESS_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ACCESS_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_ACCESS_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_SERVER_WEBSOCKET_ACCESS_H
 
 #include <cstdint>
 
@@ -10957,7 +11076,7 @@ namespace kiotty::net::implementation
     class WebSocketAccess
     {
     public:
-        explicit WebSocketAccess(HttpSite& site);
+        explicit WebSocketAccess(HttpSessionHost& host);
 
         KiottyNetWebSocketInfo info(int64_t id);
         KiottyNetSpan          header(int64_t id, Span<const char> name);
@@ -10976,7 +11095,7 @@ namespace kiotty::net::implementation
         SessionResult upgrading(int64_t id);
         LinkResult    openLink(int64_t id);
 
-        HttpSite&         _site;
+        HttpSessionHost&  _host;
         WebSocketHandler& _handler;
     };
 }
@@ -11116,7 +11235,7 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server,
                                            KiottyNetSpan data)
 {
     if (server == nullptr) { return INVALID; }
-    return net::WebSocketAccess(server->site()).broadcast(path, opcode, data);
+    return net::WebSocketAccess(server->host()).broadcast(path, opcode, data);
 }
 
 namespace
@@ -11199,36 +11318,36 @@ KiottyNetCode KiottyNet_setWebSocketClientProtocols(KiottyNetWebSocketClientHand
 KiottyNetCode KiottyNet_onWebSocketClientOpen(KiottyNetWebSocketClientHandle client,
                                               KiottyNetWebSocketClientOpenAction on_open)
 {
-    const net::RegistrationResult site = registrationOf(client, on_open != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_open = on_open;
+    const net::RegistrationResult host = registrationOf(client, on_open != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_open = on_open;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientMessage(KiottyNetWebSocketClientHandle client,
                                                  KiottyNetWebSocketClientMessageAction on_message)
 {
-    const net::RegistrationResult site = registrationOf(client, on_message != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_message = on_message;
+    const net::RegistrationResult host = registrationOf(client, on_message != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_message = on_message;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientClose(KiottyNetWebSocketClientHandle client,
                                                KiottyNetWebSocketClientCloseAction on_close)
 {
-    const net::RegistrationResult site = registrationOf(client, on_close != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_close = on_close;
+    const net::RegistrationResult host = registrationOf(client, on_close != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_close = on_close;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientError(KiottyNetWebSocketClientHandle client,
                                                KiottyNetWebSocketClientErrorAction on_error)
 {
-    const net::RegistrationResult site = registrationOf(client, on_error != nullptr);
-    if (!site) { return site.code; }
-    site.value().notices.setError(on_error);
+    const net::RegistrationResult host = registrationOf(client, on_error != nullptr);
+    if (!host) { return host.code; }
+    host.value().notices.setError(on_error);
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
@@ -23769,11 +23888,7 @@ namespace kiotty::net::implementation
         WORKING,
         SENDING,
         CLOSING,
-        SOCKET_OPENING,
-        FRAME_START,
-        FRAME_LENGTH,
-        FRAME_MASK,
-        FRAME_PAYLOAD
+        UPGRADED
     };
 }
 
@@ -23834,7 +23949,7 @@ namespace kiotty::net::implementation
         constexpr KiottyNetSpan LINE_END_SPAN{ LINE_END, 2 };
         constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-        size_t                      lineLimitOf(const HttpSite& site);
+        size_t                      lineLimitOf(const HttpSessionHost& host);
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session);
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route);
         KiottyNetTransition         afterRoute(HttpSession& session);
@@ -23864,16 +23979,8 @@ namespace kiotty::net::implementation
         detachFile(session);
         session.request.begin(connection);
         session.response.begin();
-        session.body = BodyPlan{ 0 };
-        session.sent = 0;
-        session.close_reason = KIOTTY_NET_CODE_SUCCESS;
         session.stream = KiottyNetConnectionStream{ nullptr, 0 };
-        session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
-        session.is_work_requested = false;
-        const BodyFraming no_body{ 0, BodyKind::NONE };
-        session.framing = RequestFraming{ no_body, Persistence::KEEP_ALIVE, false };
-        session.phase = SessionPhase::READING;
-        session.persistence = Persistence::KEEP_ALIVE;
+        session.state = idleSessionState();
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
     }
 
@@ -23881,7 +23988,7 @@ namespace kiotty::net::implementation
                                  HttpState state,
                                  uint32_t timeout_milliseconds)
     {
-        const size_t limit = lineLimitOf(session.site);
+        const size_t limit = lineLimitOf(session.host);
         const uint32_t timeout = timeout_milliseconds;
         const KiottyNetConnectionAction action = thenReadUntil(LINE_END_SPAN, limit, timeout);
         return Next::moveToNextState(state, action);
@@ -23889,8 +23996,8 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition readBody(HttpSession& session, HttpState state)
     {
-        const size_t step = nextReadOf(session.body, session.site.receive_capacity);
-        const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
+        const size_t step = nextReadOf(session.state.body, session.host.receive_capacity);
+        const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
         const KiottyNetConnectionAction action = thenRead(step, timeout);
         return Next::moveToNextState(state, action);
     }
@@ -23899,20 +24006,20 @@ namespace kiotty::net::implementation
     {
         session.response.begin();
         (void)session.response.setStatus(status);
-        session.persistence = Persistence::CLOSE;
-        session.close_reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
+        session.state.persistence = Persistence::CLOSE;
+        session.state.close_reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
         return startSending(session);
     }
 
     KiottyNetTransition dispatch(HttpSession& session)
     {
-        session.phase = SessionPhase::FILLING;
+        session.state.phase = SessionPhase::FILLING;
         const KiottyNetHttpRequest& request = session.request.request();
         const Span<const char> path{ request.path.data, request.path.length };
-        const RouteMatch match = session.site.registry.find(request.method, path);
+        const RouteMatch match = session.host.registry.find(request.method, path);
         const bool is_route = match.kind == MatchKind::ROUTE;
         if (is_route) { return callRoute(session, match.route); }
-        HttpUpgradeHandler* const upgrade = session.site.upgrade;
+        HttpUpgradeHandler* const upgrade = session.host.upgrade;
         const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
         if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
         const Answer answer = answerOf(match, path);
@@ -23926,39 +24033,40 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRoute route = session.route;
         const KiottyNetHttpRequest* request = &session.request.request();
         const KiottyNetHttpResponseHandle response = responseHandleOf(session);
-        const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
-        route.onWorkStarted(session.site.app_context, request, response, work);
+        const KiottyNetHttpWorkHandle work{ session.host.owner, session.id.value() };
+        route.onWorkStarted(session.host.app_context, request, response, work);
         return Next::moveToNextState(HttpState::WORKING, thenWork());
     }
 
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)
     {
-        const PieceResult piece = pieceAt(session, session.sent);
+        const PieceResult piece = pieceAt(session, session.state.sent);
         if (!piece) { return closeWith(piece.code); }
         const ResponseFrame frame = session.response.frame();
-        const SendStep step = sendStepOf(frame, session.sent, piece.value, session.persistence);
+        const HttpSessionState& state = session.state;
+        const SendStep step = sendStepOf(frame, state.sent, piece.value, state.persistence);
         if (step.kind != SendKind::DONE) { return sendPiece(session, step); }
-        const AfterResponse after = afterResponseOf(session.persistence);
-        if (after == AfterResponse::CLOSE) { return closeWith(session.close_reason); }
-        const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
+        const AfterResponse after = afterResponseOf(session.state.persistence);
+        if (after == AfterResponse::CLOSE) { return closeWith(session.state.close_reason); }
+        const uint32_t wait = session.host.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
     }
 
     KiottyNetTransition startSending(HttpSession& session)
     {
-        session.phase = SessionPhase::SENDING;
+        session.state.phase = SessionPhase::SENDING;
         sealResponse(session);
-        session.sent = 0;
+        session.state.sent = 0;
         const ResponseFrame frame = session.response.frame();
-        const Span<const char> chunk = frame.chunkAt(0, session.site.send_capacity);
-        const SendStep step = sendStepOf(frame, 0, chunk, session.persistence);
+        const Span<const char> chunk = frame.chunkAt(0, session.host.send_capacity);
+        const SendStep step = sendStepOf(frame, 0, chunk, session.state.persistence);
         return sendPiece(session, step);
     }
 
     void sealResponse(HttpSession& session)
     {
         const KiottyNetHttpMethod method = session.request.request().method;
-        session.response.seal(ResponseSeal{ method, session.persistence });
+        session.response.seal(ResponseSeal{ method, session.state.persistence });
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -23968,38 +24076,38 @@ namespace kiotty::net::implementation
 
     void startHeaderClock(HttpSession& session)
     {
-        const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
-        session.header_deadline = timeout == 0 ? 0 : monotonicMilliseconds() + timeout;
+        const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
+        session.state.header_deadline = timeout == 0 ? 0 : monotonicMilliseconds() + timeout;
     }
 
     uint32_t headerTimeLeft(const HttpSession& session)
     {
-        if (session.header_deadline == 0) { return 0; }
+        if (session.state.header_deadline == 0) { return 0; }
         const uint64_t now = monotonicMilliseconds();
-        if (now >= session.header_deadline) { return EXPIRED_MILLISECONDS; }
-        const uint64_t left = session.header_deadline - now;
+        if (now >= session.state.header_deadline) { return EXPIRED_MILLISECONDS; }
+        const uint64_t left = session.state.header_deadline - now;
         const uint64_t largest = std::numeric_limits<uint32_t>::max();
         return static_cast<uint32_t>(left < largest ? left : largest);
     }
 
     namespace
     {
-        size_t lineLimitOf(const HttpSite& site)
+        size_t lineLimitOf(const HttpSessionHost& host)
         {
-            const size_t header_line = site.limits.max_header_bytes + LINE_END_SPAN.length;
-            return site.receive_capacity < header_line ? site.receive_capacity : header_line;
+            const size_t header_line = host.limits.max_header_bytes + LINE_END_SPAN.length;
+            return host.receive_capacity < header_line ? host.receive_capacity : header_line;
         }
 
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session)
         {
-            return KiottyNetHttpResponseHandle{ session.site.owner, session.id.value() };
+            return KiottyNetHttpResponseHandle{ session.host.owner, session.id.value() };
         }
 
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
         {
             session.route = route;
             const KiottyNetHttpRequest& request = session.request.request();
-            const KiottyNetAppContext app_context = session.site.app_context;
+            const KiottyNetAppContext app_context = session.host.app_context;
             route.onRequest(app_context, &request, responseHandleOf(session));
             return afterRoute(session);
         }
@@ -24017,12 +24125,12 @@ namespace kiotty::net::implementation
         {
             const bool is_stream = session.response.frame().isStream();
             const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
-            return RouteOutcome{ is_stream, is_head, session.is_work_requested };
+            return RouteOutcome{ is_stream, is_head, session.state.is_work_requested };
         }
 
         KiottyNetTransition awaitWork(HttpSession& session)
         {
-            session.phase = SessionPhase::WORKING;
+            session.state.phase = SessionPhase::WORKING;
             session.is_worker_owned = true;
             return Next::moveToNextState(HttpState::WORKING, thenWork());
         }
@@ -24031,7 +24139,7 @@ namespace kiotty::net::implementation
         {
             session.response.begin();
             (void)session.response.setStatus(SERVER_ERROR);
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
         }
 
         KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step)
@@ -24040,7 +24148,8 @@ namespace kiotty::net::implementation
             const bool is_farewell = step.kind == SendKind::FAREWELL;
             const KiottyNetConnectionAction write = thenWrite(data, 0);
             if (!is_farewell) { return Next::moveToNextState(HttpState::SENDING, write); }
-            const KiottyNetConnectionAction farewell = thenCloseWith(data, session.close_reason);
+            const KiottyNetCode reason = session.state.close_reason;
+            const KiottyNetConnectionAction farewell = thenCloseWith(data, reason);
             return Next::moveToNextState(HttpState::CLOSING, farewell);
         }
     }
@@ -24855,38 +24964,39 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_PARSER_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_PARSER_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using FrameStartResult = Result<FrameStart, KiottyNetWebSocketStatus>;
+    using FrameLengthResult = Result<uint64_t, KiottyNetWebSocketStatus>;
+
+    FrameStartResult  parseFrameStart(Span<const char> bytes);
+    size_t            extendedLengthBytesOf(uint8_t length_code);
+    FrameLengthResult parseExtendedLength(Span<const char> bytes);
+    MaskKey           parseMaskKey(Span<const char> bytes);
+    bool              isControl(FrameOpcode opcode);
+}
+
+#endif
+
 namespace kiotty::net::implementation
 {
     namespace
     {
-        constexpr uint8_t  FINAL_BIT = 0x80;
         constexpr uint8_t  RESERVED_BITS = 0x70;
         constexpr uint8_t  OPCODE_BITS = 0x0F;
         constexpr uint8_t  CONTROL_BIT = 0x08;
         constexpr uint8_t  KNOWN_OPCODES[] = { 0x0, 0x1, 0x2, 0x8, 0x9, 0xA };
-        constexpr uint8_t  MASK_BIT = 0x80;
         constexpr uint8_t  LENGTH_BITS = 0x7F;
-        constexpr uint8_t  SHORT_LENGTH_CODE = 126;
-        constexpr uint8_t  LONG_LENGTH_CODE = 127;
-        constexpr size_t   SHORT_LENGTH_BYTES = 2;
-        constexpr size_t   LONG_LENGTH_BYTES = 8;
-        constexpr uint64_t SHORT_LENGTH_MIN = 126;
-        constexpr uint64_t LONG_LENGTH_MIN = 0x10000;
         constexpr uint64_t LONG_LENGTH_TOP_BIT = 0x8000000000000000ull;
-        constexpr uint64_t GOLDEN_GAMMA = 0x9E3779B97F4A7C15ULL;
-        constexpr uint64_t MIX_FIRST = 0xBF58476D1CE4E5B9ULL;
-        constexpr uint64_t MIX_SECOND = 0x94D049BB133111EBULL;
 
-        bool      isKnownOpcode(uint8_t opcode);
-        uint64_t  bigEndianOf(Span<const char> bytes);
-        FrameHead headOf(FrameOpcode opcode, uint64_t length, uint8_t mask_bit);
-        void      appendBigEndian(FrameHead& head, uint64_t value, size_t bytes);
-        uint8_t   lengthCodeOf(uint64_t length);
-    }
-
-    Span<const char> FrameHead::span() const
-    {
-        return Span<const char>{ bytes, length };
+        bool     isKnownOpcode(uint8_t opcode);
+        uint64_t bigEndianOf(Span<const char> bytes);
     }
 
     FrameStartResult parseFrameStart(Span<const char> bytes)
@@ -24946,45 +25056,6 @@ namespace kiotty::net::implementation
         return (static_cast<uint8_t>(opcode) & CONTROL_BIT) != 0;
     }
 
-    FrameHead buildFrameHead(FrameOpcode opcode, uint64_t length)
-    {
-        return headOf(opcode, length, 0);
-    }
-
-    FrameHead buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key)
-    {
-        FrameHead head = headOf(opcode, length, MASK_BIT);
-        for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
-        {
-            head.bytes[head.length + i] = static_cast<char>(key.bytes[i]);
-        }
-        head.length += MASK_KEY_BYTES;
-        return head;
-    }
-
-    void applyMask(Span<char> data, const MaskKey& key, size_t offset)
-    {
-        for (size_t i = 0; i < data.length; ++i)
-        {
-            const uint8_t mask = key.bytes[(offset + i) % MASK_KEY_BYTES];
-            data[i] = static_cast<char>(static_cast<uint8_t>(data[i]) ^ mask);
-        }
-    }
-
-    MaskKey nextMaskKey(std::atomic<uint64_t>& state)
-    {
-        const uint64_t drawn = state.fetch_add(GOLDEN_GAMMA) + GOLDEN_GAMMA;
-        uint64_t mixed = (drawn ^ (drawn >> 30U)) * MIX_FIRST;
-        mixed = (mixed ^ (mixed >> 27U)) * MIX_SECOND;
-        mixed = mixed ^ (mixed >> 31U);
-        MaskKey key{};
-        for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
-        {
-            key.bytes[i] = static_cast<uint8_t>(mixed >> (BITS_PER_BYTE * i));
-        }
-        return key;
-    }
-
     namespace
     {
         bool isKnownOpcode(uint8_t opcode)
@@ -25005,7 +25076,57 @@ namespace kiotty::net::implementation
             }
             return value;
         }
+    }
+}
 
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_BUILDER_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_BUILDER_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    FrameHead        buildFrameHead(FrameOpcode opcode, uint64_t length);
+    FrameHead        buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key);
+    Span<const char> headBytesOf(const FrameHead& head);
+}
+
+#endif
+
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        FrameHead headOf(FrameOpcode opcode, uint64_t length, uint8_t mask_bit);
+        void      appendBigEndian(FrameHead& head, uint64_t value, size_t bytes);
+        uint8_t   lengthCodeOf(uint64_t length);
+    }
+
+    FrameHead buildFrameHead(FrameOpcode opcode, uint64_t length)
+    {
+        return headOf(opcode, length, 0);
+    }
+
+    FrameHead buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key)
+    {
+        FrameHead head = headOf(opcode, length, MASK_BIT);
+        for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
+        {
+            head.bytes[head.length + i] = static_cast<char>(key.bytes[i]);
+        }
+        head.length += MASK_KEY_BYTES;
+        return head;
+    }
+
+    Span<const char> headBytesOf(const FrameHead& head)
+    {
+        return Span<const char>{ head.bytes, head.length };
+    }
+
+    namespace
+    {
         FrameHead headOf(FrameOpcode opcode, uint64_t length, uint8_t mask_bit)
         {
             FrameHead head{};
@@ -25041,9 +25162,61 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_MASK_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_MASK_RULES_H
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    void    applyMask(Span<char> data, const MaskKey& key, size_t offset);
+    MaskKey nextMaskKey(std::atomic<uint64_t>& state);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        constexpr uint64_t GOLDEN_GAMMA = 0x9E3779B97F4A7C15ULL;
+        constexpr uint64_t MIX_FIRST = 0xBF58476D1CE4E5B9ULL;
+        constexpr uint64_t MIX_SECOND = 0x94D049BB133111EBULL;
+    }
+
+    void applyMask(Span<char> data, const MaskKey& key, size_t offset)
+    {
+        for (size_t i = 0; i < data.length; ++i)
+        {
+            const uint8_t mask = key.bytes[(offset + i) % MASK_KEY_BYTES];
+            data[i] = static_cast<char>(static_cast<uint8_t>(data[i]) ^ mask);
+        }
+    }
+
+    MaskKey nextMaskKey(std::atomic<uint64_t>& state)
+    {
+        const uint64_t drawn = state.fetch_add(GOLDEN_GAMMA) + GOLDEN_GAMMA;
+        uint64_t mixed = (drawn ^ (drawn >> 30U)) * MIX_FIRST;
+        mixed = (mixed ^ (mixed >> 27U)) * MIX_SECOND;
+        mixed = mixed ^ (mixed >> 31U);
+        MaskKey key{};
+        for (size_t i = 0; i < MASK_KEY_BYTES; ++i)
+        {
+            key.bytes[i] = static_cast<uint8_t>(mixed >> (BITS_PER_BYTE * i));
+        }
+        return key;
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CLOSE_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CLOSE_RULES_H
+
 #ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLOSE_H
 #define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLOSE_H
 
+#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -25062,8 +25235,16 @@ namespace kiotty::net::implementation
         uint16_t         status;
     };
 
-    using ClosePayloadResult = Result<ClosePayload, KiottyNetWebSocketStatus>;
     using CloseText = FixedString<MAX_CONTROL_PAYLOAD_BYTES + 1>;
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using ClosePayloadResult = Result<ClosePayload, KiottyNetWebSocketStatus>;
     using CloseTextResult = Result<CloseText, KiottyNetCode>;
 
     ClosePayloadResult parseClosePayload(Span<const char> payload);
@@ -25128,6 +25309,17 @@ namespace kiotty::net::implementation
     }
 }
 
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_KEY_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_KEY_RULES_H
+
+namespace kiotty::net::implementation
+{
+    bool       isWebSocketKey(Span<const char> key);
+    AcceptText acceptOf(Span<const char> key);
+}
+
+#endif
+
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -25159,26 +25351,6 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_LANE_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_LANE_H
-
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    KiottyNetCode pushFrame(PushLane& lane,
-                            const SocketLink& link,
-                            FrameOpcode opcode,
-                            Span<const char> payload);
-    KiottyNetCode pushClose(PushLane& lane,
-                            SocketLink& link,
-                            uint16_t status,
-                            Span<const char> reason);
-    bool          isOpenSocket(const SocketLink& link, int64_t socket);
-}
-
-#endif
-
 namespace kiotty::net::implementation
 {
     KiottyNetCode pushFrame(PushLane& lane,
@@ -25208,8 +25380,8 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_UPGRADE_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_UPGRADE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_UPGRADE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_UPGRADE_H
 
 namespace kiotty::net::implementation
 {
@@ -25273,7 +25445,7 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest& request = session.request.request();
         const bool is_get = request.method == KIOTTY_NET_HTTP_METHOD_GET;
         if (!is_get) { return refuse(session, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
-        const bool has_body = hasBody(session.framing.body);
+        const bool has_body = hasBody(session.state.framing.body);
         if (has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
         const UpgradeCheck check = checkUpgrade(request);
         switch (check)
@@ -25288,7 +25460,7 @@ namespace kiotty::net::implementation
         SocketState& socket = socketOf(session);
         socket.reset();
         socket.target = target;
-        session.phase = SessionPhase::UPGRADING;
+        session.state.phase = SessionPhase::UPGRADING;
         const bool is_allowed = callUpgrade(session);
         if (!is_allowed) { return refuse(session, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
         return acceptUpgrade(session);
@@ -25392,7 +25564,7 @@ namespace kiotty::net::implementation
                 publicSpanOf(headerNamed(request, "Sec-WebSocket-Protocol")),
             };
             const KiottyNetBool allowed =
-                target.on_upgrade(session.site.app_context, socketHandleOf(session), upgrade);
+                target.on_upgrade(session.host.app_context, socketHandleOf(session), upgrade);
             return allowed != 0;
         }
 
@@ -25403,7 +25575,7 @@ namespace kiotty::net::implementation
             const Span<const char> get = literalOf("GET");
             const bool is_not_allowed = status == KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
             if (is_not_allowed) { (void)session.response.addHeader(literalOf("Allow"), get); }
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
             return startSending(session);
         }
 
@@ -25414,7 +25586,7 @@ namespace kiotty::net::implementation
             (void)session.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
             const Span<const char> version = literalOf(VERSION);
             (void)session.response.addHeader(literalOf("Sec-WebSocket-Version"), version);
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
             return startSending(session);
         }
 
@@ -25429,54 +25601,35 @@ namespace kiotty::net::implementation
             const Span<const char> protocol = socketOf(session).protocol.span();
             const Span<const char> protocol_name = literalOf("Sec-WebSocket-Protocol");
             if (!protocol.empty()) { (void)session.response.addHeader(protocol_name, protocol); }
-            session.persistence = Persistence::UPGRADE;
+            session.state.persistence = Persistence::UPGRADE;
             advanceSession(session);
             const KiottyNetTransition sending = startSending(session);
-            return Next::moveToNextState(HttpState::SOCKET_OPENING, sending.entry_action);
+            return Next::moveToNextState(HttpState::UPGRADED, sending.entry_action);
         }
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ROWS_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_ROWS_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_OPENING_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_HANDSHAKE_WEBSOCKET_OPENING_H
+
+#include <cstddef>
 
 namespace kiotty::net::implementation
 {
-    KiottyNetTransition onSocketWritten(KiottyNetConnectionContext context,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event);
-    KiottyNetTransition onFrameStart(KiottyNetConnectionContext context,
-                                     KiottyNetConnectionHandle connection,
-                                     KiottyNetConnectionEvent event);
-    KiottyNetTransition onFrameLength(KiottyNetConnectionContext context,
-                                      KiottyNetConnectionHandle connection,
-                                      KiottyNetConnectionEvent event);
-    KiottyNetTransition onFrameMask(KiottyNetConnectionContext context,
-                                    KiottyNetConnectionHandle connection,
-                                    KiottyNetConnectionEvent event);
-    KiottyNetTransition onFramePayload(KiottyNetConnectionContext context,
-                                       KiottyNetConnectionHandle connection,
-                                       KiottyNetConnectionEvent event);
-    KiottyNetTransition onSocketTimeout(KiottyNetConnectionContext context,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event);
+    KiottyNetTransition sendOpening(HttpSession& session, size_t written);
     KiottyNetTransition openSocket(HttpSession& session);
-    void                endSocket(HttpSession& session, KiottyNetCode reason);
 }
 
 #endif
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TIMING_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_TIMING_H
-
-#include <cstdint>
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_READER_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_READER_H
 
 namespace kiotty::net::implementation
 {
-    bool                    isClosing(const HttpSession& session);
-    uint32_t                readTimeoutOf(HttpSession& session);
-    uint64_t                deadlineAfter(uint32_t milliseconds);
-    KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason);
+    KiottyNetTransition stepFrame(HttpSession& session, KiottyNetConnectionEvent event);
+    KiottyNetTransition readNext(HttpSession& session, FrameRead read);
+    KiottyNetTransition nextFrame(HttpSession& session);
 }
 
 #endif
@@ -25486,121 +25639,25 @@ namespace kiotty::net::implementation
     namespace
     {
         using Next = KiottyNet_Transition<HttpState>;
-        using Session = KiottyNetConnectionContext;
-        using Handle = KiottyNetConnectionHandle;
-        using Event = KiottyNetConnectionEvent;
-        using Status = KiottyNetWebSocketStatus;
 
-        constexpr Status   TOO_BIG = KIOTTY_NET_WEB_SOCKET_STATUS_MESSAGE_TOO_BIG;
-
-        KiottyNetTransition     readNext(HttpSession& session, HttpState state, size_t length);
-        KiottyNetTransition     nextFrame(HttpSession& session);
-        KiottyNetTransition     afterFrameLength(HttpSession& session, uint64_t length);
-        KiottyNetTransition     beginPayload(HttpSession& session);
-        KiottyNetTransition     readPayload(HttpSession& session);
-        KiottyNetTransition     finishControl(HttpSession& session);
-        KiottyNetTransition     finishData(HttpSession& session);
-        KiottyNetTransition     answerClose(HttpSession& session);
-        KiottyNetTransition     failSocket(HttpSession& session, Status failure);
-        KiottyNetTransition     writeClose(HttpSession& session,
-                                           Span<const char> payload,
-                                           KiottyNetCode code);
-        KiottyNetCode           closeCodeOf(Status status);
-        MaskKey                 closeMaskOf(const HttpSession& session);
-        void                    callOpen(HttpSession& session);
-        void                    callMessage(HttpSession& session,
-                                            const KiottyNetWebSocketMessage& message);
-        void                    callClose(HttpSession& session,
-                                          const KiottyNetWebSocketClose& close);
-        bool                    isInOrder(const HttpSession& session, FrameOpcode opcode);
-        bool                    storePiece(HttpSession& session, Span<const char> piece);
-        void                    storeControl(HttpSession& session, Span<const char> piece);
-        void                    deliver(HttpSession& session,
-                                        FrameOpcode opcode,
-                                        KiottyNetSpan data);
+        void callOpen(HttpSession& session);
     }
 
-    KiottyNetTransition onSocketWritten(Session context, Handle, Event event)
+    KiottyNetTransition sendOpening(HttpSession& session, size_t written)
     {
-        HttpSession& session = sessionOf(context);
-        session.sent += event.length;
-        const PieceResult piece = pieceAt(session, session.sent);
+        session.state.sent += written;
+        const PieceResult piece = pieceAt(session, session.state.sent);
         if (!piece) { return closeWith(piece.code); }
         if (piece.value.empty()) { return openSocket(session); }
         const KiottyNetSpan data{ piece.value.data, piece.value.length };
-        return Next::moveToNextState(HttpState::SOCKET_OPENING, thenWrite(data, 0));
-    }
-
-    KiottyNetTransition onFrameStart(Session context, Handle, Event event)
-    {
-        HttpSession& session = sessionOf(context);
-        const FrameStartResult parsed = parseFrameStart(spanOf(event.data));
-        if (!parsed) { return failSocket(session, parsed.code); }
-        const FrameStart& start = parsed.value;
-        const bool is_masked = start.masking == FrameMasking::MASKED;
-        const bool is_server = handlerOf(session).role == SocketRole::SERVER;
-        const bool is_valid = is_masked == is_server && isInOrder(session, start.opcode);
-        if (!is_valid) { return failSocket(session, CLOSE_PROTOCOL); }
-        socketOf(session).frame = SocketFrame{
-            0, 0, MaskKey{}, start.opcode, start.finality, start.masking,
-        };
-        const size_t extended = extendedLengthBytesOf(start.length_code);
-        if (extended > 0) { return readNext(session, HttpState::FRAME_LENGTH, extended); }
-        return afterFrameLength(session, start.length_code);
-    }
-
-    KiottyNetTransition onFrameLength(Session context, Handle, Event event)
-    {
-        HttpSession& session = sessionOf(context);
-        const FrameLengthResult length = parseExtendedLength(spanOf(event.data));
-        if (!length) { return failSocket(session, length.code); }
-        return afterFrameLength(session, length.value);
-    }
-
-    KiottyNetTransition onFrameMask(Session context, Handle, Event event)
-    {
-        HttpSession& session = sessionOf(context);
-        socketOf(session).frame.key = parseMaskKey(spanOf(event.data));
-        return beginPayload(session);
-    }
-
-    KiottyNetTransition onFramePayload(Session context, Handle, Event event)
-    {
-        HttpSession& session = sessionOf(context);
-        SocketFrame& frame = socketOf(session).frame;
-        const Span<const char> piece = spanOf(event.data);
-        if (!storePiece(session, piece)) { return failSocket(session, TOO_BIG); }
-        frame.offset += piece.length;
-        frame.remaining -= piece.length;
-        if (frame.remaining > 0) { return readPayload(session); }
-        if (isControl(frame.opcode)) { return finishControl(session); }
-        return finishData(session);
-    }
-
-    KiottyNetTransition onSocketTimeout(Session context, Handle, Event)
-    {
-        HttpSession& session = sessionOf(context);
-        if (isClosing(session)) { return closeWith(KIOTTY_NET_CODE_TIMEOUT); }
-        const Span<const char> empty{ nullptr, 0 };
-        PushLane& lane = *handlerOf(session).lane;
-        SocketState& socket = socketOf(session);
-        const bool is_pong_late = socket.ping_deadline != 0;
-        if (is_pong_late) { (void)pushClose(lane, linkOf(session), GOING_AWAY, empty); }
-        else
-        {
-            (void)pushFrame(lane, linkOf(session), FrameOpcode::PING, empty);
-            const uint32_t pong_timeout = session.site.limits.websocket_pong_timeout_milliseconds;
-            socket.ping_deadline = deadlineAfter(pong_timeout);
-        }
-        const SocketRead read = socket.read;
-        return readNext(session, static_cast<HttpState>(read.state), read.length);
+        return Next::moveToNextState(HttpState::UPGRADED, thenWrite(data, 0));
     }
 
     KiottyNetTransition openSocket(HttpSession& session)
     {
         const KiottyNetConnectionHandle connection = session.request.request().connection;
         session.request.begin(connection);
-        session.phase = SessionPhase::SOCKET;
+        session.state.phase = SessionPhase::SOCKET;
         SocketState& socket = socketOf(session);
         SocketLink& link = linkOf(session);
         socket.is_open = true;
@@ -25615,6 +25672,446 @@ namespace kiotty::net::implementation
         return nextFrame(session);
     }
 
+    namespace
+    {
+        void callOpen(HttpSession& session)
+        {
+            const KiottyNetAppContext app_context = session.host.app_context;
+            SocketState& socket = socketOf(session);
+            socket.context = nullptr;
+            if (handlerOf(session).role == SocketRole::CLIENT)
+            {
+                ClientUpgrade& upgrade = handlerOf(session).client;
+                upgrade.has_opened = true;
+                const KiottyNetWebSocketClientOpenAction on_open = upgrade.events.on_open;
+                if (on_open != nullptr) { on_open(app_context); }
+                return;
+            }
+            const KiottyNetWebSocketOpenAction on_open = socket.target.on_open;
+            if (on_open == nullptr) { return; }
+            socket.context = on_open(app_context, socketHandleOf(session));
+        }
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CONTROL_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CONTROL_H
+
+namespace kiotty::net::implementation
+{
+    KiottyNetTransition timeoutSocket(HttpSession& session);
+    void                endSocket(HttpSession& session, KiottyNetCode reason);
+    KiottyNetTransition finishControl(HttpSession& session);
+    KiottyNetTransition failSocket(HttpSession& session, KiottyNetWebSocketStatus failure);
+    void                storeControl(HttpSession& session, Span<const char> piece);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_TIMING_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_TIMING_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    bool                    isClosing(const HttpSession& session);
+    uint32_t                readTimeoutOf(HttpSession& session);
+    uint64_t                deadlineAfter(uint32_t milliseconds);
+    KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_FRAME_WEBSOCKET_FRAME_RULES_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    bool        isAcceptedStart(const FrameStart& start, SocketRole role, FrameOpcode message);
+    SocketFrame frameOf(const FrameStart& start);
+    bool        isOversized(const SocketFrame& frame, uint64_t room);
+    FrameEnd    frameEndOf(const SocketFrame& frame);
+    FrameRead   payloadReadOf(const SocketFrame& frame, size_t capacity);
+    SocketFrame advanceFrame(const SocketFrame& frame, size_t piece);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_MESSAGE_WEBSOCKET_MESSAGE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_MESSAGE_WEBSOCKET_MESSAGE_H
+
+namespace kiotty::net::implementation
+{
+    KiottyNetTransition finishData(HttpSession& session);
+    bool                storePiece(HttpSession& session, Span<const char> piece);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        using Next = KiottyNet_Transition<HttpState>;
+        using Status = KiottyNetWebSocketStatus;
+
+        constexpr Status FRAME_TOO_BIG = KIOTTY_NET_WEB_SOCKET_STATUS_MESSAGE_TOO_BIG;
+
+        KiottyNetTransition stepOpening(HttpSession& session, KiottyNetConnectionEvent event);
+        KiottyNetTransition readFrameBytes(HttpSession& session,
+                                           WebSocketState state,
+                                           Span<const char> bytes);
+        KiottyNetTransition readFrameStart(HttpSession& session, Span<const char> bytes);
+        KiottyNetTransition readFrameLength(HttpSession& session, Span<const char> bytes);
+        KiottyNetTransition readFrameMask(HttpSession& session, Span<const char> bytes);
+        KiottyNetTransition readFramePiece(HttpSession& session, Span<const char> bytes);
+        KiottyNetTransition afterFrameLength(HttpSession& session, uint64_t length);
+        KiottyNetTransition beginPayload(HttpSession& session);
+        KiottyNetTransition continueFrame(HttpSession& session);
+    }
+
+    KiottyNetTransition stepFrame(HttpSession& session, KiottyNetConnectionEvent event)
+    {
+        const WebSocketState state = socketOf(session).read.state;
+        if (state == WebSocketState::OPENING) { return stepOpening(session, event); }
+        const KiottyNetConnectionEventType type = event.type;
+        if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT) { return timeoutSocket(session); }
+        const bool is_read = type == KIOTTY_NET_CONNECTION_EVENT_TYPE_READ;
+        if (!is_read) { return closeWith(KIOTTY_NET_CODE_UNHANDLED_EVENT); }
+        const Span<const char> bytes = spanOf(event.data);
+        return readFrameBytes(session, state, bytes);
+    }
+
+    KiottyNetTransition readNext(HttpSession& session, FrameRead read)
+    {
+        socketOf(session).read = read;
+        const uint32_t timeout = readTimeoutOf(session);
+        return Next::moveToNextState(HttpState::UPGRADED, thenRead(read.length, timeout));
+    }
+
+    KiottyNetTransition nextFrame(HttpSession& session)
+    {
+        return readNext(session, FrameRead{ FRAME_START_BYTES, WebSocketState::FRAME_START });
+    }
+
+    namespace
+    {
+        KiottyNetTransition stepOpening(HttpSession& session, KiottyNetConnectionEvent event)
+        {
+            const KiottyNetConnectionEventType type = event.type;
+            if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN)
+            {
+                return sendOpening(session, event.length);
+            }
+            if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT)
+            {
+                return closeWith(KIOTTY_NET_CODE_TIMEOUT);
+            }
+            return closeWith(KIOTTY_NET_CODE_UNHANDLED_EVENT);
+        }
+
+        KiottyNetTransition readFrameBytes(HttpSession& session,
+                                           WebSocketState state,
+                                           Span<const char> bytes)
+        {
+            switch (state)
+            {
+            case WebSocketState::FRAME_LENGTH:
+                return readFrameLength(session, bytes);
+            case WebSocketState::FRAME_MASK:
+                return readFrameMask(session, bytes);
+            case WebSocketState::FRAME_PAYLOAD:
+                return readFramePiece(session, bytes);
+            case WebSocketState::OPENING:
+            case WebSocketState::FRAME_START:
+                break;
+            }
+            return readFrameStart(session, bytes);
+        }
+
+        KiottyNetTransition readFrameStart(HttpSession& session, Span<const char> bytes)
+        {
+            const FrameStartResult parsed = parseFrameStart(bytes);
+            if (!parsed) { return failSocket(session, parsed.code); }
+            const FrameStart& start = parsed.value;
+            SocketState& socket = socketOf(session);
+            const SocketRole role = handlerOf(session).role;
+            const bool is_valid = isAcceptedStart(start, role, socket.message);
+            if (!is_valid) { return failSocket(session, CLOSE_PROTOCOL); }
+            socket.frame = frameOf(start);
+            const size_t extended = extendedLengthBytesOf(start.length_code);
+            const FrameRead length_read{ extended, WebSocketState::FRAME_LENGTH };
+            if (extended > 0) { return readNext(session, length_read); }
+            return afterFrameLength(session, start.length_code);
+        }
+
+        KiottyNetTransition readFrameLength(HttpSession& session, Span<const char> bytes)
+        {
+            const FrameLengthResult length = parseExtendedLength(bytes);
+            if (!length) { return failSocket(session, length.code); }
+            return afterFrameLength(session, length.value);
+        }
+
+        KiottyNetTransition readFrameMask(HttpSession& session, Span<const char> bytes)
+        {
+            socketOf(session).frame.key = parseMaskKey(bytes);
+            return beginPayload(session);
+        }
+
+        KiottyNetTransition readFramePiece(HttpSession& session, Span<const char> bytes)
+        {
+            if (!storePiece(session, bytes)) { return failSocket(session, FRAME_TOO_BIG); }
+            SocketState& socket = socketOf(session);
+            socket.frame = advanceFrame(socket.frame, bytes.length);
+            return continueFrame(session);
+        }
+
+        KiottyNetTransition afterFrameLength(HttpSession& session, uint64_t length)
+        {
+            SocketFrame& frame = socketOf(session).frame;
+            frame.remaining = length;
+            const uint64_t used = session.request.request().body.length;
+            const uint64_t room = session.host.limits.max_body_bytes - used;
+            if (isOversized(frame, room)) { return failSocket(session, FRAME_TOO_BIG); }
+            const bool is_masked = frame.masking == FrameMasking::MASKED;
+            const FrameRead mask_read{ MASK_KEY_BYTES, WebSocketState::FRAME_MASK };
+            if (is_masked) { return readNext(session, mask_read); }
+            return beginPayload(session);
+        }
+
+        KiottyNetTransition beginPayload(HttpSession& session)
+        {
+            SocketState& socket = socketOf(session);
+            if (isControl(socket.frame.opcode)) { socket.control_length = 0; }
+            return continueFrame(session);
+        }
+
+        KiottyNetTransition continueFrame(HttpSession& session)
+        {
+            const SocketFrame& frame = socketOf(session).frame;
+            const FrameEnd end = frameEndOf(frame);
+            const size_t capacity = session.host.receive_capacity;
+            if (end == FrameEnd::CONTROL) { return finishControl(session); }
+            if (end == FrameEnd::DATA) { return finishData(session); }
+            const FrameRead payload_read = payloadReadOf(frame, capacity);
+            return readNext(session, payload_read);
+        }
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_MESSAGE_WEBSOCKET_MESSAGE_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_MESSAGE_WEBSOCKET_MESSAGE_RULES_H
+
+namespace kiotty::net::implementation
+{
+    bool                      isInOrder(FrameOpcode message, FrameOpcode opcode);
+    MessageStep               messageStepOf(const SocketFrame& frame, FrameOpcode message);
+    bool                      isBrokenMessage(FrameOpcode opcode, Span<const char> body);
+    KiottyNetWebSocketMessage appMessageOf(FrameOpcode opcode, KiottyNetSpan data);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    bool isAcceptedStart(const FrameStart& start, SocketRole role, FrameOpcode message)
+    {
+        const bool is_masked = start.masking == FrameMasking::MASKED;
+        const bool is_server = role == SocketRole::SERVER;
+        return is_masked == is_server && isInOrder(message, start.opcode);
+    }
+
+    SocketFrame frameOf(const FrameStart& start)
+    {
+        return SocketFrame{ 0, 0, MaskKey{}, start.opcode, start.finality, start.masking };
+    }
+
+    bool isOversized(const SocketFrame& frame, uint64_t room)
+    {
+        return !isControl(frame.opcode) && frame.remaining > room;
+    }
+
+    FrameEnd frameEndOf(const SocketFrame& frame)
+    {
+        if (frame.remaining > 0) { return FrameEnd::PAYLOAD; }
+        if (isControl(frame.opcode)) { return FrameEnd::CONTROL; }
+        return FrameEnd::DATA;
+    }
+
+    FrameRead payloadReadOf(const SocketFrame& frame, size_t capacity)
+    {
+        const uint64_t remaining = frame.remaining;
+        const uint64_t step = remaining < capacity ? remaining : capacity;
+        return FrameRead{ static_cast<size_t>(step), WebSocketState::FRAME_PAYLOAD };
+    }
+
+    SocketFrame advanceFrame(const SocketFrame& frame, size_t piece)
+    {
+        SocketFrame next = frame;
+        next.offset += piece;
+        next.remaining -= piece;
+        return next;
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    bool isInOrder(FrameOpcode message, FrameOpcode opcode)
+    {
+        if (isControl(opcode)) { return true; }
+        const bool is_in_message = message != FrameOpcode::CONTINUATION;
+        const bool is_continuation = opcode == FrameOpcode::CONTINUATION;
+        return is_in_message == is_continuation;
+    }
+
+    MessageStep messageStepOf(const SocketFrame& frame, FrameOpcode message)
+    {
+        const bool is_first = frame.opcode != FrameOpcode::CONTINUATION;
+        const FrameOpcode current = is_first ? frame.opcode : message;
+        const FrameOpcode none = FrameOpcode::CONTINUATION;
+        if (frame.finality == FrameFinality::MORE) { return MessageStep{ current, none, false }; }
+        return MessageStep{ none, current, true };
+    }
+
+    bool isBrokenMessage(FrameOpcode opcode, Span<const char> body)
+    {
+        const bool is_text = opcode == FrameOpcode::TEXT;
+        return is_text && !isUtf8(body);
+    }
+
+    KiottyNetWebSocketMessage appMessageOf(FrameOpcode opcode, KiottyNetSpan data)
+    {
+        const bool is_text = opcode == FrameOpcode::TEXT;
+        const KiottyNetWebSocketOpcode kind =
+            is_text ? KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT : KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY;
+        return KiottyNetWebSocketMessage{ kind, data };
+    }
+}
+
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CONTROL_RULES_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CONTROL_WEBSOCKET_CONTROL_RULES_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    ControlAction controlActionOf(FrameOpcode opcode, bool is_closing);
+    TimeoutAction timeoutActionOf(bool is_closing, uint64_t ping_deadline);
+}
+
+#endif
+
+namespace kiotty::net::implementation
+{
+    ControlAction controlActionOf(FrameOpcode opcode, bool is_closing)
+    {
+        if (opcode == FrameOpcode::CLOSE) { return ControlAction::ANSWER_CLOSE; }
+        if (opcode == FrameOpcode::PONG) { return ControlAction::CLEAR_PING; }
+        const bool is_ping = opcode == FrameOpcode::PING;
+        if (is_ping && !is_closing) { return ControlAction::SEND_PONG; }
+        return ControlAction::NOTHING;
+    }
+
+    TimeoutAction timeoutActionOf(bool is_closing, uint64_t ping_deadline)
+    {
+        if (is_closing) { return TimeoutAction::CLOSE; }
+        if (ping_deadline != 0) { return TimeoutAction::SEND_CLOSE; }
+        return TimeoutAction::SEND_PING;
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message);
+    }
+
+    KiottyNetTransition finishData(HttpSession& session)
+    {
+        SocketState& socket = socketOf(session);
+        const MessageStep step = messageStepOf(socket.frame, socket.message);
+        socket.message = step.message;
+        if (!step.is_done) { return nextFrame(session); }
+        const KiottyNetHttpRequest& request = session.request.request();
+        const KiottyNetConnectionHandle connection = request.connection;
+        const bool is_broken = isBrokenMessage(step.delivered, spanOf(request.body));
+        if (is_broken) { return failSocket(session, CLOSE_INVALID_PAYLOAD); }
+        const KiottyNetWebSocketMessage message = appMessageOf(step.delivered, request.body);
+        if (!isClosing(session)) { callMessage(session, message); }
+        session.request.begin(connection);
+        return nextFrame(session);
+    }
+
+    bool storePiece(HttpSession& session, Span<const char> piece)
+    {
+        const SocketFrame& frame = socketOf(session).frame;
+        if (isControl(frame.opcode))
+        {
+            storeControl(session, piece);
+            return true;
+        }
+        const AppendedBodyResult appended = session.request.appendBody(piece);
+        if (!appended) { return false; }
+        applyMask(appended.value, frame.key, frame.offset);
+        return true;
+    }
+
+    namespace
+    {
+        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message)
+        {
+            const WebSocketHandler& handler = handlerOf(session);
+            if (handler.role == SocketRole::CLIENT)
+            {
+                handler.client.events.on_message(session.host.app_context, message);
+                return;
+            }
+            const SocketState& socket = socketOf(session);
+            const KiottyNetWebSocketMessageAction on_message = socket.target.on_message;
+            on_message(socket.context, socketHandleOf(session), message);
+        }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        using Next = KiottyNet_Transition<HttpState>;
+        using Status = KiottyNetWebSocketStatus;
+
+        constexpr Status TOO_BIG = KIOTTY_NET_WEB_SOCKET_STATUS_MESSAGE_TOO_BIG;
+
+        KiottyNetTransition answerClose(HttpSession& session);
+        KiottyNetTransition writeClose(HttpSession& session,
+                                       Span<const char> payload,
+                                       KiottyNetCode code);
+        KiottyNetCode       closeCodeOf(Status status);
+        MaskKey             closeMaskOf(const HttpSession& session);
+        void                callClose(HttpSession& session, const KiottyNetWebSocketClose& close);
+    }
+
+    KiottyNetTransition timeoutSocket(HttpSession& session)
+    {
+        SocketState& socket = socketOf(session);
+        const bool is_closing = isClosing(session);
+        const TimeoutAction action = timeoutActionOf(is_closing, socket.ping_deadline);
+        if (action == TimeoutAction::CLOSE) { return closeWith(KIOTTY_NET_CODE_TIMEOUT); }
+        const Span<const char> empty{ nullptr, 0 };
+        PushLane& lane = *handlerOf(session).lane;
+        const bool is_pong_late = action == TimeoutAction::SEND_CLOSE;
+        if (is_pong_late) { (void)pushClose(lane, linkOf(session), GOING_AWAY, empty); }
+        else
+        {
+            (void)pushFrame(lane, linkOf(session), FrameOpcode::PING, empty);
+            const uint32_t pong_timeout = session.host.limits.websocket_pong_timeout_milliseconds;
+            socket.ping_deadline = deadlineAfter(pong_timeout);
+        }
+        return readNext(session, socket.read);
+    }
+
     void endSocket(HttpSession& session, KiottyNetCode reason)
     {
         SocketState& socket = socketOf(session);
@@ -25627,85 +26124,48 @@ namespace kiotty::net::implementation
         link.path.store(NO_SOCKET_PATH);
     }
 
+    KiottyNetTransition finishControl(HttpSession& session)
+    {
+        SocketState& socket = socketOf(session);
+        const Span<const char> payload{ socket.control, socket.control_length };
+        const bool is_closing = isClosing(session);
+        const ControlAction action = controlActionOf(socket.frame.opcode, is_closing);
+        if (action == ControlAction::ANSWER_CLOSE) { return answerClose(session); }
+        if (action == ControlAction::CLEAR_PING) { socket.ping_deadline = 0; }
+        if (action == ControlAction::SEND_PONG)
+        {
+            PushLane& lane = *handlerOf(session).lane;
+            (void)pushFrame(lane, linkOf(session), FrameOpcode::PONG, payload);
+        }
+        return nextFrame(session);
+    }
+
+    KiottyNetTransition failSocket(HttpSession& session, Status failure)
+    {
+        const uint16_t status = static_cast<uint16_t>(failure);
+        const KiottyNetCode code = closeCodeOf(failure);
+        uint16_t open = 0;
+        const bool is_first = linkOf(session).closing.compare_exchange_strong(open, status);
+        if (!is_first) { return closeWith(code); }
+        const char bytes[STATUS_BYTES] = {
+            static_cast<char>(static_cast<uint8_t>(status >> BITS_PER_BYTE)),
+            static_cast<char>(static_cast<uint8_t>(status & BYTE_MASK)),
+        };
+        return writeClose(session, Span<const char>{ bytes, STATUS_BYTES }, code);
+    }
+
+    void storeControl(HttpSession& session, Span<const char> piece)
+    {
+        SocketState& socket = socketOf(session);
+        const size_t offset = socket.frame.offset;
+        const Span<char> target{ socket.control + offset, piece.length };
+        (void)target.copyFrom(piece);
+        applyMask(target, socket.frame.key, offset);
+        socket.control_length = offset + piece.length;
+    }
+
     namespace
     {
-        KiottyNetTransition readNext(HttpSession& session, HttpState state, size_t length)
-        {
-            socketOf(session).read = SocketRead{ length, static_cast<int32_t>(state) };
-            const uint32_t timeout = readTimeoutOf(session);
-            return Next::moveToNextState(state, thenRead(length, timeout));
-        }
-
-        KiottyNetTransition nextFrame(HttpSession& session)
-        {
-            return readNext(session, HttpState::FRAME_START, FRAME_START_BYTES);
-        }
-
-        KiottyNetTransition afterFrameLength(HttpSession& session, uint64_t length)
-        {
-            SocketFrame& frame = socketOf(session).frame;
-            frame.remaining = length;
-            const uint64_t used = session.request.request().body.length;
-            const uint64_t room = session.site.limits.max_body_bytes - used;
-            const bool is_too_big = !isControl(frame.opcode) && length > room;
-            if (is_too_big) { return failSocket(session, TOO_BIG); }
-            const bool is_masked = frame.masking == FrameMasking::MASKED;
-            if (is_masked) { return readNext(session, HttpState::FRAME_MASK, MASK_KEY_BYTES); }
-            return beginPayload(session);
-        }
-
-        KiottyNetTransition beginPayload(HttpSession& session)
-        {
-            SocketState& socket = socketOf(session);
-            if (isControl(socket.frame.opcode)) { socket.control_length = 0; }
-            if (socket.frame.remaining > 0) { return readPayload(session); }
-            if (isControl(socket.frame.opcode)) { return finishControl(session); }
-            return finishData(session);
-        }
-
-        KiottyNetTransition readPayload(HttpSession& session)
-        {
-            const uint64_t remaining = socketOf(session).frame.remaining;
-            const uint64_t capacity = session.site.receive_capacity;
-            const uint64_t step = remaining < capacity ? remaining : capacity;
-            return readNext(session, HttpState::FRAME_PAYLOAD, static_cast<size_t>(step));
-        }
-
-        KiottyNetTransition finishControl(HttpSession& session)
-        {
-            SocketState& socket = socketOf(session);
-            const Span<const char> payload{ socket.control, socket.control_length };
-            const FrameOpcode opcode = socket.frame.opcode;
-            if (opcode == FrameOpcode::CLOSE) { return answerClose(session); }
-            if (opcode == FrameOpcode::PONG) { socket.ping_deadline = 0; }
-            const bool is_ping = opcode == FrameOpcode::PING;
-            if (is_ping && !isClosing(session))
-            {
-                PushLane& lane = *handlerOf(session).lane;
-                (void)pushFrame(lane, linkOf(session), FrameOpcode::PONG, payload);
-            }
-            return nextFrame(session);
-        }
-
-        KiottyNetTransition finishData(HttpSession& session)
-        {
-            SocketState& socket = socketOf(session);
-            const SocketFrame& frame = socket.frame;
-            const bool is_first = frame.opcode != FrameOpcode::CONTINUATION;
-            if (is_first) { socket.message = frame.opcode; }
-            if (frame.finality == FrameFinality::MORE) { return nextFrame(session); }
-            const FrameOpcode message = socket.message;
-            socket.message = FrameOpcode::CONTINUATION;
-            const KiottyNetHttpRequest& request = session.request.request();
-            const KiottyNetConnectionHandle connection = request.connection;
-            const bool is_text = message == FrameOpcode::TEXT;
-            const bool is_broken = is_text && !isUtf8(spanOf(request.body));
-            if (is_broken) { return failSocket(session, CLOSE_INVALID_PAYLOAD); }
-            if (!isClosing(session)) { deliver(session, message, request.body); }
-            session.request.begin(connection);
-            return nextFrame(session);
-        }
-
         KiottyNetTransition answerClose(HttpSession& session)
         {
             SocketState& socket = socketOf(session);
@@ -25723,20 +26183,6 @@ namespace kiotty::net::implementation
             return writeClose(session, echo, KIOTTY_NET_CODE_SUCCESS);
         }
 
-        KiottyNetTransition failSocket(HttpSession& session, Status failure)
-        {
-            const uint16_t status = static_cast<uint16_t>(failure);
-            const KiottyNetCode code = closeCodeOf(failure);
-            uint16_t open = 0;
-            const bool is_first = linkOf(session).closing.compare_exchange_strong(open, status);
-            if (!is_first) { return closeWith(code); }
-            const char bytes[STATUS_BYTES] = {
-                static_cast<char>(static_cast<uint8_t>(status >> BITS_PER_BYTE)),
-                static_cast<char>(static_cast<uint8_t>(status & BYTE_MASK)),
-            };
-            return writeClose(session, Span<const char>{ bytes, STATUS_BYTES }, code);
-        }
-
         KiottyNetTransition writeClose(HttpSession& session,
                                        Span<const char> payload,
                                        KiottyNetCode code)
@@ -25748,13 +26194,19 @@ namespace kiotty::net::implementation
                                              : buildFrameHead(close, payload.length);
             char* const outgoing_bytes = socketOf(session).outgoing;
             const Span<char> outgoing{ outgoing_bytes, CLOSE_FRAME_BYTES };
-            (void)outgoing.copyFrom(head.span());
+            (void)outgoing.copyFrom(headBytesOf(head));
             const Span<char> body{ outgoing_bytes + head.length, payload.length };
             (void)body.copyFrom(payload);
             applyMask(body, key, 0);
             const KiottyNetSpan data{ outgoing_bytes, head.length + payload.length };
             const KiottyNetConnectionAction farewell = thenCloseWith(data, code);
             return Next::moveToNextState(HttpState::CLOSING, farewell);
+        }
+
+        KiottyNetCode closeCodeOf(Status status)
+        {
+            if (status == TOO_BIG) { return KIOTTY_NET_CODE_REQUEST_TOO_LARGE; }
+            return KIOTTY_NET_CODE_PROTOCOL_ERROR;
         }
 
         MaskKey closeMaskOf(const HttpSession& session)
@@ -25764,40 +26216,9 @@ namespace kiotty::net::implementation
             return nextMaskKey(handler.mask_state);
         }
 
-        void callOpen(HttpSession& session)
-        {
-            const KiottyNetAppContext app_context = session.site.app_context;
-            SocketState& socket = socketOf(session);
-            socket.context = nullptr;
-            if (handlerOf(session).role == SocketRole::CLIENT)
-            {
-                ClientUpgrade& upgrade = handlerOf(session).client;
-                upgrade.has_opened = true;
-                const KiottyNetWebSocketClientOpenAction on_open = upgrade.events.on_open;
-                if (on_open != nullptr) { on_open(app_context); }
-                return;
-            }
-            const KiottyNetWebSocketOpenAction on_open = socket.target.on_open;
-            if (on_open == nullptr) { return; }
-            socket.context = on_open(app_context, socketHandleOf(session));
-        }
-
-        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message)
-        {
-            const WebSocketHandler& handler = handlerOf(session);
-            if (handler.role == SocketRole::CLIENT)
-            {
-                handler.client.events.on_message(session.site.app_context, message);
-                return;
-            }
-            const SocketState& socket = socketOf(session);
-            const KiottyNetWebSocketMessageAction on_message = socket.target.on_message;
-            on_message(socket.context, socketHandleOf(session), message);
-        }
-
         void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
         {
-            const KiottyNetAppContext app_context = session.site.app_context;
+            const KiottyNetAppContext app_context = session.host.app_context;
             const WebSocketHandler& handler = handlerOf(session);
             if (handler.role == SocketRole::CLIENT)
             {
@@ -25810,53 +26231,6 @@ namespace kiotty::net::implementation
             const KiottyNetWebSocketCloseAction on_close = socket.target.on_close;
             if (on_close == nullptr) { return; }
             on_close(app_context, socket.context, close);
-        }
-
-        KiottyNetCode closeCodeOf(Status status)
-        {
-            if (status == TOO_BIG) { return KIOTTY_NET_CODE_REQUEST_TOO_LARGE; }
-            return KIOTTY_NET_CODE_PROTOCOL_ERROR;
-        }
-
-        bool isInOrder(const HttpSession& session, FrameOpcode opcode)
-        {
-            if (isControl(opcode)) { return true; }
-            const bool is_in_message = socketOf(session).message != FrameOpcode::CONTINUATION;
-            const bool is_continuation = opcode == FrameOpcode::CONTINUATION;
-            return is_in_message == is_continuation;
-        }
-
-        bool storePiece(HttpSession& session, Span<const char> piece)
-        {
-            const SocketFrame& frame = socketOf(session).frame;
-            if (isControl(frame.opcode))
-            {
-                storeControl(session, piece);
-                return true;
-            }
-            const AppendedBodyResult appended = session.request.appendBody(piece);
-            if (!appended) { return false; }
-            applyMask(appended.value, frame.key, frame.offset);
-            return true;
-        }
-
-        void storeControl(HttpSession& session, Span<const char> piece)
-        {
-            SocketState& socket = socketOf(session);
-            const size_t offset = socket.frame.offset;
-            const Span<char> target{ socket.control + offset, piece.length };
-            (void)target.copyFrom(piece);
-            applyMask(target, socket.frame.key, offset);
-            socket.control_length = offset + piece.length;
-        }
-
-        void deliver(HttpSession& session, FrameOpcode opcode, KiottyNetSpan data)
-        {
-            const bool is_text = opcode == FrameOpcode::TEXT;
-            const KiottyNetWebSocketOpcode kind =
-                is_text ? KIOTTY_NET_WEB_SOCKET_OPCODE_TEXT : KIOTTY_NET_WEB_SOCKET_OPCODE_BINARY;
-            const KiottyNetWebSocketMessage message{ kind, data };
-            callMessage(session, message);
         }
     }
 }
@@ -25882,7 +26256,7 @@ namespace kiotty::net::implementation
         if (isClosing(session)) { return closeTimeOf(session); }
         const uint64_t ping_deadline = socketOf(session).ping_deadline;
         if (ping_deadline != 0) { return timeLeft(ping_deadline); }
-        return session.site.limits.websocket_ping_interval_milliseconds;
+        return session.host.limits.websocket_ping_interval_milliseconds;
     }
 
     uint64_t deadlineAfter(uint32_t milliseconds)
@@ -25914,7 +26288,7 @@ namespace kiotty::net::implementation
     {
         uint32_t closeTimeOf(HttpSession& session)
         {
-            const uint32_t timeout = session.site.limits.websocket_close_timeout_milliseconds;
+            const uint32_t timeout = session.host.limits.websocket_close_timeout_milliseconds;
             if (timeout == 0) { return 0; }
             SocketState& socket = socketOf(session);
             if (socket.close_deadline == 0) { socket.close_deadline = deadlineAfter(timeout); }
@@ -25941,12 +26315,12 @@ namespace kiotty::net::implementation
     }
 }
 
-#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLIENT_MACHINE_H
-#define KIOTTY_NET_INTERNAL_WEBSOCKET_DOMAIN_ENTITY_WEBSOCKET_CLIENT_MACHINE_H
+#ifndef KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CLIENT_WEBSOCKET_CLIENT_MACHINE_H
+#define KIOTTY_NET_INTERNAL_WEBSOCKET_DATA_REPOSITORY_CLIENT_WEBSOCKET_CLIENT_MACHINE_H
 
 namespace kiotty::net::implementation
 {
-    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSite& site);
+    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSessionHost& host);
 }
 
 #endif
@@ -25958,10 +26332,7 @@ namespace kiotty::net::implementation
 {
     inline constexpr HttpState HEADER_LINE = HttpState::HEADER_LINE;
     inline constexpr HttpState CLOSING = HttpState::CLOSING;
-    inline constexpr HttpState FRAME_START = HttpState::FRAME_START;
-    inline constexpr HttpState FRAME_LENGTH = HttpState::FRAME_LENGTH;
-    inline constexpr HttpState FRAME_MASK = HttpState::FRAME_MASK;
-    inline constexpr HttpState FRAME_PAYLOAD = HttpState::FRAME_PAYLOAD;
+    inline constexpr HttpState UPGRADED = HttpState::UPGRADED;
 
     inline constexpr KiottyNetConnectionEventType CONNECTED =
         KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;
@@ -25991,6 +26362,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onUpgradeSent(Session context, Handle connection, Event event);
         KiottyNetTransition onStatusLine(Session context, Handle connection, Event event);
         KiottyNetTransition onResponseHeader(Session context, Handle connection, Event event);
+        KiottyNetTransition onClientFrame(Session context, Handle connection, Event event);
         KiottyNetTransition onClientTimeout(Session context, Handle connection, Event event);
         KiottyNetTransition onClientClosed(Session context, Handle connection, Event event);
 
@@ -26018,39 +26390,9 @@ namespace kiotty::net::implementation
             KiottyNet_from(HEADER_LINE)
                 .when(READ)
                 .then(onResponseHeader)
-                .to(HEADER_LINE, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(READ)
-                .then(onFrameStart)
-                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(READ)
-                .then(onFrameLength)
-                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(READ)
-                .then(onFrameMask)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(READ)
-                .then(onFramePayload)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
+                .to(HEADER_LINE, UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(READ).then(onClientFrame).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(TIMEOUT).then(onClientFrame).to(UPGRADED, CLOSING),
             KiottyNet_when(TIMEOUT).then(onClientTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClientClosed));
 
@@ -26058,10 +26400,10 @@ namespace kiotty::net::implementation
             KiottyNet_makeStateMachine(CLIENT_RULES, UPGRADE_SENDING);
     }
 
-    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSite& site)
+    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSessionHost& host)
     {
         return KiottyNetStatefulAppContext{
-            &site, &CLIENT_MACHINE, createClientSession, releaseClientSession, reportClientError,
+            &host, &CLIENT_MACHINE, createClientSession, releaseClientSession, reportClientError,
         };
     }
 
@@ -26074,7 +26416,7 @@ namespace kiotty::net::implementation
             session.request.begin(connection);
             session.response.begin();
             socketOf(session).reset();
-            session.sent = 0;
+            session.state.sent = 0;
             startHeaderClock(session);
             return writeRequest(session);
         }
@@ -26082,8 +26424,8 @@ namespace kiotty::net::implementation
         KiottyNetTransition onUpgradeSent(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            session.sent += event.length;
-            const bool has_more = session.sent < handlerOf(session).client.request.length;
+            session.state.sent += event.length;
+            const bool has_more = session.state.sent < handlerOf(session).client.request.length;
             if (has_more) { return writeRequest(session); }
             return readLine(session, STATUS_LINE, headerTimeLeft(session));
         }
@@ -26118,6 +26460,11 @@ namespace kiotty::net::implementation
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
         }
 
+        KiottyNetTransition onClientFrame(Session context, Handle, Event event)
+        {
+            return stepFrame(sessionOf(context), event);
+        }
+
         KiottyNetTransition onClientTimeout(Session, Handle, Event)
         {
             return closeWith(KIOTTY_NET_CODE_TIMEOUT);
@@ -26134,9 +26481,10 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition writeRequest(HttpSession& session)
         {
-            const Span<const char> request = handlerOf(session).client.request.skip(session.sent);
+            const Span<const char> whole = handlerOf(session).client.request;
+            const Span<const char> request = whole.skip(session.state.sent);
             const KiottyNetSpan data{ request.data, request.length };
-            const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
+            const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
             return Next::moveToNextState(UPGRADE_SENDING, thenWrite(data, timeout));
         }
 
@@ -26151,9 +26499,9 @@ namespace kiotty::net::implementation
         KiottyNetConnectionContext createClientSession(KiottyNetAppContext app_context,
                                                        KiottyNetConnectionInfo info)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            handlerOf(site).client.peer = info;
-            const SessionResult acquired = site.sessions.acquire(info);
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            handlerOf(host).client.peer = info;
+            const SessionResult acquired = host.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
         }
@@ -26161,8 +26509,8 @@ namespace kiotty::net::implementation
         void releaseClientSession(KiottyNetAppContext app_context,
                                   KiottyNetConnectionContext context)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.sessions.release(sessionOf(context));
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.sessions.release(sessionOf(context));
         }
 
         void reportClientError(KiottyNetAppContext app_context,
@@ -26170,12 +26518,12 @@ namespace kiotty::net::implementation
                                KiottyNetCode code,
                                const char* message)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            ClientUpgrade& upgrade = handlerOf(site).client;
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            ClientUpgrade& upgrade = handlerOf(host).client;
             const bool is_settled = upgrade.has_opened || upgrade.has_failed;
             if (is_settled) { return; }
             upgrade.has_failed = true;
-            site.notices.reportError(site.app_context, info, code, message);
+            host.notices.reportError(host.app_context, info, code, message);
         }
     }
 }
@@ -26188,22 +26536,22 @@ namespace kiotty::net::implementation
 
         bool          isDataOpcode(KiottyNetWebSocketOpcode opcode);
         FrameOpcode   frameOpcodeOf(KiottyNetWebSocketOpcode opcode);
-        KiottyNetCode checkData(const HttpSite& site,
+        KiottyNetCode checkData(const HttpSessionHost& host,
                                 KiottyNetWebSocketOpcode opcode,
                                 KiottyNetSpan data);
         bool          isBroadcastTarget(const SocketLink& link, int32_t path);
     }
 
-    WebSocketAccess::WebSocketAccess(HttpSite& site)
-        : _site(site)
-        , _handler(handlerOf(site))
+    WebSocketAccess::WebSocketAccess(HttpSessionHost& host)
+        : _host(host)
+        , _handler(handlerOf(host))
     {
     }
 
     KiottyNetWebSocketInfo WebSocketAccess::info(int64_t id)
     {
         KiottyNetWebSocketInfo info{};
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return info; }
         const HttpSession& session = found.value();
         const SocketState& socket = socketOf(session);
@@ -26233,7 +26581,7 @@ namespace kiotty::net::implementation
                                         KiottyNetWebSocketOpcode opcode,
                                         KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(_site, opcode, data);
+        const KiottyNetCode checked = checkData(_host, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const LinkResult link = openLink(id);
         if (!link) { return link.code; }
@@ -26253,14 +26601,14 @@ namespace kiotty::net::implementation
                                              KiottyNetWebSocketOpcode opcode,
                                              KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(_site, opcode, data);
+        const KiottyNetCode checked = checkData(_host, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         int32_t index = NO_SOCKET_PATH;
         if (path != nullptr)
         {
             const TextResult text = parseText(path, MAX_SOCKET_PATH_LENGTH);
             if (!text) { return text.code; }
-            index = _site.registry.find(text.value);
+            index = _host.registry.find(text.value);
             if (index == NO_UPGRADE_ROUTE) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         }
         KiottyNetCode result = KIOTTY_NET_CODE_SUCCESS;
@@ -26277,9 +26625,9 @@ namespace kiotty::net::implementation
 
     SessionResult WebSocketAccess::upgrading(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
-        const bool is_upgrading = found.value().phase == SessionPhase::UPGRADING;
+        const bool is_upgrading = found.value().state.phase == SessionPhase::UPGRADING;
         if (!is_upgrading) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }
         return found;
     }
@@ -26310,17 +26658,17 @@ namespace kiotty::net::implementation
             return is_text ? FrameOpcode::TEXT : FrameOpcode::BINARY;
         }
 
-        KiottyNetCode checkData(const HttpSite& site,
+        KiottyNetCode checkData(const HttpSessionHost& host,
                                 KiottyNetWebSocketOpcode opcode,
                                 KiottyNetSpan data)
         {
             const bool is_empty = data.data == nullptr || data.length == 0;
             if (is_empty || !isDataOpcode(opcode)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-            const bool is_masked = handlerOf(site).role == SocketRole::CLIENT;
+            const bool is_masked = handlerOf(host).role == SocketRole::CLIENT;
             const size_t mask_bytes = is_masked ? MASK_KEY_BYTES : 0;
             const size_t frame_head = buildFrameHead(FrameOpcode::BINARY, data.length).length;
             const size_t head = frame_head + mask_bytes;
-            const size_t room = site.push_capacity;
+            const size_t room = host.push_capacity;
             const bool fits = head <= room && data.length <= room - head;
             if (!fits) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
             return KIOTTY_NET_CODE_SUCCESS;
@@ -26350,7 +26698,7 @@ namespace kiotty::net::implementation
         , context(nullptr)
         , protocol()
         , frame{}
-        , read{}
+        , read{ 0, WebSocketState::OPENING }
         , ping_deadline(0)
         , close_deadline(0)
         , control_length(0)
@@ -26369,7 +26717,7 @@ namespace kiotty::net::implementation
         context = nullptr;
         protocol.clear();
         frame = SocketFrame{};
-        read = SocketRead{};
+        read = FrameRead{ 0, WebSocketState::OPENING };
         ping_deadline = 0;
         close_deadline = 0;
         control_length = 0;
@@ -26380,12 +26728,48 @@ namespace kiotty::net::implementation
     }
 }
 
+namespace kiotty::net::implementation
+{
+    SocketTable::SocketTable()
+        : _sockets()
+        , _links()
+        , _count(0)
+    {
+    }
+
+    void SocketTable::initialize(size_t count)
+    {
+        if (_sockets.size() < count) { _sockets = std::vector<SocketState>(count); }
+        if (_links.size() < count) { _links = std::vector<SocketLink>(count); }
+        for (SocketState& socket : _sockets)
+        {
+            socket.reset();
+        }
+        _count = count;
+    }
+
+    SocketState& SocketTable::socketAt(int32_t index)
+    {
+        return _sockets[static_cast<size_t>(index)];
+    }
+
+    SocketLink& SocketTable::linkAt(int32_t index)
+    {
+        return _links[static_cast<size_t>(index)];
+    }
+
+    Span<SocketLink> SocketTable::links()
+    {
+        return Span<SocketLink>{ _links.data(), _count };
+    }
+}
+
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_MACHINE_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_MACHINE_HTTP_MACHINE_H
 
 namespace kiotty::net::implementation
 {
-    KiottyNetStatefulAppContext httpStatefulOf(HttpSite& site);
+    KiottyNetStatefulAppContext httpStatefulOf(HttpSessionHost& host);
 }
 
 #endif
@@ -26444,7 +26828,6 @@ namespace kiotty::net::implementation
         constexpr HttpState CONTINUING = HttpState::CONTINUING;
         constexpr HttpState WORKING = HttpState::WORKING;
         constexpr HttpState SENDING = HttpState::SENDING;
-        constexpr HttpState SOCKET_OPENING = HttpState::SOCKET_OPENING;
 
         constexpr EventType WORK_STARTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED;
 
@@ -26463,7 +26846,7 @@ namespace kiotty::net::implementation
                     CONTINUING,
                     SENDING,
                     WORKING,
-                    SOCKET_OPENING,
+                    UPGRADED,
                     CLOSING),
             KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING, CLOSING),
             KiottyNet_from(CHUNK_SIZE)
@@ -26487,42 +26870,9 @@ namespace kiotty::net::implementation
                 .then(onRequestLine)
                 .to(HEADER_LINE, SENDING, CLOSING),
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
-            KiottyNet_from(SOCKET_OPENING)
-                .when(WRITTEN)
-                .then(onUpgraded)
-                .to(SOCKET_OPENING, FRAME_START),
-            KiottyNet_from(FRAME_START)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
+            KiottyNet_from(UPGRADED).when(WRITTEN).then(onUpgraded).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(READ).then(onUpgraded).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(TIMEOUT).then(onUpgraded).to(UPGRADED, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
 
@@ -26530,10 +26880,10 @@ namespace kiotty::net::implementation
             KiottyNet_makeStateMachine(HTTP_RULES, REQUEST_LINE);
     }
 
-    KiottyNetStatefulAppContext httpStatefulOf(HttpSite& site)
+    KiottyNetStatefulAppContext httpStatefulOf(HttpSessionHost& host)
     {
         return KiottyNetStatefulAppContext{
-            &site, &HTTP_MACHINE, createSession, releaseSession, reportError,
+            &host, &HTTP_MACHINE, createSession, releaseSession, reportError,
         };
     }
 
@@ -26542,7 +26892,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onConnected(Session context, Handle connection, Event)
         {
             HttpSession& session = sessionOf(context);
-            const uint32_t wait = session.site.limits.header_timeout_milliseconds;
+            const uint32_t wait = session.host.limits.header_timeout_milliseconds;
             return beginExchange(session, connection, wait);
         }
 
@@ -26577,10 +26927,10 @@ namespace kiotty::net::implementation
             if (!size) { return reject(session, size.code); }
             if (size.value == 0) { return readLine(session, TRAILER, bodyTimeOf(session)); }
             const uint64_t used = session.request.request().body.length;
-            const uint64_t room = session.site.limits.max_body_bytes - used;
+            const uint64_t room = session.host.limits.max_body_bytes - used;
             const BodyPlanResult plan = planBody(size.value, room);
             if (!plan) { return reject(session, plan.code); }
-            session.body = plan.value;
+            session.state.body = plan.value;
             return readBody(session, CHUNK_DATA);
         }
 
@@ -26618,14 +26968,14 @@ namespace kiotty::net::implementation
         KiottyNetTransition onSent(Session context, Handle connection, Event event)
         {
             HttpSession& session = sessionOf(context);
-            session.sent += event.length;
+            session.state.sent += event.length;
             return sendNext(session, connection);
         }
 
         KiottyNetTransition onUpgraded(Session context, Handle connection, Event event)
         {
             HttpSession& session = sessionOf(context);
-            return session.site.upgrade->step(session, connection, event);
+            return session.host.upgrade->step(session, connection, event);
         }
 
         KiottyNetTransition onTimeout(Session, Handle, Event)
@@ -26636,10 +26986,10 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            HttpUpgradeHandler* const upgrade = session.site.upgrade;
+            HttpUpgradeHandler* const upgrade = session.host.upgrade;
             if (upgrade != nullptr) { upgrade->end(session, event.reason); }
-            const KiottyNetAppContext app_context = session.site.app_context;
-            session.site.notices.reportDisconnected(app_context, session.info, event.reason);
+            const KiottyNetAppContext app_context = session.host.app_context;
+            session.host.notices.reportDisconnected(app_context, session.info, event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
         }
 
@@ -26647,8 +26997,8 @@ namespace kiotty::net::implementation
         {
             const RequestFramingResult framing = session.request.finishHeaders();
             if (!framing) { return reject(session, framing.code); }
-            session.framing = framing.value;
-            session.persistence = framing.value.persistence;
+            session.state.framing = framing.value;
+            session.state.persistence = framing.value.persistence;
             const BodyFraming& body = framing.value.body;
             switch (body.kind)
             {
@@ -26664,22 +27014,22 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length)
         {
-            const BodyPlanResult plan = planBody(length, session.site.limits.max_body_bytes);
+            const BodyPlanResult plan = planBody(length, session.host.limits.max_body_bytes);
             if (!plan) { return reject(session, plan.code); }
             if (!hasMoreBody(plan.value)) { return dispatch(session); }
-            session.body = plan.value;
+            session.state.body = plan.value;
             return beginBody(session);
         }
 
         KiottyNetTransition beginBody(HttpSession& session)
         {
-            if (!session.framing.expects_continue) { return readFirstBody(session); }
+            if (!session.state.framing.expects_continue) { return readFirstBody(session); }
             return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
         }
 
         KiottyNetTransition readFirstBody(HttpSession& session)
         {
-            if (hasMoreBody(session.body)) { return readBody(session, BODY); }
+            if (hasMoreBody(session.state.body)) { return readBody(session, BODY); }
             return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
@@ -26688,8 +27038,8 @@ namespace kiotty::net::implementation
             const Span<const char> piece{ data.data, data.length };
             const AppendedBodyResult appended = session.request.appendBody(piece);
             if (!appended) { return reject(session, appended.code); }
-            session.body = takeBodyPiece(session.body, data.length);
-            if (hasMoreBody(session.body)) { return readBody(session, more); }
+            session.state.body = takeBodyPiece(session.state.body, data.length);
+            if (hasMoreBody(session.state.body)) { return readBody(session, more); }
             const bool is_chunk = more == CHUNK_DATA;
             const uint32_t timeout = bodyTimeOf(session);
             const KiottyNetConnectionAction line_end = thenRead(CHUNK_END_BYTES, timeout);
@@ -26699,22 +27049,22 @@ namespace kiotty::net::implementation
 
         uint32_t bodyTimeOf(const HttpSession& session)
         {
-            return session.site.limits.header_timeout_milliseconds;
+            return session.host.limits.header_timeout_milliseconds;
         }
 
         KiottyNetConnectionContext createSession(KiottyNetAppContext app_context,
                                                  KiottyNetConnectionInfo info)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            const SessionResult acquired = site.sessions.acquire(info);
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            const SessionResult acquired = host.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
         }
 
         void releaseSession(KiottyNetAppContext app_context, KiottyNetConnectionContext context)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.sessions.release(sessionOf(context));
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.sessions.release(sessionOf(context));
         }
 
         void reportError(KiottyNetAppContext app_context,
@@ -26722,8 +27072,8 @@ namespace kiotty::net::implementation
                          KiottyNetCode code,
                          const char* message)
         {
-            const HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.notices.reportError(site.app_context, info, code, message);
+            const HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.notices.reportError(host.app_context, info, code, message);
         }
     }
 }
@@ -27544,7 +27894,7 @@ namespace kiotty::net::implementation
 
     PieceResult pieceAt(HttpSession& session, size_t offset)
     {
-        const size_t capacity = session.site.send_capacity;
+        const size_t capacity = session.host.send_capacity;
         const ResponseFrame frame = session.response.frame();
         const FilePiece piece = frame.filePieceAt(offset, capacity);
         if (!piece.is_file) { return PieceResult::success(frame.chunkAt(offset, capacity)); }
@@ -27614,31 +27964,40 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
-    HttpSession::HttpSession(HttpSite& owner,
+    HttpSession::HttpSession(HttpSessionHost& owner,
                              const SessionResources& resources,
                              int32_t index,
                              const SessionBuffers& buffers)
         : request(buffers.header, buffers.headers, buffers.body)
         , response(buffers.response)
-        , site(owner)
+        , host(owner)
         , file(resources.file)
         , published(resources.published)
         , info{}
         , route{}
         , stream{ nullptr, 0 }
-        , framing{ BodyFraming{ 0, BodyKind::NONE }, Persistence::KEEP_ALIVE, false }
-        , body{ 0 }
-        , header_deadline(0)
-        , sent(0)
+        , state(idleSessionState())
         , id{ 0, index }
-        , close_reason(KIOTTY_NET_CODE_SUCCESS)
-        , stream_failure(KIOTTY_NET_CODE_SUCCESS)
-        , phase(SessionPhase::READING)
-        , persistence(Persistence::KEEP_ALIVE)
-        , is_work_requested(false)
         , is_worker_owned(false)
         , is_orphaned(false)
     {
+    }
+
+    HttpSessionState idleSessionState()
+    {
+        const BodyFraming no_body{ 0, BodyKind::NONE };
+        const RequestFraming framing{ no_body, Persistence::KEEP_ALIVE, false };
+        return HttpSessionState{
+            framing,
+            BodyPlan{ 0 },
+            0,
+            0,
+            KIOTTY_NET_CODE_SUCCESS,
+            KIOTTY_NET_CODE_SUCCESS,
+            SessionPhase::READING,
+            Persistence::KEEP_ALIVE,
+            false,
+        };
     }
 }
 
@@ -27675,7 +28034,7 @@ namespace kiotty::net::implementation
     {
     }
 
-    KiottyNetCode HttpSessionPool::initialize(HttpSite& site,
+    KiottyNetCode HttpSessionPool::initialize(HttpSessionHost& host,
                                               size_t count,
                                               const KiottyNetHttpLimits& limits)
     {
@@ -27701,7 +28060,7 @@ namespace kiotty::net::implementation
                                                          limits.max_headers };
             const int32_t index = static_cast<int32_t>(i);
             const SessionResources resources{ _files[i], _published[i] };
-            _sessions.emplace_back(site, resources, index, buffers);
+            _sessions.emplace_back(host, resources, index, buffers);
             const bool has_history = i < _generations.size();
             HttpSession& session = _sessions.back();
             session.id.generation = has_history ? _generations[i] : 0;
@@ -28161,7 +28520,7 @@ namespace kiotty::net::implementation
 
     HttpServer::HttpServer()
         : Server()
-        , _site()
+        , _host()
         , _runs(0)
     {
     }
@@ -28179,7 +28538,7 @@ namespace kiotty::net::implementation
     void HttpServer::reset() noexcept
     {
         Server::reset();
-        _site.notices.clear();
+        _host.notices.clear();
     }
 
     KiottyNetCode HttpServer::run(KiottyNetHttpServerHandle self,
@@ -28188,10 +28547,10 @@ namespace kiotty::net::implementation
                                   KiottyNetAppContext app_context)
     {
         _runs.fetch_add(1);
-        _site.is_closing.store(false);
-        _site.app_context = app_context;
-        _site.owner = self;
-        const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
+        _host.is_closing.store(false);
+        _host.app_context = app_context;
+        _host.owner = self;
+        const KiottyNetStatefulAppContext stateful = httpStatefulOf(_host);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);
         _runs.fetch_sub(1);
@@ -28201,23 +28560,23 @@ namespace kiotty::net::implementation
     RegistryResult HttpServer::registry()
     {
         if (_runs.load() > 0) { return RegistryResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return RegistryResult::success(_site.registry);
+        return RegistryResult::success(_host.registry);
     }
 
     NoticesResult HttpServer::notices()
     {
         if (_runs.load() > 0) { return NoticesResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return NoticesResult::success(_site.notices);
+        return NoticesResult::success(_host.notices);
     }
 
-    HttpSite& HttpServer::site()
+    HttpSessionHost& HttpServer::host()
     {
-        return _site;
+        return _host;
     }
 
     void HttpServer::close()
     {
-        _site.is_closing.store(true);
+        _host.is_closing.store(true);
         Server::close();
     }
 
@@ -28225,13 +28584,13 @@ namespace kiotty::net::implementation
     {
         const KiottyNetHttpLimits& limits = configuration.limits;
         if (!areLimitsUsable(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        _site.limits = limits;
-        _site.receive_capacity = configuration.server.receive_capacity;
-        _site.send_capacity = configuration.server.send_capacity;
-        _site.push_capacity = configuration.server.push_capacity;
-        _site.registry.initialize(limits.max_routes);
-        _site.notices.clear();
-        return _site.sessions.initialize(_site, configuration.server.max_clients, limits);
+        _host.limits = limits;
+        _host.receive_capacity = configuration.server.receive_capacity;
+        _host.send_capacity = configuration.server.send_capacity;
+        _host.push_capacity = configuration.server.push_capacity;
+        _host.registry.initialize(limits.max_routes);
+        _host.notices.clear();
+        return _host.sessions.initialize(_host, configuration.server.max_clients, limits);
     }
 
     namespace
@@ -28283,16 +28642,16 @@ namespace kiotty::net::implementation
         size_t                    headerBytesOf(const HttpSession& session);
     }
 
-    HttpWork::HttpWork(HttpSite& site)
-        : _site(site)
+    HttpWork::HttpWork(HttpSessionHost& host)
+        : _host(host)
     {
     }
 
     SessionResult HttpWork::fill(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
-        const SessionPhase phase = found.value().phase;
+        const SessionPhase phase = found.value().state.phase;
         const bool is_open = phase == SessionPhase::FILLING || phase == SessionPhase::WORKING;
         if (!is_open) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }
         return found;
@@ -28300,14 +28659,14 @@ namespace kiotty::net::implementation
 
     KiottyNetCode HttpWork::start(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found.code; }
         HttpSession& session = found.value();
-        const bool is_filling = session.phase == SessionPhase::FILLING;
-        const bool is_first = is_filling && !session.is_work_requested;
+        const bool is_filling = session.state.phase == SessionPhase::FILLING;
+        const bool is_first = is_filling && !session.state.is_work_requested;
         if (!is_first) { return KIOTTY_NET_CODE_BUSY; }
         if (session.route.onWorkStarted == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        session.is_work_requested = true;
+        session.state.is_work_requested = true;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -28321,18 +28680,18 @@ namespace kiotty::net::implementation
         if (is_too_large) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }
         const KiottyNetCode checked = session.response.frame().checkChunk(piece);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, checked); }
-        if (session.stream_failure != KIOTTY_NET_CODE_SUCCESS)
+        if (session.state.stream_failure != KIOTTY_NET_CODE_SUCCESS)
         {
-            return resultOf(0, session.stream_failure);
+            return resultOf(0, session.state.stream_failure);
         }
         const Deadline deadline(timeout_milliseconds);
         const size_t kept = openStream(session);
         const bool has_body = session.response.frame().hasSendableBody();
         const KiottyNetCode sent = has_body ? sendChunk(session, piece, kept, deadline)
                                             : sendHeaderOnly(session, kept, deadline);
-        session.stream_failure = failureOf(session, sent);
+        session.state.stream_failure = failureOf(session, sent);
         const size_t bytes = sent == KIOTTY_NET_CODE_SUCCESS ? piece.length : 0;
-        return resultOf(bytes, session.stream_failure);
+        return resultOf(bytes, session.state.stream_failure);
     }
 
     KiottyNetCode HttpWork::finishWithResponse(int64_t id)
@@ -28340,9 +28699,9 @@ namespace kiotty::net::implementation
         const SessionResult found = working(id);
         if (!found) { return found.code; }
         HttpSession& session = found.value();
-        const SessionPhase phase = session.phase;
+        const SessionPhase phase = session.state.phase;
         const KiottyNetConnectionStream stream = session.stream;
-        session.phase = SessionPhase::SENDING;
+        session.state.phase = SessionPhase::SENDING;
         const KiottyNetConnectionAction then = finishingActionOf(session, phase);
         return handOver(session, stream, then);
     }
@@ -28353,7 +28712,7 @@ namespace kiotty::net::implementation
         if (!found) { return found.code; }
         HttpSession& session = found.value();
         const KiottyNetConnectionStream stream = session.stream;
-        session.phase = SessionPhase::SENDING;
+        session.state.phase = SessionPhase::SENDING;
         return handOver(session, stream, thenClose(reason));
     }
 
@@ -28361,17 +28720,17 @@ namespace kiotty::net::implementation
     {
         const SessionResult found = working(id);
         if (!found) { return false; }
-        if (_site.is_closing.load()) { return false; }
+        if (_host.is_closing.load()) { return false; }
         const KiottyNetConnectionStream stream = found.value().stream;
         return stream.owner->isStreamOpen(stream.id);
     }
 
     SessionResult HttpWork::working(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
         const HttpSession& session = found.value();
-        const SessionPhase phase = session.phase;
+        const SessionPhase phase = session.state.phase;
         const bool is_working = phase == SessionPhase::WORKING || phase == SessionPhase::STREAMING;
         const bool has_stream = session.stream.owner != nullptr;
         const bool is_usable = is_working && has_stream;
@@ -28383,9 +28742,9 @@ namespace kiotty::net::implementation
     {
         size_t openStream(HttpSession& session)
         {
-            if (session.phase == SessionPhase::STREAMING) { return 0; }
+            if (session.state.phase == SessionPhase::STREAMING) { return 0; }
             sealResponse(session);
-            session.phase = SessionPhase::STREAMING;
+            session.state.phase = SessionPhase::STREAMING;
             return headerBytesOf(session);
         }
 
@@ -28394,7 +28753,7 @@ namespace kiotty::net::implementation
                                 size_t kept,
                                 const Deadline& deadline)
         {
-            const size_t limit = session.site.send_capacity;
+            const size_t limit = session.host.send_capacity;
             const Span<const char> framed = session.response.frame().frameChunk(data, kept, limit);
             if (framed.empty()) { return sendPieces(session, data, kept, deadline); }
             return sendSpan(session, framed, deadline);
@@ -28447,7 +28806,7 @@ namespace kiotty::net::implementation
             const bool is_peer_closed = code == KIOTTY_NET_CODE_PEER_CLOSED;
             const bool is_lost = is_peer_closed || code == KIOTTY_NET_CODE_SOCKET_ERROR;
             if (!is_lost) { return code; }
-            if (session.site.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }
+            if (session.host.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }
             const KiottyNetConnectionStream stream = session.stream;
             const bool is_open = stream.owner->isStreamOpen(stream.id);
             return is_open ? code : KIOTTY_NET_CODE_PEER_CLOSED;
@@ -28457,7 +28816,7 @@ namespace kiotty::net::implementation
                                KiottyNetConnectionStream stream,
                                const KiottyNetConnectionAction& then)
         {
-            HttpSessionPool& sessions = session.site.sessions;
+            HttpSessionPool& sessions = session.host.sessions;
             const bool is_orphaned = sessions.handBack(session);
             const KiottyNetCode closed = stream.owner->closeStream(stream.id, then);
             if (is_orphaned) { sessions.release(session); }
@@ -28467,7 +28826,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionAction finishingActionOf(HttpSession& session, SessionPhase phase)
         {
             if (phase == SessionPhase::WORKING) { return sealedPieceOf(session); }
-            const KiottyNetCode failure = session.stream_failure;
+            const KiottyNetCode failure = session.state.stream_failure;
             if (failure == KIOTTY_NET_CODE_SUCCESS)
             {
                 return firstPieceOf(session, headerBytesOf(session));
@@ -28486,18 +28845,18 @@ namespace kiotty::net::implementation
 
         KiottyNetConnectionAction firstPieceOf(HttpSession& session, size_t sent)
         {
-            session.sent = sent;
-            const size_t capacity = session.site.send_capacity;
+            session.state.sent = sent;
+            const size_t capacity = session.host.send_capacity;
             const Span<const char> chunk = session.response.frame().chunkAt(sent, capacity);
             return thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0);
         }
 
         KiottyNetConnectionAction nextExchangeOf(HttpSession& session)
         {
-            const AfterResponse after = afterResponseOf(session.persistence);
+            const AfterResponse after = afterResponseOf(session.state.persistence);
             if (after == AfterResponse::CLOSE) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
             const KiottyNetConnectionHandle connection = session.request.request().connection;
-            const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
+            const uint32_t wait = session.host.limits.keep_alive_timeout_milliseconds;
             return beginExchange(session, connection, wait).entry_action;
         }
 
@@ -28510,13 +28869,6 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
-    namespace
-    {
-        KiottyNetTransition onFrameRead(HttpSession& session,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event);
-    }
-
     WebSocketHandler::WebSocketHandler()
         : HttpUpgradeHandler()
         , owner(nullptr)
@@ -28525,21 +28877,13 @@ namespace kiotty::net::implementation
         , role(SocketRole::SERVER)
         , mask_state(0)
         , _targets()
-        , _sockets()
-        , _links()
-        , _count(0)
+        , _table()
     {
     }
 
     void WebSocketHandler::initialize(size_t sockets, size_t routes, SocketRole socket_role)
     {
-        if (_sockets.size() < sockets) { _sockets = std::vector<SocketState>(sockets); }
-        if (_links.size() < sockets) { _links = std::vector<SocketLink>(sockets); }
-        for (SocketState& socket : _sockets)
-        {
-            socket.reset();
-        }
-        _count = sockets;
+        _table.initialize(sockets);
         _targets.clear();
         _targets.reserve(routes);
         role = socket_role;
@@ -28568,17 +28912,17 @@ namespace kiotty::net::implementation
 
     SocketState& WebSocketHandler::socketAt(int32_t index)
     {
-        return _sockets[static_cast<size_t>(index)];
+        return _table.socketAt(index);
     }
 
     SocketLink& WebSocketHandler::linkAt(int32_t index)
     {
-        return _links[static_cast<size_t>(index)];
+        return _table.linkAt(index);
     }
 
     Span<SocketLink> WebSocketHandler::links()
     {
-        return Span<SocketLink>{ _links.data(), _count };
+        return _table.links();
     }
 
     KiottyNetTransition WebSocketHandler::answer(HttpSession& session, int32_t upgrade_route)
@@ -28589,19 +28933,10 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetTransition WebSocketHandler::step(HttpSession& session,
-                                               KiottyNetConnectionHandle connection,
+                                               KiottyNetConnectionHandle,
                                                KiottyNetConnectionEvent event)
     {
-        const KiottyNetConnectionEventType type = event.type;
-        if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN)
-        {
-            return onSocketWritten(&session, connection, event);
-        }
-        if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT)
-        {
-            return onSocketTimeout(&session, connection, event);
-        }
-        return onFrameRead(session, connection, event);
+        return stepFrame(session, event);
     }
 
     void WebSocketHandler::end(HttpSession& session, KiottyNetCode reason)
@@ -28609,14 +28944,14 @@ namespace kiotty::net::implementation
         endSocket(session, reason);
     }
 
-    WebSocketHandler& handlerOf(const HttpSite& site)
+    WebSocketHandler& handlerOf(const HttpSessionHost& host)
     {
-        return static_cast<WebSocketHandler&>(*site.upgrade);
+        return static_cast<WebSocketHandler&>(*host.upgrade);
     }
 
     WebSocketHandler& handlerOf(const HttpSession& session)
     {
-        return handlerOf(session.site);
+        return handlerOf(session.host);
     }
 
     SocketState& socketOf(const HttpSession& session)
@@ -28629,29 +28964,6 @@ namespace kiotty::net::implementation
         return handlerOf(session).linkAt(session.id.index);
     }
 
-    namespace
-    {
-        KiottyNetTransition onFrameRead(HttpSession& session,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event)
-        {
-            const HttpState state = static_cast<HttpState>(socketOf(session).read.state);
-            HttpSession* const context = &session;
-            if (state == HttpState::FRAME_LENGTH)
-            {
-                return onFrameLength(context, connection, event);
-            }
-            if (state == HttpState::FRAME_MASK)
-            {
-                return onFrameMask(context, connection, event);
-            }
-            if (state == HttpState::FRAME_PAYLOAD)
-            {
-                return onFramePayload(context, connection, event);
-            }
-            return onFrameStart(context, connection, event);
-        }
-    }
 }
 
 namespace kiotty::net::implementation
@@ -28674,7 +28986,7 @@ namespace kiotty::net::implementation
         WebSocketHandler::initialize(sockets, routes, SocketRole::SERVER);
         owner = this;
         lane = this;
-        site().upgrade = this;
+        host().upgrade = this;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -28701,31 +29013,31 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketServer::socketInfo(int64_t id)
     {
-        return WebSocketAccess(site()).info(id);
+        return WebSocketAccess(host()).info(id);
     }
 
     KiottyNetSpan WebSocketServer::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(site()).header(id, name);
+        return WebSocketAccess(host()).header(id, name);
     }
 
     KiottyNetCode WebSocketServer::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(site()).select(id, protocol);
+        return WebSocketAccess(host()).select(id, protocol);
     }
 
     KiottyNetCode WebSocketServer::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(site()).send(id, opcode, data);
+        return WebSocketAccess(host()).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketServer::closeSocket(int64_t id,
                                                uint16_t status,
                                                Span<const char> reason)
     {
-        return WebSocketAccess(site()).close(id, status, reason);
+        return WebSocketAccess(host()).close(id, status, reason);
     }
 }
 
@@ -28751,7 +29063,7 @@ namespace kiotty::net::implementation
     WebSocketClient::WebSocketClient()
         : EventClient()
         , WebSocketHandler()
-        , _site()
+        , _host()
         , _protocols()
         , _request()
         , _accept()
@@ -28774,12 +29086,12 @@ namespace kiotty::net::implementation
         const KiottyNetCode base = EventClient::initialize(id, configuration.client);
         if (base != KIOTTY_NET_CODE_SUCCESS) { return base; }
         _protocols.clear();
-        _site.limits = limits;
-        _site.receive_capacity = configuration.client.receive_capacity;
-        _site.send_capacity = configuration.client.send_capacity;
-        _site.push_capacity = configuration.client.push_capacity;
-        _site.upgrade = this;
-        _site.registry.initialize(1);
+        _host.limits = limits;
+        _host.receive_capacity = configuration.client.receive_capacity;
+        _host.send_capacity = configuration.client.send_capacity;
+        _host.push_capacity = configuration.client.push_capacity;
+        _host.upgrade = this;
+        _host.registry.initialize(1);
         WebSocketHandler::initialize(1, 0, SocketRole::CLIENT);
         owner = this;
         lane = this;
@@ -28787,8 +29099,8 @@ namespace kiotty::net::implementation
         std::random_device seed;
         mask_state.store((static_cast<uint64_t>(seed()) << 32U) | seed());
         client.events = ClientEvents{ nullptr, nullptr, nullptr };
-        _site.notices.clear();
-        return _site.sessions.initialize(_site, 1, limits);
+        _host.notices.clear();
+        return _host.sessions.initialize(_host, 1, limits);
     }
 
     void WebSocketClient::reset() noexcept
@@ -28800,7 +29112,7 @@ namespace kiotty::net::implementation
     RegistrationResult WebSocketClient::registration()
     {
         if (_is_running.load()) { return RegistrationResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return RegistrationResult::success(_site);
+        return RegistrationResult::success(_host);
     }
 
     KiottyNetCode WebSocketClient::setProtocols(Span<const char> protocols)
@@ -28857,7 +29169,7 @@ namespace kiotty::net::implementation
         const size_t total = head.length + payload.length;
         if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         const Span<char> frame{ _scratch.data(), total };
-        (void)frame.copyFrom(head.span());
+        (void)frame.copyFrom(headBytesOf(head));
         const Span<char> body = frame.skip(head.length);
         (void)body.copyFrom(payload);
         applyMask(body, key, 0);
@@ -28866,29 +29178,29 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketClient::socketInfo(int64_t id)
     {
-        return WebSocketAccess(_site).info(id);
+        return WebSocketAccess(_host).info(id);
     }
 
     KiottyNetSpan WebSocketClient::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(_site).header(id, name);
+        return WebSocketAccess(_host).header(id, name);
     }
 
     KiottyNetCode WebSocketClient::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(_site).select(id, protocol);
+        return WebSocketAccess(_host).select(id, protocol);
     }
 
     KiottyNetCode WebSocketClient::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(_site).send(id, opcode, data);
+        return WebSocketAccess(_host).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketClient::closeSocket(int64_t id, uint16_t status, Span<const char> reason)
     {
-        return WebSocketAccess(_site).close(id, status, reason);
+        return WebSocketAccess(_host).close(id, status, reason);
     }
 
     KiottyNetCode WebSocketClient::prepareUpgrade(const ClientRun& request)
@@ -28928,13 +29240,13 @@ namespace kiotty::net::implementation
         _opened.unpark(begin);
         const KiottyNetCode prepared = prepareUpgrade(request);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
-        _site.app_context = request.app_context;
+        _host.app_context = request.app_context;
         client.peer = KiottyNetConnectionInfo{};
         client.opened = &_opened;
         client.failure = KIOTTY_NET_CODE_SUCCESS;
         client.has_opened = false;
         client.has_failed = false;
-        const KiottyNetStatefulAppContext stateful = webSocketClientStatefulOf(_site);
+        const KiottyNetStatefulAppContext stateful = webSocketClientStatefulOf(_host);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = EventClient::run(handler, request.address, request.tls);
         const KiottyNetCode failure = client.failure;
@@ -28951,7 +29263,7 @@ namespace kiotty::net::implementation
         const bool is_settled = client.has_opened || client.has_failed;
         if (is_settled || !isReported(code)) { return; }
         client.has_failed = true;
-        _site.notices.reportError(_site.app_context, client.peer, code, messageOf(code));
+        _host.notices.reportError(_host.app_context, client.peer, code, messageOf(code));
     }
 
     bool WebSocketClient::isOpen()
