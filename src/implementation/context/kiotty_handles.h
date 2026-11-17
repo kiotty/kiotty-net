@@ -4,8 +4,8 @@
 #include "base/data/repository/endpoint/kiotty_server.h"
 #include "base/data/repository/endpoint/kiotty_stream_client.h"
 #include "http/data/repository/client/kiotty_http_client.h"
-#include "websocket/data/repository/kiotty_websocket_client.h"
-#include "websocket/data/repository/kiotty_websocket_server.h"
+#include "websocket/data/repository/client/kiotty_websocket_client.h"
+#include "websocket/data/repository/server/kiotty_websocket_server.h"
 
 struct KiottyNetServer final : kiotty::net::implementation::Server
 {

@@ -1,8 +1,10 @@
 #include "core/kiotty_base64.h"
 #include "core/kiotty_sha1.h"
-#include "websocket/domain/entity/kiotty_websocket_close.h"
-#include "websocket/domain/entity/kiotty_websocket_frame.h"
-#include "websocket/domain/entity/kiotty_websocket_handshake.h"
+#include "websocket/data/repository/control/kiotty_websocket_close_rules.h"
+#include "websocket/data/repository/frame/kiotty_websocket_frame_builder.h"
+#include "websocket/data/repository/frame/kiotty_websocket_frame_parser.h"
+#include "websocket/data/repository/frame/kiotty_websocket_mask_rules.h"
+#include "websocket/data/repository/handshake/kiotty_websocket_key_rules.h"
 
 #include <gtest/gtest.h>
 
@@ -155,14 +157,14 @@ TEST(WebSocketFrame, ExtendedLengthsAreMinimalAndBelowTheTopBit)
 
 TEST(WebSocketFrame, BuildsTheRfcExampleHeads)
 {
-    EXPECT_EQ(bytesOf({ 0x81, 0x05 }), textOf(net::buildFrameHead(FrameOpcode::TEXT, 5).span()));
-    EXPECT_EQ(bytesOf({ 0x82, 0x7E, 0x01, 0x00 }), textOf(net::buildFrameHead(FrameOpcode::BINARY, 256).span()));
+    EXPECT_EQ(bytesOf({ 0x81, 0x05 }), textOf(net::headBytesOf(net::buildFrameHead(FrameOpcode::TEXT, 5))));
+    EXPECT_EQ(bytesOf({ 0x82, 0x7E, 0x01, 0x00 }), textOf(net::headBytesOf(net::buildFrameHead(FrameOpcode::BINARY, 256))));
     EXPECT_EQ(bytesOf({ 0x82, 0x7F, 0, 0, 0, 0, 0, 1, 0, 0 }),
-              textOf(net::buildFrameHead(FrameOpcode::BINARY, 65536).span()));
-    EXPECT_EQ(bytesOf({ 0x82, 0x7D }), textOf(net::buildFrameHead(FrameOpcode::BINARY, 125).span()));
-    EXPECT_EQ(bytesOf({ 0x82, 0x7E, 0xFF, 0xFF }), textOf(net::buildFrameHead(FrameOpcode::BINARY, 65535).span()));
+              textOf(net::headBytesOf(net::buildFrameHead(FrameOpcode::BINARY, 65536))));
+    EXPECT_EQ(bytesOf({ 0x82, 0x7D }), textOf(net::headBytesOf(net::buildFrameHead(FrameOpcode::BINARY, 125))));
+    EXPECT_EQ(bytesOf({ 0x82, 0x7E, 0xFF, 0xFF }), textOf(net::headBytesOf(net::buildFrameHead(FrameOpcode::BINARY, 65535))));
     EXPECT_EQ(bytesOf({ 0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d }),
-              textOf(net::buildMaskedFrameHead(FrameOpcode::TEXT, 5, RFC_KEY).span()));
+              textOf(net::headBytesOf(net::buildMaskedFrameHead(FrameOpcode::TEXT, 5, RFC_KEY))));
 }
 
 TEST(WebSocketFrame, MaskingIsTheRfcExampleAndHonoursTheOffset)

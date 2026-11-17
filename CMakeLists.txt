@@ -135,16 +135,22 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/request/kiotty_http_request_head_builder.cpp
     src/implementation/http/data/repository/body/kiotty_http_upload_rules.cpp
     src/implementation/http/data/repository/header/kiotty_http_reply_headers_parser.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_frame.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_close.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_handshake.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_lane.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_upgrade.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_rows.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_timing.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_client_machine.cpp
-    src/implementation/websocket/domain/entity/kiotty_websocket_access.cpp
-    src/implementation/websocket/data/repository/kiotty_websocket_socket.cpp
+    src/implementation/websocket/data/repository/frame/kiotty_websocket_frame_parser.cpp
+    src/implementation/websocket/data/repository/frame/kiotty_websocket_frame_builder.cpp
+    src/implementation/websocket/data/repository/frame/kiotty_websocket_mask_rules.cpp
+    src/implementation/websocket/data/repository/control/kiotty_websocket_close_rules.cpp
+    src/implementation/websocket/data/repository/handshake/kiotty_websocket_key_rules.cpp
+    src/implementation/websocket/data/repository/send/kiotty_websocket_lane.cpp
+    src/implementation/websocket/data/repository/handshake/kiotty_websocket_upgrade.cpp
+    src/implementation/websocket/data/repository/handshake/kiotty_websocket_opening.cpp
+    src/implementation/websocket/data/repository/frame/kiotty_websocket_frame_reader.cpp
+    src/implementation/websocket/data/repository/message/kiotty_websocket_message.cpp
+    src/implementation/websocket/data/repository/control/kiotty_websocket_control.cpp
+    src/implementation/websocket/data/repository/control/kiotty_websocket_timing.cpp
+    src/implementation/websocket/data/repository/client/kiotty_websocket_client_machine.cpp
+    src/implementation/websocket/data/repository/server/kiotty_websocket_access.cpp
+    src/implementation/websocket/data/state/kiotty_websocket_socket_state.cpp
+    src/implementation/websocket/data/datasource/kiotty_websocket_socket_table.cpp
     src/implementation/http/data/repository/machine/kiotty_http_machine.cpp
     src/implementation/base/data/infra/clock/kiotty_wall_clock.cpp
     src/implementation/http/data/repository/request/kiotty_http_request_store.cpp
@@ -159,10 +165,10 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/server/kiotty_http_configuration.cpp
     src/implementation/http/data/repository/server/kiotty_http_server.cpp
     src/implementation/http/data/repository/server/kiotty_http_work.cpp
-    src/implementation/websocket/data/repository/kiotty_websocket_handler.cpp
-    src/implementation/websocket/data/repository/kiotty_websocket_server.cpp
-    src/implementation/websocket/data/repository/kiotty_websocket_client.cpp
-    src/implementation/websocket/data/repository/kiotty_websocket_endpoint.cpp
+    src/implementation/websocket/data/repository/server/kiotty_websocket_handler.cpp
+    src/implementation/websocket/data/repository/server/kiotty_websocket_server.cpp
+    src/implementation/websocket/data/repository/client/kiotty_websocket_client.cpp
+    src/implementation/websocket/data/repository/endpoint/kiotty_websocket_endpoint.cpp
     src/implementation/base/domain/usecases/io_loop/kiotty_io_loop_submit.cpp
     src/implementation/base/data/repository/endpoint/kiotty_endpoint.cpp
     src/implementation/base/data/repository/configuration/kiotty_configuration.cpp

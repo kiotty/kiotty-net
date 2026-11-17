@@ -3,7 +3,7 @@
 #include "base/data/infra/tls/kiotty_tls_profile.h"
 #include "support/kiotty_test_peer.h"
 #include "support/kiotty_test_wait.h"
-#include "websocket/domain/entity/kiotty_websocket_handshake.h"
+#include "websocket/data/repository/handshake/kiotty_websocket_key_rules.h"
 
 #include <gtest/gtest.h>
 

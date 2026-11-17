@@ -1496,16 +1496,28 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | 층 | 파일 | 하는 일 |
 |---|---|---|
 | core | `kiotty_sha1`, `kiotty_base64` | `Sec-WebSocket-Accept` 와 키. 할당 없음 |
-| websocket/domain/entity | `kiotty_websocket_frame` | frame 머리 파싱 / 만들기 (최대 14 바이트), `applyMask(span, key, offset)`, `nextMaskKey(state)` |
-| | `kiotty_websocket_close` | close payload 파싱 / 만들기, 보낼 수 있는 status |
-| | `kiotty_websocket_handshake` | `isWebSocketKey`, `acceptOf` |
-| | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse(response, accept, offered)`), subprotocol 선택 |
-| | `kiotty_websocket_rows` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onSocketTimeout`), `openSocket`, `endSocket`, 역할로 콜백을 가르는 `callOpen` / `callMessage` / `callClose` |
+| websocket/domain/entity | `kiotty_websocket_frame`, `_close`, `_handshake`, `_target` | 값만: frame 머리, close payload, Accept 의 상수와 struct, `SocketRole`, `WebSocketTarget` (서버 경로의 콜백 넷과 경로 번호), `ClientEvents`, `ProtocolText` |
+| websocket/data/repository/frame | `kiotty_websocket_frame_parser` | `parseFrameStart`, `extendedLengthBytesOf`, `parseExtendedLength`, `parseMaskKey`, `isControl` |
+| | `kiotty_websocket_frame_builder` | frame 머리 만들기 (최대 14 바이트), `headBytesOf(head)` |
+| | `kiotty_websocket_mask_rules` | `applyMask(span, key, offset)`, `nextMaskKey(state)` |
+| | `kiotty_websocket_frame_reader` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onFramePayload`), `readNext`, `nextFrame` |
+| websocket/data/repository/message | `kiotty_websocket_message` | data frame 이어 붙이기 (`storePiece`), 순서 검사 (`isInOrder`), 끝의 UTF-8 검사와 `callMessage` (`finishData`) |
+| websocket/data/repository/control | `kiotty_websocket_close_rules` | close payload 파싱 / 만들기, 보낼 수 있는 status |
+| | `kiotty_websocket_control` | ping / pong / close 답 (`finishControl`), `failSocket`, `onSocketTimeout`, `endSocket`, `callClose` |
 | | `kiotty_websocket_timing` | 다음 read 의 timeout, `onClose` 의 `{ code, status, reason }` |
-| | `kiotty_websocket_lane` | push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
+| websocket/data/repository/handshake | `kiotty_websocket_key_rules` | `isWebSocketKey`, `acceptOf` |
+| | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse(response, accept, offered)`), subprotocol 선택 |
+| | `kiotty_websocket_opening` | 101 송신 (`onSocketWritten`), `openSocket`, `callOpen` |
+| websocket/data/repository/send | `kiotty_websocket_lane` | `PushLane`, push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
+| websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현, 라우트 대상, `SocketTable`) |
+| | `kiotty_websocket_server` | `WebSocketServer` |
 | | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast) |
+| websocket/data/repository/client | `kiotty_websocket_client` | `WebSocketClient` |
 | | `kiotty_websocket_client_machine` | 클라이언트의 표 (Upgrade 요청 → 상태줄 → 헤더 줄 → frame 행) |
-| repository/websocket | `kiotty_websocket_socket` | `SocketState` (IO thread 만), `SocketLink` (다른 thread 도), `WebSocketTarget` (서버 경로의 콜백 넷과 경로 번호), `ClientEvents` / `ClientUpgrade` (클라이언트), `PushLane` |
+| websocket/data/repository/endpoint | `kiotty_websocket_endpoint` | `KiottyNetWebSocketEndpoint` |
+| websocket/data/state | `kiotty_websocket_socket_state` | `SocketState` (IO thread 만), `SocketLink` (다른 thread 도) |
+| | `kiotty_websocket_client_state` | `ClientUpgrade` (클라이언트) |
+| websocket/data/datasource | `kiotty_websocket_socket_table` | `SocketTable`: `SocketState[]`, `SocketLink[]` (initialize 때 크기) |
 | context | `KiottyNetWebSocketEndpoint` | handle 의 owner. 소켓 함수 다섯의 가상 함수. HttpServer 와 WebSocketClient 가 상속 |
 | context | `WebSocketClient` | `EventClient` + `PushLane` + `KiottyNetWebSocketEndpoint` |
 
@@ -1690,7 +1702,7 @@ KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span
     const size_t total = head.length + payload.length;
     if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
     const Span<char> frame{ _scratch.data(), total };
-    (void)frame.copyFrom(head.span());
+    (void)frame.copyFrom(headBytesOf(head));
     const Span<char> body = frame.skip(head.length);
     (void)body.copyFrom(payload);
     applyMask(body, key, 0);

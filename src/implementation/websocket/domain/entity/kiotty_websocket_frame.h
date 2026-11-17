@@ -1,10 +1,7 @@
 #pragma once
 
-#include "core/kiotty_result.h"
-#include "core/kiotty_span.h"
 #include "kiotty_net_websocket.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -14,6 +11,15 @@ namespace kiotty::net::implementation
     inline constexpr size_t MASK_KEY_BYTES = 4;
     inline constexpr size_t MAX_FRAME_HEAD_BYTES = 14;
     inline constexpr size_t MAX_CONTROL_PAYLOAD_BYTES = 125;
+
+    inline constexpr uint8_t  FINAL_BIT = 0x80;
+    inline constexpr uint8_t  MASK_BIT = 0x80;
+    inline constexpr uint8_t  SHORT_LENGTH_CODE = 126;
+    inline constexpr uint8_t  LONG_LENGTH_CODE = 127;
+    inline constexpr size_t   SHORT_LENGTH_BYTES = 2;
+    inline constexpr size_t   LONG_LENGTH_BYTES = 8;
+    inline constexpr uint64_t SHORT_LENGTH_MIN = 126;
+    inline constexpr uint64_t LONG_LENGTH_MIN = 0x10000;
 
     inline constexpr KiottyNetWebSocketStatus CLOSE_PROTOCOL =
         KIOTTY_NET_WEB_SOCKET_STATUS_PROTOCOL_ERROR;
@@ -57,20 +63,5 @@ namespace kiotty::net::implementation
     {
         char   bytes[MAX_FRAME_HEAD_BYTES];
         size_t length;
-
-        Span<const char> span() const;
     };
-
-    using FrameStartResult = Result<FrameStart, KiottyNetWebSocketStatus>;
-    using FrameLengthResult = Result<uint64_t, KiottyNetWebSocketStatus>;
-
-    FrameStartResult  parseFrameStart(Span<const char> bytes);
-    size_t            extendedLengthBytesOf(uint8_t length_code);
-    FrameLengthResult parseExtendedLength(Span<const char> bytes);
-    MaskKey           parseMaskKey(Span<const char> bytes);
-    bool              isControl(FrameOpcode opcode);
-    FrameHead         buildFrameHead(FrameOpcode opcode, uint64_t length);
-    FrameHead         buildMaskedFrameHead(FrameOpcode opcode, uint64_t length, const MaskKey& key);
-    void              applyMask(Span<char> data, const MaskKey& key, size_t offset);
-    MaskKey           nextMaskKey(std::atomic<uint64_t>& state);
 }

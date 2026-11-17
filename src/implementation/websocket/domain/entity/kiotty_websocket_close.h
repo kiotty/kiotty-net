@@ -1,11 +1,11 @@
 #pragma once
 
 #include "core/kiotty_fixed_string.h"
-#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/domain/entity/kiotty_websocket_frame.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -24,11 +24,5 @@ namespace kiotty::net::implementation
         uint16_t         status;
     };
 
-    using ClosePayloadResult = Result<ClosePayload, KiottyNetWebSocketStatus>;
     using CloseText = FixedString<MAX_CONTROL_PAYLOAD_BYTES + 1>;
-    using CloseTextResult = Result<CloseText, KiottyNetCode>;
-
-    ClosePayloadResult parseClosePayload(Span<const char> payload);
-    CloseTextResult    buildClosePayload(uint16_t status, Span<const char> reason);
-    bool               isSendableCloseStatus(uint16_t status);
 }

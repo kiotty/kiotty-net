@@ -6,8 +6,8 @@
 #include "core/kiotty_text.h"
 #include "http/data/repository/header/kiotty_http_token_rules.h"
 #include "http/data/repository/server/kiotty_http_configuration.h"
-#include "websocket/data/repository/kiotty_websocket_endpoint.h"
-#include "websocket/domain/entity/kiotty_websocket_access.h"
+#include "websocket/data/repository/endpoint/kiotty_websocket_endpoint.h"
+#include "websocket/data/repository/server/kiotty_websocket_access.h"
 
 namespace net = kiotty::net::implementation;
 
