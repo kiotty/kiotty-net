@@ -1,9 +1,9 @@
 #pragma once
 
-#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "kiotty_net_statemachine.h"
+#include "websocket/data/state/kiotty_websocket_client_state.h"
 
 namespace kiotty::net::implementation
 {
-    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSessionHost& host);
+    KiottyNetStatefulAppContext webSocketClientStatefulOf(WebSocketClientState& state);
 }

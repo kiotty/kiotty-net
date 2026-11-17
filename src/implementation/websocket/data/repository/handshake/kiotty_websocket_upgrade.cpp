@@ -34,6 +34,13 @@ namespace kiotty::net::implementation
             return headerOf(request, literalOf(name));
         }
 
+        template <size_t N>
+        Span<const char> headerNamed(Span<const KiottyNetHttpHeader> headers,
+                                     const char (&name)[N])
+        {
+            return headerOf(headers, literalOf(name));
+        }
+
         bool                hasToken(Span<const char> list,
                                      Span<const char> token,
                                      TokenMatch match);
@@ -84,9 +91,14 @@ namespace kiotty::net::implementation
 
     Span<const char> headerOf(const KiottyNetHttpRequest& request, Span<const char> name)
     {
-        for (size_t i = 0; i < request.header_count; ++i)
+        const Span<const KiottyNetHttpHeader> headers{ request.headers, request.header_count };
+        return headerOf(headers, name);
+    }
+
+    Span<const char> headerOf(Span<const KiottyNetHttpHeader> headers, Span<const char> name)
+    {
+        for (const KiottyNetHttpHeader& header : headers)
         {
-            const KiottyNetHttpHeader& header = request.headers[i];
             const Span<const char> found{ header.name.data, header.name.length };
             if (equalsIgnoreCase(found, name)) { return spanOf(header.value); }
         }
@@ -105,7 +117,7 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    bool isUpgradeResponse(const KiottyNetHttpRequest& response,
+    bool isUpgradeResponse(Span<const KiottyNetHttpHeader> response,
                            Span<const char> accept,
                            Span<const char> offered)
     {

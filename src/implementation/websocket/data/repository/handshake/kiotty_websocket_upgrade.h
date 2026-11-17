@@ -15,10 +15,12 @@ namespace kiotty::net::implementation
     KiottyNetWebSocketHandle socketHandleOf(const WebSocketHandler& handler,
                                             const UpgradeSession& upgrade);
     Span<const char>         headerOf(const KiottyNetHttpRequest& request, Span<const char> name);
+    Span<const char>         headerOf(Span<const KiottyNetHttpHeader> headers,
+                                      Span<const char> name);
     KiottyNetCode            chooseProtocol(WebSocketHandler& handler,
                                             const UpgradeSession& upgrade,
                                             Span<const char> protocol);
-    bool                     isUpgradeResponse(const KiottyNetHttpRequest& response,
+    bool                     isUpgradeResponse(Span<const KiottyNetHttpHeader> response,
                                                Span<const char> accept,
                                                Span<const char> offered);
 }

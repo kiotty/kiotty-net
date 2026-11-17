@@ -99,7 +99,7 @@ namespace kiotty::net::implementation
                                      KiottyNetSpan data)
     {
         HttpSessionHost& host = server.host();
-        WebSocketAccess access(host.registry, server, host.push_capacity);
+        WebSocketAccess access(&host.registry, server, host.push_capacity);
         return access.broadcast(path, opcode, data);
     }
 }

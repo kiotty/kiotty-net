@@ -14,7 +14,7 @@ namespace kiotty::net::implementation
     class WebSocketAccess
     {
     public:
-        WebSocketAccess(const HttpRegistry& registry,
+        WebSocketAccess(const HttpRegistry* registry,
                         WebSocketHandler& handler,
                         size_t push_capacity);
 
@@ -37,7 +37,7 @@ namespace kiotty::net::implementation
         LinkResult    openLink(int64_t id);
         KiottyNetCode checkData(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data) const;
 
-        const HttpRegistry& _registry;
+        const HttpRegistry* _registry;
         WebSocketHandler&   _handler;
         size_t              _push_capacity;
     };

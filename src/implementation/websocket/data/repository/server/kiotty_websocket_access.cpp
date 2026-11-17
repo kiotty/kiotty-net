@@ -17,7 +17,7 @@ namespace kiotty::net::implementation
         bool        isBroadcastTarget(const SocketLink& link, int32_t path);
     }
 
-    WebSocketAccess::WebSocketAccess(const HttpRegistry& registry,
+    WebSocketAccess::WebSocketAccess(const HttpRegistry* registry,
                                      WebSocketHandler& handler,
                                      size_t push_capacity)
         : _registry(registry)
@@ -85,7 +85,8 @@ namespace kiotty::net::implementation
         {
             const TextResult text = parseText(path, MAX_SOCKET_PATH_LENGTH);
             if (!text) { return text.code; }
-            index = _registry.find(text.value);
+            if (_registry == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+            index = _registry->find(text.value);
             if (index == NO_UPGRADE_ROUTE) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         }
         KiottyNetCode result = KIOTTY_NET_CODE_SUCCESS;

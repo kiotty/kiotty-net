@@ -1774,31 +1774,53 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 
 ### 5.8 클라이언트
 
-`WebSocketClient` 는 `EventClient` 에 HttpSessionHost 하나 (Session 하나, 라우트 표 1 칸, `role = CLIENT`) 를 든 것이다. create 때 잡는 것: Session 의 버퍼 (4.2 와 같은 limits), Upgrade 요청 버퍼 (1024 바이트), Accept 값, subprotocol 후보 (127 바이트), push scratch, mask 상태 (`HttpSessionHost::mask_state`).
+`WebSocketClient` 는 `EventClient` 에 자기 `WebSocketClientState` (`websocket/data/state/kiotty_websocket_client_state.h`, R7-3) 를 든 것이다 (`role = CLIENT`). http 의 Session, session 풀, 라우트 표는 없다. create 때 잡는 것: 101 응답 머리 (`HttpReplyStore`: `max_header_bytes`, `max_headers`), message 버퍼 (`max_body_bytes`), Upgrade 요청 버퍼 (1024 바이트), Accept 값, subprotocol 후보 (127 바이트), push scratch, mask 상태.
 
-등록 (V3). 콜백 넷은 host 에 둔다. Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `HttpNotices::setError` (모양이 `KiottyNetHttpErrorAction` 과 같다). usecase `onWebSocketClient*` 가 `client.registration()` (run 중이면 `BUSY`, 아니면 `HttpSessionHost&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (usecase `setWebSocketClientProtocols` 가 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
+```cpp
+struct WebSocketClientState
+{
+    HttpReplyStore           reply;            // 101 의 헤더 줄 (HttpClient 와 같은 저장소)
+    HttpResponseStore        response;         // 빈 것. UpgradeSession 의 칸을 채울 뿐 (answer 는 서버만)
+    KiottyNetHttpRequest     request;          // connection 만. openSocket 이 본다
+    KiottyNetConnectionInfo  info;             // createSession 때
+    Span<char>               message;          // message 를 모으는 곳
+    KiottyNetHttpLimits      limits;
+    size_t                   receive_capacity;
+    size_t                   push_capacity;
+    KiottyNetAppContext      app_context;      // run 의 것
+    KiottyNetHttpErrorAction on_error;
+    WebSocketHandler*        handler;          // 자기 자신 (WebSocketClient 가 WebSocketHandler 다)
+    PoolHandle               id;               // { generation, 0 }. 연결마다 generation 을 올린다
+    uint64_t                 header_deadline;
+    size_t                   sent;             // Upgrade 요청을 보낸 바이트
+};
+```
+
+frame 단계는 서버와 같고, 클라이언트는 `clientUpgradeOf(state)` 로 `UpgradeSession` 을 만들어 넘긴다.
+
+등록 (V3). Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `state.on_error` (모양이 `KiottyNetHttpErrorAction` 과 같다). usecase `onWebSocketClient*` 가 `client.registration()` (run 중이면 `BUSY`, 아니면 `WebSocketClientState&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (usecase `setWebSocketClientProtocols` 가 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
 
 | 상태 | 사건 | 행 |
 |---|---|---|
-| (어디서나) | CONNECTED | generation 을 올리고 Session 을 비운다. `header_deadline` 을 잡고 Upgrade 요청을 write lane 으로 (timeout `header_timeout`) |
+| (어디서나) | CONNECTED | generation 을 올리고 `reply`, socket 칸, `sent` 를 비운다. `header_deadline` 을 잡고 Upgrade 요청을 write lane 으로 (timeout `header_timeout`) |
 | SENDING | WRITTEN | 남았으면 이어서, 다 보냈으면 상태줄 read (남은 header 시간) |
 | REQUEST_LINE (상태줄) | READ | `HTTP/1.1 101` 다음이 끝이거나 공백이 아니면 `PROTOCOL_ERROR` |
-| HEADER_LINE | READ | 4.3 의 `takeHeader` 로 요청 저장소에 (`max_header_bytes`, `max_headers`). 빈 줄이면 `isUpgradeResponse(response, accept, protocols)` 를 보고, 101 의 `Sec-WebSocket-Protocol` 을 `socket.protocol` 에 담은 뒤 (`openSocket` 이 요청 저장소를 다시 쓰기 전에) `openSocket` |
+| HEADER_LINE | READ | `HttpReplyStore::takeHeader` 로 (`max_header_bytes`, `max_headers`). 줄은 `thenReadUntil("\r\n", min(receive_capacity, max_header_bytes + 2), 남은 header 시간)`. 빈 줄이면 `isUpgradeResponse(reply.headers(), accept, protocols)` 를 보고, 101 의 `Sec-WebSocket-Protocol` 을 `socket.protocol` 에 담은 뒤 `openSocket` |
 | UPGRADED | READ, TIMEOUT | `stepFrame` (5.4 ~ 5.7 그대로) |
 | (어디서나) | TIMEOUT | `TIMEOUT` (`UPGRADED` 의 TIMEOUT 은 위의 행이 먼저 잡는다) |
 | (어디서나) | CLOSED | 열리기 전이면 끊긴 이유를 `upgrade.failure` 에 적는다. `endSocket` |
 
-- **요청.** `prepareUpgrade` 가 run 마다 만든다 (run 의 path, 후보가 있으면 `Sec-WebSocket-Protocol`). 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`. run 은 app_context 를 `HttpSessionHost::app_context` 에, 후보를 `upgrade.protocols` 에 두고 `peer`, `failure`, `has_opened`, `has_failed` 를 지운다.
+- **요청.** `prepareUpgrade` 가 run 마다 만든다 (run 의 path, 후보가 있으면 `Sec-WebSocket-Protocol`). 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`. run 은 app_context 를 `state.app_context` 에, 후보를 `upgrade.protocols` 에 두고 `peer`, `failure`, `has_opened`, `has_failed` 를 지운다.
 - **101 검사의 subprotocol.** 101 의 `Sec-WebSocket-Protocol` 이 비었으면 통과, 아니면 후보 목록의 한 항목과 정확히 같아야 한다 (`hasToken(offered, protocol, EXACT)`). 후보가 비었는데 오면 실패다.
 - **run 의 반환값.** `EventClient::run` 의 반환값을 그대로 쓰되, 열리기 전에 우리가 `PROTOCOL_ERROR` / `TIMEOUT` 으로 닫았으면 base 는 `PEER_CLOSED` 를 돌려주므로 `upgrade.failure` 로 바꾼다.
-- **onError 는 열리기 전에 한 번.** 길은 둘이다. client machine 의 `reportError` (base 의 오류 보고: TLS handshake 실패 등) 는 `has_opened` 도 `has_failed` 도 아니면 `has_failed` 를 세우고 notices 로 넘긴다. run 이 끝나면 `reportUnopened(result)` 가 같은 조건에서 결과 code 로 알린다 (`SUCCESS`, `CLOSED`, `INVALID_ARGUMENT` 는 알리지 않는다). info 는 `createSession` 이 적어 둔 `upgrade.peer` (연결 전 실패면 빈 값). 둘 다 IO thread (= run 의 thread) 라 플래그는 plain bool 이다.
-- **bye** 는 `KiottyNet_closeWebSocket(client->socket(), status, reason)` 이다. 새 길은 없다.
+- **onError 는 열리기 전에 한 번.** 길은 둘이다. client machine 의 `reportError` (base 의 오류 보고: TLS handshake 실패 등) 는 `has_opened` 도 `has_failed` 도 아니면 `has_failed` 를 세우고 `state.on_error` 로 넘긴다. run 이 끝나면 `reportUnopened(result)` 가 같은 조건에서 결과 code 로 알린다 (`SUCCESS`, `CLOSED`, `INVALID_ARGUMENT` 는 알리지 않는다). info 는 `createSession` 이 적어 둔 `upgrade.peer` (연결 전 실패면 빈 값). 둘 다 IO thread (= run 의 thread) 라 플래그는 plain bool 이다.
+- **bye** 는 usecase `byeWebSocketClient` 가 `closeWebSocket(client.socket(), status, reason)` 을 부른다. 새 길은 없다.
 - **await.** `Parker` 하나다. `openSocket` 이 깨우고 (그때 `SocketLink::socket` 이 0 이 아니다), run 이 끝날 때 결과를 적고 깨운다. await 는 "소켓이 열렸으면 `SUCCESS`, run 이 끝났으면 그 결과" 가 될 때까지 기다린다. run 의 시작에서 결과를 지우므로 그 전의 짧은 동안은 앞 run 의 결과가 보인다.
-- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `HttpSessionHost::mask_state` 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
+- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `WebSocketHandler::mask_state` 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
 
 ### 5.9 다른 thread 에서 오는 것
 
-`WebSocketAccess` 가 공개 함수의 몸이다. 소유자 (HttpServer, WebSocketClient) 는 `KiottyNetWebSocketEndpoint` 의 가상 함수에서 `WebSocketAccess(_host)` 를 만들어 넘긴다.
+`WebSocketAccess` 가 공개 함수의 몸이다. 소유자 (WebSocketServer, WebSocketClient) 는 `KiottyNetWebSocketEndpoint` 의 가상 함수에서 `WebSocketAccess(registry, handler, push_capacity)` 를 만들어 넘긴다. 클라이언트의 registry 는 NULL 이다 (broadcast 의 path 는 서버만).
 
 - `send`: 인자 검사 (빈 data, 모르는 opcode) → `openLink` → 플래그가 서 있으면 `CLOSED` → `pushFrame`.
 - `close`: `openLink` → `pushClose` (status 와 reason 검사, CAS, push lane).

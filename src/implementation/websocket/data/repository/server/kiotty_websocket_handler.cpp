@@ -1,6 +1,5 @@
 #include "websocket/data/repository/server/kiotty_websocket_handler.h"
 
-#include "http/data/state/kiotty_http_session.h"
 #include "websocket/data/repository/control/kiotty_websocket_control.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_reader.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_opening.h"
@@ -85,26 +84,6 @@ namespace kiotty::net::implementation
     void WebSocketHandler::end(const UpgradeSession& upgrade, KiottyNetCode reason)
     {
         endSocket(*this, upgrade, reason);
-    }
-
-    WebSocketHandler& handlerOf(const HttpSessionHost& host)
-    {
-        return static_cast<WebSocketHandler&>(*host.upgrade);
-    }
-
-    WebSocketHandler& handlerOf(const HttpSession& session)
-    {
-        return handlerOf(session.host);
-    }
-
-    SocketState& socketOf(const HttpSession& session)
-    {
-        return handlerOf(session).socketAt(session.id.index);
-    }
-
-    SocketLink& linkOf(const HttpSession& session)
-    {
-        return handlerOf(session).linkAt(session.id.index);
     }
 
     SocketState& socketOf(WebSocketHandler& handler, const UpgradeSession& upgrade)

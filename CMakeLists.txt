@@ -153,6 +153,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/websocket/data/repository/client/kiotty_websocket_client_machine.cpp
     src/implementation/websocket/data/repository/server/kiotty_websocket_access.cpp
     src/implementation/websocket/data/state/kiotty_websocket_socket_state.cpp
+    src/implementation/websocket/data/state/kiotty_websocket_client_state.cpp
     src/implementation/websocket/data/datasource/kiotty_websocket_socket_table.cpp
     src/implementation/http/data/repository/machine/kiotty_http_machine.cpp
     src/implementation/base/data/infra/clock/kiotty_wall_clock.cpp

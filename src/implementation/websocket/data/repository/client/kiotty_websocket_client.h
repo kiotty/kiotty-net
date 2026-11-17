@@ -4,7 +4,6 @@
 #include "core/kiotty_fixed_string.h"
 #include "core/kiotty_parker.h"
 #include "core/kiotty_result.h"
-#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/data/repository/endpoint/kiotty_websocket_endpoint.h"
 #include "websocket/data/repository/send/kiotty_websocket_lane.h"
@@ -22,7 +21,7 @@ namespace kiotty::net::implementation
 
     using SocketPath = FixedString<KIOTTY_NET_MAX_URL_LENGTH>;
     using UpgradeText = FixedString<MAX_UPGRADE_REQUEST_BYTES>;
-    using RegistrationResult = Result<HttpSessionHost&, KiottyNetCode>;
+    using RegistrationResult = Result<WebSocketClientState&, KiottyNetCode>;
 
     struct WebSocketClientConfiguration
     {
@@ -77,12 +76,16 @@ namespace kiotty::net::implementation
                                            Span<const char> reason) override;
 
     private:
+        void          prepareState(const WebSocketClientConfiguration& configuration);
         KiottyNetCode prepareUpgrade(const ClientRun& request);
         KiottyNetCode runOnce(const ClientRun& request);
         void          reportUnopened(KiottyNetCode code);
         bool          isOpen();
 
-        HttpSessionHost       _host;
+        std::vector<char>                _reply_bytes;
+        std::vector<KiottyNetHttpHeader> _reply_entries;
+        std::vector<char>                _message_bytes;
+        WebSocketClientState             _state;
         ProtocolText          _protocols;
         UpgradeText           _request;
         AcceptText            _accept;

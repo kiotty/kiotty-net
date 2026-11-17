@@ -2,8 +2,16 @@
 
 #include "core/kiotty_parker.h"
 #include "core/kiotty_span.h"
+#include "core/pool/kiotty_pool_handle.h"
+#include "http/data/repository/response/kiotty_http_reply_store.h"
+#include "http/data/repository/response/kiotty_http_response_store.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_handler.h"
+#include "kiotty_net_http.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/domain/entity/kiotty_websocket_target.h"
+
+#include <cstddef>
+#include <cstdint>
 
 namespace kiotty::net::implementation
 {
@@ -19,4 +27,28 @@ namespace kiotty::net::implementation
         bool                    has_opened;
         bool                    has_failed;
     };
+
+    class WebSocketHandler;
+
+    struct WebSocketClientState
+    {
+        WebSocketClientState();
+
+        HttpReplyStore           reply;
+        HttpResponseStore        response;
+        KiottyNetHttpRequest     request;
+        KiottyNetConnectionInfo  info;
+        Span<char>               message;
+        KiottyNetHttpLimits      limits;
+        size_t                   receive_capacity;
+        size_t                   push_capacity;
+        KiottyNetAppContext      app_context;
+        KiottyNetHttpErrorAction on_error;
+        WebSocketHandler*        handler;
+        PoolHandle               id;
+        uint64_t                 header_deadline;
+        size_t                   sent;
+    };
+
+    UpgradeSession clientUpgradeOf(WebSocketClientState& state);
 }

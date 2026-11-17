@@ -9,7 +9,7 @@ namespace kiotty::net::implementation
     {
         WebSocketAccess serverAccessOf(HttpSessionHost& host, WebSocketHandler& handler)
         {
-            return WebSocketAccess(host.registry, handler, host.push_capacity);
+            return WebSocketAccess(&host.registry, handler, host.push_capacity);
         }
     }
 
