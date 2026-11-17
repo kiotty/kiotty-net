@@ -134,7 +134,7 @@ namespace kiotty::net::implementation
             SocketFrame& frame = socketOf(session).frame;
             frame.remaining = length;
             const uint64_t used = session.request.request().body.length;
-            const uint64_t room = session.site.limits.max_body_bytes - used;
+            const uint64_t room = session.host.limits.max_body_bytes - used;
             if (isOversized(frame, room)) { return failSocket(session, FRAME_TOO_BIG); }
             const bool is_masked = frame.masking == FrameMasking::MASKED;
             const FrameRead mask_read{ MASK_KEY_BYTES, WebSocketState::FRAME_MASK };
@@ -153,7 +153,7 @@ namespace kiotty::net::implementation
         {
             const SocketFrame& frame = socketOf(session).frame;
             const FrameEnd end = frameEndOf(frame);
-            const size_t capacity = session.site.receive_capacity;
+            const size_t capacity = session.host.receive_capacity;
             if (end == FrameEnd::CONTROL) { return finishControl(session); }
             if (end == FrameEnd::DATA) { return finishData(session); }
             const FrameRead payload_read = payloadReadOf(frame, capacity);

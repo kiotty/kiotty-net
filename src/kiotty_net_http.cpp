@@ -21,7 +21,7 @@ namespace
     FillingResult fillingOf(KiottyNetHttpResponseHandle response)
     {
         if (response.server == nullptr) { return FillingResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
-        return net::HttpWork(response.server->site()).fill(response.id);
+        return net::HttpWork(response.server->host()).fill(response.id);
     }
 
     KiottyNetCode setBody(KiottyNetHttpResponseHandle response,
@@ -119,7 +119,7 @@ KiottyNetCode KiottyNet_setHttpHeader(KiottyNetHttpResponseHandle response,
     const FillingResult filling = fillingOf(response);
     if (!filling) { return filling.code; }
     net::HttpSession& session = filling.value();
-    const size_t limit = session.site.limits.response_bytes;
+    const size_t limit = session.host.limits.response_bytes;
     const net::TextResult parsed_name = net::parseText(name, limit);
     if (!parsed_name) { return parsed_name.code; }
     const net::TextResult parsed_value = net::parseText(value, limit);
@@ -170,7 +170,7 @@ KiottyNetCode KiottyNet_setHttpBodyStream(KiottyNetHttpResponseHandle response,
 KiottyNetCode KiottyNet_startHttpWork(KiottyNetHttpResponseHandle response)
 {
     if (response.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(response.server->site()).start(response.id);
+    return net::HttpWork(response.server->host()).start(response.id);
 }
 
 KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
@@ -179,25 +179,25 @@ KiottyNetResult KiottyNet_writeHttpWorkChunk(KiottyNetHttpWorkHandle work,
 {
     const KiottyNetResult closed = { 0, KIOTTY_NET_CODE_PEER_CLOSED };
     if (work.server == nullptr) { return closed; }
-    return net::HttpWork(work.server->site()).write(work.id, data, timeout_milliseconds);
+    return net::HttpWork(work.server->host()).write(work.id, data, timeout_milliseconds);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithResponse(KiottyNetHttpWorkHandle work)
 {
     if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->site()).finishWithResponse(work.id);
+    return net::HttpWork(work.server->host()).finishWithResponse(work.id);
 }
 
 KiottyNetCode KiottyNet_finishHttpWorkWithClose(KiottyNetHttpWorkHandle work, KiottyNetCode reason)
 {
     if (work.server == nullptr) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-    return net::HttpWork(work.server->site()).finishWithClose(work.id, reason);
+    return net::HttpWork(work.server->host()).finishWithClose(work.id, reason);
 }
 
 KiottyNetBool KiottyNet_isHttpWorkConnected(KiottyNetHttpWorkHandle work)
 {
     if (work.server == nullptr) { return 0; }
-    const bool is_connected = net::HttpWork(work.server->site()).isConnected(work.id);
+    const bool is_connected = net::HttpWork(work.server->host()).isConnected(work.id);
     return is_connected ? 1 : 0;
 }
 

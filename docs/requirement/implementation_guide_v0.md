@@ -838,7 +838,7 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 | context | `kiotty_http_server` | `HttpServer : Server`. close / await / lifetime / 연결 관리는 base 그대로. `run` 이 HTTP 표로 `StatefulHandler` 를 만든다 (4.8) |
 | | `kiotty_http_work` | `HttpWork` : setter 가 쓸 Session 찾기 (`fill`), `start`, `write`, `finishWithResponse`, `finishWithClose`, `isConnected` (4.5, 4.6, 4.9) |
 | | `kiotty_http_configuration` | `KiottyNetHttpLimits` 의 initialize / configure |
-| http/data/repository | `kiotty_http_site` | 서버 하나의 공유 부분 (4.1) |
+| http/data/repository | `kiotty_http_session_host` | 서버 하나의 공유 부분 (4.1) |
 | | `kiotty_http_session` | Session (4.2). 그 풀 `kiotty_http_session_pool` 은 http/data/datasource |
 | | `kiotty_http_request_store` | 요청 줄 / 헤더 줄을 헤더 버퍼로 복사하고 자른다. body 를 이어 붙인다 (4.3) |
 | | `kiotty_http_response_store` | 응답 버퍼의 배치, setter, `seal`, 송신 쪽 읽기 `ResponseFrame` (4.4) |
@@ -855,11 +855,11 @@ requirement_v0.md 9절과 `include/kiotty_net_http.h` (공개 API 판 v2) 의 �
 ```cpp
 class HttpServer : public Server                      // http/data/repository/server/kiotty_http_server
 {
-    HttpSite             _site;
+    HttpSessionHost             _host;
     std::atomic<int32_t> _runs;                       // run 중이면 registry() / notices() 가 KIOTTY_NET_CODE_BUSY
 };
 
-struct HttpSite                                       // http/data/repository/server/kiotty_http_site.h. Session 이 이것을 참조한다
+struct HttpSessionHost                                       // http/data/repository/server/kiotty_http_session_host.h. Session 이 이것을 참조한다
 {
     HttpRegistry              registry;               // 라우트와 정적 경로의 표, not found 라우트
     HttpNotices               notices;                // 끊김 / 오류 action. app_context 는 들지 않는다
@@ -906,7 +906,7 @@ struct HttpSession                                    // http/data/state/kiotty_
 {
     HttpRequestStore          request;                // 헤더 버퍼, 헤더 span 배열, body 버퍼. KiottyNetHttpRequest 를 채운다 (4.3)
     HttpResponseStore         response;               // 응답 버퍼 (4.4)
-    HttpSite&                 site;
+    HttpSessionHost&                 host;
     InputFile&                file;                   // 풀이 Session 마다 하나 잡는다. 파일 body (4.7)
     KiottyNetConnectionInfo   info;                   // acquire 때. 끊김 action 에 준다
     KiottyNetHttpRoute        route;                  // 이번 요청에서 onRequest 를 부른 라우트 (not found 라우트 포함). onWorkStarted 를 여기서 찾는다
@@ -1065,7 +1065,7 @@ KiottyNetTransition dispatch(HttpSession& session)
 {
     session.phase = SessionPhase::FILLING;
     const KiottyNetHttpRequest& request = session.request.request();
-    const RouteMatch match = session.site.registry.find(request.method, Span<const char>{ request.path.data, request.path.length });
+    const RouteMatch match = session.host.registry.find(request.method, Span<const char>{ request.path.data, request.path.length });
     if (match.kind == MatchKind::ROUTE) { return callRoute(session, match.route); }   // not found 라우트도 ROUTE 로 온다
     answerAutomatically(session, match);                                     // STATIC (4.7), NOT_FOUND 404, NOT_ALLOWED 405 + Allow, OPTIONS 204 + Allow
     return startSending(session);
@@ -1074,7 +1074,7 @@ KiottyNetTransition dispatch(HttpSession& session)
 KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
 {
     session.route = route;                                                   // onWorkStarted 를 찾기 위해
-    route.onRequest(session.site.app_context, &session.request.request(), responseHandleOf(session));   // 사용자 코드. setter, startHttpWork
+    route.onRequest(session.host.app_context, &session.request.request(), responseHandleOf(session));   // 사용자 코드. setter, startHttpWork
     return afterRoute(session);
 }
 
@@ -1199,7 +1199,7 @@ void HttpResponseStore::seal(const ResponseSeal& seal)                          
 ```cpp
 KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session)          // callRoute, startWork 가 사용자에게 준다
 {
-    return KiottyNetHttpResponseHandle{ session.site.owner, session.id.value() };
+    return KiottyNetHttpResponseHandle{ session.host.owner, session.id.value() };
 }
 
 SessionResult HttpSessionPool::find(int64_t id)                                   // 모든 response / work 함수의 첫 줄
@@ -1214,7 +1214,7 @@ SessionResult HttpSessionPool::find(int64_t id)                                 
 
 SessionResult HttpWork::fill(int64_t id)                                          // setter 일곱의 길 (C API 의 fillingOf)
 {
-    const SessionResult found = _site.sessions.find(id);
+    const SessionResult found = _host.sessions.find(id);
     if (!found) { return found; }
     const SessionPhase phase = found.value().phase;
     if (phase != SessionPhase::FILLING && phase != SessionPhase::WORKING) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }   // 헤더가 나갔다
@@ -1229,12 +1229,12 @@ SessionResult HttpWork::fill(int64_t id)                                        
 
 ### 4.6 Work
 
-Work 는 `http/data/repository/server/kiotty_http_work` 의 `HttpWork` 가 한다 (`HttpServer::work()` 가 `HttpSite` 를 들고 만든다). Work stream 의 write 와 close 는 `stream.owner` (Endpoint, 곧 이 HttpServer) 로 부른다.
+Work 는 `http/data/repository/server/kiotty_http_work` 의 `HttpWork` 가 한다 (`HttpServer::work()` 가 `HttpSessionHost` 를 들고 만든다). Work stream 의 write 와 close 는 `stream.owner` (Endpoint, 곧 이 HttpServer) 로 부른다.
 
 ```cpp
 KiottyNetCode HttpWork::start(int64_t id)                                         // KiottyNet_startHttpWork
 {
-    const SessionResult found = _site.sessions.find(id);
+    const SessionResult found = _host.sessions.find(id);
     if (!found) { return found.code; }
     HttpSession& session = found.value();
     const bool is_first = session.phase == SessionPhase::FILLING && !session.is_work_requested;
@@ -1248,8 +1248,8 @@ KiottyNetTransition startWork(HttpSession& session, KiottyNetConnectionStream st
 {
     session.stream = stream;
     const KiottyNetHttpRoute route = session.route;
-    const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
-    route.onWorkStarted(session.site.app_context, &session.request.request(), responseHandleOf(session), work);   // 사용자가 handle 둘을 worker 로 넘긴다
+    const KiottyNetHttpWorkHandle work{ session.host.owner, session.id.value() };
+    route.onWorkStarted(session.host.app_context, &session.request.request(), responseHandleOf(session), work);   // 사용자가 handle 둘을 worker 로 넘긴다
     return Next::moveToNextState(HttpState::WORKING, thenWork());                // stream 은 worker 의 것 (2.4). 이 뒤로 IO Thread 는 Session 을 건드리지 않는다
 }
 
@@ -1277,7 +1277,7 @@ KiottyNetCode HttpWork::finishWithClose(int64_t id, KiottyNetCode reason)
 
 KiottyNetCode handOver(HttpSession& session, KiottyNetConnectionStream stream, const KiottyNetConnectionAction& then)
 {
-    HttpSessionPool& sessions = session.site.sessions;
+    HttpSessionPool& sessions = session.host.sessions;
     const bool is_orphaned = sessions.handBack(session);                          // 소유를 내려놓고, IO Thread 가 그사이 release 하려 했는지 받는다
     const KiottyNetCode closed = stream.owner->closeStream(stream.id, then);      // closeConnectionStream(stream, then)
     if (is_orphaned) { sessions.release(session); }                               // 미뤄 둔 반납
@@ -1288,7 +1288,7 @@ bool HttpWork::isConnected(int64_t id)
 {
     const SessionResult found = working(id);
     if (!found) { return false; }
-    if (_site.is_closing.load()) { return false; }                                // 서버 close 중
+    if (_host.is_closing.load()) { return false; }                                // 서버 close 중
     const KiottyNetConnectionStream stream = found.value().stream;
     return stream.owner->isStreamOpen(stream.id);
 }
@@ -1323,7 +1323,7 @@ KiottyNetTransition startSending(HttpSession& session)        // IO Thread 경�
     session.phase = SessionPhase::SENDING;
     session.response.seal(ResponseSeal{ session.request.request().method, session.persistence });
     session.sent = 0;
-    const Span<const char> chunk = session.response.frame().chunkAt(0, session.site.send_capacity);   // 첫 조각은 헤더 블록
+    const Span<const char> chunk = session.response.frame().chunkAt(0, session.host.send_capacity);   // 첫 조각은 헤더 블록
     return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0));
 }
 
@@ -1334,12 +1334,12 @@ KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle con
     const Span<const char> chunk = piece.value;
     if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0)); }
     if (session.persistence != Persistence::KEEP_ALIVE) { return closeWith(session.close_reason); }   // SUCCESS, 거절이면 PROTOCOL_ERROR
-    return beginExchange(session, connection, session.site.limits.keep_alive_timeout_milliseconds);   // 다음 요청. 파일은 여기서 닫힌다
+    return beginExchange(session, connection, session.host.limits.keep_alive_timeout_milliseconds);   // 다음 요청. 파일은 여기서 닫힌다
 }
 
 PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repository/body/kiotty_http_file_body
 {
-    const size_t capacity = session.site.send_capacity;
+    const size_t capacity = session.host.send_capacity;
     const ResponseFrame frame = session.response.frame();
     const FilePiece piece = frame.filePieceAt(offset, capacity);
     if (!piece.is_file) { return PieceResult::success(frame.chunkAt(offset, capacity)); }   // 헤더 블록, 복사 / 참조 body, 끝 chunk
@@ -1368,9 +1368,9 @@ PieceResult pieceAt(HttpSession& session, size_t offset)      // http/data/repos
 KiottyNetCode HttpServer::run(const KiottyNetAddress& address, const KiottyNetTlsServerConfiguration* tls, KiottyNetAppContext app_context)
 {
     _runs.fetch_add(1);                                                           // 등록 함수가 BUSY 를 돌려주기 시작한다
-    _site.is_closing.store(false);
-    _site.app_context = app_context;                                              // 이 run 의 모든 콜백이 받는다
-    const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);           // { &site, &HTTP_MACHINE, createSession, releaseSession, reportError }
+    _host.is_closing.store(false);
+    _host.app_context = app_context;                                              // 이 run 의 모든 콜백이 받는다
+    const KiottyNetStatefulAppContext stateful = httpStatefulOf(_host);           // { &host, &HTTP_MACHINE, createSession, releaseSession, reportError }
     const StatefulHandler handler(stateful, *this);                               // run 의 stack 에만 산다 (2.1)
     const KiottyNetCode code = Server::run(handler, address, tls);
     _runs.fetch_sub(1);
@@ -1379,13 +1379,13 @@ KiottyNetCode HttpServer::run(const KiottyNetAddress& address, const KiottyNetTl
 
 void HttpServer::close()
 {
-    _site.is_closing.store(true);                                                 // Work 의 write 가 PEER_CLOSED 대신 CLOSED 를 돌려주게 (4.9)
+    _host.is_closing.store(true);                                                 // Work 의 write 가 PEER_CLOSED 대신 CLOSED 를 돌려주게 (4.9)
     Server::close();
 }
 ```
 
 - `KiottyNet_runHttpServer` 는 server / address NULL 을 거르고 주소를 stack 에 복사해 넘긴다. 주소 / TLS 검사, `RunGate`, SSL_CTX 는 base 의 run 그대로다 (1.7).
-- `reportError` 는 base 의 onError (TLS handshake 실패, accept 실패, `SESSION_EXHAUSTED`) 를 오류 action 으로 넘긴다. 끊김 action 은 CLOSED 행의 `onClosed` 가 Session 의 `info` 와 event 의 reason 으로 부른다. 둘 다 `site.app_context` 를 첫 인자로 준다 (`HttpNotices::report*(app_context, ...)`).
+- `reportError` 는 base 의 onError (TLS handshake 실패, accept 실패, `SESSION_EXHAUSTED`) 를 오류 action 으로 넘긴다. 끊김 action 은 CLOSED 행의 `onClosed` 가 Session 의 `info` 와 event 의 reason 으로 부른다. 둘 다 `host.app_context` 를 첫 인자로 준다 (`HttpNotices::report*(app_context, ...)`).
 - `await` 는 base 그대로다.
 
 HttpServer 가 base 에 더 요구하는 것은 없다. 쓰는 것은 `Server` 의 initialize / run / close / await, action 함수 (`then*`), Endpoint 의 `writeStream`, `closeStream`, `isStreamOpen` (`KiottyNet_writeConnectionStream`, `closeConnectionStream`, `isConnectionStreamOpen` 의 안쪽) 뿐이다.
@@ -1416,7 +1416,7 @@ KiottyNetResult HttpWork::write(int64_t id, KiottyNetSpan data, uint32_t timeout
 
 KiottyNetCode sendChunk(HttpSession& session, Span<const char> data, size_t kept, const Deadline& deadline)
 {
-    const Span<const char> framed = session.response.frame().frameChunk(data, kept, session.site.send_capacity);
+    const Span<const char> framed = session.response.frame().frameChunk(data, kept, session.host.send_capacity);
     if (framed.empty()) { return sendPieces(session, data, kept, deadline); }     // 다 들어가지 않으면 조각 넷을 차례로
     return sendSpan(session, framed, deadline);                                   // 헤더 + 머리 + data + 꼬리를 write 한 번
 }
@@ -1446,7 +1446,7 @@ KiottyNetCode failureOf(const HttpSession& session, KiottyNetCode code)         
 {
     const bool is_lost = code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
     if (!is_lost) { return code; }
-    if (session.site.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }      // 서버 close 중 : FIN 뒤의 EPIPE 를 base 는 PEER_CLOSED 로 준다
+    if (session.host.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }      // 서버 close 중 : FIN 뒤의 EPIPE 를 base 는 PEER_CLOSED 로 준다
     const bool is_open = session.stream.owner->isStreamOpen(session.stream.id);
     return is_open ? code : KIOTTY_NET_CODE_PEER_CLOSED;                          // 상대가 사라짐 : RST 를 base 는 SOCKET_ERROR 로 준다
 }
@@ -1489,7 +1489,7 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 
 ## 5. WebSocket : HttpSession 위의 frame 행
 
-[requirement_v0.md](requirement_v0.md) 10, 11절과 [design_websocket_v0.html](../design/design_websocket_v0.html) 6, 7절을 코드로 옮긴 것이다 (cycle W2 ~ W4). 등록을 HTTP 모양으로 바꾼 것 ([design_websocket_v1.html](../design/design_websocket_v1.html) 9절) 은 cycle V1 ~ V3 이다. 새 Session 종류도 새 버퍼 묶음도 없다. 4절의 HttpSession 이 Upgrade 뒤에 frame 상태를 들고, HTTP 표에 frame 행을 더한다. 서버와 클라이언트가 같은 frame 행을 쓰고 차이는 `HttpSite::role` 하나다 (mask 와 부르는 콜백).
+[requirement_v0.md](requirement_v0.md) 10, 11절과 [design_websocket_v0.html](../design/design_websocket_v0.html) 6, 7절을 코드로 옮긴 것이다 (cycle W2 ~ W4). 등록을 HTTP 모양으로 바꾼 것 ([design_websocket_v1.html](../design/design_websocket_v1.html) 9절) 은 cycle V1 ~ V3 이다. 새 Session 종류도 새 버퍼 묶음도 없다. 4절의 HttpSession 이 Upgrade 뒤에 frame 상태를 들고, HTTP 표에 frame 행을 더한다. 서버와 클라이언트가 같은 frame 행을 쓰고 차이는 `HttpSessionHost::role` 하나다 (mask 와 부르는 콜백).
 
 ### 5.1 어디에 무엇이 있나
 
@@ -1546,7 +1546,7 @@ struct SocketLink {                      // 다른 thread 의 send / close / bro
 
 ### 5.2 handle
 
-handle 은 `{ site.socket_owner, session.id.value() }` 다. id 는 4.5 와 같이 generation + index 이고, generation 은 두 번 오른다.
+handle 은 `{ host.socket_owner, session.id.value() }` 다. id 는 4.5 와 같이 generation + index 이고, generation 은 두 번 오른다.
 
 - 서버: Upgrade 를 받아들여 101 을 만들 때 (`acceptUpgrade`). 그래서 `onUpgrade` 의 handle 과 `onOpen` 의 handle 이 다르다. 그 전의 HTTP 요청에 쓴 handle 로도 소켓을 만질 수 없다.
 - 클라이언트: 연결마다 (`onConnected`). 서버의 요청마다 오르는 것과 같은 자리다. 처음 연결의 generation 이 0 이면 id 가 0 (무효) 이 되기 때문이기도 하다.
@@ -1557,7 +1557,7 @@ handle 은 `{ site.socket_owner, session.id.value() }` 다. id 는 4.5 와 같�
 WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
 {
     const PoolHandle handle = PoolHandle::fromValue(id);
-    const Span<SocketLink> links = _site.sessions.links();
+    const Span<SocketLink> links = _host.sessions.links();
     const size_t index = static_cast<size_t>(handle.index);
     const bool is_inside = handle.index >= 0 && index < links.length;
     if (!is_inside) { return LinkResult::failure(KIOTTY_NET_CODE_PEER_CLOSED); }
@@ -1573,7 +1573,7 @@ WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
 
 라우트 표 (4.1) 의 WebSocket 항목은 path 의 모든 메서드를 차지하고 (`DUPLICATE_RULE` 검사) 매칭에는 GET 비트 하나로 든다. 그래서 OPTIONS 와 다른 메서드는 4절의 자동 응답 (204 / 405) 이고, GET 과 HEAD 만 `MatchKind::SOCKET` 으로 `answerUpgrade` 에 온다.
 
-등록 (V2). `HttpRegistry::addRoute(path)` 가 빈 `WebSocketTarget { NULL ×4, index }` 를 `_sockets` 에 넣고 index 를 돌려준다 (`SocketIndexResult`). 번역 층의 `KiottyNet_onWebSocket*(route, cb)` 는 `server->registry()` (run 중이면 `BUSY`) 의 `find(route.index)` (`SocketTargetResult`, 범위 밖이면 `INVALID_ARGUMENT`) 로 그 칸을 받아 필드 하나를 채운다. `find(path)` 가 경로 번호를 주는 것과 짝이다. `HttpServer::run` 의 첫 줄이 모든 칸에 `on_message` 가 있는지 보고 (`hasEverySocketMessage`) 없으면 열기 전에 `INVALID_ARGUMENT` 다. 콜백의 app_context 는 칸에 없고 `HttpSite::app_context` (run 이 넣는다, V1) 다.
+등록 (V2). `HttpRegistry::addRoute(path)` 가 빈 `WebSocketTarget { NULL ×4, index }` 를 `_sockets` 에 넣고 index 를 돌려준다 (`SocketIndexResult`). 번역 층의 `KiottyNet_onWebSocket*(route, cb)` 는 `server->registry()` (run 중이면 `BUSY`) 의 `find(route.index)` (`SocketTargetResult`, 범위 밖이면 `INVALID_ARGUMENT`) 로 그 칸을 받아 필드 하나를 채운다. `find(path)` 가 경로 번호를 주는 것과 짝이다. `HttpServer::run` 의 첫 줄이 모든 칸에 `on_message` 가 있는지 보고 (`hasEverySocketMessage`) 없으면 열기 전에 `INVALID_ARGUMENT` 다. 콜백의 app_context 는 칸에 없고 `HttpSessionHost::app_context` (run 이 넣는다, V1) 다.
 
 ```
 answerUpgrade(session, target)
@@ -1603,7 +1603,7 @@ KiottyNetTransition openSocket(HttpSession& session)
     session.link.closing.store(0);
     session.link.socket.store(session.id.value());     // 이때부터 다른 thread 가 보낼 수 있다
     callOpen(session);                                 // 서버: target.on_open(app_context, handle) 의 값이 context. 클라이언트: events.on_open(app_context)
-    Parker* opened = session.site.upgrade.opened;      // 클라이언트의 await (5.8). 서버는 NULL
+    Parker* opened = session.host.upgrade.opened;      // 클라이언트의 await (5.8). 서버는 NULL
     const auto wake = []() {};
     if (opened != nullptr) { opened->unpark(wake); }
     return nextFrame(session);
@@ -1615,10 +1615,10 @@ KiottyNetTransition openSocket(HttpSession& session)
 ```cpp
 void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
 {
-    const KiottyNetAppContext app_context = session.site.app_context;              // run 의 것
-    if (session.site.role == SocketRole::CLIENT)
+    const KiottyNetAppContext app_context = session.host.app_context;              // run 의 것
+    if (session.host.role == SocketRole::CLIENT)
     {
-        const ClientEvents& events = session.site.upgrade.events;
+        const ClientEvents& events = session.host.upgrade.events;
         const KiottyNetWebSocketClientCloseAction on_close = events.on_close;
         if (on_close != nullptr) { on_close(app_context, close); }
         return;
@@ -1666,7 +1666,7 @@ uint32_t readTimeoutOf(HttpSession& session)
     if (isClosing(session)) { return closeTimeOf(session); }          // 처음 부를 때 close_deadline 을 잡고 남은 시간
     const uint64_t ping_deadline = session.socket.ping_deadline;
     if (ping_deadline != 0) { return timeLeft(ping_deadline); }       // ping 을 보냈다. pong 까지 남은 시간
-    return session.site.limits.websocket_ping_interval_milliseconds;  // 받은 frame 이 없으면 이 뒤에 ping
+    return session.host.limits.websocket_ping_interval_milliseconds;  // 받은 frame 이 없으면 이 뒤에 ping
 }
 ```
 
@@ -1700,7 +1700,7 @@ KiottyNetCode HttpServer::push(int64_t connection, FrameOpcode opcode, Span<cons
 KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span<const char> payload)
 {
     const std::lock_guard<std::mutex> lock(_push_mutex);
-    const MaskKey key = nextMaskKey(_site.mask_state);
+    const MaskKey key = nextMaskKey(_host.mask_state);
     const FrameHead head = buildMaskedFrameHead(opcode, payload.length, key);
     const size_t total = head.length + payload.length;
     if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
@@ -1715,7 +1715,7 @@ KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span
 
 base 의 NotificationDesk 는 조각을 그대로 복사하므로 mask 는 그 앞에서 씌운다. 클라이언트는 `push_capacity` 크기의 scratch 버퍼를 initialize 때 한 번 잡고 mutex 하나로 지킨다 (send 는 아무 thread 에서나 오므로). push lane 보다 큰 frame 은 들어갈 수 없으니 scratch 도 그 크기면 된다. base 는 바뀌지 않았다.
 
-- 크기 검사 (`checkData`) 는 send 와 broadcast 가 같이 쓴다. base 의 desk 는 안 들어가는 notify 를 `BUFFER_FULL` 로 돌려주므로, 그대로 두면 "자리가 나면 된다" 로 읽혀 앱이 영원히 다시 부를 수 있다. 그래서 WebSocket 층이 먼저 `HttpSite::push_capacity` 로 거른다.
+- 크기 검사 (`checkData`) 는 send 와 broadcast 가 같이 쓴다. base 의 desk 는 안 들어가는 notify 를 `BUFFER_FULL` 로 돌려주므로, 그대로 두면 "자리가 나면 된다" 로 읽혀 앱이 영원히 다시 부를 수 있다. 그래서 WebSocket 층이 먼저 `HttpSessionHost::push_capacity` 로 거른다.
 
 **write lane.** frame 행 안에서 우리가 연결을 닫을 때 (1002 / 1007 / 1009, 상대 close 에 대한 답) 는 close frame 을 `socket.outgoing` 에 만들어 `thenCloseWith(close_frame, code)` 하나로 `CLOSING` 에 간다 (B3, 1.6). base 가 close frame 만 보내고 push lane 의 남은 것은 버린 뒤 닫으므로 close frame 뒤에 데이터 frame 이 나가지 않는다 (RFC 6455 5.5.1). B3 전에는 `thenWrite` 와 `SOCKET_CLOSING` 상태의 WRITTEN 행이었고, 같은 WRITE 에 push lane 이 붙어 close frame 뒤에 데이터 frame 이 나갈 수 있었다.
 
@@ -1754,9 +1754,9 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 
 ### 5.8 클라이언트
 
-`WebSocketClient` 는 `EventClient` 에 HttpSite 하나 (Session 하나, 라우트 표 1 칸, `role = CLIENT`) 를 든 것이다. create 때 잡는 것: Session 의 버퍼 (4.2 와 같은 limits), Upgrade 요청 버퍼 (1024 바이트), Accept 값, subprotocol 후보 (127 바이트), push scratch, mask 상태 (`HttpSite::mask_state`).
+`WebSocketClient` 는 `EventClient` 에 HttpSessionHost 하나 (Session 하나, 라우트 표 1 칸, `role = CLIENT`) 를 든 것이다. create 때 잡는 것: Session 의 버퍼 (4.2 와 같은 limits), Upgrade 요청 버퍼 (1024 바이트), Accept 값, subprotocol 후보 (127 바이트), push scratch, mask 상태 (`HttpSessionHost::mask_state`).
 
-등록 (V3). 콜백 넷은 site 에 둔다. Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `HttpNotices::setError` (모양이 `KiottyNetHttpErrorAction` 과 같다). 번역 층이 `client->registration()` (run 중이면 `BUSY`, 아니면 `HttpSite&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (번역 층이 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
+등록 (V3). 콜백 넷은 host 에 둔다. Open / Message / Close 는 `ClientUpgrade::events`, Error 는 `HttpNotices::setError` (모양이 `KiottyNetHttpErrorAction` 과 같다). 번역 층이 `client->registration()` (run 중이면 `BUSY`, 아니면 `HttpSessionHost&`) 으로 칸을 받아 채운다. 후보는 `setProtocols` 가 `_protocols` 에 복사한다 (번역 층이 token 목록인지 본다). run 은 `events.on_message` 가 없으면 `INVALID_ARGUMENT`.
 
 | 상태 | 사건 | 행 |
 |---|---|---|
@@ -1768,17 +1768,17 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 | (어디서나) | TIMEOUT | `TIMEOUT` (`UPGRADED` 의 TIMEOUT 은 위의 행이 먼저 잡는다) |
 | (어디서나) | CLOSED | 열리기 전이면 끊긴 이유를 `upgrade.failure` 에 적는다. `endSocket` |
 
-- **요청.** `prepareUpgrade` 가 run 마다 만든다 (run 의 path, 후보가 있으면 `Sec-WebSocket-Protocol`). 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`. run 은 app_context 를 `HttpSite::app_context` 에, 후보를 `upgrade.protocols` 에 두고 `peer`, `failure`, `has_opened`, `has_failed` 를 지운다.
+- **요청.** `prepareUpgrade` 가 run 마다 만든다 (run 의 path, 후보가 있으면 `Sec-WebSocket-Protocol`). 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`. run 은 app_context 를 `HttpSessionHost::app_context` 에, 후보를 `upgrade.protocols` 에 두고 `peer`, `failure`, `has_opened`, `has_failed` 를 지운다.
 - **101 검사의 subprotocol.** 101 의 `Sec-WebSocket-Protocol` 이 비었으면 통과, 아니면 후보 목록의 한 항목과 정확히 같아야 한다 (`hasToken(offered, protocol, EXACT)`). 후보가 비었는데 오면 실패다.
 - **run 의 반환값.** `EventClient::run` 의 반환값을 그대로 쓰되, 열리기 전에 우리가 `PROTOCOL_ERROR` / `TIMEOUT` 으로 닫았으면 base 는 `PEER_CLOSED` 를 돌려주므로 `upgrade.failure` 로 바꾼다.
 - **onError 는 열리기 전에 한 번.** 길은 둘이다. client machine 의 `reportError` (base 의 오류 보고: TLS handshake 실패 등) 는 `has_opened` 도 `has_failed` 도 아니면 `has_failed` 를 세우고 notices 로 넘긴다. run 이 끝나면 `reportUnopened(result)` 가 같은 조건에서 결과 code 로 알린다 (`SUCCESS`, `CLOSED`, `INVALID_ARGUMENT` 는 알리지 않는다). info 는 `createSession` 이 적어 둔 `upgrade.peer` (연결 전 실패면 빈 값). 둘 다 IO thread (= run 의 thread) 라 플래그는 plain bool 이다.
 - **bye** 는 `KiottyNet_closeWebSocket(client->socket(), status, reason)` 이다. 새 길은 없다.
 - **await.** `Parker` 하나다. `openSocket` 이 깨우고 (그때 `SocketLink::socket` 이 0 이 아니다), run 이 끝날 때 결과를 적고 깨운다. await 는 "소켓이 열렸으면 `SUCCESS`, run 이 끝났으면 그 결과" 가 될 때까지 기다린다. run 의 시작에서 결과를 지우므로 그 전의 짧은 동안은 앞 run 의 결과가 보인다.
-- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `HttpSite::mask_state` 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
+- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `HttpSessionHost::mask_state` 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
 
 ### 5.9 다른 thread 에서 오는 것
 
-`WebSocketAccess` 가 공개 함수의 몸이다. 소유자 (HttpServer, WebSocketClient) 는 `KiottyNetWebSocketEndpoint` 의 가상 함수에서 `WebSocketAccess(_site)` 를 만들어 넘긴다.
+`WebSocketAccess` 가 공개 함수의 몸이다. 소유자 (HttpServer, WebSocketClient) 는 `KiottyNetWebSocketEndpoint` 의 가상 함수에서 `WebSocketAccess(_host)` 를 만들어 넘긴다.
 
 - `send`: 인자 검사 (빈 data, 모르는 opcode) → `openLink` → 플래그가 서 있으면 `CLOSED` → `pushFrame`.
 - `close`: `openLink` → `pushClose` (status 와 reason 검사, CAS, push lane).

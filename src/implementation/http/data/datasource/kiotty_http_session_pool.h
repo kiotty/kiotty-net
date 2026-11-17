@@ -22,7 +22,9 @@ namespace kiotty::net::implementation
         HttpSessionPool(const HttpSessionPool&) = delete;
         HttpSessionPool& operator=(const HttpSessionPool&) = delete;
 
-        KiottyNetCode initialize(HttpSite& site, size_t count, const KiottyNetHttpLimits& limits);
+        KiottyNetCode initialize(HttpSessionHost& host,
+                                 size_t count,
+                                 const KiottyNetHttpLimits& limits);
         SessionResult acquire(const KiottyNetConnectionInfo& info);
         void          release(HttpSession& session);
         bool          handBack(HttpSession& session);

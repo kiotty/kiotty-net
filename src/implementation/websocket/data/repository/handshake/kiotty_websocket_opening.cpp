@@ -49,7 +49,7 @@ namespace kiotty::net::implementation
     {
         void callOpen(HttpSession& session)
         {
-            const KiottyNetAppContext app_context = session.site.app_context;
+            const KiottyNetAppContext app_context = session.host.app_context;
             SocketState& socket = socketOf(session);
             socket.context = nullptr;
             if (handlerOf(session).role == SocketRole::CLIENT)

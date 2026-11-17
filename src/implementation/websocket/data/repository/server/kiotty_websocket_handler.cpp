@@ -82,14 +82,14 @@ namespace kiotty::net::implementation
         endSocket(session, reason);
     }
 
-    WebSocketHandler& handlerOf(const HttpSite& site)
+    WebSocketHandler& handlerOf(const HttpSessionHost& host)
     {
-        return static_cast<WebSocketHandler&>(*site.upgrade);
+        return static_cast<WebSocketHandler&>(*host.upgrade);
     }
 
     WebSocketHandler& handlerOf(const HttpSession& session)
     {
-        return handlerOf(session.site);
+        return handlerOf(session.host);
     }
 
     SocketState& socketOf(const HttpSession& session)

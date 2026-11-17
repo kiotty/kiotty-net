@@ -35,7 +35,7 @@ namespace kiotty::net::implementation
     {
     }
 
-    KiottyNetCode HttpSessionPool::initialize(HttpSite& site,
+    KiottyNetCode HttpSessionPool::initialize(HttpSessionHost& host,
                                               size_t count,
                                               const KiottyNetHttpLimits& limits)
     {
@@ -61,7 +61,7 @@ namespace kiotty::net::implementation
                                                          limits.max_headers };
             const int32_t index = static_cast<int32_t>(i);
             const SessionResources resources{ _files[i], _published[i] };
-            _sessions.emplace_back(site, resources, index, buffers);
+            _sessions.emplace_back(host, resources, index, buffers);
             const bool has_history = i < _generations.size();
             HttpSession& session = _sessions.back();
             session.id.generation = has_history ? _generations[i] : 0;

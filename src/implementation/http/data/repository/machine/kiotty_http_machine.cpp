@@ -113,10 +113,10 @@ namespace kiotty::net::implementation
             KiottyNet_makeStateMachine(HTTP_RULES, REQUEST_LINE);
     }
 
-    KiottyNetStatefulAppContext httpStatefulOf(HttpSite& site)
+    KiottyNetStatefulAppContext httpStatefulOf(HttpSessionHost& host)
     {
         return KiottyNetStatefulAppContext{
-            &site, &HTTP_MACHINE, createSession, releaseSession, reportError,
+            &host, &HTTP_MACHINE, createSession, releaseSession, reportError,
         };
     }
 
@@ -125,7 +125,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onConnected(Session context, Handle connection, Event)
         {
             HttpSession& session = sessionOf(context);
-            const uint32_t wait = session.site.limits.header_timeout_milliseconds;
+            const uint32_t wait = session.host.limits.header_timeout_milliseconds;
             return beginExchange(session, connection, wait);
         }
 
@@ -160,7 +160,7 @@ namespace kiotty::net::implementation
             if (!size) { return reject(session, size.code); }
             if (size.value == 0) { return readLine(session, TRAILER, bodyTimeOf(session)); }
             const uint64_t used = session.request.request().body.length;
-            const uint64_t room = session.site.limits.max_body_bytes - used;
+            const uint64_t room = session.host.limits.max_body_bytes - used;
             const BodyPlanResult plan = planBody(size.value, room);
             if (!plan) { return reject(session, plan.code); }
             session.body = plan.value;
@@ -208,7 +208,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onUpgraded(Session context, Handle connection, Event event)
         {
             HttpSession& session = sessionOf(context);
-            return session.site.upgrade->step(session, connection, event);
+            return session.host.upgrade->step(session, connection, event);
         }
 
         KiottyNetTransition onTimeout(Session, Handle, Event)
@@ -219,10 +219,10 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClosed(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            HttpUpgradeHandler* const upgrade = session.site.upgrade;
+            HttpUpgradeHandler* const upgrade = session.host.upgrade;
             if (upgrade != nullptr) { upgrade->end(session, event.reason); }
-            const KiottyNetAppContext app_context = session.site.app_context;
-            session.site.notices.reportDisconnected(app_context, session.info, event.reason);
+            const KiottyNetAppContext app_context = session.host.app_context;
+            session.host.notices.reportDisconnected(app_context, session.info, event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
         }
 
@@ -247,7 +247,7 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition afterLength(HttpSession& session, uint64_t length)
         {
-            const BodyPlanResult plan = planBody(length, session.site.limits.max_body_bytes);
+            const BodyPlanResult plan = planBody(length, session.host.limits.max_body_bytes);
             if (!plan) { return reject(session, plan.code); }
             if (!hasMoreBody(plan.value)) { return dispatch(session); }
             session.body = plan.value;
@@ -282,22 +282,22 @@ namespace kiotty::net::implementation
 
         uint32_t bodyTimeOf(const HttpSession& session)
         {
-            return session.site.limits.header_timeout_milliseconds;
+            return session.host.limits.header_timeout_milliseconds;
         }
 
         KiottyNetConnectionContext createSession(KiottyNetAppContext app_context,
                                                  KiottyNetConnectionInfo info)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            const SessionResult acquired = site.sessions.acquire(info);
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            const SessionResult acquired = host.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
         }
 
         void releaseSession(KiottyNetAppContext app_context, KiottyNetConnectionContext context)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.sessions.release(sessionOf(context));
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.sessions.release(sessionOf(context));
         }
 
         void reportError(KiottyNetAppContext app_context,
@@ -305,8 +305,8 @@ namespace kiotty::net::implementation
                          KiottyNetCode code,
                          const char* message)
         {
-            const HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.notices.reportError(site.app_context, info, code, message);
+            const HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.notices.reportError(host.app_context, info, code, message);
         }
     }
 }

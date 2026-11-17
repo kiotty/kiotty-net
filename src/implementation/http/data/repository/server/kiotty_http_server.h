@@ -3,7 +3,7 @@
 #include "base/data/repository/endpoint/kiotty_server.h"
 #include "core/kiotty_result.h"
 #include "http/data/repository/server/kiotty_http_configuration.h"
-#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "http/data/repository/server/kiotty_http_work.h"
 #include "kiotty_net_http.h"
 
@@ -34,15 +34,15 @@ namespace kiotty::net::implementation
                            const KiottyNetAddress& address,
                            const KiottyNetTlsServerConfiguration* tls,
                            KiottyNetAppContext app_context);
-        RegistryResult registry();
-        NoticesResult  notices();
-        HttpSite&      site();
-        void           close();
+        RegistryResult   registry();
+        NoticesResult    notices();
+        HttpSessionHost& host();
+        void             close();
 
     private:
         KiottyNetCode prepare(const HttpServerConfiguration& configuration);
 
-        HttpSite             _site;
+        HttpSessionHost      _host;
         std::atomic<int32_t> _runs;
     };
 }

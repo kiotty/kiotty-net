@@ -11,12 +11,12 @@
 
 namespace kiotty::net::implementation
 {
-    struct HttpSite
+    struct HttpSessionHost
     {
-        HttpSite();
+        HttpSessionHost();
 
-        HttpSite(const HttpSite&) = delete;
-        HttpSite& operator=(const HttpSite&) = delete;
+        HttpSessionHost(const HttpSessionHost&) = delete;
+        HttpSessionHost& operator=(const HttpSessionHost&) = delete;
 
         HttpRegistry              registry;
         HttpNotices               notices;
@@ -31,7 +31,7 @@ namespace kiotty::net::implementation
         std::atomic<bool>         is_closing;
     };
 
-    inline HttpSite::HttpSite()
+    inline HttpSessionHost::HttpSessionHost()
         : registry()
         , notices()
         , sessions()

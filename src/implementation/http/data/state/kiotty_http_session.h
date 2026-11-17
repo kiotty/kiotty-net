@@ -16,7 +16,7 @@
 
 namespace kiotty::net::implementation
 {
-    struct HttpSite;
+    struct HttpSessionHost;
 
     enum class SessionPhase : uint8_t
     {
@@ -45,14 +45,14 @@ namespace kiotty::net::implementation
 
     struct HttpSession
     {
-        HttpSession(HttpSite& owner,
+        HttpSession(HttpSessionHost& owner,
                     const SessionResources& resources,
                     int32_t index,
                     const SessionBuffers& buffers);
 
         HttpRequestStore          request;
         HttpResponseStore         response;
-        HttpSite&                 site;
+        HttpSessionHost&          host;
         InputFile&                file;
         std::atomic<int64_t>&     published;
         KiottyNetConnectionInfo   info;

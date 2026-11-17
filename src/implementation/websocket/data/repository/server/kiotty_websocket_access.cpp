@@ -14,22 +14,22 @@ namespace kiotty::net::implementation
 
         bool          isDataOpcode(KiottyNetWebSocketOpcode opcode);
         FrameOpcode   frameOpcodeOf(KiottyNetWebSocketOpcode opcode);
-        KiottyNetCode checkData(const HttpSite& site,
+        KiottyNetCode checkData(const HttpSessionHost& host,
                                 KiottyNetWebSocketOpcode opcode,
                                 KiottyNetSpan data);
         bool          isBroadcastTarget(const SocketLink& link, int32_t path);
     }
 
-    WebSocketAccess::WebSocketAccess(HttpSite& site)
-        : _site(site)
-        , _handler(handlerOf(site))
+    WebSocketAccess::WebSocketAccess(HttpSessionHost& host)
+        : _host(host)
+        , _handler(handlerOf(host))
     {
     }
 
     KiottyNetWebSocketInfo WebSocketAccess::info(int64_t id)
     {
         KiottyNetWebSocketInfo info{};
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return info; }
         const HttpSession& session = found.value();
         const SocketState& socket = socketOf(session);
@@ -59,7 +59,7 @@ namespace kiotty::net::implementation
                                         KiottyNetWebSocketOpcode opcode,
                                         KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(_site, opcode, data);
+        const KiottyNetCode checked = checkData(_host, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const LinkResult link = openLink(id);
         if (!link) { return link.code; }
@@ -79,14 +79,14 @@ namespace kiotty::net::implementation
                                              KiottyNetWebSocketOpcode opcode,
                                              KiottyNetSpan data)
     {
-        const KiottyNetCode checked = checkData(_site, opcode, data);
+        const KiottyNetCode checked = checkData(_host, opcode, data);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         int32_t index = NO_SOCKET_PATH;
         if (path != nullptr)
         {
             const TextResult text = parseText(path, MAX_SOCKET_PATH_LENGTH);
             if (!text) { return text.code; }
-            index = _site.registry.find(text.value);
+            index = _host.registry.find(text.value);
             if (index == NO_UPGRADE_ROUTE) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         }
         KiottyNetCode result = KIOTTY_NET_CODE_SUCCESS;
@@ -103,7 +103,7 @@ namespace kiotty::net::implementation
 
     SessionResult WebSocketAccess::upgrading(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
         const bool is_upgrading = found.value().phase == SessionPhase::UPGRADING;
         if (!is_upgrading) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }
@@ -136,17 +136,17 @@ namespace kiotty::net::implementation
             return is_text ? FrameOpcode::TEXT : FrameOpcode::BINARY;
         }
 
-        KiottyNetCode checkData(const HttpSite& site,
+        KiottyNetCode checkData(const HttpSessionHost& host,
                                 KiottyNetWebSocketOpcode opcode,
                                 KiottyNetSpan data)
         {
             const bool is_empty = data.data == nullptr || data.length == 0;
             if (is_empty || !isDataOpcode(opcode)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-            const bool is_masked = handlerOf(site).role == SocketRole::CLIENT;
+            const bool is_masked = handlerOf(host).role == SocketRole::CLIENT;
             const size_t mask_bytes = is_masked ? MASK_KEY_BYTES : 0;
             const size_t frame_head = buildFrameHead(FrameOpcode::BINARY, data.length).length;
             const size_t head = frame_head + mask_bytes;
-            const size_t room = site.push_capacity;
+            const size_t room = host.push_capacity;
             const bool fits = head <= room && data.length <= room - head;
             if (!fits) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
             return KIOTTY_NET_CODE_SUCCESS;

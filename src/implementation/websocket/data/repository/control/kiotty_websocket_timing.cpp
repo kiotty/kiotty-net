@@ -25,7 +25,7 @@ namespace kiotty::net::implementation
         if (isClosing(session)) { return closeTimeOf(session); }
         const uint64_t ping_deadline = socketOf(session).ping_deadline;
         if (ping_deadline != 0) { return timeLeft(ping_deadline); }
-        return session.site.limits.websocket_ping_interval_milliseconds;
+        return session.host.limits.websocket_ping_interval_milliseconds;
     }
 
     uint64_t deadlineAfter(uint32_t milliseconds)
@@ -57,7 +57,7 @@ namespace kiotty::net::implementation
     {
         uint32_t closeTimeOf(HttpSession& session)
         {
-            const uint32_t timeout = session.site.limits.websocket_close_timeout_milliseconds;
+            const uint32_t timeout = session.host.limits.websocket_close_timeout_milliseconds;
             if (timeout == 0) { return 0; }
             SocketState& socket = socketOf(session);
             if (socket.close_deadline == 0) { socket.close_deadline = deadlineAfter(timeout); }

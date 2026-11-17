@@ -142,7 +142,7 @@ KiottyNetCode KiottyNet_broadcastWebSocket(KiottyNetHttpServerHandle server,
                                            KiottyNetSpan data)
 {
     if (server == nullptr) { return INVALID; }
-    return net::WebSocketAccess(server->site()).broadcast(path, opcode, data);
+    return net::WebSocketAccess(server->host()).broadcast(path, opcode, data);
 }
 
 namespace
@@ -225,36 +225,36 @@ KiottyNetCode KiottyNet_setWebSocketClientProtocols(KiottyNetWebSocketClientHand
 KiottyNetCode KiottyNet_onWebSocketClientOpen(KiottyNetWebSocketClientHandle client,
                                               KiottyNetWebSocketClientOpenAction on_open)
 {
-    const net::RegistrationResult site = registrationOf(client, on_open != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_open = on_open;
+    const net::RegistrationResult host = registrationOf(client, on_open != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_open = on_open;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientMessage(KiottyNetWebSocketClientHandle client,
                                                  KiottyNetWebSocketClientMessageAction on_message)
 {
-    const net::RegistrationResult site = registrationOf(client, on_message != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_message = on_message;
+    const net::RegistrationResult host = registrationOf(client, on_message != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_message = on_message;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientClose(KiottyNetWebSocketClientHandle client,
                                                KiottyNetWebSocketClientCloseAction on_close)
 {
-    const net::RegistrationResult site = registrationOf(client, on_close != nullptr);
-    if (!site) { return site.code; }
-    net::handlerOf(site.value()).client.events.on_close = on_close;
+    const net::RegistrationResult host = registrationOf(client, on_close != nullptr);
+    if (!host) { return host.code; }
+    net::handlerOf(host.value()).client.events.on_close = on_close;
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
 KiottyNetCode KiottyNet_onWebSocketClientError(KiottyNetWebSocketClientHandle client,
                                                KiottyNetWebSocketClientErrorAction on_error)
 {
-    const net::RegistrationResult site = registrationOf(client, on_error != nullptr);
-    if (!site) { return site.code; }
-    site.value().notices.setError(on_error);
+    const net::RegistrationResult host = registrationOf(client, on_error != nullptr);
+    if (!host) { return host.code; }
+    host.value().notices.setError(on_error);
     return KIOTTY_NET_CODE_SUCCESS;
 }
 

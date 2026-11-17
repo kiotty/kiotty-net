@@ -12,7 +12,7 @@ namespace kiotty::net::implementation
 
     HttpServer::HttpServer()
         : Server()
-        , _site()
+        , _host()
         , _runs(0)
     {
     }
@@ -30,7 +30,7 @@ namespace kiotty::net::implementation
     void HttpServer::reset() noexcept
     {
         Server::reset();
-        _site.notices.clear();
+        _host.notices.clear();
     }
 
     KiottyNetCode HttpServer::run(KiottyNetHttpServerHandle self,
@@ -39,10 +39,10 @@ namespace kiotty::net::implementation
                                   KiottyNetAppContext app_context)
     {
         _runs.fetch_add(1);
-        _site.is_closing.store(false);
-        _site.app_context = app_context;
-        _site.owner = self;
-        const KiottyNetStatefulAppContext stateful = httpStatefulOf(_site);
+        _host.is_closing.store(false);
+        _host.app_context = app_context;
+        _host.owner = self;
+        const KiottyNetStatefulAppContext stateful = httpStatefulOf(_host);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = Server::run(handler, address, tls);
         _runs.fetch_sub(1);
@@ -52,23 +52,23 @@ namespace kiotty::net::implementation
     RegistryResult HttpServer::registry()
     {
         if (_runs.load() > 0) { return RegistryResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return RegistryResult::success(_site.registry);
+        return RegistryResult::success(_host.registry);
     }
 
     NoticesResult HttpServer::notices()
     {
         if (_runs.load() > 0) { return NoticesResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return NoticesResult::success(_site.notices);
+        return NoticesResult::success(_host.notices);
     }
 
-    HttpSite& HttpServer::site()
+    HttpSessionHost& HttpServer::host()
     {
-        return _site;
+        return _host;
     }
 
     void HttpServer::close()
     {
-        _site.is_closing.store(true);
+        _host.is_closing.store(true);
         Server::close();
     }
 
@@ -76,13 +76,13 @@ namespace kiotty::net::implementation
     {
         const KiottyNetHttpLimits& limits = configuration.limits;
         if (!areLimitsUsable(limits)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        _site.limits = limits;
-        _site.receive_capacity = configuration.server.receive_capacity;
-        _site.send_capacity = configuration.server.send_capacity;
-        _site.push_capacity = configuration.server.push_capacity;
-        _site.registry.initialize(limits.max_routes);
-        _site.notices.clear();
-        return _site.sessions.initialize(_site, configuration.server.max_clients, limits);
+        _host.limits = limits;
+        _host.receive_capacity = configuration.server.receive_capacity;
+        _host.send_capacity = configuration.server.send_capacity;
+        _host.push_capacity = configuration.server.push_capacity;
+        _host.registry.initialize(limits.max_routes);
+        _host.notices.clear();
+        return _host.sessions.initialize(_host, configuration.server.max_clients, limits);
     }
 
     namespace

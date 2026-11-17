@@ -1,7 +1,7 @@
 #pragma once
 
 #include "http/data/datasource/kiotty_http_session_pool.h"
-#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "kiotty_net_http.h"
 
 #include <cstdint>
@@ -11,7 +11,7 @@ namespace kiotty::net::implementation
     class HttpWork
     {
     public:
-        explicit HttpWork(HttpSite& site);
+        explicit HttpWork(HttpSessionHost& host);
 
         SessionResult   fill(int64_t id);
         KiottyNetCode   start(int64_t id);
@@ -23,6 +23,6 @@ namespace kiotty::net::implementation
     private:
         SessionResult working(int64_t id);
 
-        HttpSite& _site;
+        HttpSessionHost& _host;
     };
 }

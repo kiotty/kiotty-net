@@ -8,7 +8,7 @@
 #include "http/data/repository/machine/kiotty_http_answer_writer.h"
 #include "http/data/repository/response/kiotty_http_answer_rules.h"
 #include "http/data/repository/response/kiotty_http_send_rules.h"
-#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "http/domain/entity/kiotty_http_constants.h"
 
 #include <limits>
@@ -22,7 +22,7 @@ namespace kiotty::net::implementation
         constexpr KiottyNetSpan LINE_END_SPAN{ LINE_END, 2 };
         constexpr int32_t       SERVER_ERROR = KIOTTY_NET_HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-        size_t                      lineLimitOf(const HttpSite& site);
+        size_t                      lineLimitOf(const HttpSessionHost& host);
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session);
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route);
         KiottyNetTransition         afterRoute(HttpSession& session);
@@ -69,7 +69,7 @@ namespace kiotty::net::implementation
                                  HttpState state,
                                  uint32_t timeout_milliseconds)
     {
-        const size_t limit = lineLimitOf(session.site);
+        const size_t limit = lineLimitOf(session.host);
         const uint32_t timeout = timeout_milliseconds;
         const KiottyNetConnectionAction action = thenReadUntil(LINE_END_SPAN, limit, timeout);
         return Next::moveToNextState(state, action);
@@ -77,8 +77,8 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition readBody(HttpSession& session, HttpState state)
     {
-        const size_t step = nextReadOf(session.body, session.site.receive_capacity);
-        const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
+        const size_t step = nextReadOf(session.body, session.host.receive_capacity);
+        const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
         const KiottyNetConnectionAction action = thenRead(step, timeout);
         return Next::moveToNextState(state, action);
     }
@@ -97,10 +97,10 @@ namespace kiotty::net::implementation
         session.phase = SessionPhase::FILLING;
         const KiottyNetHttpRequest& request = session.request.request();
         const Span<const char> path{ request.path.data, request.path.length };
-        const RouteMatch match = session.site.registry.find(request.method, path);
+        const RouteMatch match = session.host.registry.find(request.method, path);
         const bool is_route = match.kind == MatchKind::ROUTE;
         if (is_route) { return callRoute(session, match.route); }
-        HttpUpgradeHandler* const upgrade = session.site.upgrade;
+        HttpUpgradeHandler* const upgrade = session.host.upgrade;
         const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
         if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
         const Answer answer = answerOf(match, path);
@@ -114,8 +114,8 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRoute route = session.route;
         const KiottyNetHttpRequest* request = &session.request.request();
         const KiottyNetHttpResponseHandle response = responseHandleOf(session);
-        const KiottyNetHttpWorkHandle work{ session.site.owner, session.id.value() };
-        route.onWorkStarted(session.site.app_context, request, response, work);
+        const KiottyNetHttpWorkHandle work{ session.host.owner, session.id.value() };
+        route.onWorkStarted(session.host.app_context, request, response, work);
         return Next::moveToNextState(HttpState::WORKING, thenWork());
     }
 
@@ -128,7 +128,7 @@ namespace kiotty::net::implementation
         if (step.kind != SendKind::DONE) { return sendPiece(session, step); }
         const AfterResponse after = afterResponseOf(session.persistence);
         if (after == AfterResponse::CLOSE) { return closeWith(session.close_reason); }
-        const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
+        const uint32_t wait = session.host.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
     }
 
@@ -138,7 +138,7 @@ namespace kiotty::net::implementation
         sealResponse(session);
         session.sent = 0;
         const ResponseFrame frame = session.response.frame();
-        const Span<const char> chunk = frame.chunkAt(0, session.site.send_capacity);
+        const Span<const char> chunk = frame.chunkAt(0, session.host.send_capacity);
         const SendStep step = sendStepOf(frame, 0, chunk, session.persistence);
         return sendPiece(session, step);
     }
@@ -156,7 +156,7 @@ namespace kiotty::net::implementation
 
     void startHeaderClock(HttpSession& session)
     {
-        const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
+        const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
         session.header_deadline = timeout == 0 ? 0 : monotonicMilliseconds() + timeout;
     }
 
@@ -172,22 +172,22 @@ namespace kiotty::net::implementation
 
     namespace
     {
-        size_t lineLimitOf(const HttpSite& site)
+        size_t lineLimitOf(const HttpSessionHost& host)
         {
-            const size_t header_line = site.limits.max_header_bytes + LINE_END_SPAN.length;
-            return site.receive_capacity < header_line ? site.receive_capacity : header_line;
+            const size_t header_line = host.limits.max_header_bytes + LINE_END_SPAN.length;
+            return host.receive_capacity < header_line ? host.receive_capacity : header_line;
         }
 
         KiottyNetHttpResponseHandle responseHandleOf(const HttpSession& session)
         {
-            return KiottyNetHttpResponseHandle{ session.site.owner, session.id.value() };
+            return KiottyNetHttpResponseHandle{ session.host.owner, session.id.value() };
         }
 
         KiottyNetTransition callRoute(HttpSession& session, const KiottyNetHttpRoute& route)
         {
             session.route = route;
             const KiottyNetHttpRequest& request = session.request.request();
-            const KiottyNetAppContext app_context = session.site.app_context;
+            const KiottyNetAppContext app_context = session.host.app_context;
             route.onRequest(app_context, &request, responseHandleOf(session));
             return afterRoute(session);
         }

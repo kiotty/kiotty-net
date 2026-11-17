@@ -55,7 +55,7 @@ namespace kiotty::net::implementation
             const WebSocketHandler& handler = handlerOf(session);
             if (handler.role == SocketRole::CLIENT)
             {
-                handler.client.events.on_message(session.site.app_context, message);
+                handler.client.events.on_message(session.host.app_context, message);
                 return;
             }
             const SocketState& socket = socketOf(session);

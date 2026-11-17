@@ -1,7 +1,7 @@
 #include "http/data/repository/body/kiotty_http_file_body.h"
 
 #include "http/data/repository/header/kiotty_http_content_type_rules.h"
-#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_session_host.h"
 
 #include <cstdint>
 
@@ -32,7 +32,7 @@ namespace kiotty::net::implementation
 
     PieceResult pieceAt(HttpSession& session, size_t offset)
     {
-        const size_t capacity = session.site.send_capacity;
+        const size_t capacity = session.host.send_capacity;
         const ResponseFrame frame = session.response.frame();
         const FilePiece piece = frame.filePieceAt(offset, capacity);
         if (!piece.is_file) { return PieceResult::success(frame.chunkAt(offset, capacity)); }

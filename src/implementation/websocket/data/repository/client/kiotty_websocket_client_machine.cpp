@@ -64,10 +64,10 @@ namespace kiotty::net::implementation
             KiottyNet_makeStateMachine(CLIENT_RULES, UPGRADE_SENDING);
     }
 
-    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSite& site)
+    KiottyNetStatefulAppContext webSocketClientStatefulOf(HttpSessionHost& host)
     {
         return KiottyNetStatefulAppContext{
-            &site, &CLIENT_MACHINE, createClientSession, releaseClientSession, reportClientError,
+            &host, &CLIENT_MACHINE, createClientSession, releaseClientSession, reportClientError,
         };
     }
 
@@ -147,7 +147,7 @@ namespace kiotty::net::implementation
         {
             const Span<const char> request = handlerOf(session).client.request.skip(session.sent);
             const KiottyNetSpan data{ request.data, request.length };
-            const uint32_t timeout = session.site.limits.header_timeout_milliseconds;
+            const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
             return Next::moveToNextState(UPGRADE_SENDING, thenWrite(data, timeout));
         }
 
@@ -162,9 +162,9 @@ namespace kiotty::net::implementation
         KiottyNetConnectionContext createClientSession(KiottyNetAppContext app_context,
                                                        KiottyNetConnectionInfo info)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            handlerOf(site).client.peer = info;
-            const SessionResult acquired = site.sessions.acquire(info);
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            handlerOf(host).client.peer = info;
+            const SessionResult acquired = host.sessions.acquire(info);
             if (!acquired) { return nullptr; }
             return &acquired.value();
         }
@@ -172,8 +172,8 @@ namespace kiotty::net::implementation
         void releaseClientSession(KiottyNetAppContext app_context,
                                   KiottyNetConnectionContext context)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            site.sessions.release(sessionOf(context));
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            host.sessions.release(sessionOf(context));
         }
 
         void reportClientError(KiottyNetAppContext app_context,
@@ -181,12 +181,12 @@ namespace kiotty::net::implementation
                                KiottyNetCode code,
                                const char* message)
         {
-            HttpSite& site = *static_cast<HttpSite*>(app_context);
-            ClientUpgrade& upgrade = handlerOf(site).client;
+            HttpSessionHost& host = *static_cast<HttpSessionHost*>(app_context);
+            ClientUpgrade& upgrade = handlerOf(host).client;
             const bool is_settled = upgrade.has_opened || upgrade.has_failed;
             if (is_settled) { return; }
             upgrade.has_failed = true;
-            site.notices.reportError(site.app_context, info, code, message);
+            host.notices.reportError(host.app_context, info, code, message);
         }
     }
 }

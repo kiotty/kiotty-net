@@ -23,7 +23,7 @@ namespace kiotty::net::implementation
         WebSocketHandler::initialize(sockets, routes, SocketRole::SERVER);
         owner = this;
         lane = this;
-        site().upgrade = this;
+        host().upgrade = this;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -50,30 +50,30 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketServer::socketInfo(int64_t id)
     {
-        return WebSocketAccess(site()).info(id);
+        return WebSocketAccess(host()).info(id);
     }
 
     KiottyNetSpan WebSocketServer::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(site()).header(id, name);
+        return WebSocketAccess(host()).header(id, name);
     }
 
     KiottyNetCode WebSocketServer::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(site()).select(id, protocol);
+        return WebSocketAccess(host()).select(id, protocol);
     }
 
     KiottyNetCode WebSocketServer::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(site()).send(id, opcode, data);
+        return WebSocketAccess(host()).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketServer::closeSocket(int64_t id,
                                                uint16_t status,
                                                Span<const char> reason)
     {
-        return WebSocketAccess(site()).close(id, status, reason);
+        return WebSocketAccess(host()).close(id, status, reason);
     }
 }

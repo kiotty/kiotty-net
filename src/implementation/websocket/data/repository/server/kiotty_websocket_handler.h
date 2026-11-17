@@ -2,7 +2,7 @@
 
 #include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
-#include "http/data/repository/server/kiotty_http_site.h"
+#include "http/data/repository/server/kiotty_http_session_host.h"
 #include "http/data/repository/upgrade/kiotty_http_upgrade_handler.h"
 #include "websocket/data/datasource/kiotty_websocket_socket_table.h"
 #include "websocket/data/repository/endpoint/kiotty_websocket_endpoint.h"
@@ -53,7 +53,7 @@ namespace kiotty::net::implementation
         SocketTable                  _table;
     };
 
-    WebSocketHandler& handlerOf(const HttpSite& site);
+    WebSocketHandler& handlerOf(const HttpSessionHost& host);
     WebSocketHandler& handlerOf(const HttpSession& session);
     SocketState&      socketOf(const HttpSession& session);
     SocketLink&       linkOf(const HttpSession& session);

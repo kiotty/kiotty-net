@@ -43,7 +43,7 @@ namespace kiotty::net::implementation
         else
         {
             (void)pushFrame(lane, linkOf(session), FrameOpcode::PING, empty);
-            const uint32_t pong_timeout = session.site.limits.websocket_pong_timeout_milliseconds;
+            const uint32_t pong_timeout = session.host.limits.websocket_pong_timeout_milliseconds;
             socket.ping_deadline = deadlineAfter(pong_timeout);
         }
         return readNext(session, socket.read);
@@ -155,7 +155,7 @@ namespace kiotty::net::implementation
 
         void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
         {
-            const KiottyNetAppContext app_context = session.site.app_context;
+            const KiottyNetAppContext app_context = session.host.app_context;
             const WebSocketHandler& handler = handlerOf(session);
             if (handler.role == SocketRole::CLIENT)
             {

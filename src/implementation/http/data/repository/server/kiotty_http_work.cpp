@@ -45,14 +45,14 @@ namespace kiotty::net::implementation
         size_t                    headerBytesOf(const HttpSession& session);
     }
 
-    HttpWork::HttpWork(HttpSite& site)
-        : _site(site)
+    HttpWork::HttpWork(HttpSessionHost& host)
+        : _host(host)
     {
     }
 
     SessionResult HttpWork::fill(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
         const SessionPhase phase = found.value().phase;
         const bool is_open = phase == SessionPhase::FILLING || phase == SessionPhase::WORKING;
@@ -62,7 +62,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode HttpWork::start(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found.code; }
         HttpSession& session = found.value();
         const bool is_filling = session.phase == SessionPhase::FILLING;
@@ -123,14 +123,14 @@ namespace kiotty::net::implementation
     {
         const SessionResult found = working(id);
         if (!found) { return false; }
-        if (_site.is_closing.load()) { return false; }
+        if (_host.is_closing.load()) { return false; }
         const KiottyNetConnectionStream stream = found.value().stream;
         return stream.owner->isStreamOpen(stream.id);
     }
 
     SessionResult HttpWork::working(int64_t id)
     {
-        const SessionResult found = _site.sessions.find(id);
+        const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
         const HttpSession& session = found.value();
         const SessionPhase phase = session.phase;
@@ -156,7 +156,7 @@ namespace kiotty::net::implementation
                                 size_t kept,
                                 const Deadline& deadline)
         {
-            const size_t limit = session.site.send_capacity;
+            const size_t limit = session.host.send_capacity;
             const Span<const char> framed = session.response.frame().frameChunk(data, kept, limit);
             if (framed.empty()) { return sendPieces(session, data, kept, deadline); }
             return sendSpan(session, framed, deadline);
@@ -209,7 +209,7 @@ namespace kiotty::net::implementation
             const bool is_peer_closed = code == KIOTTY_NET_CODE_PEER_CLOSED;
             const bool is_lost = is_peer_closed || code == KIOTTY_NET_CODE_SOCKET_ERROR;
             if (!is_lost) { return code; }
-            if (session.site.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }
+            if (session.host.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }
             const KiottyNetConnectionStream stream = session.stream;
             const bool is_open = stream.owner->isStreamOpen(stream.id);
             return is_open ? code : KIOTTY_NET_CODE_PEER_CLOSED;
@@ -219,7 +219,7 @@ namespace kiotty::net::implementation
                                KiottyNetConnectionStream stream,
                                const KiottyNetConnectionAction& then)
         {
-            HttpSessionPool& sessions = session.site.sessions;
+            HttpSessionPool& sessions = session.host.sessions;
             const bool is_orphaned = sessions.handBack(session);
             const KiottyNetCode closed = stream.owner->closeStream(stream.id, then);
             if (is_orphaned) { sessions.release(session); }
@@ -249,7 +249,7 @@ namespace kiotty::net::implementation
         KiottyNetConnectionAction firstPieceOf(HttpSession& session, size_t sent)
         {
             session.sent = sent;
-            const size_t capacity = session.site.send_capacity;
+            const size_t capacity = session.host.send_capacity;
             const Span<const char> chunk = session.response.frame().chunkAt(sent, capacity);
             return thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0);
         }
@@ -259,7 +259,7 @@ namespace kiotty::net::implementation
             const AfterResponse after = afterResponseOf(session.persistence);
             if (after == AfterResponse::CLOSE) { return thenClose(KIOTTY_NET_CODE_SUCCESS); }
             const KiottyNetConnectionHandle connection = session.request.request().connection;
-            const uint32_t wait = session.site.limits.keep_alive_timeout_milliseconds;
+            const uint32_t wait = session.host.limits.keep_alive_timeout_milliseconds;
             return beginExchange(session, connection, wait).entry_action;
         }
 

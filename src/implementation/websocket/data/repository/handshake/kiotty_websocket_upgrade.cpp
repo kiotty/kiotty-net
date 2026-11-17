@@ -176,7 +176,7 @@ namespace kiotty::net::implementation
                 publicSpanOf(headerNamed(request, "Sec-WebSocket-Protocol")),
             };
             const KiottyNetBool allowed =
-                target.on_upgrade(session.site.app_context, socketHandleOf(session), upgrade);
+                target.on_upgrade(session.host.app_context, socketHandleOf(session), upgrade);
             return allowed != 0;
         }
 

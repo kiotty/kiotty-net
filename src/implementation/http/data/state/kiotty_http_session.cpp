@@ -2,13 +2,13 @@
 
 namespace kiotty::net::implementation
 {
-    HttpSession::HttpSession(HttpSite& owner,
+    HttpSession::HttpSession(HttpSessionHost& owner,
                              const SessionResources& resources,
                              int32_t index,
                              const SessionBuffers& buffers)
         : request(buffers.header, buffers.headers, buffers.body)
         , response(buffers.response)
-        , site(owner)
+        , host(owner)
         , file(resources.file)
         , published(resources.published)
         , info{}

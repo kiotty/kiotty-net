@@ -34,7 +34,7 @@ namespace kiotty::net::implementation
     WebSocketClient::WebSocketClient()
         : EventClient()
         , WebSocketHandler()
-        , _site()
+        , _host()
         , _protocols()
         , _request()
         , _accept()
@@ -57,12 +57,12 @@ namespace kiotty::net::implementation
         const KiottyNetCode base = EventClient::initialize(id, configuration.client);
         if (base != KIOTTY_NET_CODE_SUCCESS) { return base; }
         _protocols.clear();
-        _site.limits = limits;
-        _site.receive_capacity = configuration.client.receive_capacity;
-        _site.send_capacity = configuration.client.send_capacity;
-        _site.push_capacity = configuration.client.push_capacity;
-        _site.upgrade = this;
-        _site.registry.initialize(1);
+        _host.limits = limits;
+        _host.receive_capacity = configuration.client.receive_capacity;
+        _host.send_capacity = configuration.client.send_capacity;
+        _host.push_capacity = configuration.client.push_capacity;
+        _host.upgrade = this;
+        _host.registry.initialize(1);
         WebSocketHandler::initialize(1, 0, SocketRole::CLIENT);
         owner = this;
         lane = this;
@@ -70,8 +70,8 @@ namespace kiotty::net::implementation
         std::random_device seed;
         mask_state.store((static_cast<uint64_t>(seed()) << 32U) | seed());
         client.events = ClientEvents{ nullptr, nullptr, nullptr };
-        _site.notices.clear();
-        return _site.sessions.initialize(_site, 1, limits);
+        _host.notices.clear();
+        return _host.sessions.initialize(_host, 1, limits);
     }
 
     void WebSocketClient::reset() noexcept
@@ -83,7 +83,7 @@ namespace kiotty::net::implementation
     RegistrationResult WebSocketClient::registration()
     {
         if (_is_running.load()) { return RegistrationResult::failure(KIOTTY_NET_CODE_BUSY); }
-        return RegistrationResult::success(_site);
+        return RegistrationResult::success(_host);
     }
 
     KiottyNetCode WebSocketClient::setProtocols(Span<const char> protocols)
@@ -149,29 +149,29 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketClient::socketInfo(int64_t id)
     {
-        return WebSocketAccess(_site).info(id);
+        return WebSocketAccess(_host).info(id);
     }
 
     KiottyNetSpan WebSocketClient::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(_site).header(id, name);
+        return WebSocketAccess(_host).header(id, name);
     }
 
     KiottyNetCode WebSocketClient::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(_site).select(id, protocol);
+        return WebSocketAccess(_host).select(id, protocol);
     }
 
     KiottyNetCode WebSocketClient::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(_site).send(id, opcode, data);
+        return WebSocketAccess(_host).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketClient::closeSocket(int64_t id, uint16_t status, Span<const char> reason)
     {
-        return WebSocketAccess(_site).close(id, status, reason);
+        return WebSocketAccess(_host).close(id, status, reason);
     }
 
     KiottyNetCode WebSocketClient::prepareUpgrade(const ClientRun& request)
@@ -211,13 +211,13 @@ namespace kiotty::net::implementation
         _opened.unpark(begin);
         const KiottyNetCode prepared = prepareUpgrade(request);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
-        _site.app_context = request.app_context;
+        _host.app_context = request.app_context;
         client.peer = KiottyNetConnectionInfo{};
         client.opened = &_opened;
         client.failure = KIOTTY_NET_CODE_SUCCESS;
         client.has_opened = false;
         client.has_failed = false;
-        const KiottyNetStatefulAppContext stateful = webSocketClientStatefulOf(_site);
+        const KiottyNetStatefulAppContext stateful = webSocketClientStatefulOf(_host);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = EventClient::run(handler, request.address, request.tls);
         const KiottyNetCode failure = client.failure;
@@ -234,7 +234,7 @@ namespace kiotty::net::implementation
         const bool is_settled = client.has_opened || client.has_failed;
         if (is_settled || !isReported(code)) { return; }
         client.has_failed = true;
-        _site.notices.reportError(_site.app_context, client.peer, code, messageOf(code));
+        _host.notices.reportError(_host.app_context, client.peer, code, messageOf(code));
     }
 
     bool WebSocketClient::isOpen()
