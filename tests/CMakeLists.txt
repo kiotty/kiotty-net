@@ -36,6 +36,7 @@ function(kiotty_net_add_test_target target label)
     gtest_discover_tests(${target}
         PROPERTIES LABELS ${label}
         DISCOVERY_MODE PRE_TEST
+        DISCOVERY_TIMEOUT 60
     )
 endfunction()
 

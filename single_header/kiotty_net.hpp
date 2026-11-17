@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 6db8054
+    KiottyNet single header, generated from commit 5a615f5
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -6046,6 +6046,7 @@ namespace kiotty::net::implementation
 namespace kiotty::net::implementation
 {
     using LineResult = Result<Span<const char>, KiottyNetCode>;
+    using StagedResult = Result<Span<const char>, KiottyNetCode>;
 
     class ConnectionStream
     {
@@ -6055,8 +6056,8 @@ namespace kiotty::net::implementation
         ConnectionStream& operator=(const ConnectionStream&) = delete;
 
         KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
-        LineResult      readLine(uint32_t timeout_milliseconds);
-        KiottyNetCode   fill(uint32_t timeout_milliseconds);
+        StagedResult    peek(size_t wanted, uint32_t timeout_milliseconds);
+        void            consume(size_t length);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
         KiottyNetCode   writeFile(Span<const char> path,
                                   uint64_t offset,
@@ -6102,6 +6103,8 @@ namespace kiotty::net::implementation
         StageBase&    _receive;
         StageBase&    _send;
     };
+
+    LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds);
 }
 
 #endif
@@ -7386,6 +7389,8 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
+    using StreamResult = Result<ConnectionStream&, KiottyNetCode>;
+
     class StreamClient : public Endpoint
     {
     public:
@@ -7404,14 +7409,14 @@ namespace kiotty::net::implementation
         StreamClient(StreamClient&&) = delete;
         StreamClient& operator=(StreamClient&&) = delete;
 
-        KiottyNetCode   initialize(PoolHandle id,
-                                   const KiottyNetClientConfiguration& configuration);
-        void            reset() noexcept;
-        KiottyNetCode   connect(const KiottyNetAddress& address,
-                                const KiottyNetTlsClientConfiguration* tls);
-        void            disconnect();
-        KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
-        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+        KiottyNetCode initialize(PoolHandle id, const KiottyNetClientConfiguration& configuration);
+        void          reset() noexcept;
+        KiottyNetCode connect(const KiottyNetAddress& address,
+                              const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode reconnect(const KiottyNetAddress& address, const Deadline& deadline);
+        void          disconnect();
+        StreamResult  stream();
+        StopSignal&   stop();
 
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetCode           notify(int64_t id, Span<const KiottyNetSpan> pieces) override;
@@ -7430,23 +7435,11 @@ namespace kiotty::net::implementation
         KiottyNetCode           closeStream(int64_t id,
                                             const KiottyNetConnectionAction& then) override;
 
-    protected:
-        using StagedResult = Result<Span<const char>, KiottyNetCode>;
-
+    private:
         KiottyNetCode prepare(const KiottyNetAddress& address,
                               const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode reconnect(const KiottyNetAddress& address, const Deadline& deadline);
-        bool          isConnected() const;
-        LineResult    readLine(uint32_t timeout_milliseconds);
-        StagedResult  peekReceived(uint32_t timeout_milliseconds);
-        void          consumeReceived(size_t length);
-        size_t        stagedBytes();
-        StopSignal&   stopSignal();
-
-    private:
-        KiottyNetCode    openProfile(const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode    secure(const KiottyNetAddress& address, const Deadline& deadline);
-        ConnectionStream stream();
+        KiottyNetCode openProfile(const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode secure(const KiottyNetAddress& address, const Deadline& deadline);
 
         Stage                        _receive;
         Stage                        _send;
@@ -7455,12 +7448,19 @@ namespace kiotty::net::implementation
         ActiveSocket                 _socket;
         KiottyNetClientConfiguration _configuration;
         StopSignal                   _stop;
+        ConnectionStream             _stream;
     };
 }
 
 #endif
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_STATE_HTTP_CLIENT_STATE_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_STATE_HTTP_CLIENT_STATE_H
 
 #ifndef KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
 #define KIOTTY_NET_INTERNAL_CORE_BUSY_GUARD_H
@@ -7697,56 +7697,6 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_EXCHANGE_H
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    class HttpClient;
-    struct ClientRequest;
-
-    class HttpClientExchange
-    {
-    public:
-        explicit HttpClientExchange(HttpClient& client);
-
-        KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
-        KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
-        KiottyNetCode      begin(const ClientRequest& request,
-                                 uint64_t body_length,
-                                 uint32_t timeout_milliseconds);
-        KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
-        KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
-
-    private:
-        struct Attempt
-        {
-            KiottyNetCode code;
-            bool          is_stale;
-        };
-
-        KiottyNetHttpReply run(const ClientRequest& request, uint32_t timeout_milliseconds);
-        Attempt            attempt(const ClientRequest& request,
-                                   size_t head_length,
-                                   const Deadline& deadline);
-        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
-        KiottyNetCode      checkStart(const ClientRequest& request);
-        KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
-        KiottyNetCode      sendEnd(const Deadline& deadline);
-        void               settleUpload();
-        void               dropUpload();
-
-        HttpClient& _client;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
-
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_SHARED_HEADERS_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_HEADER_HTTP_SHARED_HEADERS_H
 
@@ -7775,196 +7725,6 @@ namespace kiotty::net::implementation
         size_t                    _text_length;
         size_t                    _count;
     };
-}
-
-#endif
-
-namespace kiotty::net::implementation
-{
-    class HttpClientHeaders
-    {
-    public:
-        HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy);
-
-        KiottyNetCode set(Span<const char> name, Span<const char> value);
-        KiottyNetCode remove(Span<const char> name);
-        KiottyNetCode clear();
-
-    private:
-        HttpSharedHeaders& _shared;
-        BusyFlag&          _is_busy;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
-
-namespace kiotty::net::implementation
-{
-    class HttpClientLink
-    {
-    public:
-        HttpClientLink(StreamClient& stream, StopSignal& stop, BusyFlag& busy);
-
-        void disconnect();
-        void close();
-
-    private:
-        StreamClient& _stream;
-        StopSignal&   _stop;
-        BusyFlag&     _busy;
-    };
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
-#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
-
-#ifndef KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
-#define KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
-
-#include <array>
-#include <cstddef>
-
-namespace kiotty::net::implementation
-{
-    template <size_t N>
-    class FixedString
-    {
-        static_assert(N > 0, "FixedString: N counts the terminator and must be positive");
-
-    public:
-        static constexpr size_t MAX_LENGTH = N - 1;
-
-        FixedString();
-
-        bool             assign(Span<const char> text);
-        bool             append(Span<const char> text);
-        Span<const char> span() const;
-        const char*      c_str() const;
-        size_t           length() const;
-        bool             empty() const;
-        void             clear();
-
-    private:
-        std::array<char, N> _text;
-        size_t              _length;
-    };
-
-    template <size_t N>
-    inline FixedString<N>::FixedString()
-        : _text{}
-        , _length(0)
-    {
-    }
-
-    template <size_t N>
-    inline bool FixedString<N>::assign(Span<const char> text)
-    {
-        clear();
-        if (text.length > MAX_LENGTH) { return false; }
-        const Span<char> target{ _text.data(), MAX_LENGTH };
-        const bool copied = target.copyFrom(text);
-        if (!copied) { return false; }
-        _length = text.length;
-        _text[_length] = '\0';
-        return true;
-    }
-
-    template <size_t N>
-    inline bool FixedString<N>::append(Span<const char> text)
-    {
-        const size_t room = MAX_LENGTH - _length;
-        if (text.length > room) { return false; }
-        const Span<char> target{ _text.data() + _length, room };
-        const bool copied = target.copyFrom(text);
-        if (!copied) { return false; }
-        _length += text.length;
-        _text[_length] = '\0';
-        return true;
-    }
-
-    template <size_t N>
-    inline Span<const char> FixedString<N>::span() const
-    {
-        return Span<const char>{ _text.data(), _length };
-    }
-
-    template <size_t N>
-    inline const char* FixedString<N>::c_str() const
-    {
-        return _text.data();
-    }
-
-    template <size_t N>
-    inline size_t FixedString<N>::length() const
-    {
-        return _length;
-    }
-
-    template <size_t N>
-    inline bool FixedString<N>::empty() const
-    {
-        return _length == 0;
-    }
-
-    template <size_t N>
-    inline void FixedString<N>::clear()
-    {
-        _length = 0;
-        _text[0] = '\0';
-    }
-}
-
-#endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    inline constexpr uint16_t HTTP_DEFAULT_PORT = 80;
-    inline constexpr uint16_t HTTPS_DEFAULT_PORT = 443;
-    inline constexpr size_t   HOST_BRACKET_BYTES = 2;
-    inline constexpr size_t   HOST_PORT_BYTES = 6;
-    inline constexpr size_t   HOST_FIELD_BYTES =
-        KIOTTY_NET_MAX_HOST_LENGTH + HOST_BRACKET_BYTES + HOST_PORT_BYTES;
-
-    using HostField = FixedString<HOST_FIELD_BYTES + 1>;
-
-    struct RequestHead
-    {
-        Span<const KiottyNetHttpHeader> shared_headers;
-        Span<const KiottyNetHttpHeader> extra_headers;
-        Span<const char>                path;
-        Span<const char>                host_field;
-        uint64_t                        body_length;
-        size_t                          max_headers;
-        KiottyNetHttpMethod             method;
-        KiottyNetHttpContentType        type;
-    };
-
-    static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + sizeof(uint64_t)
-                                             + sizeof(size_t) + 2 * sizeof(int32_t),
-                  "RequestHead: unexpected padding");
-}
-
-#endif
-
-#include <cstddef>
-#include <cstdint>
-
-namespace kiotty::net::implementation
-{
-    using HostFieldResult = Result<HostField, KiottyNetCode>;
-    using HeadLengthResult = Result<size_t, KiottyNetCode>;
-
-    HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);
-    HostFieldResult  hostFieldOf(const KiottyNetAddress& address, uint16_t default_port);
-    HeadLengthResult writeRequestHead(Span<char> buffer, const RequestHead& head);
 }
 
 #endif
@@ -8074,24 +7834,136 @@ namespace kiotty::net::implementation
 }
 
 #endif
-#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
-#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_REQUEST_HEAD_H
 
+#ifndef KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
+#define KIOTTY_NET_INTERNAL_CORE_FIXED_STRING_H
+
+#include <array>
+#include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    template <size_t N>
+    class FixedString
+    {
+        static_assert(N > 0, "FixedString: N counts the terminator and must be positive");
+
+    public:
+        static constexpr size_t MAX_LENGTH = N - 1;
+
+        FixedString();
+
+        bool             assign(Span<const char> text);
+        bool             append(Span<const char> text);
+        Span<const char> span() const;
+        const char*      c_str() const;
+        size_t           length() const;
+        bool             empty() const;
+        void             clear();
+
+    private:
+        std::array<char, N> _text;
+        size_t              _length;
+    };
+
+    template <size_t N>
+    inline FixedString<N>::FixedString()
+        : _text{}
+        , _length(0)
+    {
+    }
+
+    template <size_t N>
+    inline bool FixedString<N>::assign(Span<const char> text)
+    {
+        clear();
+        if (text.length > MAX_LENGTH) { return false; }
+        const Span<char> target{ _text.data(), MAX_LENGTH };
+        const bool copied = target.copyFrom(text);
+        if (!copied) { return false; }
+        _length = text.length;
+        _text[_length] = '\0';
+        return true;
+    }
+
+    template <size_t N>
+    inline bool FixedString<N>::append(Span<const char> text)
+    {
+        const size_t room = MAX_LENGTH - _length;
+        if (text.length > room) { return false; }
+        const Span<char> target{ _text.data() + _length, room };
+        const bool copied = target.copyFrom(text);
+        if (!copied) { return false; }
+        _length += text.length;
+        _text[_length] = '\0';
+        return true;
+    }
+
+    template <size_t N>
+    inline Span<const char> FixedString<N>::span() const
+    {
+        return Span<const char>{ _text.data(), _length };
+    }
+
+    template <size_t N>
+    inline const char* FixedString<N>::c_str() const
+    {
+        return _text.data();
+    }
+
+    template <size_t N>
+    inline size_t FixedString<N>::length() const
+    {
+        return _length;
+    }
+
+    template <size_t N>
+    inline bool FixedString<N>::empty() const
+    {
+        return _length == 0;
+    }
+
+    template <size_t N>
+    inline void FixedString<N>::clear()
+    {
+        _length = 0;
+        _text[0] = '\0';
+    }
+}
+
+#endif
+
+#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    struct ClientRequest
+    inline constexpr uint16_t HTTP_DEFAULT_PORT = 80;
+    inline constexpr uint16_t HTTPS_DEFAULT_PORT = 443;
+    inline constexpr size_t   HOST_BRACKET_BYTES = 2;
+    inline constexpr size_t   HOST_PORT_BYTES = 6;
+    inline constexpr size_t   HOST_FIELD_BYTES =
+        KIOTTY_NET_MAX_HOST_LENGTH + HOST_BRACKET_BYTES + HOST_PORT_BYTES;
+
+    using HostField = FixedString<HOST_FIELD_BYTES + 1>;
+
+    struct RequestHead
     {
-        Span<const KiottyNetHttpHeader> headers;
+        Span<const KiottyNetHttpHeader> shared_headers;
+        Span<const KiottyNetHttpHeader> extra_headers;
         Span<const char>                path;
-        Span<const char>                body;
+        Span<const char>                host_field;
+        uint64_t                        body_length;
+        size_t                          max_headers;
         KiottyNetHttpMethod             method;
         KiottyNetHttpContentType        type;
     };
 
-    static_assert(sizeof(ClientRequest) == 3 * sizeof(Span<const char>) + 2 * sizeof(int32_t),
-                  "ClientRequest: unexpected padding");
+    static_assert(sizeof(RequestHead) == 4 * sizeof(Span<const char>) + sizeof(uint64_t)
+                                             + sizeof(size_t) + 2 * sizeof(int32_t),
+                  "RequestHead: unexpected padding");
 }
 
 #endif
@@ -8125,7 +7997,165 @@ namespace kiotty::net::implementation
 #endif
 
 #include <cstddef>
+
+namespace kiotty::net::implementation
+{
+    struct HttpClientTarget
+    {
+        KiottyNetAddress address;
+        HostField        host;
+        bool             is_set;
+    };
+
+    struct HttpClientState
+    {
+        HttpClientState();
+
+        HttpSharedHeaders shared;
+        HttpReplyStore    reply;
+        HttpBodyReader    body;
+        HttpUpload        upload;
+        HttpClientTarget  target;
+        Span<char>        head_area;
+        size_t            max_headers;
+        Persistence       persistence;
+        BusyFlag          busy;
+    };
+
+    void dropReply(HttpClientState& state);
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_REQUEST_H
+
 #include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    struct ClientRequest
+    {
+        Span<const KiottyNetHttpHeader> headers;
+        Span<const char>                path;
+        Span<const char>                body;
+        KiottyNetHttpMethod             method;
+        KiottyNetHttpContentType        type;
+    };
+
+    static_assert(sizeof(ClientRequest) == 3 * sizeof(Span<const char>) + 2 * sizeof(int32_t),
+                  "ClientRequest: unexpected padding");
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_STEP_H
+#define KIOTTY_NET_INTERNAL_HTTP_DOMAIN_ENTITY_HTTP_CLIENT_STEP_H
+
+namespace kiotty::net::implementation
+{
+    struct Connected
+    {
+        KiottyNetCode code;
+        bool          is_reused;
+    };
+
+    struct ReplyHead
+    {
+        KiottyNetCode code;
+        bool          saw_bytes;
+    };
+
+    static_assert(sizeof(Connected) == 2 * sizeof(KiottyNetCode), "Connected: unexpected padding");
+    static_assert(sizeof(ReplyHead) == 2 * sizeof(KiottyNetCode), "ReplyHead: unexpected padding");
+}
+
+#endif
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    class HttpClientExchange
+    {
+    public:
+        HttpClientExchange(HttpClientState& state, StreamClient& line);
+
+        KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
+        KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
+        KiottyNetCode      begin(const ClientRequest& request,
+                                 uint64_t body_length,
+                                 uint32_t timeout_milliseconds);
+        KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
+        KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+
+    private:
+        struct Attempt
+        {
+            KiottyNetCode code;
+            bool          is_stale;
+        };
+
+        KiottyNetHttpReply run(const ClientRequest& request, uint32_t timeout_milliseconds);
+        Attempt            attempt(const ClientRequest& request,
+                                   Span<const char> head,
+                                   const Deadline& deadline);
+        KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
+        KiottyNetCode      transmit(Span<const char> head,
+                                    Span<const char> body,
+                                    const Connected& link,
+                                    const Deadline& deadline);
+        KiottyNetCode      checkStart(const ClientRequest& request);
+        KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
+        KiottyNetCode      sendEnd(const Deadline& deadline);
+        void               settleUpload();
+        void               dropUpload();
+
+        HttpClientState& _state;
+        StreamClient&    _line;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_HEADERS_H
+
+namespace kiotty::net::implementation
+{
+    class HttpClientHeaders
+    {
+    public:
+        explicit HttpClientHeaders(HttpClientState& state);
+
+        KiottyNetCode set(Span<const char> name, Span<const char> value);
+        KiottyNetCode remove(Span<const char> name);
+        KiottyNetCode clear();
+
+    private:
+        HttpClientState& _state;
+    };
+}
+
+#endif
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_LINK_H
+
+namespace kiotty::net::implementation
+{
+    class HttpClientLink
+    {
+    public:
+        HttpClientLink(HttpClientState& state, StreamClient& line);
+
+        void disconnect();
+        void close();
+
+    private:
+        HttpClientState& _state;
+        StreamClient&    _line;
+    };
+}
+
+#endif
+
 #include <vector>
 
 namespace kiotty::net::implementation
@@ -8161,42 +8191,11 @@ namespace kiotty::net::implementation
         HttpClientLink     link();
 
     private:
-        friend class HttpClientExchange;
-
-        void               settleStop();
-        HeadLengthResult   writeHead(const ClientRequest& request, uint64_t body_length);
-        void               dropUnreadReply();
-        KiottyNetCode      transmit(size_t head_length,
-                                    Span<const char> body,
-                                    const Deadline& deadline);
-        KiottyNetCode      writeAll(Span<const char> data, const Deadline& deadline);
-        KiottyNetCode      receiveReply(KiottyNetHttpMethod method, const Deadline& deadline);
-        KiottyNetCode      receiveHead(const Deadline& deadline);
-        LineResult         nextLine(const Deadline& deadline);
-        void               startBody(const ReplyFraming& framing);
-        void               finishBody();
-        void               dropReply();
-        KiottyNetHttpReply replyOf(KiottyNetCode code);
-        KiottyNetResult    pumpBody(Span<char> buffer, const Deadline& deadline);
-        KiottyNetResult    endInput(KiottyNetCode code);
-        Span<char>         sharedArea();
-        Span<char>         requestArea();
-
         std::vector<char>                _head_bytes;
         std::vector<char>                _reply_bytes;
         std::vector<KiottyNetHttpHeader> _shared_entries;
         std::vector<KiottyNetHttpHeader> _reply_entries;
-        HttpSharedHeaders                _shared;
-        HttpReplyStore                   _reply;
-        HttpBodyReader                   _body;
-        HttpUpload                       _upload;
-        KiottyNetAddress                 _address;
-        HostField                        _host;
-        size_t                           _max_headers;
-        Persistence                      _persistence;
-        bool                             _has_target;
-        bool                             _has_reply_bytes;
-        BusyFlag                         _busy;
+        HttpClientState                  _state;
     };
 }
 
@@ -10217,7 +10216,9 @@ KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client,
 {
     if (client == nullptr || !isUsable(buffer, length)) { return invalidResult(); }
     const net::Span<char> target{ static_cast<char*>(buffer), length };
-    return client->read(target, timeout_milliseconds);
+    const net::StreamResult stream = client->stream();
+    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+    return stream.value().read(target, timeout_milliseconds);
 }
 
 KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
@@ -10225,7 +10226,9 @@ KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
                                             uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return invalidResult(); }
-    return client->write(data, timeout_milliseconds);
+    const net::StreamResult stream = client->stream();
+    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+    return stream.value().write(data, timeout_milliseconds);
 }
 
 KiottyNetEventClientResult KiottyNet_createEventClient(
@@ -19517,33 +19520,25 @@ namespace kiotty::net::implementation
         Span<const char> lineBefore(Span<const char> staged, size_t line_feed);
     }
 
-    LineResult ConnectionStream::readLine(uint32_t timeout_milliseconds)
+    StagedResult ConnectionStream::peek(size_t wanted, uint32_t timeout_milliseconds)
     {
+        const Span<const char> staged = stagedOf(_receive);
+        if (staged.length >= wanted) { return StagedResult::success(staged); }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(flushed); }
-        size_t searched = 0;
+        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(flushed); }
         for (;;)
         {
-            const Span<const char> staged = stagedOf(_receive);
-            const size_t line_feed = findLineFeed(staged, searched);
-            if (line_feed < staged.length)
-            {
-                _receive.consumer().commit(line_feed + 1);
-                return LineResult::success(lineBefore(staged, line_feed));
-            }
-            searched = staged.length;
             const KiottyNetCode filled = fillStage(deadline);
-            if (filled != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(filled); }
+            if (filled != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(filled); }
+            const Span<const char> received = stagedOf(_receive);
+            if (received.length >= wanted) { return StagedResult::success(received); }
         }
     }
 
-    KiottyNetCode ConnectionStream::fill(uint32_t timeout_milliseconds)
+    void ConnectionStream::consume(size_t length)
     {
-        const Deadline deadline(timeout_milliseconds);
-        const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
-        return fillStage(deadline);
+        _receive.consumer().commit(length);
     }
 
     KiottyNetCode ConnectionStream::fillStage(const Deadline& deadline)
@@ -19563,6 +19558,25 @@ namespace kiotty::net::implementation
                 provider.commit(static_cast<size_t>(received.bytes));
                 return KIOTTY_NET_CODE_SUCCESS;
             }
+        }
+    }
+
+    LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds)
+    {
+        const Deadline deadline(timeout_milliseconds);
+        size_t searched = 0;
+        for (;;)
+        {
+            if (deadline.expired()) { return LineResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
+            const StagedResult staged = stream.peek(searched + 1, deadline.remaining());
+            if (!staged) { return LineResult::failure(staged.code); }
+            const size_t line_feed = findLineFeed(staged.value, searched);
+            if (line_feed < staged.value.length)
+            {
+                stream.consume(line_feed + 1);
+                return LineResult::success(lineBefore(staged.value, line_feed));
+            }
+            searched = staged.value.length;
         }
     }
 
@@ -24602,6 +24616,24 @@ namespace kiotty::net::implementation
         }
     }
 }
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_REQUEST_HTTP_REQUEST_HEAD_BUILDER_H
+
+#include <cstddef>
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using HostFieldResult = Result<HostField, KiottyNetCode>;
+    using HeadLengthResult = Result<size_t, KiottyNetCode>;
+
+    HostFieldResult  buildHostField(Span<const char> host, uint16_t port, uint16_t default_port);
+    HostFieldResult  hostFieldOf(const KiottyNetAddress& address, uint16_t default_port);
+    HeadLengthResult writeRequestHead(Span<char> buffer, const RequestHead& head);
+}
+
+#endif
 
 #ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_UPLOAD_RULES_H
 #define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_BODY_HTTP_UPLOAD_RULES_H
@@ -30489,11 +30521,6 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
-    namespace
-    {
-        KiottyNetResult unconnected();
-    }
-
     StreamClient::StreamClient()
         : _receive()
         , _send()
@@ -30502,6 +30529,7 @@ namespace kiotty::net::implementation
         , _socket()
         , _configuration()
         , _stop()
+        , _stream(_socket, _tls, _receive, _send)
     {
     }
 
@@ -30540,6 +30568,18 @@ namespace kiotty::net::implementation
         return reconnect(address, Deadline(0));
     }
 
+    KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
+    {
+        disconnect();
+        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
+        if (!connected) { return connected.code; }
+        _socket = std::move(connected.value);
+        const KiottyNetCode secured = secure(address, deadline);
+        if (secured == KIOTTY_NET_CODE_SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
+        disconnect();
+        return secured;
+    }
+
     void StreamClient::disconnect()
     {
         _tls.close();
@@ -30548,16 +30588,15 @@ namespace kiotty::net::implementation
         _send.clear();
     }
 
-    KiottyNetResult StreamClient::read(Span<char> buffer, uint32_t timeout_milliseconds)
+    StreamResult StreamClient::stream()
     {
-        if (!_socket.valid()) { return unconnected(); }
-        return stream().read(buffer, timeout_milliseconds);
+        if (!_socket.valid()) { return StreamResult::failure(KIOTTY_NET_CODE_CLOSED); }
+        return StreamResult::success(_stream);
     }
 
-    KiottyNetResult StreamClient::write(KiottyNetSpan data, uint32_t timeout_milliseconds)
+    StopSignal& StreamClient::stop()
     {
-        if (!_socket.valid()) { return unconnected(); }
-        return stream().write(data, timeout_milliseconds);
+        return _stop;
     }
 
     KiottyNetCode StreamClient::notify(int64_t id, KiottyNetSpan data)
@@ -30634,56 +30673,6 @@ namespace kiotty::net::implementation
         return openProfile(tls);
     }
 
-    KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
-    {
-        disconnect();
-        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
-        if (!connected) { return connected.code; }
-        _socket = std::move(connected.value);
-        const KiottyNetCode secured = secure(address, deadline);
-        if (secured == KIOTTY_NET_CODE_SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
-        disconnect();
-        return secured;
-    }
-
-    bool StreamClient::isConnected() const
-    {
-        return _socket.valid();
-    }
-
-    LineResult StreamClient::readLine(uint32_t timeout_milliseconds)
-    {
-        if (!_socket.valid()) { return LineResult::failure(KIOTTY_NET_CODE_CLOSED); }
-        return stream().readLine(timeout_milliseconds);
-    }
-
-    StreamClient::StagedResult StreamClient::peekReceived(uint32_t timeout_milliseconds)
-    {
-        if (!_socket.valid()) { return StagedResult::failure(KIOTTY_NET_CODE_CLOSED); }
-        StageBase::Consumer staged = _receive.consumer();
-        if (staged.readable() == 0)
-        {
-            const KiottyNetCode filled = stream().fill(timeout_milliseconds);
-            if (filled != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(filled); }
-        }
-        return StagedResult::success(Span<const char>{ staged.peek(), staged.readable() });
-    }
-
-    void StreamClient::consumeReceived(size_t length)
-    {
-        _receive.consumer().commit(length);
-    }
-
-    size_t StreamClient::stagedBytes()
-    {
-        return _receive.consumer().readable();
-    }
-
-    StopSignal& StreamClient::stopSignal()
-    {
-        return _stop;
-    }
-
     KiottyNetCode StreamClient::openProfile(const KiottyNetTlsClientConfiguration* tls)
     {
         _profile.close();
@@ -30698,82 +30687,94 @@ namespace kiotty::net::implementation
                                     _configuration.send_capacity };
         const KiottyNetCode opened = _tls.open(_profile, hostnameOf(address), capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        return stream().handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
-    }
-
-    ConnectionStream StreamClient::stream()
-    {
-        return ConnectionStream(_socket, _tls, _receive, _send);
-    }
-
-    namespace
-    {
-        KiottyNetResult unconnected()
-        {
-            return KiottyNetResult{ 0, KIOTTY_NET_CODE_CLOSED };
-        }
+        return _stream.handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
     }
 }
 
 namespace kiotty::net::implementation
 {
-    HttpClientHeaders::HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy)
-        : _shared(shared)
-        , _is_busy(is_busy)
+    HttpClientHeaders::HttpClientHeaders(HttpClientState& state)
+        : _state(state)
     {
     }
 
     KiottyNetCode HttpClientHeaders::set(Span<const char> name, Span<const char> value)
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        return _shared.set(name, value);
+        return _state.shared.set(name, value);
     }
 
     KiottyNetCode HttpClientHeaders::remove(Span<const char> name)
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        return _shared.remove(name);
+        return _state.shared.remove(name);
     }
 
     KiottyNetCode HttpClientHeaders::clear()
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        _shared.clear();
+        _state.shared.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
 }
 
 namespace kiotty::net::implementation
 {
-    HttpClientLink::HttpClientLink(StreamClient& stream, StopSignal& stop, BusyFlag& busy)
-        : _stream(stream)
-        , _stop(stop)
-        , _busy(busy)
+    HttpClientLink::HttpClientLink(HttpClientState& state, StreamClient& line)
+        : _state(state)
+        , _line(line)
     {
     }
 
     void HttpClientLink::disconnect()
     {
-        const BusyGuard guard(_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return; }
-        static_cast<void>(_stop.accept());
-        _stream.disconnect();
+        static_cast<void>(_line.stop().accept());
+        _line.disconnect();
     }
 
     void HttpClientLink::close()
     {
-        if (!_busy.enterClose())
+        if (!_state.busy.enterClose())
         {
-            _stop.raise();
+            _line.stop().raise();
             return;
         }
-        _stream.disconnect();
-        _busy.leave();
+        _line.disconnect();
+        _state.busy.leave();
     }
 }
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_SEND_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_SEND_H
+
+#include <cstdint>
+
+namespace kiotty::net::implementation
+{
+    using TimeLeftResult = Result<uint32_t, KiottyNetCode>;
+    using HeadBytesResult = Result<Span<const char>, KiottyNetCode>;
+
+    TimeLeftResult  timeLeftOf(const Deadline& deadline);
+    void            settleStop(StreamClient& line);
+    HeadBytesResult writeHead(HttpClientState& state,
+                              const ClientRequest& request,
+                              uint64_t body_length);
+    Connected       ensureConnected(StreamClient& line,
+                                    const HttpClientTarget& target,
+                                    const Deadline& deadline);
+    KiottyNetCode   writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline);
+    KiottyNetCode   sendBytes(StreamClient& line,
+                              Span<const char> head,
+                              Span<const char> body,
+                              const Deadline& deadline);
+}
+
+#endif
 
 #include <algorithm>
 
@@ -30781,14 +30782,10 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        using TimeLeftResult = Result<uint32_t, KiottyNetCode>;
-
         constexpr size_t HEAD_AREA_COUNT = 2;
-        constexpr size_t MAX_INTERIM_REPLIES = 16;
 
-        TimeLeftResult     timeLeftOf(const Deadline& deadline);
-        KiottyNetCode      checkLimits(const KiottyNetHttpLimits& limits);
-        uint16_t           defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode                checkLimits(const KiottyNetHttpLimits& limits);
+        uint16_t                     defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
     }
 
@@ -30798,17 +30795,7 @@ namespace kiotty::net::implementation
         , _reply_bytes()
         , _shared_entries()
         , _reply_entries()
-        , _shared(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
-        , _reply(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
-        , _body()
-        , _upload(idleUpload())
-        , _address()
-        , _host()
-        , _max_headers(0)
-        , _persistence(Persistence::CLOSE)
-        , _has_target(false)
-        , _has_reply_bytes(false)
-        , _busy()
+        , _state()
     {
     }
 
@@ -30822,242 +30809,81 @@ namespace kiotty::net::implementation
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
         const KiottyNetCode base = StreamClient::initialize(id, lineReadyOf(configuration));
         if (base != KIOTTY_NET_CODE_SUCCESS) { return base; }
-        _head_bytes.assign(HEAD_AREA_COUNT * limits.max_header_bytes, '\0');
-        _reply_bytes.assign(limits.max_header_bytes, '\0');
+        const size_t half = limits.max_header_bytes;
+        _head_bytes.assign(HEAD_AREA_COUNT * half, '\0');
+        _reply_bytes.assign(half, '\0');
         _shared_entries.assign(limits.max_headers, KiottyNetHttpHeader{});
         _reply_entries.assign(limits.max_headers, KiottyNetHttpHeader{});
+        const Span<char> shared_area{ _head_bytes.data(), half };
+        const Span<char> reply_area{ _reply_bytes.data(), half };
         const Span<KiottyNetHttpHeader> shared{ _shared_entries.data(), _shared_entries.size() };
         const Span<KiottyNetHttpHeader> reply{ _reply_entries.data(), _reply_entries.size() };
-        _shared = HttpSharedHeaders(sharedArea(), shared);
-        _reply = HttpReplyStore(Span<char>{ _reply_bytes.data(), _reply_bytes.size() }, reply);
-        _body = HttpBodyReader();
-        _upload = idleUpload();
-        _max_headers = limits.max_headers;
-        _has_target = false;
+        _state.shared = HttpSharedHeaders(shared_area, shared);
+        _state.reply = HttpReplyStore(reply_area, reply);
+        _state.head_area = Span<char>{ _head_bytes.data() + half, half };
+        _state.max_headers = limits.max_headers;
+        dropReply(_state);
+        _state.upload = idleUpload();
+        _state.target = HttpClientTarget{};
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     void HttpClient::reset() noexcept
     {
         StreamClient::reset();
-        _shared.clear();
-        requestArea().fill('\0');
-        dropReply();
-        _upload = idleUpload();
-        _has_target = false;
+        _state.shared.clear();
+        _state.head_area.fill('\0');
+        dropReply(_state);
+        _state.upload = idleUpload();
+        _state.target = HttpClientTarget{};
     }
 
     KiottyNetCode HttpClient::connect(const KiottyNetAddress& address,
                                       const KiottyNetTlsClientConfiguration* tls)
     {
-        const BusyGuard guard(_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        settleStop();
-        dropReply();
-        _upload = idleUpload();
-        _has_target = false;
-        const KiottyNetCode prepared = prepare(address, tls);
-        if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
+        settleStop(*this);
+        dropReply(_state);
+        _state.upload = idleUpload();
+        _state.target = HttpClientTarget{};
         const HostFieldResult host = hostFieldOf(address, defaultPortOf(tls));
         if (!host) { return host.code; }
-        _address = address;
-        _host = host.value;
-        _has_target = true;
-        return reconnect(_address, Deadline(0));
+        const KiottyNetCode connected = StreamClient::connect(address, tls);
+        if (connected == KIOTTY_NET_CODE_INVALID_ARGUMENT) { return connected; }
+        _state.target = HttpClientTarget{ address, host.value, true };
+        return connected;
     }
 
     HttpClientExchange HttpClient::exchange()
     {
-        return HttpClientExchange(*this);
+        StreamClient& line = *this;
+        return HttpClientExchange(_state, line);
     }
 
     HttpClientHeaders HttpClient::headers()
     {
-        return HttpClientHeaders(_shared, _busy);
+        return HttpClientHeaders(_state);
     }
 
     HttpClientLink HttpClient::link()
     {
-        StreamClient& stream = *this;
-        return HttpClientLink(stream, stopSignal(), _busy);
-    }
-
-    void HttpClient::settleStop()
-    {
-        if (stopSignal().accept()) { StreamClient::disconnect(); }
-    }
-
-    HeadLengthResult HttpClient::writeHead(const ClientRequest& request, uint64_t body_length)
-    {
-        const RequestHead head{ _shared.list(), request.headers, request.path,
-                                _host.span(),   body_length,     _max_headers,
-                                request.method, request.type };
-        const HeadLengthResult written = writeRequestHead(requestArea(), head);
-        if (!written) { requestArea().fill('\0'); }
-        return written;
-    }
-
-    KiottyNetCode HttpClient::transmit(size_t head_length,
-                                       Span<const char> body,
-                                       const Deadline& deadline)
-    {
-        const bool is_open = isConnected();
-        const KiottyNetCode connected =
-            is_open ? KIOTTY_NET_CODE_SUCCESS : reconnect(_address, deadline);
-        const Span<const char> head{ requestArea().data, head_length };
-        const bool is_connected = connected == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode sent = is_connected ? writeAll(head, deadline) : connected;
-        requestArea().fill('\0');
-        if (sent != KIOTTY_NET_CODE_SUCCESS || body.empty()) { return sent; }
-        return writeAll(body, deadline);
-    }
-
-    KiottyNetCode HttpClient::writeAll(Span<const char> data, const Deadline& deadline)
-    {
-        const TimeLeftResult left = timeLeftOf(deadline);
-        if (!left) { return left.code; }
-        const KiottyNetSpan bytes{ data.data, data.length };
-        return StreamClient::write(bytes, left.value).code;
-    }
-
-    KiottyNetCode HttpClient::receiveReply(KiottyNetHttpMethod method, const Deadline& deadline)
-    {
-        for (size_t interim = 0; interim < MAX_INTERIM_REPLIES; ++interim)
-        {
-            const KiottyNetCode head = receiveHead(deadline);
-            if (head != KIOTTY_NET_CODE_SUCCESS) { return head; }
-            const ReplyFramingResult framing = _reply.finish(method);
-            if (!framing) { return framing.code; }
-            if (framing.value.phase == ReplyPhase::FINAL)
-            {
-                startBody(framing.value);
-                return KIOTTY_NET_CODE_SUCCESS;
-            }
-        }
-        return KIOTTY_NET_CODE_PROTOCOL_ERROR;
-    }
-
-    KiottyNetCode HttpClient::receiveHead(const Deadline& deadline)
-    {
-        _reply.begin();
-        const LineResult status = nextLine(deadline);
-        if (!status) { return status.code; }
-        const KiottyNetCode parsed = _reply.takeStatusLine(status.value);
-        if (parsed != KIOTTY_NET_CODE_SUCCESS) { return parsed; }
-        for (;;)
-        {
-            const LineResult line = nextLine(deadline);
-            if (!line) { return line.code; }
-            if (line.value.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
-            const KiottyNetCode stored = _reply.takeHeader(line.value);
-            if (stored != KIOTTY_NET_CODE_SUCCESS) { return stored; }
-        }
-    }
-
-    LineResult HttpClient::nextLine(const Deadline& deadline)
-    {
-        const TimeLeftResult left = timeLeftOf(deadline);
-        if (!left) { return LineResult::failure(left.code); }
-        const LineResult line = readLine(left.value);
-        _has_reply_bytes = _has_reply_bytes || line;
-        return line;
-    }
-
-    void HttpClient::startBody(const ReplyFraming& framing)
-    {
-        _body = HttpBodyReader(framing);
-        _persistence = framing.persistence;
-        if (_body.isFinished()) { finishBody(); }
-    }
-
-    void HttpClient::finishBody()
-    {
-        const bool is_kept = _persistence == Persistence::KEEP_ALIVE;
-        if (!is_kept) { StreamClient::disconnect(); }
-    }
-
-    void HttpClient::dropReply()
-    {
-        _reply.begin();
-        _body = HttpBodyReader();
-        _persistence = Persistence::CLOSE;
-    }
-
-    void HttpClient::dropUnreadReply()
-    {
-        if (!_body.isFinished()) { StreamClient::disconnect(); }
-        dropReply();
-        _has_reply_bytes = false;
-    }
-
-    KiottyNetHttpReply HttpClient::replyOf(KiottyNetCode code)
-    {
-        if (code != KIOTTY_NET_CODE_SUCCESS)
-        {
-            StreamClient::disconnect();
-            return KiottyNetHttpReply{ code, 0, nullptr, 0 };
-        }
-        const Span<const KiottyNetHttpHeader> headers = _reply.headers();
-        return KiottyNetHttpReply{ code, _reply.status(), headers.data, headers.length };
-    }
-
-    KiottyNetResult HttpClient::pumpBody(Span<char> buffer, const Deadline& deadline)
-    {
-        for (;;)
-        {
-            const TimeLeftResult left = timeLeftOf(deadline);
-            if (!left) { return resultOf(0, left.code); }
-            const StagedResult staged = peekReceived(left.value);
-            if (!staged) { return endInput(staged.code); }
-            const BodyStep step = _body.take(staged.value, buffer);
-            consumeReceived(step.consumed);
-            if (step.code != KIOTTY_NET_CODE_SUCCESS)
-            {
-                StreamClient::disconnect();
-                return resultOf(0, step.code);
-            }
-            if (step.is_finished) { finishBody(); }
-            const bool is_answered = step.produced > 0 || step.is_finished;
-            if (is_answered) { return resultOf(step.produced, step.code); }
-        }
-    }
-
-    KiottyNetResult HttpClient::endInput(KiottyNetCode code)
-    {
-        if (code == KIOTTY_NET_CODE_TIMEOUT) { return resultOf(0, code); }
-        const bool is_closed_by_peer = code == KIOTTY_NET_CODE_PEER_CLOSED;
-        const KiottyNetCode ended = is_closed_by_peer ? _body.closeInput() : code;
-        StreamClient::disconnect();
-        return resultOf(0, ended);
-    }
-
-    Span<char> HttpClient::sharedArea()
-    {
-        const size_t half = _head_bytes.size() / HEAD_AREA_COUNT;
-        return Span<char>{ _head_bytes.data(), half };
-    }
-
-    Span<char> HttpClient::requestArea()
-    {
-        const size_t half = _head_bytes.size() / HEAD_AREA_COUNT;
-        return Span<char>{ _head_bytes.data() + half, half };
+        StreamClient& line = *this;
+        return HttpClientLink(_state, line);
     }
 
     namespace
     {
-        TimeLeftResult timeLeftOf(const Deadline& deadline)
-        {
-            const uint32_t left = deadline.remaining();
-            const bool is_expired = deadline.limited() && left == 0;
-            if (is_expired) { return TimeLeftResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
-            return TimeLeftResult::success(left);
-        }
-
         KiottyNetCode checkLimits(const KiottyNetHttpLimits& limits)
         {
             KiottyNetHttpLimits checked = limits;
             const size_t header_bytes = limits.max_header_bytes;
             return configureHttpHeaderCapacity(checked, header_bytes, limits.max_headers);
+        }
+
+        uint16_t defaultPortOf(const KiottyNetTlsClientConfiguration* tls)
+        {
+            return tls == nullptr ? HTTP_DEFAULT_PORT : HTTPS_DEFAULT_PORT;
         }
 
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration)
@@ -31068,13 +30894,27 @@ namespace kiotty::net::implementation
             client.receive_capacity = std::min(wanted, MemoryLimits::RECEIVE_CAPACITY);
             return client;
         }
-
-        uint16_t defaultPortOf(const KiottyNetTlsClientConfiguration* tls)
-        {
-            return tls == nullptr ? HTTP_DEFAULT_PORT : HTTPS_DEFAULT_PORT;
-        }
     }
 }
+
+#ifndef KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_REPLY_H
+#define KIOTTY_NET_INTERNAL_HTTP_DATA_REPOSITORY_CLIENT_HTTP_CLIENT_REPLY_H
+
+namespace kiotty::net::implementation
+{
+    ReplyHead          receiveReply(StreamClient& line,
+                                    HttpClientState& state,
+                                    KiottyNetHttpMethod method,
+                                    const Deadline& deadline);
+    KiottyNetResult    pumpBody(StreamClient& line,
+                                HttpClientState& state,
+                                Span<char> buffer,
+                                const Deadline& deadline);
+    KiottyNetHttpReply replyOf(StreamClient& line, HttpClientState& state, KiottyNetCode code);
+    void               dropUnreadReply(StreamClient& line, HttpClientState& state);
+}
+
+#endif
 
 namespace kiotty::net::implementation
 {
@@ -31088,68 +30928,70 @@ namespace kiotty::net::implementation
         bool               isConnectionLoss(KiottyNetCode code);
     }
 
-    HttpClientExchange::HttpClientExchange(HttpClient& client)
-        : _client(client)
+    HttpClientExchange::HttpClientExchange(HttpClientState& state, StreamClient& line)
+        : _state(state)
+        , _line(line)
     {
     }
 
     KiottyNetHttpReply HttpClientExchange::send(const ClientRequest& request,
                                                 uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         dropUpload();
         return run(request, timeout_milliseconds);
     }
 
     KiottyNetResult HttpClientExchange::readBody(Span<char> buffer, uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return resultOf(0, KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        if (_client._upload.mode != UploadMode::IDLE) { return resultOf(0, INVALID); }
+        if (_state.upload.mode != UploadMode::IDLE) { return resultOf(0, INVALID); }
         const Span<char> target = cappedOf(buffer);
-        const BodyStep idle = _client._body.take(Span<const char>{ nullptr, 0 }, target);
+        const BodyStep idle = _state.body.take(Span<const char>{ nullptr, 0 }, target);
         const bool is_settled = idle.code != KIOTTY_NET_CODE_SUCCESS || idle.is_finished;
         if (is_settled) { return resultOf(0, idle.code); }
         const Deadline deadline(timeout_milliseconds);
-        return _client.pumpBody(target, deadline);
+        return pumpBody(_line, _state, target, deadline);
     }
 
     KiottyNetCode HttpClientExchange::begin(const ClientRequest& request,
                                             uint64_t body_length,
                                             uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        _client.settleStop();
+        settleStop(_line);
         const KiottyNetCode checked = checkStart(request);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
-        const HeadLengthResult head = _client.writeHead(request, body_length);
+        const HeadBytesResult head = writeHead(_state, request, body_length);
         if (!head) { return head.code; }
         dropUpload();
-        _client.dropUnreadReply();
+        dropUnreadReply(_line, _state);
         const Deadline deadline(timeout_milliseconds);
+        const Connected link = ensureConnected(_line, _state.target, deadline);
         const Span<const char> no_body{ nullptr, 0 };
-        const KiottyNetCode sent = _client.transmit(head.value, no_body, deadline);
+        const KiottyNetCode sent = transmit(head.value, no_body, link, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
         {
-            _client.disconnect();
+            _line.disconnect();
             return sent;
         }
-        _client._upload = startUpload(request.method, body_length);
+        _state.upload = startUpload(request.method, body_length);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetResult HttpClientExchange::write(Span<const char> data, uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return resultOf(0, KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        const KiottyNetCode checked = checkUploadPiece(_client._upload, data.length);
+        const KiottyNetCode checked = checkUploadPiece(_state.upload, data.length);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, checked); }
         if (data.empty()) { return resultOf(0, KIOTTY_NET_CODE_SUCCESS); }
         const Deadline deadline(timeout_milliseconds);
@@ -31159,19 +31001,19 @@ namespace kiotty::net::implementation
             dropUpload();
             return resultOf(0, sent);
         }
-        _client._upload = takeUploadPiece(_client._upload, data.length);
+        _state.upload = takeUploadPiece(_state.upload, data.length);
         return resultOf(data.length, KIOTTY_NET_CODE_SUCCESS);
     }
 
     KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        if (_client._upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
-        const KiottyNetHttpMethod method = _client._upload.method;
-        const KiottyNetCode ended = checkUploadEnd(_client._upload);
+        if (_state.upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
+        const KiottyNetHttpMethod method = _state.upload.method;
+        const KiottyNetCode ended = checkUploadEnd(_state.upload);
         if (ended != KIOTTY_NET_CODE_SUCCESS)
         {
             dropUpload();
@@ -31179,88 +31021,101 @@ namespace kiotty::net::implementation
         }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode sent = sendEnd(deadline);
-        _client._upload = idleUpload();
+        _state.upload = idleUpload();
         const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode received = is_sent ? _client.receiveReply(method, deadline) : sent;
-        return _client.replyOf(received);
+        const KiottyNetCode received =
+            is_sent ? receiveReply(_line, _state, method, deadline).code : sent;
+        return replyOf(_line, _state, received);
     }
 
     KiottyNetHttpReply HttpClientExchange::run(const ClientRequest& request,
                                                uint32_t timeout_milliseconds)
     {
-        if (!_client._has_target) { return failedReply(INVALID); }
+        if (!_state.target.is_set) { return failedReply(INVALID); }
         const KiottyNetCode body = checkRequestBody(request.type, request.body);
         if (body != KIOTTY_NET_CODE_SUCCESS) { return failedReply(body); }
-        const HeadLengthResult head = _client.writeHead(request, request.body.length);
+        const HeadBytesResult head = writeHead(_state, request, request.body.length);
         if (!head) { return failedReply(head.code); }
         const Deadline deadline(timeout_milliseconds);
         const Attempt first = attempt(request, head.value, deadline);
         const KiottyNetCode received = first.is_stale ? resend(request, deadline) : first.code;
-        return _client.replyOf(received);
+        return replyOf(_line, _state, received);
     }
 
     HttpClientExchange::Attempt HttpClientExchange::attempt(const ClientRequest& request,
-                                                            size_t head_length,
+                                                            Span<const char> head,
                                                             const Deadline& deadline)
     {
-        _client.dropUnreadReply();
-        const bool is_reused = _client.isConnected();
-        const KiottyNetCode sent = _client.transmit(head_length, request.body, deadline);
+        dropUnreadReply(_line, _state);
+        const Connected link = ensureConnected(_line, _state.target, deadline);
+        const KiottyNetCode sent = transmit(head, request.body, link, deadline);
         const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode received =
-            is_sent ? _client.receiveReply(request.method, deadline) : sent;
-        const bool is_unanswered = !_client._has_reply_bytes && _client.stagedBytes() == 0;
-        const bool is_stale = is_reused && is_unanswered && isConnectionLoss(received);
-        return Attempt{ received, is_stale };
+        const ReplyHead unsent{ sent, false };
+        const ReplyHead reply =
+            is_sent ? receiveReply(_line, _state, request.method, deadline) : unsent;
+        const bool is_stale = link.is_reused && !reply.saw_bytes && isConnectionLoss(reply.code);
+        return Attempt{ reply.code, is_stale };
     }
 
     KiottyNetCode HttpClientExchange::resend(const ClientRequest& request,
                                              const Deadline& deadline)
     {
-        _client.disconnect();
+        _line.disconnect();
         if (!isIdempotent(request.method)) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        const HeadLengthResult head = _client.writeHead(request, request.body.length);
+        const HeadBytesResult head = writeHead(_state, request, request.body.length);
         if (!head) { return head.code; }
         return attempt(request, head.value, deadline).code;
     }
 
+    KiottyNetCode HttpClientExchange::transmit(Span<const char> head,
+                                               Span<const char> body,
+                                               const Connected& link,
+                                               const Deadline& deadline)
+    {
+        const bool is_connected = link.code == KIOTTY_NET_CODE_SUCCESS;
+        const KiottyNetCode sent =
+            is_connected ? sendBytes(_line, head, body, deadline) : link.code;
+        _state.head_area.fill('\0');
+        return sent;
+    }
+
     KiottyNetCode HttpClientExchange::checkStart(const ClientRequest& request)
     {
-        if (!_client._has_target) { return INVALID; }
+        if (!_state.target.is_set) { return INVALID; }
         if (request.body.length > 0) { return INVALID; }
         return checkRequestBody(request.type, request.body);
     }
 
     KiottyNetCode HttpClientExchange::sendPiece(Span<const char> data, const Deadline& deadline)
     {
-        const bool is_counted = _client._upload.mode == UploadMode::LENGTH;
-        if (is_counted) { return _client.writeAll(data, deadline); }
+        const bool is_counted = _state.upload.mode == UploadMode::LENGTH;
+        if (is_counted) { return writeAll(_line, data, deadline); }
         const ChunkHead head = chunkHeadOf(data.length);
-        const KiottyNetCode opened = _client.writeAll(head.span(), deadline);
+        const KiottyNetCode opened = writeAll(_line, head.span(), deadline);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        const KiottyNetCode carried = _client.writeAll(data, deadline);
+        const KiottyNetCode carried = writeAll(_line, data, deadline);
         if (carried != KIOTTY_NET_CODE_SUCCESS) { return carried; }
-        return _client.writeAll(textOf(LINE_END), deadline);
+        return writeAll(_line, textOf(LINE_END), deadline);
     }
 
     KiottyNetCode HttpClientExchange::sendEnd(const Deadline& deadline)
     {
-        const bool is_counted = _client._upload.mode == UploadMode::LENGTH;
+        const bool is_counted = _state.upload.mode == UploadMode::LENGTH;
         if (is_counted) { return KIOTTY_NET_CODE_SUCCESS; }
-        return _client.writeAll(textOf(LAST_UPLOAD_CHUNK), deadline);
+        return writeAll(_line, textOf(LAST_UPLOAD_CHUNK), deadline);
     }
 
     void HttpClientExchange::settleUpload()
     {
-        const bool is_open = _client.isConnected();
-        if (!is_open) { _client._upload = idleUpload(); }
+        const bool is_open = static_cast<bool>(_line.stream());
+        if (!is_open) { _state.upload = idleUpload(); }
     }
 
     void HttpClientExchange::dropUpload()
     {
-        const bool is_uploading = _client._upload.mode != UploadMode::IDLE;
-        if (is_uploading) { _client.disconnect(); }
-        _client._upload = idleUpload();
+        const bool is_uploading = _state.upload.mode != UploadMode::IDLE;
+        if (is_uploading) { _line.disconnect(); }
+        _state.upload = idleUpload();
     }
 
     namespace
@@ -31290,6 +31145,233 @@ namespace kiotty::net::implementation
         {
             return code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
         }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    TimeLeftResult timeLeftOf(const Deadline& deadline)
+    {
+        const uint32_t left = deadline.remaining();
+        const bool is_expired = deadline.limited() && left == 0;
+        if (is_expired) { return TimeLeftResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
+        return TimeLeftResult::success(left);
+    }
+
+    void settleStop(StreamClient& line)
+    {
+        if (line.stop().accept()) { line.disconnect(); }
+    }
+
+    HeadBytesResult writeHead(HttpClientState& state,
+                              const ClientRequest& request,
+                              uint64_t body_length)
+    {
+        const RequestHead head{ state.shared.list(), request.headers,  request.path,
+                                state.target.host.span(), body_length, state.max_headers,
+                                request.method,     request.type };
+        const HeadLengthResult written = writeRequestHead(state.head_area, head);
+        if (!written)
+        {
+            state.head_area.fill('\0');
+            return HeadBytesResult::failure(written.code);
+        }
+        return HeadBytesResult::success(Span<const char>{ state.head_area.data, written.value });
+    }
+
+    Connected ensureConnected(StreamClient& line,
+                              const HttpClientTarget& target,
+                              const Deadline& deadline)
+    {
+        const bool is_open = static_cast<bool>(line.stream());
+        if (is_open) { return Connected{ KIOTTY_NET_CODE_SUCCESS, true }; }
+        return Connected{ line.reconnect(target.address, deadline), false };
+    }
+
+    KiottyNetCode writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline)
+    {
+        const TimeLeftResult left = timeLeftOf(deadline);
+        if (!left) { return left.code; }
+        const StreamResult stream = line.stream();
+        if (!stream) { return stream.code; }
+        const KiottyNetSpan bytes{ data.data, data.length };
+        return stream.value().write(bytes, left.value).code;
+    }
+
+    KiottyNetCode sendBytes(StreamClient& line,
+                            Span<const char> head,
+                            Span<const char> body,
+                            const Deadline& deadline)
+    {
+        const KiottyNetCode sent = writeAll(line, head, deadline);
+        if (sent != KIOTTY_NET_CODE_SUCCESS || body.empty()) { return sent; }
+        return writeAll(line, body, deadline);
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        constexpr size_t MAX_INTERIM_REPLIES = 16;
+
+        LineResult      nextLine(StreamClient& line, const Deadline& deadline);
+        ReplyHead       receiveHead(StreamClient& line,
+                                    HttpReplyStore& reply,
+                                    const Deadline& deadline);
+        size_t          stagedBytesOf(StreamClient& line);
+        void            startBody(StreamClient& line,
+                                  HttpClientState& state,
+                                  const ReplyFraming& framing);
+        void            finishBody(StreamClient& line, HttpClientState& state);
+        KiottyNetResult endInput(StreamClient& line, HttpClientState& state, KiottyNetCode code);
+    }
+
+    ReplyHead receiveReply(StreamClient& line,
+                           HttpClientState& state,
+                           KiottyNetHttpMethod method,
+                           const Deadline& deadline)
+    {
+        bool saw_bytes = false;
+        for (size_t interim = 0; interim < MAX_INTERIM_REPLIES; ++interim)
+        {
+            const ReplyHead head = receiveHead(line, state.reply, deadline);
+            saw_bytes = saw_bytes || head.saw_bytes;
+            if (head.code != KIOTTY_NET_CODE_SUCCESS) { return ReplyHead{ head.code, saw_bytes }; }
+            const ReplyFramingResult framing = state.reply.finish(method);
+            if (!framing) { return ReplyHead{ framing.code, true }; }
+            if (framing.value.phase == ReplyPhase::FINAL)
+            {
+                startBody(line, state, framing.value);
+                return ReplyHead{ KIOTTY_NET_CODE_SUCCESS, true };
+            }
+        }
+        return ReplyHead{ KIOTTY_NET_CODE_PROTOCOL_ERROR, true };
+    }
+
+    KiottyNetResult pumpBody(StreamClient& line,
+                             HttpClientState& state,
+                             Span<char> buffer,
+                             const Deadline& deadline)
+    {
+        for (;;)
+        {
+            const TimeLeftResult left = timeLeftOf(deadline);
+            if (!left) { return resultOf(0, left.code); }
+            const StreamResult stream = line.stream();
+            if (!stream) { return endInput(line, state, stream.code); }
+            const StagedResult staged = stream.value().peek(1, left.value);
+            if (!staged) { return endInput(line, state, staged.code); }
+            const BodyStep step = state.body.take(staged.value, buffer);
+            stream.value().consume(step.consumed);
+            if (step.code != KIOTTY_NET_CODE_SUCCESS)
+            {
+                line.disconnect();
+                return resultOf(0, step.code);
+            }
+            if (step.is_finished) { finishBody(line, state); }
+            const bool is_answered = step.produced > 0 || step.is_finished;
+            if (is_answered) { return resultOf(step.produced, step.code); }
+        }
+    }
+
+    KiottyNetHttpReply replyOf(StreamClient& line, HttpClientState& state, KiottyNetCode code)
+    {
+        if (code != KIOTTY_NET_CODE_SUCCESS)
+        {
+            line.disconnect();
+            return KiottyNetHttpReply{ code, 0, nullptr, 0 };
+        }
+        const Span<const KiottyNetHttpHeader> headers = state.reply.headers();
+        return KiottyNetHttpReply{ code, state.reply.status(), headers.data, headers.length };
+    }
+
+    void dropUnreadReply(StreamClient& line, HttpClientState& state)
+    {
+        if (!state.body.isFinished()) { line.disconnect(); }
+        dropReply(state);
+    }
+
+    namespace
+    {
+        LineResult nextLine(StreamClient& line, const Deadline& deadline)
+        {
+            const TimeLeftResult left = timeLeftOf(deadline);
+            if (!left) { return LineResult::failure(left.code); }
+            const StreamResult stream = line.stream();
+            if (!stream) { return LineResult::failure(stream.code); }
+            return readLine(stream.value(), left.value);
+        }
+
+        ReplyHead receiveHead(StreamClient& line, HttpReplyStore& reply, const Deadline& deadline)
+        {
+            reply.begin();
+            const LineResult status = nextLine(line, deadline);
+            if (!status) { return ReplyHead{ status.code, stagedBytesOf(line) > 0 }; }
+            const KiottyNetCode parsed = reply.takeStatusLine(status.value);
+            if (parsed != KIOTTY_NET_CODE_SUCCESS) { return ReplyHead{ parsed, true }; }
+            for (;;)
+            {
+                const LineResult header = nextLine(line, deadline);
+                if (!header) { return ReplyHead{ header.code, true }; }
+                if (header.value.empty()) { return ReplyHead{ KIOTTY_NET_CODE_SUCCESS, true }; }
+                const KiottyNetCode stored = reply.takeHeader(header.value);
+                if (stored != KIOTTY_NET_CODE_SUCCESS) { return ReplyHead{ stored, true }; }
+            }
+        }
+
+        size_t stagedBytesOf(StreamClient& line)
+        {
+            const StreamResult stream = line.stream();
+            if (!stream) { return 0; }
+            const StagedResult staged = stream.value().peek(0, 0);
+            return staged ? staged.value.length : 0;
+        }
+
+        void startBody(StreamClient& line, HttpClientState& state, const ReplyFraming& framing)
+        {
+            state.body = HttpBodyReader(framing);
+            state.persistence = framing.persistence;
+            if (state.body.isFinished()) { finishBody(line, state); }
+        }
+
+        void finishBody(StreamClient& line, HttpClientState& state)
+        {
+            const bool is_kept = state.persistence == Persistence::KEEP_ALIVE;
+            if (!is_kept) { line.disconnect(); }
+        }
+
+        KiottyNetResult endInput(StreamClient& line, HttpClientState& state, KiottyNetCode code)
+        {
+            if (code == KIOTTY_NET_CODE_TIMEOUT) { return resultOf(0, code); }
+            const bool is_closed_by_peer = code == KIOTTY_NET_CODE_PEER_CLOSED;
+            const KiottyNetCode ended = is_closed_by_peer ? state.body.closeInput() : code;
+            line.disconnect();
+            return resultOf(0, ended);
+        }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    HttpClientState::HttpClientState()
+        : shared(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
+        , reply(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
+        , body()
+        , upload(idleUpload())
+        , target{}
+        , head_area{ nullptr, 0 }
+        , max_headers(0)
+        , persistence(Persistence::CLOSE)
+        , busy()
+    {
+    }
+
+    void dropReply(HttpClientState& state)
+    {
+        state.reply.begin();
+        state.body = HttpBodyReader();
+        state.persistence = Persistence::CLOSE;
     }
 }
 
