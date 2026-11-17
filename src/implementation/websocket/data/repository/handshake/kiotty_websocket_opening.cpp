@@ -18,8 +18,8 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition sendOpening(HttpSession& session, size_t written)
     {
-        session.sent += written;
-        const PieceResult piece = pieceAt(session, session.sent);
+        session.state.sent += written;
+        const PieceResult piece = pieceAt(session, session.state.sent);
         if (!piece) { return closeWith(piece.code); }
         if (piece.value.empty()) { return openSocket(session); }
         const KiottyNetSpan data{ piece.value.data, piece.value.length };
@@ -30,7 +30,7 @@ namespace kiotty::net::implementation
     {
         const KiottyNetConnectionHandle connection = session.request.request().connection;
         session.request.begin(connection);
-        session.phase = SessionPhase::SOCKET;
+        session.state.phase = SessionPhase::SOCKET;
         SocketState& socket = socketOf(session);
         SocketLink& link = linkOf(session);
         socket.is_open = true;

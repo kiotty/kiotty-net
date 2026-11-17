@@ -80,7 +80,7 @@ namespace kiotty::net::implementation
             session.request.begin(connection);
             session.response.begin();
             socketOf(session).reset();
-            session.sent = 0;
+            session.state.sent = 0;
             startHeaderClock(session);
             return writeRequest(session);
         }
@@ -88,8 +88,8 @@ namespace kiotty::net::implementation
         KiottyNetTransition onUpgradeSent(Session context, Handle, Event event)
         {
             HttpSession& session = sessionOf(context);
-            session.sent += event.length;
-            const bool has_more = session.sent < handlerOf(session).client.request.length;
+            session.state.sent += event.length;
+            const bool has_more = session.state.sent < handlerOf(session).client.request.length;
             if (has_more) { return writeRequest(session); }
             return readLine(session, STATUS_LINE, headerTimeLeft(session));
         }
@@ -145,7 +145,8 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition writeRequest(HttpSession& session)
         {
-            const Span<const char> request = handlerOf(session).client.request.skip(session.sent);
+            const Span<const char> whole = handlerOf(session).client.request;
+            const Span<const char> request = whole.skip(session.state.sent);
             const KiottyNetSpan data{ request.data, request.length };
             const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
             return Next::moveToNextState(UPGRADE_SENDING, thenWrite(data, timeout));

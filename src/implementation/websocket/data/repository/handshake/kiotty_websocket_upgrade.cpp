@@ -57,7 +57,7 @@ namespace kiotty::net::implementation
         const KiottyNetHttpRequest& request = session.request.request();
         const bool is_get = request.method == KIOTTY_NET_HTTP_METHOD_GET;
         if (!is_get) { return refuse(session, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
-        const bool has_body = hasBody(session.framing.body);
+        const bool has_body = hasBody(session.state.framing.body);
         if (has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
         const UpgradeCheck check = checkUpgrade(request);
         switch (check)
@@ -72,7 +72,7 @@ namespace kiotty::net::implementation
         SocketState& socket = socketOf(session);
         socket.reset();
         socket.target = target;
-        session.phase = SessionPhase::UPGRADING;
+        session.state.phase = SessionPhase::UPGRADING;
         const bool is_allowed = callUpgrade(session);
         if (!is_allowed) { return refuse(session, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
         return acceptUpgrade(session);
@@ -187,7 +187,7 @@ namespace kiotty::net::implementation
             const Span<const char> get = literalOf("GET");
             const bool is_not_allowed = status == KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
             if (is_not_allowed) { (void)session.response.addHeader(literalOf("Allow"), get); }
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
             return startSending(session);
         }
 
@@ -198,7 +198,7 @@ namespace kiotty::net::implementation
             (void)session.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
             const Span<const char> version = literalOf(VERSION);
             (void)session.response.addHeader(literalOf("Sec-WebSocket-Version"), version);
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
             return startSending(session);
         }
 
@@ -213,7 +213,7 @@ namespace kiotty::net::implementation
             const Span<const char> protocol = socketOf(session).protocol.span();
             const Span<const char> protocol_name = literalOf("Sec-WebSocket-Protocol");
             if (!protocol.empty()) { (void)session.response.addHeader(protocol_name, protocol); }
-            session.persistence = Persistence::UPGRADE;
+            session.state.persistence = Persistence::UPGRADE;
             advanceSession(session);
             const KiottyNetTransition sending = startSending(session);
             return Next::moveToNextState(HttpState::UPGRADED, sending.entry_action);

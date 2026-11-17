@@ -163,7 +163,7 @@ namespace kiotty::net::implementation
             const uint64_t room = session.host.limits.max_body_bytes - used;
             const BodyPlanResult plan = planBody(size.value, room);
             if (!plan) { return reject(session, plan.code); }
-            session.body = plan.value;
+            session.state.body = plan.value;
             return readBody(session, CHUNK_DATA);
         }
 
@@ -201,7 +201,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onSent(Session context, Handle connection, Event event)
         {
             HttpSession& session = sessionOf(context);
-            session.sent += event.length;
+            session.state.sent += event.length;
             return sendNext(session, connection);
         }
 
@@ -230,8 +230,8 @@ namespace kiotty::net::implementation
         {
             const RequestFramingResult framing = session.request.finishHeaders();
             if (!framing) { return reject(session, framing.code); }
-            session.framing = framing.value;
-            session.persistence = framing.value.persistence;
+            session.state.framing = framing.value;
+            session.state.persistence = framing.value.persistence;
             const BodyFraming& body = framing.value.body;
             switch (body.kind)
             {
@@ -250,19 +250,19 @@ namespace kiotty::net::implementation
             const BodyPlanResult plan = planBody(length, session.host.limits.max_body_bytes);
             if (!plan) { return reject(session, plan.code); }
             if (!hasMoreBody(plan.value)) { return dispatch(session); }
-            session.body = plan.value;
+            session.state.body = plan.value;
             return beginBody(session);
         }
 
         KiottyNetTransition beginBody(HttpSession& session)
         {
-            if (!session.framing.expects_continue) { return readFirstBody(session); }
+            if (!session.state.framing.expects_continue) { return readFirstBody(session); }
             return Next::moveToNextState(CONTINUING, thenWrite(CONTINUE_SPAN, 0));
         }
 
         KiottyNetTransition readFirstBody(HttpSession& session)
         {
-            if (hasMoreBody(session.body)) { return readBody(session, BODY); }
+            if (hasMoreBody(session.state.body)) { return readBody(session, BODY); }
             return readLine(session, CHUNK_SIZE, bodyTimeOf(session));
         }
 
@@ -271,8 +271,8 @@ namespace kiotty::net::implementation
             const Span<const char> piece{ data.data, data.length };
             const AppendedBodyResult appended = session.request.appendBody(piece);
             if (!appended) { return reject(session, appended.code); }
-            session.body = takeBodyPiece(session.body, data.length);
-            if (hasMoreBody(session.body)) { return readBody(session, more); }
+            session.state.body = takeBodyPiece(session.state.body, data.length);
+            if (hasMoreBody(session.state.body)) { return readBody(session, more); }
             const bool is_chunk = more == CHUNK_DATA;
             const uint32_t timeout = bodyTimeOf(session);
             const KiottyNetConnectionAction line_end = thenRead(CHUNK_END_BYTES, timeout);

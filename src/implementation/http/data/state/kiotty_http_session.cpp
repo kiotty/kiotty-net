@@ -14,18 +14,27 @@ namespace kiotty::net::implementation
         , info{}
         , route{}
         , stream{ nullptr, 0 }
-        , framing{ BodyFraming{ 0, BodyKind::NONE }, Persistence::KEEP_ALIVE, false }
-        , body{ 0 }
-        , header_deadline(0)
-        , sent(0)
+        , state(idleSessionState())
         , id{ 0, index }
-        , close_reason(KIOTTY_NET_CODE_SUCCESS)
-        , stream_failure(KIOTTY_NET_CODE_SUCCESS)
-        , phase(SessionPhase::READING)
-        , persistence(Persistence::KEEP_ALIVE)
-        , is_work_requested(false)
         , is_worker_owned(false)
         , is_orphaned(false)
     {
+    }
+
+    HttpSessionState idleSessionState()
+    {
+        const BodyFraming no_body{ 0, BodyKind::NONE };
+        const RequestFraming framing{ no_body, Persistence::KEEP_ALIVE, false };
+        return HttpSessionState{
+            framing,
+            BodyPlan{ 0 },
+            0,
+            0,
+            KIOTTY_NET_CODE_SUCCESS,
+            KIOTTY_NET_CODE_SUCCESS,
+            SessionPhase::READING,
+            Persistence::KEEP_ALIVE,
+            false,
+        };
     }
 }

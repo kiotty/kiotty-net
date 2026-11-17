@@ -52,16 +52,8 @@ namespace kiotty::net::implementation
         detachFile(session);
         session.request.begin(connection);
         session.response.begin();
-        session.body = BodyPlan{ 0 };
-        session.sent = 0;
-        session.close_reason = KIOTTY_NET_CODE_SUCCESS;
         session.stream = KiottyNetConnectionStream{ nullptr, 0 };
-        session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
-        session.is_work_requested = false;
-        const BodyFraming no_body{ 0, BodyKind::NONE };
-        session.framing = RequestFraming{ no_body, Persistence::KEEP_ALIVE, false };
-        session.phase = SessionPhase::READING;
-        session.persistence = Persistence::KEEP_ALIVE;
+        session.state = idleSessionState();
         return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
     }
 
@@ -77,7 +69,7 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition readBody(HttpSession& session, HttpState state)
     {
-        const size_t step = nextReadOf(session.body, session.host.receive_capacity);
+        const size_t step = nextReadOf(session.state.body, session.host.receive_capacity);
         const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
         const KiottyNetConnectionAction action = thenRead(step, timeout);
         return Next::moveToNextState(state, action);
@@ -87,14 +79,14 @@ namespace kiotty::net::implementation
     {
         session.response.begin();
         (void)session.response.setStatus(status);
-        session.persistence = Persistence::CLOSE;
-        session.close_reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
+        session.state.persistence = Persistence::CLOSE;
+        session.state.close_reason = KIOTTY_NET_CODE_PROTOCOL_ERROR;
         return startSending(session);
     }
 
     KiottyNetTransition dispatch(HttpSession& session)
     {
-        session.phase = SessionPhase::FILLING;
+        session.state.phase = SessionPhase::FILLING;
         const KiottyNetHttpRequest& request = session.request.request();
         const Span<const char> path{ request.path.data, request.path.length };
         const RouteMatch match = session.host.registry.find(request.method, path);
@@ -121,32 +113,33 @@ namespace kiotty::net::implementation
 
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)
     {
-        const PieceResult piece = pieceAt(session, session.sent);
+        const PieceResult piece = pieceAt(session, session.state.sent);
         if (!piece) { return closeWith(piece.code); }
         const ResponseFrame frame = session.response.frame();
-        const SendStep step = sendStepOf(frame, session.sent, piece.value, session.persistence);
+        const HttpSessionState& state = session.state;
+        const SendStep step = sendStepOf(frame, state.sent, piece.value, state.persistence);
         if (step.kind != SendKind::DONE) { return sendPiece(session, step); }
-        const AfterResponse after = afterResponseOf(session.persistence);
-        if (after == AfterResponse::CLOSE) { return closeWith(session.close_reason); }
+        const AfterResponse after = afterResponseOf(session.state.persistence);
+        if (after == AfterResponse::CLOSE) { return closeWith(session.state.close_reason); }
         const uint32_t wait = session.host.limits.keep_alive_timeout_milliseconds;
         return beginExchange(session, connection, wait);
     }
 
     KiottyNetTransition startSending(HttpSession& session)
     {
-        session.phase = SessionPhase::SENDING;
+        session.state.phase = SessionPhase::SENDING;
         sealResponse(session);
-        session.sent = 0;
+        session.state.sent = 0;
         const ResponseFrame frame = session.response.frame();
         const Span<const char> chunk = frame.chunkAt(0, session.host.send_capacity);
-        const SendStep step = sendStepOf(frame, 0, chunk, session.persistence);
+        const SendStep step = sendStepOf(frame, 0, chunk, session.state.persistence);
         return sendPiece(session, step);
     }
 
     void sealResponse(HttpSession& session)
     {
         const KiottyNetHttpMethod method = session.request.request().method;
-        session.response.seal(ResponseSeal{ method, session.persistence });
+        session.response.seal(ResponseSeal{ method, session.state.persistence });
     }
 
     KiottyNetTransition closeWith(KiottyNetCode reason)
@@ -157,15 +150,15 @@ namespace kiotty::net::implementation
     void startHeaderClock(HttpSession& session)
     {
         const uint32_t timeout = session.host.limits.header_timeout_milliseconds;
-        session.header_deadline = timeout == 0 ? 0 : monotonicMilliseconds() + timeout;
+        session.state.header_deadline = timeout == 0 ? 0 : monotonicMilliseconds() + timeout;
     }
 
     uint32_t headerTimeLeft(const HttpSession& session)
     {
-        if (session.header_deadline == 0) { return 0; }
+        if (session.state.header_deadline == 0) { return 0; }
         const uint64_t now = monotonicMilliseconds();
-        if (now >= session.header_deadline) { return EXPIRED_MILLISECONDS; }
-        const uint64_t left = session.header_deadline - now;
+        if (now >= session.state.header_deadline) { return EXPIRED_MILLISECONDS; }
+        const uint64_t left = session.state.header_deadline - now;
         const uint64_t largest = std::numeric_limits<uint32_t>::max();
         return static_cast<uint32_t>(left < largest ? left : largest);
     }
@@ -205,12 +198,12 @@ namespace kiotty::net::implementation
         {
             const bool is_stream = session.response.frame().isStream();
             const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
-            return RouteOutcome{ is_stream, is_head, session.is_work_requested };
+            return RouteOutcome{ is_stream, is_head, session.state.is_work_requested };
         }
 
         KiottyNetTransition awaitWork(HttpSession& session)
         {
-            session.phase = SessionPhase::WORKING;
+            session.state.phase = SessionPhase::WORKING;
             session.is_worker_owned = true;
             return Next::moveToNextState(HttpState::WORKING, thenWork());
         }
@@ -219,7 +212,7 @@ namespace kiotty::net::implementation
         {
             session.response.begin();
             (void)session.response.setStatus(SERVER_ERROR);
-            session.persistence = Persistence::CLOSE;
+            session.state.persistence = Persistence::CLOSE;
         }
 
         KiottyNetTransition sendPiece(const HttpSession& session, const SendStep& step)
@@ -228,7 +221,8 @@ namespace kiotty::net::implementation
             const bool is_farewell = step.kind == SendKind::FAREWELL;
             const KiottyNetConnectionAction write = thenWrite(data, 0);
             if (!is_farewell) { return Next::moveToNextState(HttpState::SENDING, write); }
-            const KiottyNetConnectionAction farewell = thenCloseWith(data, session.close_reason);
+            const KiottyNetCode reason = session.state.close_reason;
+            const KiottyNetConnectionAction farewell = thenCloseWith(data, reason);
             return Next::moveToNextState(HttpState::CLOSING, farewell);
         }
     }

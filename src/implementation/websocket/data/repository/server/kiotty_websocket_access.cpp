@@ -105,7 +105,7 @@ namespace kiotty::net::implementation
     {
         const SessionResult found = _host.sessions.find(id);
         if (!found) { return found; }
-        const bool is_upgrading = found.value().phase == SessionPhase::UPGRADING;
+        const bool is_upgrading = found.value().state.phase == SessionPhase::UPGRADING;
         if (!is_upgrading) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }
         return found;
     }

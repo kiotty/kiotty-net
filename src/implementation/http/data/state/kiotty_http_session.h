@@ -5,29 +5,15 @@
 #include "core/pool/kiotty_pool_handle.h"
 #include "http/data/repository/request/kiotty_http_request_store.h"
 #include "http/data/repository/response/kiotty_http_response_store.h"
-#include "http/domain/entity/kiotty_http_body_plan.h"
-#include "http/domain/entity/kiotty_http_message_framing.h"
-#include "http/domain/entity/kiotty_http_request_framing.h"
+#include "http/domain/entity/kiotty_http_session_state.h"
 #include "kiotty_net_http.h"
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
     struct HttpSessionHost;
-
-    enum class SessionPhase : uint8_t
-    {
-        READING,
-        FILLING,
-        WORKING,
-        STREAMING,
-        SENDING,
-        UPGRADING,
-        SOCKET
-    };
 
     struct SessionBuffers
     {
@@ -58,17 +44,11 @@ namespace kiotty::net::implementation
         KiottyNetConnectionInfo   info;
         KiottyNetHttpRoute        route;
         KiottyNetConnectionStream stream;
-        RequestFraming            framing;
-        BodyPlan                  body;
-        uint64_t                  header_deadline;
-        size_t                    sent;
+        HttpSessionState          state;
         PoolHandle                id;
-        KiottyNetCode             close_reason;
-        KiottyNetCode             stream_failure;
-        SessionPhase              phase;
-        Persistence               persistence;
-        bool                      is_work_requested;
         bool                      is_worker_owned;
         bool                      is_orphaned;
     };
+
+    HttpSessionState idleSessionState();
 }

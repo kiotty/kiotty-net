@@ -900,26 +900,32 @@ class HttpRegistry                                    // http/data/repository/se
 ### 4.2 HttpSession
 
 ```cpp
-enum class SessionPhase : uint8_t { READING, FILLING, WORKING, STREAMING, SENDING };
+enum class SessionPhase : uint8_t { READING, FILLING, WORKING, STREAMING, SENDING, UPGRADING, SOCKET };
+
+struct HttpSessionState                               // http/domain/entity/kiotty_http_session_state.h. 요청 하나의 진행. beginExchange 가 idleSessionState() 로 되돌린다
+{
+    RequestFraming framing;                           // 요청 머리가 정한 것: body 모양, keep-alive, 100-continue (R4b-1)
+    BodyPlan       body;                              // 남은 body (R4b-2)
+    uint64_t       header_deadline;                   // 요청 줄이 온 시각 + header_timeout. 0 이면 무한
+    size_t         sent;                              // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
+    KiottyNetCode  close_reason;                      // 응답 뒤 닫을 때 끊김 reason. 거절이면 PROTOCOL_ERROR
+    KiottyNetCode  stream_failure;                    // Work 스트림의 첫 실패. 다음 write 와 finish 가 본다 (4.9)
+    SessionPhase   phase;
+    Persistence    persistence;                       // KEEP_ALIVE, CLOSE, UPGRADE
+    bool           is_work_requested;                 // startHttpWork 가 켠다. onRequest 가 return 하면 afterRoute 가 본다
+};
 
 struct HttpSession                                    // http/data/state/kiotty_http_session.h
 {
     HttpRequestStore          request;                // 헤더 버퍼, 헤더 span 배열, body 버퍼. KiottyNetHttpRequest 를 채운다 (4.3)
     HttpResponseStore         response;               // 응답 버퍼 (4.4)
-    HttpSessionHost&                 host;
+    HttpSessionHost&          host;
     InputFile&                file;                   // 풀이 Session 마다 하나 잡는다. 파일 body (4.7)
     KiottyNetConnectionInfo   info;                   // acquire 때. 끊김 action 에 준다
     KiottyNetHttpRoute        route;                  // 이번 요청에서 onRequest 를 부른 라우트 (not found 라우트 포함). onWorkStarted 를 여기서 찾는다
     KiottyNetConnectionStream stream;                 // WORK_STARTED 가 준 base Stream. Work 의 write 와 finish 가 쓴다
-    uint64_t                  body_remaining;         // Content-Length 의 남은 바이트. chunked 는 지금 chunk 의 남은 바이트
-    uint64_t                  header_deadline;        // 요청 줄이 온 시각 + header_timeout. 0 이면 무한
-    size_t                    sent;                   // 이번 응답에서 write lane 으로 넘긴 바이트 (헤더 블록 + body)
+    HttpSessionState          state;                  // 위
     PoolHandle                id;                     // { generation, index }. response / work handle 의 id (4.5)
-    KiottyNetCode             close_reason;           // 응답 뒤 닫을 때 끊김 reason. 거절이면 PROTOCOL_ERROR
-    KiottyNetCode             stream_failure;         // Work 스트림의 첫 실패. 다음 write 와 finish 가 본다 (4.9)
-    SessionPhase              phase;
-    Persistence               persistence;            // KEEP_ALIVE, CLOSE
-    bool                      is_work_requested;      // startHttpWork 가 켠다. onRequest 가 return 하면 afterRoute 가 본다
     bool                      is_worker_owned;        // Work 를 열 때 켠다. worker 의 finish 가 handBack 으로 끈다
     bool                      is_orphaned;            // worker 가 들고 있는 동안 IO Thread 가 release 하려 했다
 };
@@ -1019,14 +1025,8 @@ KiottyNetTransition beginExchange(HttpSession& session, KiottyNetConnectionHandl
     detachFile(session);                                                     // 지난 응답의 파일을 닫는다
     session.request.begin(connection);
     session.response.begin();
-    session.body_remaining = 0;
-    session.sent = 0;
-    session.close_reason = KIOTTY_NET_CODE_SUCCESS;
     session.stream = KiottyNetConnectionStream{ nullptr, 0 };
-    session.stream_failure = KIOTTY_NET_CODE_SUCCESS;
-    session.is_work_requested = false;
-    session.phase = SessionPhase::READING;
-    session.persistence = Persistence::KEEP_ALIVE;
+    session.state = idleSessionState();                                      // framing, body, sent, phase READING, persistence KEEP_ALIVE, ...
     return readLine(session, HttpState::REQUEST_LINE, wait_milliseconds);
 }
 
@@ -1035,7 +1035,7 @@ KiottyNetTransition afterHeaders(HttpSession& session)
     const FramingResult framing = session.request.finishHeaders();           // keep_alive 를 정하고 body framing 을 고른다. CL + TE 는 400, chunked 아닌 TE 는 501
     if (!framing) { return reject(session, framing.code); }
     const bool is_kept = session.request.request().keep_alive != 0;
-    session.persistence = is_kept ? Persistence::KEEP_ALIVE : Persistence::CLOSE;
+    session.state.persistence = is_kept ? Persistence::KEEP_ALIVE : Persistence::CLOSE;
     switch (framing.value.kind)
     {
     case BodyKind::NONE:    return dispatch(session);
@@ -1063,7 +1063,7 @@ KiottyNetTransition beginBody(HttpSession& session)
 ```cpp
 KiottyNetTransition dispatch(HttpSession& session)
 {
-    session.phase = SessionPhase::FILLING;
+    session.state.phase = SessionPhase::FILLING;
     const KiottyNetHttpRequest& request = session.request.request();
     const RouteMatch match = session.host.registry.find(request.method, Span<const char>{ request.path.data, request.path.length });
     if (match.kind == MatchKind::ROUTE) { return callRoute(session, match.route); }   // not found 라우트도 ROUTE 로 온다
@@ -1082,9 +1082,9 @@ KiottyNetTransition afterRoute(HttpSession& session)
 {
     const bool is_stream = session.response.frame().isStream();
     const bool is_head = session.request.request().method == KIOTTY_NET_HTTP_METHOD_HEAD;
-    const bool is_working = session.is_work_requested && !(is_head && is_stream);   // HEAD 의 스트림 라우트는 Work 를 열지 않는다 (설계 결정 16)
+    const bool is_working = session.state.is_work_requested && !(is_head && is_stream);   // HEAD 의 스트림 라우트는 Work 를 열지 않는다 (설계 결정 16)
     if (is_working) { return awaitWork(session); }                           // phase = WORKING, is_worker_owned = true, { WORKING, thenWork() }
-    if (is_stream && !session.is_work_requested) { answerWithoutWork(session); }    // 보낼 사람이 없다. 500 + Connection: close
+    if (is_stream && !session.state.is_work_requested) { answerWithoutWork(session); }    // 보낼 사람이 없다. 500 + Connection: close
     return startSending(session);
 }
 ```
@@ -1216,7 +1216,7 @@ SessionResult HttpWork::fill(int64_t id)                                        
 {
     const SessionResult found = _host.sessions.find(id);
     if (!found) { return found; }
-    const SessionPhase phase = found.value().phase;
+    const SessionPhase phase = found.value().state.phase;
     if (phase != SessionPhase::FILLING && phase != SessionPhase::WORKING) { return SessionResult::failure(KIOTTY_NET_CODE_BUSY); }   // 헤더가 나갔다
     return found;
 }
@@ -1237,10 +1237,10 @@ KiottyNetCode HttpWork::start(int64_t id)                                       
     const SessionResult found = _host.sessions.find(id);
     if (!found) { return found.code; }
     HttpSession& session = found.value();
-    const bool is_first = session.phase == SessionPhase::FILLING && !session.is_work_requested;
+    const bool is_first = session.state.phase == SessionPhase::FILLING && !session.state.is_work_requested;
     if (!is_first) { return KIOTTY_NET_CODE_BUSY; }                               // onRequest 안에서만, 한 번만
     if (session.route.onWorkStarted == nullptr) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-    session.is_work_requested = true;                                             // 실제 Work 는 onRequest 가 return 한 뒤 afterRoute 가 연다 (4.3)
+    session.state.is_work_requested = true;                                             // 실제 Work 는 onRequest 가 return 한 뒤 afterRoute 가 연다 (4.3)
     return KIOTTY_NET_CODE_SUCCESS;
 }
 
@@ -1258,9 +1258,9 @@ KiottyNetCode HttpWork::finishWithResponse(int64_t id)                          
     const SessionResult found = working(id);                                      // WORKING / STREAMING 이 아니면 BUSY (두 번째 finish)
     if (!found) { return found.code; }
     HttpSession& session = found.value();
-    const SessionPhase phase = session.phase;
+    const SessionPhase phase = session.state.phase;
     const KiottyNetConnectionStream stream = session.stream;
-    session.phase = SessionPhase::SENDING;
+    session.state.phase = SessionPhase::SENDING;
     const KiottyNetConnectionAction then = finishingActionOf(session, phase);     // 아래
     return handOver(session, stream, then);
 }
@@ -1271,7 +1271,7 @@ KiottyNetCode HttpWork::finishWithClose(int64_t id, KiottyNetCode reason)
     if (!found) { return found.code; }
     HttpSession& session = found.value();
     const KiottyNetConnectionStream stream = session.stream;
-    session.phase = SessionPhase::SENDING;
+    session.state.phase = SessionPhase::SENDING;
     return handOver(session, stream, thenClose(reason));                          // 끝 chunk 없이 닫는다. reason 이 끊김 action 의 reason
 }
 
@@ -1320,20 +1320,20 @@ bool HttpWork::isConnected(int64_t id)
 ```cpp
 KiottyNetTransition startSending(HttpSession& session)        // IO Thread 경로 (Work 없이 onRequest 가 return 한 경우, 자동 응답, 거절)
 {
-    session.phase = SessionPhase::SENDING;
-    session.response.seal(ResponseSeal{ session.request.request().method, session.persistence });
-    session.sent = 0;
+    session.state.phase = SessionPhase::SENDING;
+    session.response.seal(ResponseSeal{ session.request.request().method, session.state.persistence });
+    session.state.sent = 0;
     const Span<const char> chunk = session.response.frame().chunkAt(0, session.host.send_capacity);   // 첫 조각은 헤더 블록
     return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0));
 }
 
-KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)   // onSent: session.sent += event.length 뒤
+KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection)   // onSent: session.state.sent += event.length 뒤
 {
-    const PieceResult piece = pieceAt(session, session.sent);                     // 다음 조각. 파일이면 여기서 읽는다
+    const PieceResult piece = pieceAt(session, session.state.sent);                     // 다음 조각. 파일이면 여기서 읽는다
     if (!piece) { return closeWith(piece.code); }                                 // 파일을 읽지 못함 : NOT_FOUND 로 닫는다
     const Span<const char> chunk = piece.value;
     if (!chunk.empty()) { return Next::moveToNextState(HttpState::SENDING, thenWrite(KiottyNetSpan{ chunk.data, chunk.length }, 0)); }
-    if (session.persistence != Persistence::KEEP_ALIVE) { return closeWith(session.close_reason); }   // SUCCESS, 거절이면 PROTOCOL_ERROR
+    if (session.state.persistence != Persistence::KEEP_ALIVE) { return closeWith(session.state.close_reason); }   // SUCCESS, 거절이면 PROTOCOL_ERROR
     return beginExchange(session, connection, session.host.limits.keep_alive_timeout_milliseconds);   // 다음 요청. 파일은 여기서 닫힌다
 }
 
@@ -1404,14 +1404,14 @@ KiottyNetResult HttpWork::write(int64_t id, KiottyNetSpan data, uint32_t timeout
     if (piece.length > MAX_CHUNK_BYTES) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }   // bytes 가 int32_t 라 0x7FFFFFFF 까지
     const KiottyNetCode checked = session.response.frame().checkChunk(piece);    // 스트림이 아님, 빈 data : INVALID_ARGUMENT. 텍스트 계열의 UTF-8 아님 : INVALID_ENCODING
     if (checked != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, checked); }
-    if (session.stream_failure != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, session.stream_failure); }   // 한 번 실패하면 계속 그 코드
+    if (session.state.stream_failure != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, session.state.stream_failure); }   // 한 번 실패하면 계속 그 코드
     const Deadline deadline(timeout_milliseconds);                               // 호출 전체에 하나. 0 은 무한
     const size_t kept = openStream(session);                                     // 첫 호출이면 seal, phase = STREAMING, 헤더 블록 길이. 아니면 0
     const bool has_body = session.response.frame().hasSendableBody();
     const KiottyNetCode sent = has_body ? sendChunk(session, piece, kept, deadline)
                                         : sendHeaderOnly(session, kept, deadline);   // HEAD, 1xx / 204 / 304 : 헤더만 보내고 CLOSED
-    session.stream_failure = failureOf(session, sent);
-    return resultOf(sent == KIOTTY_NET_CODE_SUCCESS ? piece.length : 0, session.stream_failure);
+    session.state.stream_failure = failureOf(session, sent);
+    return resultOf(sent == KIOTTY_NET_CODE_SUCCESS ? piece.length : 0, session.state.stream_failure);
 }
 
 KiottyNetCode sendChunk(HttpSession& session, Span<const char> data, size_t kept, const Deadline& deadline)
@@ -1595,7 +1595,7 @@ KiottyNetTransition openSocket(HttpSession& session)
 {
     const KiottyNetConnectionHandle connection = session.request.request().connection;
     session.request.begin(connection);                 // body Stage 를 메시지 버퍼로 비운다
-    session.phase = SessionPhase::SOCKET;
+    session.state.phase = SessionPhase::SOCKET;
     session.socket.is_open = true;
     const WebSocketTarget& target = session.socket.target;
     session.link.connection.store(connection.id);
