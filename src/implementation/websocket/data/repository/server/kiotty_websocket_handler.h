@@ -33,11 +33,11 @@ namespace kiotty::net::implementation
         SocketLink&        linkAt(int32_t index);
         Span<SocketLink>   links();
 
-        KiottyNetTransition answer(HttpSession& session, int32_t upgrade_route) override;
-        KiottyNetTransition step(HttpSession& session,
-                                 KiottyNetConnectionHandle connection,
+        UpgradeAnswer       answer(const UpgradeSession& upgrade, int32_t upgrade_route) override;
+        KiottyNetTransition open(const UpgradeSession& upgrade) override;
+        KiottyNetTransition step(const UpgradeSession& upgrade,
                                  KiottyNetConnectionEvent event) override;
-        void                end(HttpSession& session, KiottyNetCode reason) override;
+        void                end(const UpgradeSession& upgrade, KiottyNetCode reason) override;
 
         KiottyNetWebSocketEndpoint* owner;
         PushLane*                   lane;
@@ -57,4 +57,6 @@ namespace kiotty::net::implementation
     WebSocketHandler& handlerOf(const HttpSession& session);
     SocketState&      socketOf(const HttpSession& session);
     SocketLink&       linkOf(const HttpSession& session);
+    SocketState&      socketOf(WebSocketHandler& handler, const UpgradeSession& upgrade);
+    SocketLink&       linkOf(WebSocketHandler& handler, const UpgradeSession& upgrade);
 }

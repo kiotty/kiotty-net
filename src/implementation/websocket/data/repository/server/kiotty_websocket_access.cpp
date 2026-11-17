@@ -2,6 +2,7 @@
 
 #include "core/kiotty_text.h"
 #include "core/pool/kiotty_pool_handle.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_flow.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_builder.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_upgrade.h"
 #include "websocket/data/repository/send/kiotty_websocket_lane.h"
@@ -52,7 +53,7 @@ namespace kiotty::net::implementation
     {
         const SessionResult found = upgrading(id);
         if (!found) { return found.code; }
-        return chooseProtocol(found.value(), protocol);
+        return chooseProtocol(_handler, upgradeSessionOf(found.value()), protocol);
     }
 
     KiottyNetCode WebSocketAccess::send(int64_t id,

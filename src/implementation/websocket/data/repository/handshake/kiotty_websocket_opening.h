@@ -1,12 +1,11 @@
 #pragma once
 
-#include "http/data/state/kiotty_http_session.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_handler.h"
 #include "kiotty_net_statemachine.h"
-
-#include <cstddef>
 
 namespace kiotty::net::implementation
 {
-    KiottyNetTransition sendOpening(HttpSession& session, size_t written);
-    KiottyNetTransition openSocket(HttpSession& session);
+    class WebSocketHandler;
+
+    KiottyNetTransition openSocket(WebSocketHandler& handler, const UpgradeSession& upgrade);
 }

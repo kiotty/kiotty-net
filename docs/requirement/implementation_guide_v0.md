@@ -1501,7 +1501,7 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | websocket/data/repository/frame | `kiotty_websocket_frame_parser` | `parseFrameStart`, `extendedLengthBytesOf`, `parseExtendedLength`, `parseMaskKey`, `isControl` |
 | | `kiotty_websocket_frame_builder` | frame 머리 만들기 (최대 14 바이트), `headBytesOf(head)` |
 | | `kiotty_websocket_mask_rules` | `applyMask(span, key, offset)`, `nextMaskKey(state)` |
-| | `kiotty_websocket_frame_reader` | 서버 / 클라이언트가 같이 쓰는 `stepFrame(session, event)` (`WebSocketState` 로 가른다), `readNext(session, FrameRead)`, `nextFrame` |
+| | `kiotty_websocket_frame_reader` | 서버 / 클라이언트가 같이 쓰는 `stepFrame(handler, upgrade, event)` (`WebSocketState` 로 가른다), `readNext(handler, upgrade, FrameRead)`, `nextFrame`. websocket 의 함수는 `HttpSession` 대신 `(WebSocketHandler&, const UpgradeSession&)` 를 받는다 (R7-1) |
 | | `kiotty_websocket_frame_rules` | `isAcceptedStart`, `frameOf`, `isOversized`, `frameEndOf`, `payloadReadOf`, `advanceFrame` (session 을 받지 않는다) |
 | websocket/data/repository/message | `kiotty_websocket_message` | data frame 이어 붙이기 (`storePiece`), 끝의 `callMessage` (`finishData`) |
 | | `kiotty_websocket_message_rules` | `isInOrder(message, opcode)`, `messageStepOf(frame, message)`, `isBrokenMessage`, `appMessageOf` |
@@ -1511,9 +1511,9 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | | `kiotty_websocket_timing` | 다음 read 의 timeout, `onClose` 의 `{ code, status, reason }` |
 | websocket/data/repository/handshake | `kiotty_websocket_key_rules` | `isWebSocketKey`, `acceptOf` |
 | | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse(response, accept, offered)`), subprotocol 선택 |
-| | `kiotty_websocket_opening` | 101 송신 (`sendOpening`), `openSocket`, `callOpen` |
+| | `kiotty_websocket_opening` | `openSocket` (101 을 다 보낸 뒤 http 가 `open` 으로 부른다), `callOpen` |
 | websocket/data/repository/send | `kiotty_websocket_lane` | `PushLane`, push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
-| websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현, 라우트 대상, `SocketTable`) |
+| websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현: answer / open / step / end, 라우트 대상, `SocketTable`) |
 | | `kiotty_websocket_server` | `WebSocketServer` |
 | | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast) |
 | websocket/data/repository/client | `kiotty_websocket_client` | `WebSocketClient` |
@@ -1576,38 +1576,57 @@ WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
 
 등록 (V2). `HttpRegistry::addRoute(path)` 가 빈 `WebSocketTarget { NULL ×4, index }` 를 `_sockets` 에 넣고 index 를 돌려준다 (`SocketIndexResult`). usecase `onWebSocket*(server, index, cb)` (번역 층은 route 의 code 와 server 만 본다) 는 `server.registry()` (run 중이면 `BUSY`) 의 `find(route.index)` (`SocketTargetResult`, 범위 밖이면 `INVALID_ARGUMENT`) 로 그 칸을 받아 필드 하나를 채운다. `find(path)` 가 경로 번호를 주는 것과 짝이다. `HttpServer::run` 의 첫 줄이 모든 칸에 `on_message` 가 있는지 보고 (`hasEverySocketMessage`) 없으면 열기 전에 `INVALID_ARGUMENT` 다. 콜백의 app_context 는 칸에 없고 `HttpSessionHost::app_context` (run 이 넣는다, V1) 다.
 
-```
-answerUpgrade(session, target)
-    GET 아님 (HEAD)                         → 405 + Allow: GET, Connection: close
-    has_body                                → 400
-    Upgrade / Connection / Version 13 / Key 중 없음 → 426 + Upgrade: websocket + Sec-WebSocket-Version: 13
-    Key 가 16 바이트의 base64 아님          → 400
-    socket.reset(), socket.target = target, phase = UPGRADING
-    onUpgrade 가 0                          → 403
-    101 + Upgrade + Sec-WebSocket-Accept (+ 고른 Protocol), persistence = UPGRADE (Connection: Upgrade)
-    generation 을 올린다
-    → { UPGRADED, thenWrite(101) }   (socket.read.state = OPENING)
-```
-
-응답은 4.4 의 응답 버퍼에서 4.7 의 조각으로 나간다. http 기계의 상태는 `UPGRADED` 하나이고 사건은 모두 `handler.step` → `stepFrame` 으로 간다. websocket 의 세부 상태가 `OPENING` 이면 WRITTEN 을 `sendOpening` 이 받아 남은 조각을 보내고, 다 보냈으면 `openSocket` 이다.
+http 와 websocket 사이에는 `UpgradeSession` 값 하나가 오간다 (R7-1, `design_http_websocket_boundary_v0.html`). http 가 부를 때마다 session 에서 만든다 (`upgradeSessionOf`).
 
 ```cpp
-KiottyNetTransition openSocket(HttpSession& session)
+struct UpgradeSession                       // http/data/repository/upgrade/kiotty_http_upgrade_handler.h
 {
-    const KiottyNetConnectionHandle connection = session.request.request().connection;
-    session.request.begin(connection);                 // body Stage 를 메시지 버퍼로 비운다
-    session.state.phase = SessionPhase::SOCKET;
-    session.socket.is_open = true;
-    const WebSocketTarget& target = session.socket.target;
-    session.link.connection.store(connection.id);
-    session.link.path.store(target.path);
-    session.link.closing.store(0);
-    session.link.socket.store(session.id.value());     // 이때부터 다른 thread 가 보낼 수 있다
-    callOpen(session);                                 // 서버: target.on_open(app_context, handle) 의 값이 context. 클라이언트: events.on_open(app_context)
-    Parker* opened = session.host.upgrade.opened;      // 클라이언트의 await (5.8). 서버는 NULL
+    const KiottyNetHttpRequest& request;    // 요청 view: 헤더, connection
+    HttpResponseStore&          response;   // 101 또는 거절 응답 (answer)
+    Span<char>                  message;    // 요청 body 버퍼를 빌려준다. message 조각을 모으는 곳
+    const KiottyNetHttpLimits&  limits;
+    size_t                      receive_capacity;
+    KiottyNetAppContext         app_context;
+    PoolHandle                  id;         // index 로 websocket 의 칸, value() 로 앱의 handle
+    bool                        has_body;
+};
+// HttpUpgradeHandler: UpgradeAnswer answer(upgrade, route), open(upgrade), step(upgrade, event), end(upgrade, reason)
+```
+
+```
+dispatchUpgrade (http)
+    phase = UPGRADING
+    answer = handler.answer(upgradeSessionOf(session), route)
+        GET 아님 (HEAD)                         → 405 + Allow: GET          → REFUSE
+        has_body                                → 400                       → REFUSE
+        Upgrade / Connection / Version 13 / Key 중 없음 → 426 + Upgrade: websocket + Sec-WebSocket-Version: 13 → REFUSE
+        Key 가 16 바이트의 base64 아님          → 400                       → REFUSE
+        socket.reset(), socket.target = target
+        onUpgrade 가 0                          → 403                       → REFUSE
+        101 + Upgrade + Sec-WebSocket-Accept (+ 고른 Protocol)               → ACCEPT
+    REFUSE: persistence = CLOSE, 응답을 보내고 닫는다
+    ACCEPT: persistence = UPGRADE (Connection: Upgrade), generation 을 올린다 → { UPGRADED, thenWrite(101) }
+```
+
+응답은 4.4 의 응답 버퍼에서 4.7 의 조각으로 나간다. http 기계의 상태는 `UPGRADED` 하나다. `stepUpgraded` (http) 는 phase 가 `SOCKET` 이 아닌 동안 WRITTEN 으로 101 의 남은 조각을 보내고, 다 보냈으면 요청 저장소를 비우고 phase 를 `SOCKET` 으로 둔 뒤 `handler.open(upgrade)` 를 부른다. 그 뒤의 사건은 `handler.step` → `stepFrame` 이다.
+
+```cpp
+KiottyNetTransition openSocket(WebSocketHandler& handler, const UpgradeSession& upgrade)
+{
+    const KiottyNetConnectionHandle connection = upgrade.request.connection;
+    SocketState& socket = socketOf(handler, upgrade);
+    SocketLink& link = linkOf(handler, upgrade);
+    socket.is_open = true;
+    socket.message_length = 0;                          // upgrade.message 에 모은 길이
+    link.connection.store(connection.id);
+    link.path.store(socket.target.path);
+    link.closing.store(0);
+    link.socket.store(upgrade.id.value());              // 이때부터 다른 thread 가 보낼 수 있다
+    callOpen(handler, upgrade);                         // 서버: target.on_open(app_context, handle) 의 값이 context. 클라이언트: events.on_open(app_context)
+    Parker* opened = handler.client.opened;             // 클라이언트의 await (5.8). 서버는 NULL
     const auto wake = []() {};
     if (opened != nullptr) { opened->unpark(wake); }
-    return nextFrame(session);
+    return nextFrame(handler, upgrade);
 }
 ```
 
@@ -1642,7 +1661,7 @@ void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
 | `readFrameLength` | 확장 길이. 최소 표현이 아니거나 최상위 비트가 서면 1002 |
 | `afterFrameLength` | 데이터 frame 이면 지금까지 모인 body 에 더해 `max_body_bytes` 를 넘는지 먼저 본다 (넘으면 payload 를 읽기 전에 1009) |
 | `readFrameMask` | mask key |
-| `readFramePiece` | `min(남은 길이, receive_capacity)` 씩 읽는다. 데이터 frame 은 `appendBody(piece, key, offset)` 가 body Stage 로 복사하며 unmask 하고, 제어 frame 은 `socket.control` 로. offset 이 조각마다 이어진다 |
+| `readFramePiece` | `min(남은 길이, receive_capacity)` 씩 읽는다. 데이터 frame 은 `storePiece` 가 `upgrade.message` 의 `socket.message_length` 뒤로 복사하며 unmask 하고, 제어 frame 은 `socket.control` 로. offset 이 조각마다 이어진다 |
 | `finishControl` | ping → pong (닫는 중이면 보내지 않는다), pong → `ping_deadline = 0`, close → `answerClose` (5.7) |
 | `finishData` | FIN 이 아니면 다음 frame. FIN 이면 TEXT 의 UTF-8 검사 (아니면 1007), 닫는 중이 아니면 `callMessage` (서버 `onMessage(context, handle, { opcode, body })`, 클라이언트 `onMessage(app_context, { opcode, body })`), body Stage 를 비운다 |
 

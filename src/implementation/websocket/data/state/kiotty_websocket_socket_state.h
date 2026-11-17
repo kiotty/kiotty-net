@@ -38,6 +38,7 @@ namespace kiotty::net::implementation
         uint64_t                  ping_deadline;
         uint64_t                  close_deadline;
         size_t                    control_length;
+        size_t                    message_length;
         uint16_t                  peer_status;
         FrameOpcode               message;
         char                      control[MAX_CONTROL_PAYLOAD_BYTES];

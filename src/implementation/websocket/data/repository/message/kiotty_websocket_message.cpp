@@ -15,52 +15,61 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message);
+        void callMessage(WebSocketHandler& handler,
+                         const UpgradeSession& upgrade,
+                         const KiottyNetWebSocketMessage& message);
     }
 
-    KiottyNetTransition finishData(HttpSession& session)
+    KiottyNetTransition finishData(WebSocketHandler& handler, const UpgradeSession& upgrade)
     {
-        SocketState& socket = socketOf(session);
+        SocketState& socket = socketOf(handler, upgrade);
         const MessageStep step = messageStepOf(socket.frame, socket.message);
         socket.message = step.message;
-        if (!step.is_done) { return nextFrame(session); }
-        const KiottyNetHttpRequest& request = session.request.request();
-        const KiottyNetConnectionHandle connection = request.connection;
-        const bool is_broken = isBrokenMessage(step.delivered, spanOf(request.body));
-        if (is_broken) { return failSocket(session, CLOSE_INVALID_PAYLOAD); }
-        const KiottyNetWebSocketMessage message = appMessageOf(step.delivered, request.body);
-        if (!isClosing(session)) { callMessage(session, message); }
-        session.request.begin(connection);
-        return nextFrame(session);
+        if (!step.is_done) { return nextFrame(handler, upgrade); }
+        const Span<const char> body{ upgrade.message.data, socket.message_length };
+        const bool is_broken = isBrokenMessage(step.delivered, body);
+        if (is_broken) { return failSocket(handler, upgrade, CLOSE_INVALID_PAYLOAD); }
+        const KiottyNetSpan data{ body.data, body.length };
+        const KiottyNetWebSocketMessage message = appMessageOf(step.delivered, data);
+        if (!isClosing(handler, upgrade)) { callMessage(handler, upgrade, message); }
+        socket.message_length = 0;
+        return nextFrame(handler, upgrade);
     }
 
-    bool storePiece(HttpSession& session, Span<const char> piece)
+    bool storePiece(WebSocketHandler& handler,
+                    const UpgradeSession& upgrade,
+                    Span<const char> piece)
     {
-        const SocketFrame& frame = socketOf(session).frame;
+        SocketState& socket = socketOf(handler, upgrade);
+        const SocketFrame& frame = socket.frame;
         if (isControl(frame.opcode))
         {
-            storeControl(session, piece);
+            storeControl(handler, upgrade, piece);
             return true;
         }
-        const AppendedBodyResult appended = session.request.appendBody(piece);
-        if (!appended) { return false; }
-        applyMask(appended.value, frame.key, frame.offset);
+        const size_t used = socket.message_length;
+        if (piece.length > upgrade.message.length - used) { return false; }
+        const Span<char> target{ upgrade.message.data + used, piece.length };
+        (void)target.copyFrom(piece);
+        socket.message_length = used + piece.length;
+        applyMask(target, frame.key, frame.offset);
         return true;
     }
 
     namespace
     {
-        void callMessage(HttpSession& session, const KiottyNetWebSocketMessage& message)
+        void callMessage(WebSocketHandler& handler,
+                         const UpgradeSession& upgrade,
+                         const KiottyNetWebSocketMessage& message)
         {
-            const WebSocketHandler& handler = handlerOf(session);
             if (handler.role == SocketRole::CLIENT)
             {
-                handler.client.events.on_message(session.host.app_context, message);
+                handler.client.events.on_message(upgrade.app_context, message);
                 return;
             }
-            const SocketState& socket = socketOf(session);
+            const SocketState& socket = socketOf(handler, upgrade);
             const KiottyNetWebSocketMessageAction on_message = socket.target.on_message;
-            on_message(socket.context, socketHandleOf(session), message);
+            on_message(socket.context, socketHandleOf(handler, upgrade), message);
         }
     }
 }

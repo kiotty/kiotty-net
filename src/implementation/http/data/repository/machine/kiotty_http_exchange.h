@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kiotty_span.h"
+#include "http/data/repository/machine/kiotty_http_close.h"
 #include "http/data/state/kiotty_http_session.h"
 #include "http/domain/entity/kiotty_http_state.h"
 #include "kiotty_net_http.h"
@@ -25,7 +26,6 @@ namespace kiotty::net::implementation
     KiottyNetTransition sendNext(HttpSession& session, KiottyNetConnectionHandle connection);
     KiottyNetTransition startSending(HttpSession& session);
     void                sealResponse(HttpSession& session);
-    KiottyNetTransition closeWith(KiottyNetCode reason);
     void                startHeaderClock(HttpSession& session);
     uint32_t            headerTimeLeft(const HttpSession& session);
 }

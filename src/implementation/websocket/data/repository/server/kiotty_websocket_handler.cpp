@@ -1,8 +1,9 @@
 #include "websocket/data/repository/server/kiotty_websocket_handler.h"
 
-#include "http/data/repository/machine/kiotty_http_exchange.h"
+#include "http/data/state/kiotty_http_session.h"
 #include "websocket/data/repository/control/kiotty_websocket_control.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_reader.h"
+#include "websocket/data/repository/handshake/kiotty_websocket_opening.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_upgrade.h"
 
 namespace kiotty::net::implementation
@@ -63,23 +64,27 @@ namespace kiotty::net::implementation
         return _table.links();
     }
 
-    KiottyNetTransition WebSocketHandler::answer(HttpSession& session, int32_t upgrade_route)
+    UpgradeAnswer WebSocketHandler::answer(const UpgradeSession& upgrade, int32_t upgrade_route)
     {
         const SocketTargetResult found = target(upgrade_route);
-        if (!found) { return closeWith(KIOTTY_NET_CODE_PROTOCOL_ERROR); }
-        return answerUpgrade(session, found.value());
+        if (!found) { return UpgradeAnswer::DROP; }
+        return answerUpgrade(*this, upgrade, found.value());
     }
 
-    KiottyNetTransition WebSocketHandler::step(HttpSession& session,
-                                               KiottyNetConnectionHandle,
+    KiottyNetTransition WebSocketHandler::open(const UpgradeSession& upgrade)
+    {
+        return openSocket(*this, upgrade);
+    }
+
+    KiottyNetTransition WebSocketHandler::step(const UpgradeSession& upgrade,
                                                KiottyNetConnectionEvent event)
     {
-        return stepFrame(session, event);
+        return stepFrame(*this, upgrade, event);
     }
 
-    void WebSocketHandler::end(HttpSession& session, KiottyNetCode reason)
+    void WebSocketHandler::end(const UpgradeSession& upgrade, KiottyNetCode reason)
     {
-        endSocket(session, reason);
+        endSocket(*this, upgrade, reason);
     }
 
     WebSocketHandler& handlerOf(const HttpSessionHost& host)
@@ -100,6 +105,16 @@ namespace kiotty::net::implementation
     SocketLink& linkOf(const HttpSession& session)
     {
         return handlerOf(session).linkAt(session.id.index);
+    }
+
+    SocketState& socketOf(WebSocketHandler& handler, const UpgradeSession& upgrade)
+    {
+        return handler.socketAt(upgrade.id.index);
+    }
+
+    SocketLink& linkOf(WebSocketHandler& handler, const UpgradeSession& upgrade)
+    {
+        return handler.linkAt(upgrade.id.index);
     }
 
 }

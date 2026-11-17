@@ -2,9 +2,7 @@
 
 #include "base/domain/entity/kiotty_action.h"
 #include "core/kiotty_text.h"
-#include "http/data/repository/body/kiotty_http_message_framing_parser.h"
 #include "http/data/repository/header/kiotty_http_token_rules.h"
-#include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_key_rules.h"
 #include "websocket/data/repository/server/kiotty_websocket_handler.h"
 
@@ -14,8 +12,6 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        using Next = KiottyNet_Transition<HttpState>;
-
         enum class UpgradeCheck : uint8_t
         {
             VALID,
@@ -45,42 +41,43 @@ namespace kiotty::net::implementation
                                         Span<const char> right,
                                         TokenMatch match);
         UpgradeCheck        checkUpgrade(const KiottyNetHttpRequest& request);
-        bool                callUpgrade(HttpSession& session);
+        bool                callUpgrade(WebSocketHandler& handler, const UpgradeSession& upgrade);
         KiottyNetSpan       publicSpanOf(Span<const char> text);
-        KiottyNetTransition refuse(HttpSession& session, int32_t status);
-        KiottyNetTransition refuseVersion(HttpSession& session, int32_t status);
-        KiottyNetTransition acceptUpgrade(HttpSession& session);
+        UpgradeAnswer       refuse(const UpgradeSession& upgrade, int32_t status);
+        UpgradeAnswer       refuseVersion(const UpgradeSession& upgrade, int32_t status);
+        UpgradeAnswer       acceptUpgrade(WebSocketHandler& handler, const UpgradeSession& upgrade);
     }
 
-    KiottyNetTransition answerUpgrade(HttpSession& session, const WebSocketTarget& target)
+    UpgradeAnswer answerUpgrade(WebSocketHandler& handler,
+                                const UpgradeSession& upgrade,
+                                const WebSocketTarget& target)
     {
-        const KiottyNetHttpRequest& request = session.request.request();
+        const KiottyNetHttpRequest& request = upgrade.request;
         const bool is_get = request.method == KIOTTY_NET_HTTP_METHOD_GET;
-        if (!is_get) { return refuse(session, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
-        const bool has_body = hasBody(session.state.framing.body);
-        if (has_body) { return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
+        if (!is_get) { return refuse(upgrade, KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED); }
+        if (upgrade.has_body) { return refuse(upgrade, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST); }
         const UpgradeCheck check = checkUpgrade(request);
         switch (check)
         {
         case UpgradeCheck::VALID:
             break;
         case UpgradeCheck::REQUIRED:
-            return refuseVersion(session, KIOTTY_NET_HTTP_STATUS_UPGRADE_REQUIRED);
+            return refuseVersion(upgrade, KIOTTY_NET_HTTP_STATUS_UPGRADE_REQUIRED);
         case UpgradeCheck::BAD:
-            return refuse(session, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST);
+            return refuse(upgrade, KIOTTY_NET_HTTP_STATUS_BAD_REQUEST);
         }
-        SocketState& socket = socketOf(session);
+        SocketState& socket = socketOf(handler, upgrade);
         socket.reset();
         socket.target = target;
-        session.state.phase = SessionPhase::UPGRADING;
-        const bool is_allowed = callUpgrade(session);
-        if (!is_allowed) { return refuse(session, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
-        return acceptUpgrade(session);
+        const bool is_allowed = callUpgrade(handler, upgrade);
+        if (!is_allowed) { return refuse(upgrade, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
+        return acceptUpgrade(handler, upgrade);
     }
 
-    KiottyNetWebSocketHandle socketHandleOf(const HttpSession& session)
+    KiottyNetWebSocketHandle socketHandleOf(const WebSocketHandler& handler,
+                                            const UpgradeSession& upgrade)
     {
-        return KiottyNetWebSocketHandle{ handlerOf(session).owner, session.id.value() };
+        return KiottyNetWebSocketHandle{ handler.owner, upgrade.id.value() };
     }
 
     Span<const char> headerOf(const KiottyNetHttpRequest& request, Span<const char> name)
@@ -94,13 +91,15 @@ namespace kiotty::net::implementation
         return Span<const char>{ nullptr, 0 };
     }
 
-    KiottyNetCode chooseProtocol(HttpSession& session, Span<const char> protocol)
+    KiottyNetCode chooseProtocol(WebSocketHandler& handler,
+                                 const UpgradeSession& upgrade,
+                                 Span<const char> protocol)
     {
-        const KiottyNetHttpRequest& request = session.request.request();
+        const KiottyNetHttpRequest& request = upgrade.request;
         const Span<const char> offered = headerNamed(request, "Sec-WebSocket-Protocol");
         const bool is_offered = hasToken(offered, protocol, TokenMatch::EXACT);
         if (!is_offered) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        (void)socketOf(session).protocol.assign(protocol);
+        (void)socketOf(handler, upgrade).protocol.assign(protocol);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -163,60 +162,55 @@ namespace kiotty::net::implementation
             return UpgradeCheck::VALID;
         }
 
-        bool callUpgrade(HttpSession& session)
+        bool callUpgrade(WebSocketHandler& handler, const UpgradeSession& upgrade)
         {
-            const WebSocketTarget& target = socketOf(session).target;
+            const WebSocketTarget& target = socketOf(handler, upgrade).target;
             if (target.on_upgrade == nullptr) { return true; }
-            const KiottyNetHttpRequest& request = session.request.request();
-            const KiottyNetWebSocketUpgrade upgrade{
+            const KiottyNetHttpRequest& request = upgrade.request;
+            const KiottyNetWebSocketUpgrade offer{
                 request.path,
                 request.query,
                 publicSpanOf(headerNamed(request, "Host")),
                 publicSpanOf(headerNamed(request, "Origin")),
                 publicSpanOf(headerNamed(request, "Sec-WebSocket-Protocol")),
             };
-            const KiottyNetBool allowed =
-                target.on_upgrade(session.host.app_context, socketHandleOf(session), upgrade);
+            const KiottyNetWebSocketHandle socket = socketHandleOf(handler, upgrade);
+            const KiottyNetBool allowed = target.on_upgrade(upgrade.app_context, socket, offer);
             return allowed != 0;
         }
 
-        KiottyNetTransition refuse(HttpSession& session, int32_t status)
+        UpgradeAnswer refuse(const UpgradeSession& upgrade, int32_t status)
         {
-            session.response.begin();
-            (void)session.response.setStatus(status);
+            upgrade.response.begin();
+            (void)upgrade.response.setStatus(status);
             const Span<const char> get = literalOf("GET");
             const bool is_not_allowed = status == KIOTTY_NET_HTTP_STATUS_METHOD_NOT_ALLOWED;
-            if (is_not_allowed) { (void)session.response.addHeader(literalOf("Allow"), get); }
-            session.state.persistence = Persistence::CLOSE;
-            return startSending(session);
+            if (is_not_allowed) { (void)upgrade.response.addHeader(literalOf("Allow"), get); }
+            return UpgradeAnswer::REFUSE;
         }
 
-        KiottyNetTransition refuseVersion(HttpSession& session, int32_t status)
+        UpgradeAnswer refuseVersion(const UpgradeSession& upgrade, int32_t status)
         {
-            session.response.begin();
-            (void)session.response.setStatus(status);
-            (void)session.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
+            upgrade.response.begin();
+            (void)upgrade.response.setStatus(status);
+            (void)upgrade.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
             const Span<const char> version = literalOf(VERSION);
-            (void)session.response.addHeader(literalOf("Sec-WebSocket-Version"), version);
-            session.state.persistence = Persistence::CLOSE;
-            return startSending(session);
+            (void)upgrade.response.addHeader(literalOf("Sec-WebSocket-Version"), version);
+            return UpgradeAnswer::REFUSE;
         }
 
-        KiottyNetTransition acceptUpgrade(HttpSession& session)
+        UpgradeAnswer acceptUpgrade(WebSocketHandler& handler, const UpgradeSession& upgrade)
         {
-            const KiottyNetHttpRequest& request = session.request.request();
+            const KiottyNetHttpRequest& request = upgrade.request;
             const AcceptText accept = acceptOf(headerNamed(request, "Sec-WebSocket-Key"));
-            session.response.begin();
-            (void)session.response.setStatus(KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS);
-            (void)session.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
-            (void)session.response.addHeader(literalOf("Sec-WebSocket-Accept"), accept.span());
-            const Span<const char> protocol = socketOf(session).protocol.span();
+            upgrade.response.begin();
+            (void)upgrade.response.setStatus(KIOTTY_NET_HTTP_STATUS_SWITCHING_PROTOCOLS);
+            (void)upgrade.response.addHeader(literalOf("Upgrade"), literalOf("websocket"));
+            (void)upgrade.response.addHeader(literalOf("Sec-WebSocket-Accept"), accept.span());
+            const Span<const char> protocol = socketOf(handler, upgrade).protocol.span();
             const Span<const char> protocol_name = literalOf("Sec-WebSocket-Protocol");
-            if (!protocol.empty()) { (void)session.response.addHeader(protocol_name, protocol); }
-            session.state.persistence = Persistence::UPGRADE;
-            advanceSession(session);
-            const KiottyNetTransition sending = startSending(session);
-            return Next::moveToNextState(HttpState::UPGRADED, sending.entry_action);
+            if (!protocol.empty()) { (void)upgrade.response.addHeader(protocol_name, protocol); }
+            return UpgradeAnswer::ACCEPT;
         }
     }
 }

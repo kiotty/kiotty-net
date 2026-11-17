@@ -29,6 +29,7 @@ namespace kiotty::net::implementation
         RequestFramingResult        finishHeaders();
         AppendedBodyResult          appendBody(Span<const char> data);
         const KiottyNetHttpRequest& request() const;
+        Span<char>                  bodyArea() const;
 
     private:
         Span<char> claimHeaderRoom(Span<const char> line);

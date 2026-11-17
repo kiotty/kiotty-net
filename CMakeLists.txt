@@ -168,6 +168,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/server/kiotty_http_configuration.cpp
     src/implementation/http/data/repository/server/kiotty_http_server.cpp
     src/implementation/http/data/repository/server/kiotty_http_work.cpp
+    src/implementation/http/data/repository/upgrade/kiotty_http_upgrade_flow.cpp
     src/implementation/websocket/data/repository/server/kiotty_websocket_handler.cpp
     src/implementation/websocket/data/repository/server/kiotty_websocket_server.cpp
     src/implementation/websocket/data/repository/client/kiotty_websocket_client.cpp

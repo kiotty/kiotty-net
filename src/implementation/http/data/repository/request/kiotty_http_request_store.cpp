@@ -90,6 +90,11 @@ namespace kiotty::net::implementation
         return _request;
     }
 
+    Span<char> HttpRequestStore::bodyArea() const
+    {
+        return _body_buffer;
+    }
+
     Span<char> HttpRequestStore::claimHeaderRoom(Span<const char> line)
     {
         const size_t room = _header_buffer.length - _header_length;

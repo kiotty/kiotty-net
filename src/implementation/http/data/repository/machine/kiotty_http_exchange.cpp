@@ -10,6 +10,7 @@
 #include "http/data/repository/response/kiotty_http_send_rules.h"
 #include "http/data/repository/server/kiotty_http_session_host.h"
 #include "http/domain/entity/kiotty_http_constants.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_flow.h"
 
 #include <limits>
 
@@ -94,7 +95,7 @@ namespace kiotty::net::implementation
         if (is_route) { return callRoute(session, match.route); }
         HttpUpgradeHandler* const upgrade = session.host.upgrade;
         const bool is_upgrade = match.kind == MatchKind::UPGRADE && upgrade != nullptr;
-        if (is_upgrade) { return upgrade->answer(session, match.upgrade); }
+        if (is_upgrade) { return dispatchUpgrade(session, *upgrade, match.upgrade); }
         const Answer answer = answerOf(match, path);
         writeAnswer(session, answer);
         return startSending(session);

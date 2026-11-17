@@ -4,6 +4,7 @@
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "http/data/repository/machine/kiotty_http_rule_names.h"
 #include "http/data/repository/response/kiotty_http_status_line_parser.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_flow.h"
 #include "websocket/data/repository/control/kiotty_websocket_control.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_reader.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_opening.h"
@@ -31,6 +32,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClientClosed(Session context, Handle connection, Event event);
 
         KiottyNetTransition        writeRequest(HttpSession& session);
+        KiottyNetTransition        openClientSocket(HttpSession& session);
         bool                       isSwitchingLine(Span<const char> line);
         KiottyNetConnectionContext createClientSession(KiottyNetAppContext app_context,
                                                        KiottyNetConnectionInfo info);
@@ -117,7 +119,7 @@ namespace kiotty::net::implementation
                 const Span<const char> name{ PROTOCOL_HEADER, PROTOCOL_HEADER_LENGTH };
                 const Span<const char> chosen = headerOf(response, name);
                 (void)socketOf(session).protocol.assign(chosen);
-                return openSocket(session);
+                return openClientSocket(session);
             }
             const KiottyNetHttpStatus status = session.request.takeHeader(line);
             if (status != NO_ERROR_STATUS) { return closeWith(broken); }
@@ -126,7 +128,8 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition onClientFrame(Session context, Handle, Event event)
         {
-            return stepFrame(sessionOf(context), event);
+            HttpSession& session = sessionOf(context);
+            return stepFrame(handlerOf(session), upgradeSessionOf(session), event);
         }
 
         KiottyNetTransition onClientTimeout(Session, Handle, Event)
@@ -139,8 +142,16 @@ namespace kiotty::net::implementation
             HttpSession& session = sessionOf(context);
             ClientUpgrade& upgrade = handlerOf(session).client;
             if (!socketOf(session).is_open) { upgrade.failure = event.reason; }
-            endSocket(session, event.reason);
+            endSocket(handlerOf(session), upgradeSessionOf(session), event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
+        }
+
+        KiottyNetTransition openClientSocket(HttpSession& session)
+        {
+            const KiottyNetConnectionHandle connection = session.request.request().connection;
+            session.request.begin(connection);
+            session.state.phase = SessionPhase::SOCKET;
+            return openSocket(handlerOf(session), upgradeSessionOf(session));
         }
 
         KiottyNetTransition writeRequest(HttpSession& session)

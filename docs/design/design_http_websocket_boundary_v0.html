@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>http ↔ websocket 경계 설계 v0 (초안)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: #fff; }
+  .keep { background: var(--agree); }
+  .new { background: var(--partial); }
+  .drop { background: var(--concern); }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>http ↔ websocket 경계 설계 v0 (초안) : R7</h1>
+<p class="sub">2026-11-17 초안. 계획 <code>docs/plan/plan_base_261116.md</code> 의 R7: <code>HttpUpgradeHandler</code> 의 answer / step / end 가 session 통째 대신 필요한 것만 받는다. 클라이언트가 <code>HttpSessionHost</code> 를 통째로 빌리지 않고 자기 state 를 가진다. <code>WebSocketHandler</code> 의 공개 필드를 정리한다. 완료 조건: websocket 이 http 의 session / host 를 include 하지 않는다, websocket 테스트 그대로. 동작과 공개 API 는 바꾸지 않는다.</p>
+
+<h2 id="s1">1. 지금</h2>
+<p>websocket 의 서버 쪽은 http 가 넘긴 <code>HttpSession&amp;</code> 위에서 돈다. 함수 스물 개 정도가 <code>HttpSession&amp;</code> 를 받고, <code>handlerOf(session)</code> 은 <code>session.host.upgrade</code> 를 <code>WebSocketHandler</code> 로 바꾼 것이다. 실제로 꺼내 쓰는 것은 아래뿐이다.</p>
+<table>
+  <tr><th>꺼내는 것</th><th>어디서</th><th>무엇에</th></tr>
+  <tr><td><code>session.request.request()</code></td><td>upgrade, message, opening, frame</td><td>Upgrade 헤더 검사, connection handle, 모은 message (<code>request.body</code>)</td></tr>
+  <tr><td><code>session.request.appendBody / begin</code></td><td>message</td><td><b>message 조각을 http 요청 body 버퍼에 모은다</b>. 다 받으면 비운다</td></tr>
+  <tr><td><code>session.response.begin / setStatus / addHeader</code></td><td>upgrade</td><td>101 또는 거절 응답</td></tr>
+  <tr><td><code>session.state.persistence / phase / framing / sent</code></td><td>upgrade, opening</td><td>UPGRADE / CLOSE 를 적고, 101 을 <b>websocket 이 직접</b> <code>pieceAt</code> 으로 보내며 <code>sent</code> 를 센다</td></tr>
+  <tr><td><code>session.id</code></td><td>handler, opening, upgrade</td><td><code>index</code> 로 자기 칸 (<code>SocketState</code>, <code>SocketLink</code>), <code>value()</code> 로 앱의 socket handle</td></tr>
+  <tr><td><code>session.host.limits / receive_capacity / app_context</code></td><td>frame, control, timing, message</td><td>message 상한 (<code>max_body_bytes</code>), ping / pong / close 시각, 읽기 크기, 콜백의 app_context</td></tr>
+  <tr><td><code>host.sessions.find(id)</code>, <code>session.info</code></td><td>access (다른 thread 의 send / close / info)</td><td>handle 이 살아 있는지, 연결 정보</td></tr>
+</table>
+<p>클라이언트는 더 깊다. <code>WebSocketClient</code> 가 <code>HttpSessionHost</code> 하나 (session 풀 1 칸, registry 1 칸, notices) 를 가지고, http 의 <code>HttpState</code> 이름, <code>readLine</code>, <code>startHeaderClock</code> / <code>headerTimeLeft</code>, <code>advanceSession</code> 을 그대로 쓴다. 101 응답의 헤더는 <b>요청 store</b> 의 <code>takeHeader</code> 로 담는다.</p>
+
+<h2 id="s2">2. 서버: http 가 빌려주는 것을 값 하나로</h2>
+<pre><code>// http/data/repository/upgrade/kiotty_http_upgrade_handler.h
+struct UpgradeSession                        // http 가 answer / open / step / end 마다 session 에서 만들어 넘긴다
+{
+    const KiottyNetHttpRequest&  request;  // 요청 view: 헤더, connection
+    HttpResponseStore&           response; // 101 또는 거절 응답을 쓴다 (answer 만)
+    Span&lt;char&gt;                   message;  // 요청 body 버퍼를 빌려준다. message 조각을 모으는 곳
+    const KiottyNetHttpLimits&   limits;   // max_body_bytes, ping / pong / close
+    KiottyNetAppContext          app_context;
+    PoolHandle                   id;       // index 로 websocket 의 칸, value() 로 앱의 handle
+};
+
+class HttpUpgradeHandler
+{
+public:
+    virtual UpgradeAnswer       answer(const UpgradeSession&amp; upgrade, int32_t upgrade_route) = 0;  // 응답을 쓰고 { ACCEPT | REFUSE } 를 돌려준다
+    virtual KiottyNetTransition open(const UpgradeSession&amp; upgrade) = 0;                       // 101 을 다 보낸 뒤. on_open, frame 읽기 시작
+    virtual KiottyNetTransition step(const UpgradeSession&amp; upgrade, KiottyNetConnectionEvent event) = 0;
+    virtual void                end(const UpgradeSession&amp; upgrade, KiottyNetCode reason) = 0;
+};</code></pre>
+<ul>
+  <li><b>http 가 자기 칸을 쓴다.</b> answer 는 <code>UpgradeAnswer</code> 값만 돌려주고, <code>persistence</code> (UPGRADE / CLOSE), <code>phase</code> 는 http 가 그 값을 보고 한 번 적는다 (R4b 의 값 흐름과 같은 모양). websocket 은 <code>HttpSessionState</code> 를 모른다.</li>
+  <li><b>101 은 http 가 보낸다.</b> 다른 응답과 같은 <code>sendStepOf</code> 길로 보내고, 끝에서 <code>persistence == UPGRADE</code> 면 <code>UPGRADED</code> 로 가며 <code>open(upgrade)</code> 를 부른다. websocket 의 <code>sendOpening</code> 과 <code>session.state.sent</code> 사용이 없어진다.</li>
+  <li><b>message 버퍼는 지금처럼 빌린다.</b> 연결마다 <code>max_body_bytes</code> 를 새로 잡지 않는다 (메모리 그대로). 모은 길이는 websocket 의 <code>SocketState</code> 가 센다 (지금은 요청 store 가 센다).</li>
+  <li>websocket 의 함수는 <code>HttpSession&amp;</code> 대신 <code>(WebSocketHandler&amp;, const UpgradeSession&amp;)</code> 를 받는다. <code>handlerOf(session)</code> 은 없어진다 (handler 는 <code>this</code>).</li>
+  <li>다른 thread 의 access 는 http 의 session 풀 대신 websocket 의 <code>SocketLink</code> 를 본다. open 때 링크에 handle 값과 연결 정보를 적고, send / close / info 는 그것만 확인한다.</li>
+</ul>
+
+<h2 id="s3">3. 클라이언트: 자기 state</h2>
+<pre><code>// websocket/data/state/kiotty_websocket_client_state.h
+struct WebSocketClientState
+{
+    UpgradeText          request;     // 보낼 Upgrade 요청 (지금 _request)
+    HttpReplyStore       reply;       // 101 응답의 상태줄과 헤더. HttpClient 와 같은 저장소 (R5)
+    std::vector&lt;char&gt;    message;     // message 를 모으는 곳 (max_body_bytes)
+    SocketState          socket;      // 서버와 같은 frame 단계가 쓰는 칸
+    ClientEvents         events;      // on_open / on_message / on_close
+    KiottyNetHttpErrorAction on_error;
+    ...                                // accept, protocols, peer, opened, failure (지금 ClientUpgrade)
+};</code></pre>
+<ul>
+  <li><code>HttpSessionHost</code>, session 풀, registry 1 칸, <code>HttpState</code> 를 쓰지 않는다. 상태 기계는 websocket 의 자기 상태 (<code>SENDING_UPGRADE, STATUS_LINE, HEADER_LINE, OPEN, CLOSING</code>) 로, 줄 읽기는 base 의 <code>thenReadUntil</code> 로 한다.</li>
+  <li>101 응답은 <code>HttpReplyStore::takeStatusLine / takeHeader</code> 로 담는다 (요청 store 를 응답에 쓰던 어긋남이 없어진다). 응답 쪽 헤더 상한은 지금과 같은 <code>limits</code>.</li>
+  <li>frame 단계 (<code>stepFrame</code>, message, control) 는 서버와 같다. 클라이언트는 자기 state 로 <code>UpgradeSession</code> 와 같은 값을 만들어 넘긴다 (message 버퍼는 자기 vector).</li>
+  <li>메모리: 지금 1 칸 풀이 잡던 응답 버퍼 (<code>response_bytes</code>) 가 빠지고, 헤더 버퍼는 <code>HttpReplyStore</code> 로. 늘지 않는다.</li>
+</ul>
+
+<h2 id="s4">4. WebSocketHandler 의 공개 필드</h2>
+<table>
+  <tr><th>지금 공개</th><th>안</th></tr>
+  <tr><td><code>owner</code> (앱 handle 의 endpoint)</td><td><code>initialize</code> 인자로 받아 private</td></tr>
+  <tr><td><code>lane</code> (다른 thread 의 send 길)</td><td><code>initialize</code> 인자로 받아 private</td></tr>
+  <tr><td><code>client</code> (<code>ClientUpgrade</code>)</td><td>handler 에서 빼서 <code>WebSocketClientState</code> 로 (3절)</td></tr>
+  <tr><td><code>role</code></td><td><code>initialize</code> 인자 (지금도 그렇다), private</td></tr>
+  <tr><td><code>mask_state</code></td><td>private. 클라이언트의 mask 만 쓰므로 클라이언트 state 로</td></tr>
+</table>
+
+<h2 id="s5">5. 단계</h2>
+<table>
+  <tr><th>단계</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>R7-1 upgrade</td><td><code>UpgradeSession</code>, answer 가 <code>UpgradeAnswer</code> 를 돌려줌, http 가 101 을 보내고 <code>open</code> 을 부름, websocket 함수가 <code>(handler, upgrade)</code> 를 받음, message 길이를 <code>SocketState</code> 가 셈</td><td>websocket 서버 쪽이 <code>kiotty_http_session.h</code> 를 include 하지 않음</td></tr>
+  <tr><td>R7-2 access</td><td>send / close / info 가 <code>SocketLink</code> 만 봄</td><td>access 가 <code>HttpSessionHost</code> 를 받지 않음</td></tr>
+  <tr><td>R7-3 client state</td><td><code>WebSocketClientState</code>, 자기 상태 기계, <code>HttpReplyStore</code></td><td>클라이언트가 <code>HttpSessionHost</code> 를 가지지 않음</td></tr>
+  <tr><td>R7-4 handler 필드</td><td>4절</td><td><code>WebSocketHandler</code> 공개 필드 0</td></tr>
+</table>
+
+<p class="note">결정 (2026-11-17, 사용자): 1 은 (a) 로 하되 이름은 <code>UpgradeSession</code> (session 의 내용이고, http 의 session 과는 다른 뜻의 session). 2, 3, 4 는 (a).</p>
+<p class="note">R7-1 구현 (2026-11-17): <code>UpgradeSession</code>, <code>UpgradeAnswer { ACCEPT, REFUSE, DROP }</code>, <code>HttpUpgradeHandler</code> 의 answer / open / step / end. http 쪽은 <code>upgrade/kiotty_http_upgrade_flow</code> (<code>upgradeSessionOf</code>, <code>dispatchUpgrade</code>, <code>stepUpgraded</code>). websocket 의 frame / message / control / handshake 는 <code>(WebSocketHandler&amp;, const UpgradeSession&amp;)</code> 를 받고 http 의 session 을 include 하지 않는다 (<code>closeWith</code> 선언을 <code>machine/kiotty_http_close.h</code> 로). message 길이는 <code>SocketState::message_length</code>. 클라이언트 기계와 access 는 R7-2 / R7-3 까지 <code>upgradeSessionOf</code> 로 값을 만들어 넘긴다.</p>
+<h2 id="s6">6. 정할 것</h2>
+<table>
+  <tr><th>#</th><th>것</th><th>안 (추천이 앞)</th></tr>
+  <tr><td>1</td><td>http 가 넘기는 모양</td><td>(a) 값 하나 <code>UpgradeSession</code> (위). (b) 함수마다 인자를 따로: 수칙의 인자 4 개를 넘는 곳이 생겨 결국 묶어야 한다</td></tr>
+  <tr><td>2</td><td>101 을 누가 보내나</td><td>(a) http (위). 응답을 보내는 길이 하나가 된다. (b) 지금처럼 websocket: <code>sent</code> 와 <code>pieceAt</code> 을 upgrade 에 더 넣어야 한다</td></tr>
+  <tr><td>3</td><td>message 버퍼</td><td>(a) http 요청 body 버퍼를 빌린다 (메모리 그대로). (b) websocket 이 연결마다 따로 잡는다: 서버의 연결마다 <code>max_body_bytes</code> 가 한 번 더 든다</td></tr>
+  <tr><td>4</td><td>클라이언트의 101 응답 읽기</td><td>(a) 자기 state 와 <code>HttpReplyStore</code> (위). (b) http session 을 계속 빌리되 upgrade 로만: 클라이언트가 서버의 session 기계와 <code>HttpState</code> 에 묶여 남는다</td></tr>
+</table>
+</body>
+</html>

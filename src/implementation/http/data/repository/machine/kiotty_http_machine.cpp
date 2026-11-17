@@ -6,6 +6,7 @@
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "http/data/repository/machine/kiotty_http_rule_names.h"
 #include "http/domain/entity/kiotty_http_constants.h"
+#include "http/data/repository/upgrade/kiotty_http_upgrade_flow.h"
 
 namespace kiotty::net::implementation
 {
@@ -205,10 +206,9 @@ namespace kiotty::net::implementation
             return sendNext(session, connection);
         }
 
-        KiottyNetTransition onUpgraded(Session context, Handle connection, Event event)
+        KiottyNetTransition onUpgraded(Session context, Handle, Event event)
         {
-            HttpSession& session = sessionOf(context);
-            return session.host.upgrade->step(session, connection, event);
+            return stepUpgraded(sessionOf(context), event);
         }
 
         KiottyNetTransition onTimeout(Session, Handle, Event)
@@ -220,7 +220,7 @@ namespace kiotty::net::implementation
         {
             HttpSession& session = sessionOf(context);
             HttpUpgradeHandler* const upgrade = session.host.upgrade;
-            if (upgrade != nullptr) { upgrade->end(session, event.reason); }
+            if (upgrade != nullptr) { upgrade->end(upgradeSessionOf(session), event.reason); }
             const KiottyNetAppContext app_context = session.host.app_context;
             session.host.notices.reportDisconnected(app_context, session.info, event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
