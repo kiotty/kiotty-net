@@ -102,7 +102,7 @@ namespace kiotty::net::implementation
             if (!parsed) { return failSocket(handler, upgrade, parsed.code); }
             const FrameStart& start = parsed.value;
             SocketState& socket = socketOf(handler, upgrade);
-            const SocketRole role = handler.role;
+            const SocketRole role = handler.side().role;
             const bool is_valid = isAcceptedStart(start, role, socket.message);
             if (!is_valid) { return failSocket(handler, upgrade, CLOSE_PROTOCOL); }
             socket.frame = frameOf(start);

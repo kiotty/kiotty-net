@@ -40,7 +40,7 @@ namespace kiotty::net::implementation
         const TimeoutAction action = timeoutActionOf(is_closing, socket.ping_deadline);
         if (action == TimeoutAction::CLOSE) { return closeWith(KIOTTY_NET_CODE_TIMEOUT); }
         const Span<const char> empty{ nullptr, 0 };
-        PushLane& lane = *handler.lane;
+        PushLane& lane = *handler.side().lane;
         const bool is_pong_late = action == TimeoutAction::SEND_CLOSE;
         if (is_pong_late) { (void)pushClose(lane, linkOf(handler, upgrade), GOING_AWAY, empty); }
         else
@@ -74,7 +74,7 @@ namespace kiotty::net::implementation
         if (action == ControlAction::CLEAR_PING) { socket.ping_deadline = 0; }
         if (action == ControlAction::SEND_PONG)
         {
-            PushLane& lane = *handler.lane;
+            PushLane& lane = *handler.side().lane;
             (void)pushFrame(lane, linkOf(handler, upgrade), FrameOpcode::PONG, payload);
         }
         return nextFrame(handler, upgrade);
@@ -136,7 +136,7 @@ namespace kiotty::net::implementation
                                        KiottyNetCode code)
         {
             const MaskKey key = closeMaskOf(handler);
-            const bool is_client = handler.role == SocketRole::CLIENT;
+            const bool is_client = handler.side().role == SocketRole::CLIENT;
             const FrameOpcode close = FrameOpcode::CLOSE;
             const FrameHead head = is_client ? buildMaskedFrameHead(close, payload.length, key)
                                              : buildFrameHead(close, payload.length);
@@ -159,8 +159,9 @@ namespace kiotty::net::implementation
 
         MaskKey closeMaskOf(WebSocketHandler& handler)
         {
-            if (handler.role == SocketRole::SERVER) { return MaskKey{}; }
-            return nextMaskKey(handler.mask_state);
+            ClientUpgrade* const client = handler.side().client;
+            if (client == nullptr) { return MaskKey{}; }
+            return nextMaskKey(client->mask_state);
         }
 
         void callClose(WebSocketHandler& handler,
@@ -168,9 +169,10 @@ namespace kiotty::net::implementation
                        const KiottyNetWebSocketClose& close)
         {
             const KiottyNetAppContext app_context = upgrade.app_context;
-            if (handler.role == SocketRole::CLIENT)
+            const ClientUpgrade* const client = handler.side().client;
+            if (client != nullptr)
             {
-                const ClientEvents& events = handler.client.events;
+                const ClientEvents& events = client->events;
                 const KiottyNetWebSocketClientCloseAction on_close = events.on_close;
                 if (on_close != nullptr) { on_close(app_context, close); }
                 return;

@@ -86,7 +86,7 @@ namespace kiotty::net::implementation
     KiottyNetWebSocketHandle socketHandleOf(const WebSocketHandler& handler,
                                             const UpgradeSession& upgrade)
     {
-        return KiottyNetWebSocketHandle{ handler.owner, upgrade.id.value() };
+        return KiottyNetWebSocketHandle{ handler.side().owner, upgrade.id.value() };
     }
 
     Span<const char> headerOf(const KiottyNetHttpRequest& request, Span<const char> name)

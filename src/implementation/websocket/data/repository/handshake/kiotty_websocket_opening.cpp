@@ -24,7 +24,8 @@ namespace kiotty::net::implementation
         link.closing.store(0);
         link.socket.store(upgrade.id.value());
         callOpen(handler, upgrade);
-        Parker* opened = handler.client.opened;
+        ClientUpgrade* const client = handler.side().client;
+        Parker* opened = client == nullptr ? nullptr : client->opened;
         const auto wake = []() {};
         if (opened != nullptr) { opened->unpark(wake); }
         return nextFrame(handler, upgrade);
@@ -37,9 +38,10 @@ namespace kiotty::net::implementation
             const KiottyNetAppContext app_context = upgrade.app_context;
             SocketState& socket = socketOf(handler, upgrade);
             socket.context = nullptr;
-            if (handler.role == SocketRole::CLIENT)
+            ClientUpgrade* const side_client = handler.side().client;
+            if (side_client != nullptr)
             {
-                ClientUpgrade& client = handler.client;
+                ClientUpgrade& client = *side_client;
                 client.has_opened = true;
                 const KiottyNetWebSocketClientOpenAction on_open = client.events.on_open;
                 if (on_open != nullptr) { on_open(app_context); }

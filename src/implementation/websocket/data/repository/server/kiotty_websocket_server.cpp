@@ -28,9 +28,8 @@ namespace kiotty::net::implementation
         if (http != KIOTTY_NET_CODE_SUCCESS) { return http; }
         const size_t sockets = configuration.server.max_clients;
         const size_t routes = configuration.limits.max_routes;
-        WebSocketHandler::initialize(sockets, routes, SocketRole::SERVER);
-        owner = this;
-        lane = this;
+        const SocketSide side{ this, this, nullptr, SocketRole::SERVER };
+        WebSocketHandler::initialize(sockets, routes, side);
         host().upgrade = this;
         return KIOTTY_NET_CODE_SUCCESS;
     }

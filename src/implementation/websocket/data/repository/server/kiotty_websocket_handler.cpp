@@ -9,22 +9,18 @@ namespace kiotty::net::implementation
 {
     WebSocketHandler::WebSocketHandler()
         : HttpUpgradeHandler()
-        , owner(nullptr)
-        , lane(nullptr)
-        , client{}
-        , role(SocketRole::SERVER)
-        , mask_state(0)
+        , _side{ nullptr, nullptr, nullptr, SocketRole::SERVER }
         , _targets()
         , _table()
     {
     }
 
-    void WebSocketHandler::initialize(size_t sockets, size_t routes, SocketRole socket_role)
+    void WebSocketHandler::initialize(size_t sockets, size_t routes, const SocketSide& side)
     {
         _table.initialize(sockets);
         _targets.clear();
         _targets.reserve(routes);
-        role = socket_role;
+        _side = side;
     }
 
     void WebSocketHandler::addTarget(int32_t path)
@@ -53,14 +49,14 @@ namespace kiotty::net::implementation
         return _table.socketAt(index);
     }
 
-    SocketLink& WebSocketHandler::linkAt(int32_t index)
-    {
-        return _table.linkAt(index);
-    }
-
     Span<SocketLink> WebSocketHandler::links()
     {
         return _table.links();
+    }
+
+    const SocketSide& WebSocketHandler::side() const
+    {
+        return _side;
     }
 
     UpgradeAnswer WebSocketHandler::answer(const UpgradeSession& upgrade, int32_t upgrade_route)
@@ -93,7 +89,7 @@ namespace kiotty::net::implementation
 
     SocketLink& linkOf(WebSocketHandler& handler, const UpgradeSession& upgrade)
     {
-        return handler.linkAt(upgrade.id.index);
+        return handler.links()[static_cast<size_t>(upgrade.id.index)];
     }
 
 }

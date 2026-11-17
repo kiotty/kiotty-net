@@ -64,14 +64,14 @@ namespace kiotty::net::implementation
         if (!link) { return link.code; }
         if (link.value().closing.load() != 0) { return KIOTTY_NET_CODE_CLOSED; }
         const Span<const char> payload{ data.data, data.length };
-        return pushFrame(*_handler.lane, link.value(), frameOpcodeOf(opcode), payload);
+        return pushFrame(*_handler.side().lane, link.value(), frameOpcodeOf(opcode), payload);
     }
 
     KiottyNetCode WebSocketAccess::close(int64_t id, uint16_t status, Span<const char> reason)
     {
         const LinkResult link = openLink(id);
         if (!link) { return link.code; }
-        return pushClose(*_handler.lane, link.value(), status, reason);
+        return pushClose(*_handler.side().lane, link.value(), status, reason);
     }
 
     KiottyNetCode WebSocketAccess::broadcast(const char* path,
@@ -95,7 +95,7 @@ namespace kiotty::net::implementation
         for (SocketLink& link : _handler.links())
         {
             if (!isBroadcastTarget(link, index)) { continue; }
-            const KiottyNetCode pushed = pushFrame(*_handler.lane, link, frame, payload);
+            const KiottyNetCode pushed = pushFrame(*_handler.side().lane, link, frame, payload);
             if (pushed == KIOTTY_NET_CODE_BUFFER_FULL) { result = pushed; }
         }
         return result;
@@ -132,7 +132,7 @@ namespace kiotty::net::implementation
     {
         const bool is_empty = data.data == nullptr || data.length == 0;
         if (is_empty || !isDataOpcode(opcode)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        const bool is_masked = _handler.role == SocketRole::CLIENT;
+        const bool is_masked = _handler.side().role == SocketRole::CLIENT;
         const size_t mask_bytes = is_masked ? MASK_KEY_BYTES : 0;
         const size_t frame_head = buildFrameHead(FrameOpcode::BINARY, data.length).length;
         const size_t head = frame_head + mask_bytes;

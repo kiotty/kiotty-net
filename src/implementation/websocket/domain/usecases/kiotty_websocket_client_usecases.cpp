@@ -57,7 +57,7 @@ namespace kiotty::net::implementation
     {
         const RegistrationResult host = clientHostOf(client, on_open != nullptr);
         if (!host) { return host.code; }
-        host.value().handler->client.events.on_open = on_open;
+        host.value().upgrade.events.on_open = on_open;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -66,7 +66,7 @@ namespace kiotty::net::implementation
     {
         const RegistrationResult host = clientHostOf(client, on_message != nullptr);
         if (!host) { return host.code; }
-        host.value().handler->client.events.on_message = on_message;
+        host.value().upgrade.events.on_message = on_message;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -75,7 +75,7 @@ namespace kiotty::net::implementation
     {
         const RegistrationResult host = clientHostOf(client, on_close != nullptr);
         if (!host) { return host.code; }
-        host.value().handler->client.events.on_close = on_close;
+        host.value().upgrade.events.on_close = on_close;
         return KIOTTY_NET_CODE_SUCCESS;
     }
 

@@ -1513,14 +1513,14 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse(response, accept, offered)`), subprotocol 선택 |
 | | `kiotty_websocket_opening` | `openSocket` (101 을 다 보낸 뒤 http 가 `open` 으로 부른다), `callOpen` |
 | websocket/data/repository/send | `kiotty_websocket_lane` | `PushLane`, push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
-| websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현: answer / open / step / end, 라우트 대상, `SocketTable`) |
+| websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현: answer / open / step / end, 라우트 대상, `SocketTable`). 공개 필드 없음: initialize 가 `SocketSide { owner, lane, client, role }` 를 받고 `side()` 로 읽는다 (R7-4) |
 | | `kiotty_websocket_server` | `WebSocketServer` |
 | | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast). websocket 의 `SocketLink` / `SocketState` 와 경로 이름을 찾는 `HttpRegistry` 만 본다 (R7-2) |
 | websocket/data/repository/client | `kiotty_websocket_client` | `WebSocketClient` |
 | | `kiotty_websocket_client_machine` | 클라이언트의 표 (Upgrade 요청 → 상태줄 → 헤더 줄 → frame 행) |
 | websocket/data/repository/endpoint | `kiotty_websocket_endpoint` | `KiottyNetWebSocketEndpoint` |
 | websocket/data/state | `kiotty_websocket_socket_state` | `SocketState` (IO thread 만), `SocketLink` (다른 thread 도) |
-| | `kiotty_websocket_client_state` | `ClientUpgrade` (클라이언트) |
+| | `kiotty_websocket_client_state` | `ClientUpgrade` (mask 상태 포함), `WebSocketClientState` (클라이언트, R7-3 / R7-4) |
 | websocket/data/datasource | `kiotty_websocket_socket_table` | `SocketTable`: `SocketState[]`, `SocketLink[]` (initialize 때 크기) |
 | context | `KiottyNetWebSocketEndpoint` | handle 의 owner. 소켓 함수 다섯의 가상 함수. HttpServer 와 WebSocketClient 가 상속 |
 | context | `WebSocketClient` | `EventClient` + `PushLane` + `KiottyNetWebSocketEndpoint` |
@@ -1623,7 +1623,8 @@ KiottyNetTransition openSocket(WebSocketHandler& handler, const UpgradeSession& 
     link.closing.store(0);
     link.socket.store(upgrade.id.value());              // 이때부터 다른 thread 가 보낼 수 있다
     callOpen(handler, upgrade);                         // 서버: target.on_open(app_context, handle) 의 값이 context. 클라이언트: events.on_open(app_context)
-    Parker* opened = handler.client.opened;             // 클라이언트의 await (5.8). 서버는 NULL
+    ClientUpgrade* const client = handler.side().client; // 클라이언트만. 서버는 NULL
+    Parker* opened = client == nullptr ? nullptr : client->opened;   // 클라이언트의 await (5.8)
     const auto wake = []() {};
     if (opened != nullptr) { opened->unpark(wake); }
     return nextFrame(handler, upgrade);
@@ -1633,19 +1634,21 @@ KiottyNetTransition openSocket(WebSocketHandler& handler, const UpgradeSession& 
 콜백 자리 셋은 역할 값으로 가른다.
 
 ```cpp
-void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
+void callClose(WebSocketHandler& handler, const UpgradeSession& upgrade, const KiottyNetWebSocketClose& close)
 {
-    const KiottyNetAppContext app_context = session.host.app_context;              // run 의 것
-    if (session.host.role == SocketRole::CLIENT)
+    const KiottyNetAppContext app_context = upgrade.app_context;                   // run 의 것
+    const ClientUpgrade* const client = handler.side().client;                     // 클라이언트만
+    if (client != nullptr)
     {
-        const ClientEvents& events = session.host.upgrade.events;
+        const ClientEvents& events = client->events;
         const KiottyNetWebSocketClientCloseAction on_close = events.on_close;
         if (on_close != nullptr) { on_close(app_context, close); }
         return;
     }
-    const KiottyNetWebSocketCloseAction on_close = session.socket.target.on_close;
+    const SocketState& socket = socketOf(handler, upgrade);
+    const KiottyNetWebSocketCloseAction on_close = socket.target.on_close;
     if (on_close == nullptr) { return; }
-    on_close(app_context, session.socket.context, close);                          // handle 없음
+    on_close(app_context, socket.context, close);                                  // handle 없음
 }
 ```
 
@@ -1720,7 +1723,7 @@ KiottyNetCode HttpServer::push(int64_t connection, FrameOpcode opcode, Span<cons
 KiottyNetCode WebSocketClient::push(int64_t connection, FrameOpcode opcode, Span<const char> payload)
 {
     const std::lock_guard<std::mutex> lock(_push_mutex);
-    const MaskKey key = nextMaskKey(_host.mask_state);
+    const MaskKey key = nextMaskKey(_state.upgrade.mask_state);
     const FrameHead head = buildMaskedFrameHead(opcode, payload.length, key);
     const size_t total = head.length + payload.length;
     if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
@@ -1816,7 +1819,7 @@ frame 단계는 서버와 같고, 클라이언트는 `clientUpgradeOf(state)` �
 - **onError 는 열리기 전에 한 번.** 길은 둘이다. client machine 의 `reportError` (base 의 오류 보고: TLS handshake 실패 등) 는 `has_opened` 도 `has_failed` 도 아니면 `has_failed` 를 세우고 `state.on_error` 로 넘긴다. run 이 끝나면 `reportUnopened(result)` 가 같은 조건에서 결과 code 로 알린다 (`SUCCESS`, `CLOSED`, `INVALID_ARGUMENT` 는 알리지 않는다). info 는 `createSession` 이 적어 둔 `upgrade.peer` (연결 전 실패면 빈 값). 둘 다 IO thread (= run 의 thread) 라 플래그는 plain bool 이다.
 - **bye** 는 usecase `byeWebSocketClient` 가 `closeWebSocket(client.socket(), status, reason)` 을 부른다. 새 길은 없다.
 - **await.** `Parker` 하나다. `openSocket` 이 깨우고 (그때 `SocketLink::socket` 이 0 이 아니다), run 이 끝날 때 결과를 적고 깨운다. await 는 "소켓이 열렸으면 `SUCCESS`, run 이 끝났으면 그 결과" 가 될 때까지 기다린다. run 의 시작에서 결과를 지우므로 그 전의 짧은 동안은 앞 run 의 결과가 보인다.
-- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `WebSocketHandler::mask_state` 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
+- **mask key.** `nextMaskKey(std::atomic<uint64_t>& state)` (frame 모듈) 는 splitmix64 다. 상태 `ClientUpgrade::mask_state` (클라이언트 state 안, R7-4) 는 initialize 때 `std::random_device` 로 seed 하고 `fetch_add` 로 frame 마다 나아간다 (여러 thread 의 send 가 같은 key 를 받지 않는다). push lane 의 frame 과 write lane 의 close frame (`closeMaskOf`) 이 같은 상태에서 뽑는다 (V3, v1 결정 15. 그 전의 close frame 은 단조 시계로 만든 key 라 예측할 수 있었다). RFC 6455 10.3 의 요구는 "상대가 다음 key 를 예측할 수 없을 것" 이고 암호 수준의 난수는 요구하지 않는다.
 
 ### 5.9 다른 thread 에서 오는 것
 

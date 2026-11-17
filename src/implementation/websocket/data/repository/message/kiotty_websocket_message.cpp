@@ -62,9 +62,10 @@ namespace kiotty::net::implementation
                          const UpgradeSession& upgrade,
                          const KiottyNetWebSocketMessage& message)
         {
-            if (handler.role == SocketRole::CLIENT)
+            const ClientUpgrade* const client = handler.side().client;
+            if (client != nullptr)
             {
-                handler.client.events.on_message(upgrade.app_context, message);
+                client->events.on_message(upgrade.app_context, message);
                 return;
             }
             const SocketState& socket = socketOf(handler, upgrade);

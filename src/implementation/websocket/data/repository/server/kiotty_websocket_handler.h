@@ -19,18 +19,26 @@ namespace kiotty::net::implementation
 {
     using SocketTargetResult = Result<WebSocketTarget&, KiottyNetCode>;
 
+    struct SocketSide
+    {
+        KiottyNetWebSocketEndpoint* owner;
+        PushLane*                   lane;
+        ClientUpgrade*              client;
+        SocketRole                  role;
+    };
+
     class WebSocketHandler : public HttpUpgradeHandler
     {
     public:
         WebSocketHandler();
 
-        void               initialize(size_t sockets, size_t routes, SocketRole socket_role);
+        void               initialize(size_t sockets, size_t routes, const SocketSide& side);
         void               addTarget(int32_t path);
         SocketTargetResult target(int32_t path);
         bool               hasEveryMessage() const;
         SocketState&       socketAt(int32_t index);
-        SocketLink&        linkAt(int32_t index);
         Span<SocketLink>   links();
+        const SocketSide&  side() const;
 
         UpgradeAnswer       answer(const UpgradeSession& upgrade, int32_t upgrade_route) override;
         KiottyNetTransition open(const UpgradeSession& upgrade) override;
@@ -38,16 +46,11 @@ namespace kiotty::net::implementation
                                  KiottyNetConnectionEvent event) override;
         void                end(const UpgradeSession& upgrade, KiottyNetCode reason) override;
 
-        KiottyNetWebSocketEndpoint* owner;
-        PushLane*                   lane;
-        ClientUpgrade               client;
-        SocketRole                  role;
-        std::atomic<uint64_t>       mask_state;
-
     protected:
         ~WebSocketHandler() = default;
 
     private:
+        SocketSide                   _side;
         std::vector<WebSocketTarget> _targets;
         SocketTable                  _table;
     };

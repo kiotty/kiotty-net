@@ -10,6 +10,7 @@
 #include "kiotty_net_websocket.h"
 #include "websocket/domain/entity/kiotty_websocket_target.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -26,6 +27,7 @@ namespace kiotty::net::implementation
         KiottyNetCode           failure;
         bool                    has_opened;
         bool                    has_failed;
+        std::atomic<uint64_t>   mask_state;
     };
 
     class WebSocketHandler;
@@ -34,6 +36,7 @@ namespace kiotty::net::implementation
     {
         WebSocketClientState();
 
+        ClientUpgrade            upgrade;
         HttpReplyStore           reply;
         HttpResponseStore        response;
         KiottyNetHttpRequest     request;

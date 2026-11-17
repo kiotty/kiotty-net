@@ -66,13 +66,12 @@ namespace kiotty::net::implementation
         if (base != KIOTTY_NET_CODE_SUCCESS) { return base; }
         _protocols.clear();
         prepareState(configuration);
-        WebSocketHandler::initialize(1, 0, SocketRole::CLIENT);
-        owner = this;
-        lane = this;
+        const SocketSide side{ this, this, &_state.upgrade, SocketRole::CLIENT };
+        WebSocketHandler::initialize(1, 0, side);
         _scratch.resize(configuration.client.push_capacity);
         std::random_device seed;
-        mask_state.store((static_cast<uint64_t>(seed()) << 32U) | seed());
-        client.events = ClientEvents{ nullptr, nullptr, nullptr };
+        _state.upgrade.mask_state.store((static_cast<uint64_t>(seed()) << 32U) | seed());
+        _state.upgrade.events = ClientEvents{ nullptr, nullptr, nullptr };
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -98,7 +97,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode WebSocketClient::run(const ClientRun& request)
     {
-        const bool has_message = client.events.on_message != nullptr;
+        const bool has_message = _state.upgrade.events.on_message != nullptr;
         if (!has_message) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         bool is_idle = false;
         const bool is_first = _is_running.compare_exchange_strong(is_idle, true);
@@ -137,7 +136,7 @@ namespace kiotty::net::implementation
                                         Span<const char> payload)
     {
         const std::lock_guard<std::mutex> lock(_push_mutex);
-        const MaskKey key = nextMaskKey(mask_state);
+        const MaskKey key = nextMaskKey(_state.upgrade.mask_state);
         const FrameHead head = buildMaskedFrameHead(opcode, payload.length, key);
         const size_t total = head.length + payload.length;
         if (total > _scratch.size()) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
@@ -198,9 +197,9 @@ namespace kiotty::net::implementation
         is_written = is_written && _request.append(literalOf("\r\n\r\n"));
         if (!is_written) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
         _accept = acceptOf(key.span());
-        client.request = _request.span();
-        client.accept = _accept.span();
-        client.protocols = _protocols.span();
+        _state.upgrade.request = _request.span();
+        _state.upgrade.accept = _accept.span();
+        _state.upgrade.protocols = _protocols.span();
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
@@ -214,15 +213,15 @@ namespace kiotty::net::implementation
         const KiottyNetCode prepared = prepareUpgrade(request);
         if (prepared != KIOTTY_NET_CODE_SUCCESS) { return prepared; }
         _state.app_context = request.app_context;
-        client.peer = KiottyNetConnectionInfo{};
-        client.opened = &_opened;
-        client.failure = KIOTTY_NET_CODE_SUCCESS;
-        client.has_opened = false;
-        client.has_failed = false;
+        _state.upgrade.peer = KiottyNetConnectionInfo{};
+        _state.upgrade.opened = &_opened;
+        _state.upgrade.failure = KIOTTY_NET_CODE_SUCCESS;
+        _state.upgrade.has_opened = false;
+        _state.upgrade.has_failed = false;
         const KiottyNetStatefulAppContext stateful = webSocketClientStatefulOf(_state);
         const StatefulHandler handler(stateful, *this);
         const KiottyNetCode code = EventClient::run(handler, request.address, request.tls);
-        const KiottyNetCode failure = client.failure;
+        const KiottyNetCode failure = _state.upgrade.failure;
         const bool is_refused = failure != KIOTTY_NET_CODE_SUCCESS
                                 && failure != KIOTTY_NET_CODE_PEER_CLOSED;
         const bool is_dropped = code == KIOTTY_NET_CODE_PEER_CLOSED;
@@ -233,11 +232,11 @@ namespace kiotty::net::implementation
 
     void WebSocketClient::reportUnopened(KiottyNetCode code)
     {
-        const bool is_settled = client.has_opened || client.has_failed;
+        const bool is_settled = _state.upgrade.has_opened || _state.upgrade.has_failed;
         if (is_settled || !isReported(code)) { return; }
-        client.has_failed = true;
+        _state.upgrade.has_failed = true;
         if (_state.on_error == nullptr) { return; }
-        _state.on_error(_state.app_context, client.peer, code, messageOf(code));
+        _state.on_error(_state.app_context, _state.upgrade.peer, code, messageOf(code));
     }
 
     void WebSocketClient::prepareState(const WebSocketClientConfiguration& configuration)

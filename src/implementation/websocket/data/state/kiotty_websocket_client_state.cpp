@@ -3,7 +3,8 @@
 namespace kiotty::net::implementation
 {
     WebSocketClientState::WebSocketClientState()
-        : reply(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
+        : upgrade{}
+        , reply(Span<char>{ nullptr, 0 }, Span<KiottyNetHttpHeader>{ nullptr, 0 })
         , response(Span<char>{ nullptr, 0 })
         , request{}
         , info{}

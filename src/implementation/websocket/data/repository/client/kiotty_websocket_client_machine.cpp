@@ -105,7 +105,7 @@ namespace kiotty::net::implementation
         {
             WebSocketClientState& state = clientStateOf(context);
             state.sent += event.length;
-            const bool has_more = state.sent < state.handler->client.request.length;
+            const bool has_more = state.sent < state.upgrade.request.length;
             if (has_more) { return writeRequest(state); }
             return readReplyLine(state, STATUS_LINE);
         }
@@ -143,7 +143,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onClientClosed(Session context, Handle, Event event)
         {
             WebSocketClientState& state = clientStateOf(context);
-            ClientUpgrade& upgrade = state.handler->client;
+            ClientUpgrade& upgrade = state.upgrade;
             if (!clientSocketOf(state).is_open) { upgrade.failure = event.reason; }
             endSocket(*state.handler, clientUpgradeOf(state), event.reason);
             return Next::moveToNextState(CLOSING, thenHold(0));
@@ -156,7 +156,7 @@ namespace kiotty::net::implementation
 
         KiottyNetTransition writeRequest(WebSocketClientState& state)
         {
-            const Span<const char> whole = state.handler->client.request;
+            const Span<const char> whole = state.upgrade.request;
             const Span<const char> request = whole.skip(state.sent);
             const KiottyNetSpan data{ request.data, request.length };
             const uint32_t timeout = state.limits.header_timeout_milliseconds;
@@ -177,7 +177,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition openClient(WebSocketClientState& state)
         {
             const Span<const KiottyNetHttpHeader> headers = state.reply.headers();
-            const ClientUpgrade& upgrade = state.handler->client;
+            const ClientUpgrade& upgrade = state.upgrade;
             const bool is_upgraded = isUpgradeResponse(headers, upgrade.accept, upgrade.protocols);
             if (!is_upgraded) { return closeWith(KIOTTY_NET_CODE_PROTOCOL_ERROR); }
             const Span<const char> name{ PROTOCOL_HEADER, PROTOCOL_HEADER_LENGTH };
@@ -227,7 +227,7 @@ namespace kiotty::net::implementation
                                                        KiottyNetConnectionInfo info)
         {
             WebSocketClientState& state = *static_cast<WebSocketClientState*>(app_context);
-            state.handler->client.peer = info;
+            state.upgrade.peer = info;
             state.info = info;
             return &state;
         }
@@ -242,7 +242,7 @@ namespace kiotty::net::implementation
                                const char* message)
         {
             WebSocketClientState& state = *static_cast<WebSocketClientState*>(app_context);
-            ClientUpgrade& upgrade = state.handler->client;
+            ClientUpgrade& upgrade = state.upgrade;
             const bool is_settled = upgrade.has_opened || upgrade.has_failed;
             if (is_settled) { return; }
             upgrade.has_failed = true;
