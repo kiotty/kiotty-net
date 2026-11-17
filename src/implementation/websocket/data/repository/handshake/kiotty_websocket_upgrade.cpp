@@ -69,7 +69,9 @@ namespace kiotty::net::implementation
         SocketState& socket = socketOf(handler, upgrade);
         socket.reset();
         socket.target = target;
+        socket.upgrading = &upgrade;
         const bool is_allowed = callUpgrade(handler, upgrade);
+        socket.upgrading = nullptr;
         if (!is_allowed) { return refuse(upgrade, KIOTTY_NET_HTTP_STATUS_FORBIDDEN); }
         return acceptUpgrade(handler, upgrade);
     }

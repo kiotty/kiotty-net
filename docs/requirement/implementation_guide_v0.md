@@ -1515,7 +1515,7 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | websocket/data/repository/send | `kiotty_websocket_lane` | `PushLane`, push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
 | websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현: answer / open / step / end, 라우트 대상, `SocketTable`) |
 | | `kiotty_websocket_server` | `WebSocketServer` |
-| | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast) |
+| | `kiotty_websocket_access` | 공개 함수의 몸 (info, header, select, send, close, broadcast). websocket 의 `SocketLink` / `SocketState` 와 경로 이름을 찾는 `HttpRegistry` 만 본다 (R7-2) |
 | websocket/data/repository/client | `kiotty_websocket_client` | `WebSocketClient` |
 | | `kiotty_websocket_client_machine` | 클라이언트의 표 (Upgrade 요청 → 상태줄 → 헤더 줄 → frame 행) |
 | websocket/data/repository/endpoint | `kiotty_websocket_endpoint` | `KiottyNetWebSocketEndpoint` |
@@ -1568,7 +1568,7 @@ WebSocketAccess::LinkResult WebSocketAccess::openLink(int64_t id)
 }
 ```
 
-`openSocket` (IO thread) 이 `connection`, `path`, `closing = 0` 을 쓰고 마지막에 `socket` 을 쓴다. `endSocket` 은 `onClose` 전에 `socket` 을 0 으로 둔다. 그래서 `onClose` 안의 `send` 는 `PEER_CLOSED` 다. `onUpgrade` 안에서만 되는 둘 (`findWebSocketUpgradeHeader`, `selectWebSocketProtocol`) 은 `sessions.find(id)` 로 Session 을 찾고 `phase == UPGRADING` 이 아니면 `BUSY` 다 (IO thread 의 콜백 안에서만 부르는 함수라 Session 을 직접 본다).
+`openSocket` (IO thread) 이 `connection`, `path`, `closing = 0` 을 쓰고 마지막에 `socket` 을 쓴다. `endSocket` 은 `onClose` 전에 `socket` 을 0 으로 둔다. 그래서 `onClose` 안의 `send` 는 `PEER_CLOSED` 다. `onUpgrade` 안에서만 되는 둘 (`findWebSocketUpgradeHeader`, `selectWebSocketProtocol`) 은 `SocketState::upgrading` 을 본다. answer 가 `onUpgrade` 를 부르는 동안만 그 칸이 지금의 `UpgradeSession` 을 가리키고, id 가 같으면 그 요청과 칸을 쓴다. 열린 socket 의 id 면 `BUSY`, 아니면 `PEER_CLOSED` 다 (R7-2). `WebSocketAccess(registry, handler, push_capacity)` 는 http 의 session 풀을 보지 않는다. info 의 연결 정보는 open 때 `SocketState::connection` 에 복사한 것이다.
 
 ### 5.3 Upgrade (서버)
 

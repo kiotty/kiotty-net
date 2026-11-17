@@ -21,14 +21,15 @@ namespace kiotty::net::implementation
 
     struct UpgradeSession
     {
-        const KiottyNetHttpRequest& request;
-        HttpResponseStore&          response;
-        Span<char>                  message;
-        const KiottyNetHttpLimits&  limits;
-        size_t                      receive_capacity;
-        KiottyNetAppContext         app_context;
-        PoolHandle                  id;
-        bool                        has_body;
+        const KiottyNetHttpRequest&    request;
+        const KiottyNetConnectionInfo& info;
+        HttpResponseStore&             response;
+        Span<char>                     message;
+        const KiottyNetHttpLimits&     limits;
+        size_t                         receive_capacity;
+        KiottyNetAppContext            app_context;
+        PoolHandle                     id;
+        bool                           has_body;
     };
 
     class HttpUpgradeHandler

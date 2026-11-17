@@ -18,6 +18,11 @@ namespace kiotty::net::implementation
 {
     namespace
     {
+        WebSocketAccess clientAccessOf(HttpSessionHost& host, WebSocketHandler& handler)
+        {
+            return WebSocketAccess(host.registry, handler, host.push_capacity);
+        }
+
         constexpr size_t   KEY_BYTES = 16;
         const char* const  REFUSED_MESSAGE = "websocket upgrade refused";
         const char* const  TIMEOUT_MESSAGE = "websocket upgrade timed out";
@@ -149,29 +154,29 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketClient::socketInfo(int64_t id)
     {
-        return WebSocketAccess(_host).info(id);
+        return clientAccessOf(_host, *this).info(id);
     }
 
     KiottyNetSpan WebSocketClient::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(_host).header(id, name);
+        return clientAccessOf(_host, *this).header(id, name);
     }
 
     KiottyNetCode WebSocketClient::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(_host).select(id, protocol);
+        return clientAccessOf(_host, *this).select(id, protocol);
     }
 
     KiottyNetCode WebSocketClient::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(_host).send(id, opcode, data);
+        return clientAccessOf(_host, *this).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketClient::closeSocket(int64_t id, uint16_t status, Span<const char> reason)
     {
-        return WebSocketAccess(_host).close(id, status, reason);
+        return clientAccessOf(_host, *this).close(id, status, reason);
     }
 
     KiottyNetCode WebSocketClient::prepareUpgrade(const ClientRun& request)

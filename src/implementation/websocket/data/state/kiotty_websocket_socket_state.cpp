@@ -13,6 +13,8 @@ namespace kiotty::net::implementation
     SocketState::SocketState()
         : target{}
         , context(nullptr)
+        , connection{}
+        , upgrading(nullptr)
         , protocol()
         , frame{}
         , read{ 0, WebSocketState::OPENING }
@@ -33,6 +35,8 @@ namespace kiotty::net::implementation
     {
         target = WebSocketTarget{ nullptr, nullptr, nullptr, nullptr, NO_SOCKET_PATH };
         context = nullptr;
+        connection = KiottyNetConnectionInfo{};
+        upgrading = nullptr;
         protocol.clear();
         frame = SocketFrame{};
         read = FrameRead{ 0, WebSocketState::OPENING };

@@ -5,6 +5,14 @@
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        WebSocketAccess serverAccessOf(HttpSessionHost& host, WebSocketHandler& handler)
+        {
+            return WebSocketAccess(host.registry, handler, host.push_capacity);
+        }
+    }
+
     WebSocketServer::WebSocketServer()
         : HttpServer()
         , WebSocketHandler()
@@ -50,30 +58,30 @@ namespace kiotty::net::implementation
 
     KiottyNetWebSocketInfo WebSocketServer::socketInfo(int64_t id)
     {
-        return WebSocketAccess(host()).info(id);
+        return serverAccessOf(host(), *this).info(id);
     }
 
     KiottyNetSpan WebSocketServer::upgradeHeader(int64_t id, Span<const char> name)
     {
-        return WebSocketAccess(host()).header(id, name);
+        return serverAccessOf(host(), *this).header(id, name);
     }
 
     KiottyNetCode WebSocketServer::selectProtocol(int64_t id, Span<const char> protocol)
     {
-        return WebSocketAccess(host()).select(id, protocol);
+        return serverAccessOf(host(), *this).select(id, protocol);
     }
 
     KiottyNetCode WebSocketServer::sendSocket(int64_t id,
                                               KiottyNetWebSocketOpcode opcode,
                                               KiottyNetSpan data)
     {
-        return WebSocketAccess(host()).send(id, opcode, data);
+        return serverAccessOf(host(), *this).send(id, opcode, data);
     }
 
     KiottyNetCode WebSocketServer::closeSocket(int64_t id,
                                                uint16_t status,
                                                Span<const char> reason)
     {
-        return WebSocketAccess(host()).close(id, status, reason);
+        return serverAccessOf(host(), *this).close(id, status, reason);
     }
 }

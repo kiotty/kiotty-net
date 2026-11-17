@@ -18,6 +18,7 @@ namespace kiotty::net::implementation
         SocketLink& link = linkOf(handler, upgrade);
         socket.is_open = true;
         socket.message_length = 0;
+        socket.connection = upgrade.info;
         link.connection.store(connection.id);
         link.path.store(socket.target.path);
         link.closing.store(0);

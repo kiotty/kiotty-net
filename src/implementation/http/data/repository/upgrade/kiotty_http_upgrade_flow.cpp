@@ -23,6 +23,7 @@ namespace kiotty::net::implementation
         const bool has_body = hasBody(session.state.framing.body);
         return UpgradeSession{
             session.request.request(),
+            session.info,
             session.response,
             session.request.bodyArea(),
             host.limits,

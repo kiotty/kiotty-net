@@ -98,6 +98,8 @@ namespace kiotty::net::implementation
                                      KiottyNetWebSocketOpcode opcode,
                                      KiottyNetSpan data)
     {
-        return WebSocketAccess(server.host()).broadcast(path, opcode, data);
+        HttpSessionHost& host = server.host();
+        WebSocketAccess access(host.registry, server, host.push_capacity);
+        return access.broadcast(path, opcode, data);
     }
 }

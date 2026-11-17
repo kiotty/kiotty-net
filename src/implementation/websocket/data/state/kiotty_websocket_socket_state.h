@@ -11,6 +11,8 @@
 
 namespace kiotty::net::implementation
 {
+    struct UpgradeSession;
+
     inline constexpr size_t CLOSE_FRAME_BYTES =
         FRAME_START_BYTES + MASK_KEY_BYTES + MAX_CONTROL_PAYLOAD_BYTES;
 
@@ -32,6 +34,8 @@ namespace kiotty::net::implementation
 
         WebSocketTarget           target;
         KiottyNetWebSocketContext context;
+        KiottyNetConnectionInfo   connection;
+        const UpgradeSession*     upgrading;
         ProtocolText              protocol;
         SocketFrame               frame;
         FrameRead                 read;

@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
-#include "http/data/datasource/kiotty_http_session_pool.h"
-#include "http/data/repository/server/kiotty_http_session_host.h"
+#include "http/data/repository/server/kiotty_http_registry.h"
 #include "kiotty_net_websocket.h"
 #include "websocket/data/repository/server/kiotty_websocket_handler.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
@@ -13,7 +14,9 @@ namespace kiotty::net::implementation
     class WebSocketAccess
     {
     public:
-        explicit WebSocketAccess(HttpSessionHost& host);
+        WebSocketAccess(const HttpRegistry& registry,
+                        WebSocketHandler& handler,
+                        size_t push_capacity);
 
         KiottyNetWebSocketInfo info(int64_t id);
         KiottyNetSpan          header(int64_t id, Span<const char> name);
@@ -28,11 +31,14 @@ namespace kiotty::net::implementation
 
     private:
         using LinkResult = Result<SocketLink&, KiottyNetCode>;
+        using OfferResult = Result<const UpgradeSession&, KiottyNetCode>;
 
-        SessionResult upgrading(int64_t id);
+        OfferResult   upgrading(int64_t id);
         LinkResult    openLink(int64_t id);
+        KiottyNetCode checkData(KiottyNetWebSocketOpcode opcode, KiottyNetSpan data) const;
 
-        HttpSessionHost&  _host;
-        WebSocketHandler& _handler;
+        const HttpRegistry& _registry;
+        WebSocketHandler&   _handler;
+        size_t              _push_capacity;
     };
 }
