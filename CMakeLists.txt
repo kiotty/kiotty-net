@@ -187,6 +187,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/http/data/repository/client/kiotty_http_client_link.cpp
     src/implementation/http/data/repository/client/kiotty_http_client.cpp
     src/implementation/http/data/repository/client/kiotty_http_client_exchange.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client_send.cpp
+    src/implementation/http/data/repository/client/kiotty_http_client_reply.cpp
+    src/implementation/http/data/state/kiotty_http_client_state.cpp
     src/implementation/context/kiotty_context.cpp
 )
 

@@ -12,33 +12,25 @@ namespace kiotty::net::implementation
         Span<const char> lineBefore(Span<const char> staged, size_t line_feed);
     }
 
-    LineResult ConnectionStream::readLine(uint32_t timeout_milliseconds)
+    StagedResult ConnectionStream::peek(size_t wanted, uint32_t timeout_milliseconds)
     {
+        const Span<const char> staged = stagedOf(_receive);
+        if (staged.length >= wanted) { return StagedResult::success(staged); }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(flushed); }
-        size_t searched = 0;
+        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(flushed); }
         for (;;)
         {
-            const Span<const char> staged = stagedOf(_receive);
-            const size_t line_feed = findLineFeed(staged, searched);
-            if (line_feed < staged.length)
-            {
-                _receive.consumer().commit(line_feed + 1);
-                return LineResult::success(lineBefore(staged, line_feed));
-            }
-            searched = staged.length;
             const KiottyNetCode filled = fillStage(deadline);
-            if (filled != KIOTTY_NET_CODE_SUCCESS) { return LineResult::failure(filled); }
+            if (filled != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(filled); }
+            const Span<const char> received = stagedOf(_receive);
+            if (received.length >= wanted) { return StagedResult::success(received); }
         }
     }
 
-    KiottyNetCode ConnectionStream::fill(uint32_t timeout_milliseconds)
+    void ConnectionStream::consume(size_t length)
     {
-        const Deadline deadline(timeout_milliseconds);
-        const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
-        return fillStage(deadline);
+        _receive.consumer().commit(length);
     }
 
     KiottyNetCode ConnectionStream::fillStage(const Deadline& deadline)
@@ -58,6 +50,25 @@ namespace kiotty::net::implementation
                 provider.commit(static_cast<size_t>(received.bytes));
                 return KIOTTY_NET_CODE_SUCCESS;
             }
+        }
+    }
+
+    LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds)
+    {
+        const Deadline deadline(timeout_milliseconds);
+        size_t searched = 0;
+        for (;;)
+        {
+            if (deadline.expired()) { return LineResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
+            const StagedResult staged = stream.peek(searched + 1, deadline.remaining());
+            if (!staged) { return LineResult::failure(staged.code); }
+            const size_t line_feed = findLineFeed(staged.value, searched);
+            if (line_feed < staged.value.length)
+            {
+                stream.consume(line_feed + 1);
+                return LineResult::success(lineBefore(staged.value, line_feed));
+            }
+            searched = staged.value.length;
         }
     }
 

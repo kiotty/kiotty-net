@@ -1,21 +1,21 @@
 #pragma once
 
+#include "base/data/repository/endpoint/kiotty_stream_client.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_span.h"
+#include "http/data/state/kiotty_http_client_state.h"
+#include "http/domain/entity/kiotty_http_client_request.h"
+#include "http/domain/entity/kiotty_http_client_step.h"
 #include "kiotty_net_http.h"
 
-#include <cstddef>
 #include <cstdint>
 
 namespace kiotty::net::implementation
 {
-    class HttpClient;
-    struct ClientRequest;
-
     class HttpClientExchange
     {
     public:
-        explicit HttpClientExchange(HttpClient& client);
+        HttpClientExchange(HttpClientState& state, StreamClient& line);
 
         KiottyNetHttpReply send(const ClientRequest& request, uint32_t timeout_milliseconds);
         KiottyNetResult    readBody(Span<char> buffer, uint32_t timeout_milliseconds);
@@ -34,15 +34,20 @@ namespace kiotty::net::implementation
 
         KiottyNetHttpReply run(const ClientRequest& request, uint32_t timeout_milliseconds);
         Attempt            attempt(const ClientRequest& request,
-                                   size_t head_length,
+                                   Span<const char> head,
                                    const Deadline& deadline);
         KiottyNetCode      resend(const ClientRequest& request, const Deadline& deadline);
+        KiottyNetCode      transmit(Span<const char> head,
+                                    Span<const char> body,
+                                    const Connected& link,
+                                    const Deadline& deadline);
         KiottyNetCode      checkStart(const ClientRequest& request);
         KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
         KiottyNetCode      sendEnd(const Deadline& deadline);
         void               settleUpload();
         void               dropUpload();
 
-        HttpClient& _client;
+        HttpClientState& _state;
+        StreamClient&    _line;
     };
 }

@@ -4,31 +4,30 @@
 
 namespace kiotty::net::implementation
 {
-    HttpClientHeaders::HttpClientHeaders(HttpSharedHeaders& shared, BusyFlag& is_busy)
-        : _shared(shared)
-        , _is_busy(is_busy)
+    HttpClientHeaders::HttpClientHeaders(HttpClientState& state)
+        : _state(state)
     {
     }
 
     KiottyNetCode HttpClientHeaders::set(Span<const char> name, Span<const char> value)
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        return _shared.set(name, value);
+        return _state.shared.set(name, value);
     }
 
     KiottyNetCode HttpClientHeaders::remove(Span<const char> name)
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        return _shared.remove(name);
+        return _state.shared.remove(name);
     }
 
     KiottyNetCode HttpClientHeaders::clear()
     {
-        const BusyGuard guard(_is_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        _shared.clear();
+        _state.shared.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
 }

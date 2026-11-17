@@ -17,6 +17,7 @@
 namespace kiotty::net::implementation
 {
     using LineResult = Result<Span<const char>, KiottyNetCode>;
+    using StagedResult = Result<Span<const char>, KiottyNetCode>;
 
     class ConnectionStream
     {
@@ -26,8 +27,8 @@ namespace kiotty::net::implementation
         ConnectionStream& operator=(const ConnectionStream&) = delete;
 
         KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
-        LineResult      readLine(uint32_t timeout_milliseconds);
-        KiottyNetCode   fill(uint32_t timeout_milliseconds);
+        StagedResult    peek(size_t wanted, uint32_t timeout_milliseconds);
+        void            consume(size_t length);
         KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
         KiottyNetCode   writeFile(Span<const char> path,
                                   uint64_t offset,
@@ -73,4 +74,6 @@ namespace kiotty::net::implementation
         StageBase&    _receive;
         StageBase&    _send;
     };
+
+    LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds);
 }

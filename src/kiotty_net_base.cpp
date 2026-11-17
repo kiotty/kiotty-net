@@ -451,7 +451,9 @@ KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client,
 {
     if (client == nullptr || !isUsable(buffer, length)) { return invalidResult(); }
     const net::Span<char> target{ static_cast<char*>(buffer), length };
-    return client->read(target, timeout_milliseconds);
+    const net::StreamResult stream = client->stream();
+    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+    return stream.value().read(target, timeout_milliseconds);
 }
 
 KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
@@ -459,7 +461,9 @@ KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client,
                                             uint32_t timeout_milliseconds)
 {
     if (client == nullptr) { return invalidResult(); }
-    return client->write(data, timeout_milliseconds);
+    const net::StreamResult stream = client->stream();
+    if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+    return stream.value().write(data, timeout_milliseconds);
 }
 
 KiottyNetEventClientResult KiottyNet_createEventClient(

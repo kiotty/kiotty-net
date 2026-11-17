@@ -1,30 +1,31 @@
 #include "http/data/repository/client/kiotty_http_client_link.h"
 
+#include "core/kiotty_busy_guard.h"
+
 namespace kiotty::net::implementation
 {
-    HttpClientLink::HttpClientLink(StreamClient& stream, StopSignal& stop, BusyFlag& busy)
-        : _stream(stream)
-        , _stop(stop)
-        , _busy(busy)
+    HttpClientLink::HttpClientLink(HttpClientState& state, StreamClient& line)
+        : _state(state)
+        , _line(line)
     {
     }
 
     void HttpClientLink::disconnect()
     {
-        const BusyGuard guard(_busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return; }
-        static_cast<void>(_stop.accept());
-        _stream.disconnect();
+        static_cast<void>(_line.stop().accept());
+        _line.disconnect();
     }
 
     void HttpClientLink::close()
     {
-        if (!_busy.enterClose())
+        if (!_state.busy.enterClose())
         {
-            _stop.raise();
+            _line.stop().raise();
             return;
         }
-        _stream.disconnect();
-        _busy.leave();
+        _line.disconnect();
+        _state.busy.leave();
     }
 }

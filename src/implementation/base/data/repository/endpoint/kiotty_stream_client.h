@@ -8,6 +8,7 @@
 #include "base/data/repository/endpoint/kiotty_endpoint.h"
 #include "base/data/repository/stream/kiotty_connection_stream.h"
 #include "core/kiotty_deadline.h"
+#include "core/kiotty_result.h"
 #include "core/kiotty_span.h"
 #include "core/kiotty_stage.h"
 #include "core/pool/kiotty_pool_handle.h"
@@ -17,6 +18,8 @@
 
 namespace kiotty::net::implementation
 {
+    using StreamResult = Result<ConnectionStream&, KiottyNetCode>;
+
     class StreamClient : public Endpoint
     {
     public:
@@ -35,14 +38,14 @@ namespace kiotty::net::implementation
         StreamClient(StreamClient&&) = delete;
         StreamClient& operator=(StreamClient&&) = delete;
 
-        KiottyNetCode   initialize(PoolHandle id,
-                                   const KiottyNetClientConfiguration& configuration);
-        void            reset() noexcept;
-        KiottyNetCode   connect(const KiottyNetAddress& address,
-                                const KiottyNetTlsClientConfiguration* tls);
-        void            disconnect();
-        KiottyNetResult read(Span<char> buffer, uint32_t timeout_milliseconds);
-        KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+        KiottyNetCode initialize(PoolHandle id, const KiottyNetClientConfiguration& configuration);
+        void          reset() noexcept;
+        KiottyNetCode connect(const KiottyNetAddress& address,
+                              const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode reconnect(const KiottyNetAddress& address, const Deadline& deadline);
+        void          disconnect();
+        StreamResult  stream();
+        StopSignal&   stop();
 
         KiottyNetCode           notify(int64_t id, KiottyNetSpan data) override;
         KiottyNetCode           notify(int64_t id, Span<const KiottyNetSpan> pieces) override;
@@ -61,23 +64,11 @@ namespace kiotty::net::implementation
         KiottyNetCode           closeStream(int64_t id,
                                             const KiottyNetConnectionAction& then) override;
 
-    protected:
-        using StagedResult = Result<Span<const char>, KiottyNetCode>;
-
+    private:
         KiottyNetCode prepare(const KiottyNetAddress& address,
                               const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode reconnect(const KiottyNetAddress& address, const Deadline& deadline);
-        bool          isConnected() const;
-        LineResult    readLine(uint32_t timeout_milliseconds);
-        StagedResult  peekReceived(uint32_t timeout_milliseconds);
-        void          consumeReceived(size_t length);
-        size_t        stagedBytes();
-        StopSignal&   stopSignal();
-
-    private:
-        KiottyNetCode    openProfile(const KiottyNetTlsClientConfiguration* tls);
-        KiottyNetCode    secure(const KiottyNetAddress& address, const Deadline& deadline);
-        ConnectionStream stream();
+        KiottyNetCode openProfile(const KiottyNetTlsClientConfiguration* tls);
+        KiottyNetCode secure(const KiottyNetAddress& address, const Deadline& deadline);
 
         Stage                        _receive;
         Stage                        _send;
@@ -86,5 +77,6 @@ namespace kiotty::net::implementation
         ActiveSocket                 _socket;
         KiottyNetClientConfiguration _configuration;
         StopSignal                   _stop;
+        ConnectionStream             _stream;
     };
 }

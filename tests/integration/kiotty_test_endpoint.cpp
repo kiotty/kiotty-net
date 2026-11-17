@@ -317,13 +317,27 @@ namespace
         return text;
     }
 
+    KiottyNetResult readClient(KiottyNetStreamClient& client, net::Span<char> buffer, uint32_t wait)
+    {
+        net::StreamResult stream = client.stream();
+        if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+        return stream.value().read(buffer, wait);
+    }
+
+    KiottyNetResult writeClient(KiottyNetStreamClient& client, KiottyNetSpan data, uint32_t wait)
+    {
+        net::StreamResult stream = client.stream();
+        if (!stream) { return KiottyNetResult{ 0, stream.code }; }
+        return stream.value().write(data, wait);
+    }
+
     std::string readFromClient(KiottyNetStreamClient& client, size_t length)
     {
         std::string text;
         char buffer[64];
         while (text.size() < length)
         {
-            KiottyNetResult result = client.read(net::Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
+            KiottyNetResult result = readClient(client, net::Span<char>{ buffer, sizeof(buffer) }, WAIT_MS);
             if (result.code != KIOTTY_NET_CODE_SUCCESS)
             {
                 break;
@@ -355,7 +369,7 @@ namespace
         const int64_t id = probe.stream_id.load();
         EXPECT_EQ(static_cast<net::Endpoint*>(&server), &owner);
 
-        EXPECT_EQ(4, client.write(spanOf("ping"), WAIT_MS).bytes);
+        EXPECT_EQ(4, writeClient(client, spanOf("ping"), WAIT_MS).bytes);
         EXPECT_EQ("ping", readFromStream(owner, id, 4));
         EXPECT_TRUE(owner.isStreamOpen(id));
         EXPECT_EQ(4, owner.writeStream(id, spanOf("pong"), WAIT_MS).bytes);
@@ -363,7 +377,7 @@ namespace
         EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, owner.closeStream(id, net::thenClose(KIOTTY_NET_CODE_SUCCESS)));
 
         char byte = 0;
-        KiottyNetResult closed = client.read(net::Span<char>{ &byte, 1 }, WAIT_MS);
+        KiottyNetResult closed = readClient(client, net::Span<char>{ &byte, 1 }, WAIT_MS);
         EXPECT_NE(KIOTTY_NET_CODE_SUCCESS, closed.code);
         EXPECT_TRUE(kiotty_test::waitUntil([&probe]() { return probe.disconnected.load() == 1; }, WAIT_MS));
         EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, running.stop());
@@ -512,8 +526,8 @@ TEST_F(EndpointTest, StreamClientRefusesConnectionHandleCallsAndReadsBeforeConne
     ASSERT_TRUE(created);
     KiottyNetStreamClient& client = created.value();
     char byte = 0;
-    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, client.read(net::Span<char>{ &byte, 1 }, 10).code);
-    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, client.write(spanOf("x"), 10).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, readClient(client, net::Span<char>{ &byte, 1 }, 10).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, writeClient(client, spanOf("x"), 10).code);
     net::Endpoint& owner = client;
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, owner.notify(1, spanOf("x")));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, owner.readStream(1, net::Span<char>{ &byte, 1 }, 10).code);

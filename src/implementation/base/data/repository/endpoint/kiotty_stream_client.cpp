@@ -8,11 +8,6 @@
 
 namespace kiotty::net::implementation
 {
-    namespace
-    {
-        KiottyNetResult unconnected();
-    }
-
     StreamClient::StreamClient()
         : _receive()
         , _send()
@@ -21,6 +16,7 @@ namespace kiotty::net::implementation
         , _socket()
         , _configuration()
         , _stop()
+        , _stream(_socket, _tls, _receive, _send)
     {
     }
 
@@ -59,6 +55,18 @@ namespace kiotty::net::implementation
         return reconnect(address, Deadline(0));
     }
 
+    KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
+    {
+        disconnect();
+        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
+        if (!connected) { return connected.code; }
+        _socket = std::move(connected.value);
+        const KiottyNetCode secured = secure(address, deadline);
+        if (secured == KIOTTY_NET_CODE_SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
+        disconnect();
+        return secured;
+    }
+
     void StreamClient::disconnect()
     {
         _tls.close();
@@ -67,16 +75,15 @@ namespace kiotty::net::implementation
         _send.clear();
     }
 
-    KiottyNetResult StreamClient::read(Span<char> buffer, uint32_t timeout_milliseconds)
+    StreamResult StreamClient::stream()
     {
-        if (!_socket.valid()) { return unconnected(); }
-        return stream().read(buffer, timeout_milliseconds);
+        if (!_socket.valid()) { return StreamResult::failure(KIOTTY_NET_CODE_CLOSED); }
+        return StreamResult::success(_stream);
     }
 
-    KiottyNetResult StreamClient::write(KiottyNetSpan data, uint32_t timeout_milliseconds)
+    StopSignal& StreamClient::stop()
     {
-        if (!_socket.valid()) { return unconnected(); }
-        return stream().write(data, timeout_milliseconds);
+        return _stop;
     }
 
     KiottyNetCode StreamClient::notify(int64_t id, KiottyNetSpan data)
@@ -153,56 +160,6 @@ namespace kiotty::net::implementation
         return openProfile(tls);
     }
 
-    KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
-    {
-        disconnect();
-        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
-        if (!connected) { return connected.code; }
-        _socket = std::move(connected.value);
-        const KiottyNetCode secured = secure(address, deadline);
-        if (secured == KIOTTY_NET_CODE_SUCCESS) { return KIOTTY_NET_CODE_SUCCESS; }
-        disconnect();
-        return secured;
-    }
-
-    bool StreamClient::isConnected() const
-    {
-        return _socket.valid();
-    }
-
-    LineResult StreamClient::readLine(uint32_t timeout_milliseconds)
-    {
-        if (!_socket.valid()) { return LineResult::failure(KIOTTY_NET_CODE_CLOSED); }
-        return stream().readLine(timeout_milliseconds);
-    }
-
-    StreamClient::StagedResult StreamClient::peekReceived(uint32_t timeout_milliseconds)
-    {
-        if (!_socket.valid()) { return StagedResult::failure(KIOTTY_NET_CODE_CLOSED); }
-        StageBase::Consumer staged = _receive.consumer();
-        if (staged.readable() == 0)
-        {
-            const KiottyNetCode filled = stream().fill(timeout_milliseconds);
-            if (filled != KIOTTY_NET_CODE_SUCCESS) { return StagedResult::failure(filled); }
-        }
-        return StagedResult::success(Span<const char>{ staged.peek(), staged.readable() });
-    }
-
-    void StreamClient::consumeReceived(size_t length)
-    {
-        _receive.consumer().commit(length);
-    }
-
-    size_t StreamClient::stagedBytes()
-    {
-        return _receive.consumer().readable();
-    }
-
-    StopSignal& StreamClient::stopSignal()
-    {
-        return _stop;
-    }
-
     KiottyNetCode StreamClient::openProfile(const KiottyNetTlsClientConfiguration* tls)
     {
         _profile.close();
@@ -217,19 +174,6 @@ namespace kiotty::net::implementation
                                     _configuration.send_capacity };
         const KiottyNetCode opened = _tls.open(_profile, hostnameOf(address), capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        return stream().handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
-    }
-
-    ConnectionStream StreamClient::stream()
-    {
-        return ConnectionStream(_socket, _tls, _receive, _send);
-    }
-
-    namespace
-    {
-        KiottyNetResult unconnected()
-        {
-            return KiottyNetResult{ 0, KIOTTY_NET_CODE_CLOSED };
-        }
+        return _stream.handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
     }
 }

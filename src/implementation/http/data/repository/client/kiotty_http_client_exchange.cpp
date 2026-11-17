@@ -4,7 +4,8 @@
 #include "core/kiotty_codes.h"
 #include "core/kiotty_text.h"
 #include "http/data/repository/body/kiotty_http_upload_rules.h"
-#include "http/data/repository/client/kiotty_http_client.h"
+#include "http/data/repository/client/kiotty_http_client_reply.h"
+#include "http/data/repository/client/kiotty_http_client_send.h"
 #include "http/data/repository/request/kiotty_http_request_check_rules.h"
 #include "http/data/repository/response/kiotty_http_response_text_builder.h"
 
@@ -20,68 +21,70 @@ namespace kiotty::net::implementation
         bool               isConnectionLoss(KiottyNetCode code);
     }
 
-    HttpClientExchange::HttpClientExchange(HttpClient& client)
-        : _client(client)
+    HttpClientExchange::HttpClientExchange(HttpClientState& state, StreamClient& line)
+        : _state(state)
+        , _line(line)
     {
     }
 
     KiottyNetHttpReply HttpClientExchange::send(const ClientRequest& request,
                                                 uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         dropUpload();
         return run(request, timeout_milliseconds);
     }
 
     KiottyNetResult HttpClientExchange::readBody(Span<char> buffer, uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return resultOf(0, KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        if (_client._upload.mode != UploadMode::IDLE) { return resultOf(0, INVALID); }
+        if (_state.upload.mode != UploadMode::IDLE) { return resultOf(0, INVALID); }
         const Span<char> target = cappedOf(buffer);
-        const BodyStep idle = _client._body.take(Span<const char>{ nullptr, 0 }, target);
+        const BodyStep idle = _state.body.take(Span<const char>{ nullptr, 0 }, target);
         const bool is_settled = idle.code != KIOTTY_NET_CODE_SUCCESS || idle.is_finished;
         if (is_settled) { return resultOf(0, idle.code); }
         const Deadline deadline(timeout_milliseconds);
-        return _client.pumpBody(target, deadline);
+        return pumpBody(_line, _state, target, deadline);
     }
 
     KiottyNetCode HttpClientExchange::begin(const ClientRequest& request,
                                             uint64_t body_length,
                                             uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
-        _client.settleStop();
+        settleStop(_line);
         const KiottyNetCode checked = checkStart(request);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
-        const HeadLengthResult head = _client.writeHead(request, body_length);
+        const HeadBytesResult head = writeHead(_state, request, body_length);
         if (!head) { return head.code; }
         dropUpload();
-        _client.dropUnreadReply();
+        dropUnreadReply(_line, _state);
         const Deadline deadline(timeout_milliseconds);
+        const Connected link = ensureConnected(_line, _state.target, deadline);
         const Span<const char> no_body{ nullptr, 0 };
-        const KiottyNetCode sent = _client.transmit(head.value, no_body, deadline);
+        const KiottyNetCode sent = transmit(head.value, no_body, link, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
         {
-            _client.disconnect();
+            _line.disconnect();
             return sent;
         }
-        _client._upload = startUpload(request.method, body_length);
+        _state.upload = startUpload(request.method, body_length);
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetResult HttpClientExchange::write(Span<const char> data, uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return resultOf(0, KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        const KiottyNetCode checked = checkUploadPiece(_client._upload, data.length);
+        const KiottyNetCode checked = checkUploadPiece(_state.upload, data.length);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, checked); }
         if (data.empty()) { return resultOf(0, KIOTTY_NET_CODE_SUCCESS); }
         const Deadline deadline(timeout_milliseconds);
@@ -91,19 +94,19 @@ namespace kiotty::net::implementation
             dropUpload();
             return resultOf(0, sent);
         }
-        _client._upload = takeUploadPiece(_client._upload, data.length);
+        _state.upload = takeUploadPiece(_state.upload, data.length);
         return resultOf(data.length, KIOTTY_NET_CODE_SUCCESS);
     }
 
     KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
     {
-        const BusyGuard guard(_client._busy);
+        const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
-        _client.settleStop();
+        settleStop(_line);
         settleUpload();
-        if (_client._upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
-        const KiottyNetHttpMethod method = _client._upload.method;
-        const KiottyNetCode ended = checkUploadEnd(_client._upload);
+        if (_state.upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
+        const KiottyNetHttpMethod method = _state.upload.method;
+        const KiottyNetCode ended = checkUploadEnd(_state.upload);
         if (ended != KIOTTY_NET_CODE_SUCCESS)
         {
             dropUpload();
@@ -111,88 +114,101 @@ namespace kiotty::net::implementation
         }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode sent = sendEnd(deadline);
-        _client._upload = idleUpload();
+        _state.upload = idleUpload();
         const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode received = is_sent ? _client.receiveReply(method, deadline) : sent;
-        return _client.replyOf(received);
+        const KiottyNetCode received =
+            is_sent ? receiveReply(_line, _state, method, deadline).code : sent;
+        return replyOf(_line, _state, received);
     }
 
     KiottyNetHttpReply HttpClientExchange::run(const ClientRequest& request,
                                                uint32_t timeout_milliseconds)
     {
-        if (!_client._has_target) { return failedReply(INVALID); }
+        if (!_state.target.is_set) { return failedReply(INVALID); }
         const KiottyNetCode body = checkRequestBody(request.type, request.body);
         if (body != KIOTTY_NET_CODE_SUCCESS) { return failedReply(body); }
-        const HeadLengthResult head = _client.writeHead(request, request.body.length);
+        const HeadBytesResult head = writeHead(_state, request, request.body.length);
         if (!head) { return failedReply(head.code); }
         const Deadline deadline(timeout_milliseconds);
         const Attempt first = attempt(request, head.value, deadline);
         const KiottyNetCode received = first.is_stale ? resend(request, deadline) : first.code;
-        return _client.replyOf(received);
+        return replyOf(_line, _state, received);
     }
 
     HttpClientExchange::Attempt HttpClientExchange::attempt(const ClientRequest& request,
-                                                            size_t head_length,
+                                                            Span<const char> head,
                                                             const Deadline& deadline)
     {
-        _client.dropUnreadReply();
-        const bool is_reused = _client.isConnected();
-        const KiottyNetCode sent = _client.transmit(head_length, request.body, deadline);
+        dropUnreadReply(_line, _state);
+        const Connected link = ensureConnected(_line, _state.target, deadline);
+        const KiottyNetCode sent = transmit(head, request.body, link, deadline);
         const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
-        const KiottyNetCode received =
-            is_sent ? _client.receiveReply(request.method, deadline) : sent;
-        const bool is_unanswered = !_client._has_reply_bytes && _client.stagedBytes() == 0;
-        const bool is_stale = is_reused && is_unanswered && isConnectionLoss(received);
-        return Attempt{ received, is_stale };
+        const ReplyHead unsent{ sent, false };
+        const ReplyHead reply =
+            is_sent ? receiveReply(_line, _state, request.method, deadline) : unsent;
+        const bool is_stale = link.is_reused && !reply.saw_bytes && isConnectionLoss(reply.code);
+        return Attempt{ reply.code, is_stale };
     }
 
     KiottyNetCode HttpClientExchange::resend(const ClientRequest& request,
                                              const Deadline& deadline)
     {
-        _client.disconnect();
+        _line.disconnect();
         if (!isIdempotent(request.method)) { return KIOTTY_NET_CODE_PEER_CLOSED; }
-        const HeadLengthResult head = _client.writeHead(request, request.body.length);
+        const HeadBytesResult head = writeHead(_state, request, request.body.length);
         if (!head) { return head.code; }
         return attempt(request, head.value, deadline).code;
     }
 
+    KiottyNetCode HttpClientExchange::transmit(Span<const char> head,
+                                               Span<const char> body,
+                                               const Connected& link,
+                                               const Deadline& deadline)
+    {
+        const bool is_connected = link.code == KIOTTY_NET_CODE_SUCCESS;
+        const KiottyNetCode sent =
+            is_connected ? sendBytes(_line, head, body, deadline) : link.code;
+        _state.head_area.fill('\0');
+        return sent;
+    }
+
     KiottyNetCode HttpClientExchange::checkStart(const ClientRequest& request)
     {
-        if (!_client._has_target) { return INVALID; }
+        if (!_state.target.is_set) { return INVALID; }
         if (request.body.length > 0) { return INVALID; }
         return checkRequestBody(request.type, request.body);
     }
 
     KiottyNetCode HttpClientExchange::sendPiece(Span<const char> data, const Deadline& deadline)
     {
-        const bool is_counted = _client._upload.mode == UploadMode::LENGTH;
-        if (is_counted) { return _client.writeAll(data, deadline); }
+        const bool is_counted = _state.upload.mode == UploadMode::LENGTH;
+        if (is_counted) { return writeAll(_line, data, deadline); }
         const ChunkHead head = chunkHeadOf(data.length);
-        const KiottyNetCode opened = _client.writeAll(head.span(), deadline);
+        const KiottyNetCode opened = writeAll(_line, head.span(), deadline);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        const KiottyNetCode carried = _client.writeAll(data, deadline);
+        const KiottyNetCode carried = writeAll(_line, data, deadline);
         if (carried != KIOTTY_NET_CODE_SUCCESS) { return carried; }
-        return _client.writeAll(textOf(LINE_END), deadline);
+        return writeAll(_line, textOf(LINE_END), deadline);
     }
 
     KiottyNetCode HttpClientExchange::sendEnd(const Deadline& deadline)
     {
-        const bool is_counted = _client._upload.mode == UploadMode::LENGTH;
+        const bool is_counted = _state.upload.mode == UploadMode::LENGTH;
         if (is_counted) { return KIOTTY_NET_CODE_SUCCESS; }
-        return _client.writeAll(textOf(LAST_UPLOAD_CHUNK), deadline);
+        return writeAll(_line, textOf(LAST_UPLOAD_CHUNK), deadline);
     }
 
     void HttpClientExchange::settleUpload()
     {
-        const bool is_open = _client.isConnected();
-        if (!is_open) { _client._upload = idleUpload(); }
+        const bool is_open = static_cast<bool>(_line.stream());
+        if (!is_open) { _state.upload = idleUpload(); }
     }
 
     void HttpClientExchange::dropUpload()
     {
-        const bool is_uploading = _client._upload.mode != UploadMode::IDLE;
-        if (is_uploading) { _client.disconnect(); }
-        _client._upload = idleUpload();
+        const bool is_uploading = _state.upload.mode != UploadMode::IDLE;
+        if (is_uploading) { _line.disconnect(); }
+        _state.upload = idleUpload();
     }
 
     namespace
