@@ -216,7 +216,7 @@ namespace kiotty::net::implementation
             session.persistence = Persistence::UPGRADE;
             advanceSession(session);
             const KiottyNetTransition sending = startSending(session);
-            return Next::moveToNextState(HttpState::SOCKET_OPENING, sending.entry_action);
+            return Next::moveToNextState(HttpState::UPGRADED, sending.entry_action);
         }
     }
 }

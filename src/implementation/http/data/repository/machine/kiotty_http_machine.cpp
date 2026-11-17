@@ -61,7 +61,6 @@ namespace kiotty::net::implementation
         constexpr HttpState CONTINUING = HttpState::CONTINUING;
         constexpr HttpState WORKING = HttpState::WORKING;
         constexpr HttpState SENDING = HttpState::SENDING;
-        constexpr HttpState SOCKET_OPENING = HttpState::SOCKET_OPENING;
 
         constexpr EventType WORK_STARTED = KIOTTY_NET_CONNECTION_EVENT_TYPE_WORK_STARTED;
 
@@ -80,7 +79,7 @@ namespace kiotty::net::implementation
                     CONTINUING,
                     SENDING,
                     WORKING,
-                    SOCKET_OPENING,
+                    UPGRADED,
                     CLOSING),
             KiottyNet_from(BODY).when(READ).then(onBody).to(BODY, SENDING, WORKING, CLOSING),
             KiottyNet_from(CHUNK_SIZE)
@@ -104,42 +103,9 @@ namespace kiotty::net::implementation
                 .then(onRequestLine)
                 .to(HEADER_LINE, SENDING, CLOSING),
             KiottyNet_from(SENDING).when(WRITTEN).then(onSent).to(SENDING, REQUEST_LINE, CLOSING),
-            KiottyNet_from(SOCKET_OPENING)
-                .when(WRITTEN)
-                .then(onUpgraded)
-                .to(SOCKET_OPENING, FRAME_START),
-            KiottyNet_from(FRAME_START)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(READ)
-                .then(onUpgraded)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(TIMEOUT)
-                .then(onUpgraded)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
+            KiottyNet_from(UPGRADED).when(WRITTEN).then(onUpgraded).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(READ).then(onUpgraded).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(TIMEOUT).then(onUpgraded).to(UPGRADED, CLOSING),
             KiottyNet_when(TIMEOUT).then(onTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClosed));
 

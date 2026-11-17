@@ -2,6 +2,7 @@
 
 #include "kiotty_net_websocket.h"
 #include "websocket/domain/entity/kiotty_websocket_frame.h"
+#include "websocket/domain/entity/kiotty_websocket_frame_step.h"
 #include "websocket/domain/entity/kiotty_websocket_target.h"
 
 #include <atomic>
@@ -23,22 +24,6 @@ namespace kiotty::net::implementation
         std::atomic<uint16_t> closing;
     };
 
-    struct SocketFrame
-    {
-        uint64_t      remaining;
-        size_t        offset;
-        MaskKey       key;
-        FrameOpcode   opcode;
-        FrameFinality finality;
-        FrameMasking  masking;
-    };
-
-    struct SocketRead
-    {
-        size_t  length;
-        int32_t state;
-    };
-
     struct SocketState
     {
         SocketState();
@@ -49,7 +34,7 @@ namespace kiotty::net::implementation
         KiottyNetWebSocketContext context;
         ProtocolText              protocol;
         SocketFrame               frame;
-        SocketRead                read;
+        FrameRead                 read;
         uint64_t                  ping_deadline;
         uint64_t                  close_deadline;
         size_t                    control_length;

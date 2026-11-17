@@ -17,10 +17,6 @@ namespace kiotty::net::implementation
         WORKING,
         SENDING,
         CLOSING,
-        SOCKET_OPENING,
-        FRAME_START,
-        FRAME_LENGTH,
-        FRAME_MASK,
-        FRAME_PAYLOAD
+        UPGRADED
     };
 }

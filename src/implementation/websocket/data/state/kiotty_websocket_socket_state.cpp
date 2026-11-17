@@ -15,7 +15,7 @@ namespace kiotty::net::implementation
         , context(nullptr)
         , protocol()
         , frame{}
-        , read{}
+        , read{ 0, WebSocketState::OPENING }
         , ping_deadline(0)
         , close_deadline(0)
         , control_length(0)
@@ -34,7 +34,7 @@ namespace kiotty::net::implementation
         context = nullptr;
         protocol.clear();
         frame = SocketFrame{};
-        read = SocketRead{};
+        read = FrameRead{ 0, WebSocketState::OPENING };
         ping_deadline = 0;
         close_deadline = 0;
         control_length = 0;

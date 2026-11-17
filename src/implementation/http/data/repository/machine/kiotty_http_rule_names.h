@@ -7,10 +7,7 @@ namespace kiotty::net::implementation
 {
     inline constexpr HttpState HEADER_LINE = HttpState::HEADER_LINE;
     inline constexpr HttpState CLOSING = HttpState::CLOSING;
-    inline constexpr HttpState FRAME_START = HttpState::FRAME_START;
-    inline constexpr HttpState FRAME_LENGTH = HttpState::FRAME_LENGTH;
-    inline constexpr HttpState FRAME_MASK = HttpState::FRAME_MASK;
-    inline constexpr HttpState FRAME_PAYLOAD = HttpState::FRAME_PAYLOAD;
+    inline constexpr HttpState UPGRADED = HttpState::UPGRADED;
 
     inline constexpr KiottyNetConnectionEventType CONNECTED =
         KIOTTY_NET_CONNECTION_EVENT_TYPE_CONNECTED;

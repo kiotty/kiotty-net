@@ -1,25 +1,12 @@
 #pragma once
 
 #include "http/data/state/kiotty_http_session.h"
-#include "http/domain/entity/kiotty_http_state.h"
 #include "kiotty_net_statemachine.h"
-
-#include <cstddef>
+#include "websocket/domain/entity/kiotty_websocket_frame_step.h"
 
 namespace kiotty::net::implementation
 {
-    KiottyNetTransition onFrameStart(KiottyNetConnectionContext context,
-                                     KiottyNetConnectionHandle connection,
-                                     KiottyNetConnectionEvent event);
-    KiottyNetTransition onFrameLength(KiottyNetConnectionContext context,
-                                      KiottyNetConnectionHandle connection,
-                                      KiottyNetConnectionEvent event);
-    KiottyNetTransition onFrameMask(KiottyNetConnectionContext context,
-                                    KiottyNetConnectionHandle connection,
-                                    KiottyNetConnectionEvent event);
-    KiottyNetTransition onFramePayload(KiottyNetConnectionContext context,
-                                       KiottyNetConnectionHandle connection,
-                                       KiottyNetConnectionEvent event);
-    KiottyNetTransition readNext(HttpSession& session, HttpState state, size_t length);
+    KiottyNetTransition stepFrame(HttpSession& session, KiottyNetConnectionEvent event);
+    KiottyNetTransition readNext(HttpSession& session, FrameRead read);
     KiottyNetTransition nextFrame(HttpSession& session);
 }

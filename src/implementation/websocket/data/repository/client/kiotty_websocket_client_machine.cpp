@@ -26,6 +26,7 @@ namespace kiotty::net::implementation
         KiottyNetTransition onUpgradeSent(Session context, Handle connection, Event event);
         KiottyNetTransition onStatusLine(Session context, Handle connection, Event event);
         KiottyNetTransition onResponseHeader(Session context, Handle connection, Event event);
+        KiottyNetTransition onClientFrame(Session context, Handle connection, Event event);
         KiottyNetTransition onClientTimeout(Session context, Handle connection, Event event);
         KiottyNetTransition onClientClosed(Session context, Handle connection, Event event);
 
@@ -53,39 +54,9 @@ namespace kiotty::net::implementation
             KiottyNet_from(HEADER_LINE)
                 .when(READ)
                 .then(onResponseHeader)
-                .to(HEADER_LINE, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(READ)
-                .then(onFrameStart)
-                .to(FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(READ)
-                .then(onFrameLength)
-                .to(FRAME_MASK, FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(READ)
-                .then(onFrameMask)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(READ)
-                .then(onFramePayload)
-                .to(FRAME_PAYLOAD, FRAME_START, CLOSING),
-            KiottyNet_from(FRAME_START)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_LENGTH)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_MASK)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
-            KiottyNet_from(FRAME_PAYLOAD)
-                .when(TIMEOUT)
-                .then(onSocketTimeout)
-                .to(FRAME_START, FRAME_LENGTH, FRAME_MASK, FRAME_PAYLOAD, CLOSING),
+                .to(HEADER_LINE, UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(READ).then(onClientFrame).to(UPGRADED, CLOSING),
+            KiottyNet_from(UPGRADED).when(TIMEOUT).then(onClientFrame).to(UPGRADED, CLOSING),
             KiottyNet_when(TIMEOUT).then(onClientTimeout).to(CLOSING),
             KiottyNet_when(CLOSED).then(onClientClosed));
 
@@ -151,6 +122,11 @@ namespace kiotty::net::implementation
             const KiottyNetHttpStatus status = session.request.takeHeader(line);
             if (status != NO_ERROR_STATUS) { return closeWith(broken); }
             return readLine(session, HEADER_LINE, headerTimeLeft(session));
+        }
+
+        KiottyNetTransition onClientFrame(Session context, Handle, Event event)
+        {
+            return stepFrame(sessionOf(context), event);
         }
 
         KiottyNetTransition onClientTimeout(Session, Handle, Event)

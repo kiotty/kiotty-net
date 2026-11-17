@@ -1500,14 +1500,17 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 | websocket/data/repository/frame | `kiotty_websocket_frame_parser` | `parseFrameStart`, `extendedLengthBytesOf`, `parseExtendedLength`, `parseMaskKey`, `isControl` |
 | | `kiotty_websocket_frame_builder` | frame 머리 만들기 (최대 14 바이트), `headBytesOf(head)` |
 | | `kiotty_websocket_mask_rules` | `applyMask(span, key, offset)`, `nextMaskKey(state)` |
-| | `kiotty_websocket_frame_reader` | 서버 / 클라이언트가 같이 쓰는 frame 행 (`onFrameStart` ~ `onFramePayload`), `readNext`, `nextFrame` |
-| websocket/data/repository/message | `kiotty_websocket_message` | data frame 이어 붙이기 (`storePiece`), 순서 검사 (`isInOrder`), 끝의 UTF-8 검사와 `callMessage` (`finishData`) |
+| | `kiotty_websocket_frame_reader` | 서버 / 클라이언트가 같이 쓰는 `stepFrame(session, event)` (`WebSocketState` 로 가른다), `readNext(session, FrameRead)`, `nextFrame` |
+| | `kiotty_websocket_frame_rules` | `isAcceptedStart`, `frameOf`, `isOversized`, `frameEndOf`, `payloadReadOf`, `advanceFrame` (session 을 받지 않는다) |
+| websocket/data/repository/message | `kiotty_websocket_message` | data frame 이어 붙이기 (`storePiece`), 끝의 `callMessage` (`finishData`) |
+| | `kiotty_websocket_message_rules` | `isInOrder(message, opcode)`, `messageStepOf(frame, message)`, `isBrokenMessage`, `appMessageOf` |
 | websocket/data/repository/control | `kiotty_websocket_close_rules` | close payload 파싱 / 만들기, 보낼 수 있는 status |
-| | `kiotty_websocket_control` | ping / pong / close 답 (`finishControl`), `failSocket`, `onSocketTimeout`, `endSocket`, `callClose` |
+| | `kiotty_websocket_control` | ping / pong / close 답 (`finishControl`), `failSocket`, `timeoutSocket`, `endSocket`, `callClose` |
+| | `kiotty_websocket_control_rules` | `controlActionOf(opcode, is_closing)`, `timeoutActionOf(is_closing, ping_deadline)` |
 | | `kiotty_websocket_timing` | 다음 read 의 timeout, `onClose` 의 `{ code, status, reason }` |
 | websocket/data/repository/handshake | `kiotty_websocket_key_rules` | `isWebSocketKey`, `acceptOf` |
 | | `kiotty_websocket_upgrade` | 서버의 Upgrade 검사와 101 (`answerUpgrade`), 클라이언트의 101 검사 (`isUpgradeResponse(response, accept, offered)`), subprotocol 선택 |
-| | `kiotty_websocket_opening` | 101 송신 (`onSocketWritten`), `openSocket`, `callOpen` |
+| | `kiotty_websocket_opening` | 101 송신 (`sendOpening`), `openSocket`, `callOpen` |
 | websocket/data/repository/send | `kiotty_websocket_lane` | `PushLane`, push lane 으로 frame 하나 (`pushFrame`), 닫힘 플래그 + close frame (`pushClose`) |
 | websocket/data/repository/server | `kiotty_websocket_handler` | `WebSocketHandler` (`HttpUpgradeHandler` 구현, 라우트 대상, `SocketTable`) |
 | | `kiotty_websocket_server` | `WebSocketServer` |
@@ -1582,10 +1585,10 @@ answerUpgrade(session, target)
     onUpgrade 가 0                          → 403
     101 + Upgrade + Sec-WebSocket-Accept (+ 고른 Protocol), persistence = UPGRADE (Connection: Upgrade)
     generation 을 올린다
-    → { SOCKET_OPENING, thenWrite(101) }
+    → { UPGRADED, thenWrite(101) }   (socket.read.state = OPENING)
 ```
 
-응답은 4.4 의 응답 버퍼에서 4.7 의 조각으로 나간다. `SOCKET_OPENING` 의 WRITTEN 행 (`onSocketWritten`) 이 남은 조각을 보내고, 다 보냈으면 `openSocket` 이다.
+응답은 4.4 의 응답 버퍼에서 4.7 의 조각으로 나간다. http 기계의 상태는 `UPGRADED` 하나이고 사건은 모두 `handler.step` → `stepFrame` 으로 간다. websocket 의 세부 상태가 `OPENING` 이면 WRITTEN 을 `sendOpening` 이 받아 남은 조각을 보내고, 다 보냈으면 `openSocket` 이다.
 
 ```cpp
 KiottyNetTransition openSocket(HttpSession& session)
@@ -1630,26 +1633,26 @@ void callClose(HttpSession& session, const KiottyNetWebSocketClose& close)
 
 ### 5.4 frame 읽기
 
-상태는 `FRAME_START` (2 바이트), `FRAME_LENGTH` (2 또는 8), `FRAME_MASK` (4), `FRAME_PAYLOAD` 다. 닫는 중에 상대 close 를 기다리는 따로 된 상태는 없다. 닫힘 플래그가 서 있으면 같은 `FRAME_*` 상태에서 read 의 timeout 만 `close_timeout` 이 된다 (5.5).
+상태 기계 (서버의 http 기계, 클라이언트 기계) 의 상태는 `UPGRADED` 하나다. 세부 상태는 websocket 의 `WebSocketState` (`OPENING`, `FRAME_START` (2 바이트), `FRAME_LENGTH` (2 또는 8), `FRAME_MASK` (4), `FRAME_PAYLOAD`) 로 `socket.read` 에 있고, `stepFrame` 이 그것으로 가른다 (READ 는 아래 단계, TIMEOUT 은 `timeoutSocket`). 닫는 중에 상대 close 를 기다리는 따로 된 상태는 없다. 닫힘 플래그가 서 있으면 같은 상태에서 read 의 timeout 만 `close_timeout` 이 된다 (5.5).
 
-| 행 | 하는 일 |
+| 단계 | 하는 일 |
 |---|---|
-| `onFrameStart` | `parseFrameStart` (FIN, RSV 0, 아는 opcode, 제어 frame 은 FIN 이고 125 이하). MASK 비트가 역할과 맞는지 (서버는 있어야, 클라이언트는 없어야), 조각 순서 (`isInOrder`: 메시지 중이면 continuation 만, 아니면 continuation 이 아닌 것만. 제어 frame 은 언제나). 아니면 1002 |
-| `onFrameLength` | 확장 길이. 최소 표현이 아니거나 최상위 비트가 서면 1002 |
-| `afterLength` | 데이터 frame 이면 지금까지 모인 body 에 더해 `max_body_bytes` 를 넘는지 먼저 본다 (넘으면 payload 를 읽기 전에 1009) |
-| `onFrameMask` | mask key |
-| `onFramePayload` | `min(남은 길이, receive_capacity)` 씩 읽는다. 데이터 frame 은 `appendBody(piece, key, offset)` 가 body Stage 로 복사하며 unmask 하고, 제어 frame 은 `socket.control` 로. offset 이 조각마다 이어진다 |
+| `readFrameStart` | `parseFrameStart` (FIN, RSV 0, 아는 opcode, 제어 frame 은 FIN 이고 125 이하). MASK 비트가 역할과 맞는지 (서버는 있어야, 클라이언트는 없어야), 조각 순서 (`isInOrder`: 메시지 중이면 continuation 만, 아니면 continuation 이 아닌 것만. 제어 frame 은 언제나). 아니면 1002 |
+| `readFrameLength` | 확장 길이. 최소 표현이 아니거나 최상위 비트가 서면 1002 |
+| `afterFrameLength` | 데이터 frame 이면 지금까지 모인 body 에 더해 `max_body_bytes` 를 넘는지 먼저 본다 (넘으면 payload 를 읽기 전에 1009) |
+| `readFrameMask` | mask key |
+| `readFramePiece` | `min(남은 길이, receive_capacity)` 씩 읽는다. 데이터 frame 은 `appendBody(piece, key, offset)` 가 body Stage 로 복사하며 unmask 하고, 제어 frame 은 `socket.control` 로. offset 이 조각마다 이어진다 |
 | `finishControl` | ping → pong (닫는 중이면 보내지 않는다), pong → `ping_deadline = 0`, close → `answerClose` (5.7) |
 | `finishData` | FIN 이 아니면 다음 frame. FIN 이면 TEXT 의 UTF-8 검사 (아니면 1007), 닫는 중이 아니면 `callMessage` (서버 `onMessage(context, handle, { opcode, body })`, 클라이언트 `onMessage(app_context, { opcode, body })`), body Stage 를 비운다 |
 
-모든 read 는 `readNext` 하나로 건다. 마지막 read 의 길이와 상태를 `socket.read` 에 적어 두어 TIMEOUT 행이 같은 read 를 다시 걸 수 있게 한다.
+판단은 값을 돌려주는 규칙이 한다 (`isAcceptedStart`, `frameEndOf` → `PAYLOAD / CONTROL / DATA`, `messageStepOf` → `MessageStep { message, delivered, is_done }`, `controlActionOf`, `timeoutActionOf`). 단계 함수는 그 값을 `socket` 에 한 번 저장하고 다음 read 를 건다. 모든 read 는 `readNext` 하나로 건다. 마지막 read (`FrameRead { length, state }`) 를 `socket.read` 에 적어 두어 TIMEOUT 이 같은 read 를 다시 걸 수 있게 한다.
 
 ```cpp
-KiottyNetTransition readNext(HttpSession& session, HttpState state, size_t length)
+KiottyNetTransition readNext(HttpSession& session, FrameRead read)
 {
-    session.socket.read = SocketRead{ length, static_cast<int32_t>(state) };
+    socketOf(session).read = read;
     const uint32_t timeout = readTimeoutOf(session);
-    return Next::moveToNextState(state, thenRead(length, timeout));
+    return Next::moveToNextState(HttpState::UPGRADED, thenRead(read.length, timeout));
 }
 ```
 
@@ -1667,7 +1670,7 @@ uint32_t readTimeoutOf(HttpSession& session)
 }
 ```
 
-`onSocketTimeout` 이 TIMEOUT 을 가른다.
+`timeoutSocket` 이 TIMEOUT 을 가른다 (`timeoutActionOf` → `CLOSE / SEND_CLOSE / SEND_PING`).
 
 | 그때 | 하는 일 |
 |---|---|
@@ -1761,8 +1764,8 @@ KiottyNetWebSocketClose closeOf(const HttpSession& session, KiottyNetCode reason
 | SENDING | WRITTEN | 남았으면 이어서, 다 보냈으면 상태줄 read (남은 header 시간) |
 | REQUEST_LINE (상태줄) | READ | `HTTP/1.1 101` 다음이 끝이거나 공백이 아니면 `PROTOCOL_ERROR` |
 | HEADER_LINE | READ | 4.3 의 `takeHeader` 로 요청 저장소에 (`max_header_bytes`, `max_headers`). 빈 줄이면 `isUpgradeResponse(response, accept, protocols)` 를 보고, 101 의 `Sec-WebSocket-Protocol` 을 `socket.protocol` 에 담은 뒤 (`openSocket` 이 요청 저장소를 다시 쓰기 전에) `openSocket` |
-| FRAME_* | | 5.4 ~ 5.7 그대로 |
-| (어디서나) | TIMEOUT | `TIMEOUT` (frame 행의 TIMEOUT 은 위의 `onSocketTimeout` 이 먼저 잡는다) |
+| UPGRADED | READ, TIMEOUT | `stepFrame` (5.4 ~ 5.7 그대로) |
+| (어디서나) | TIMEOUT | `TIMEOUT` (`UPGRADED` 의 TIMEOUT 은 위의 행이 먼저 잡는다) |
 | (어디서나) | CLOSED | 열리기 전이면 끊긴 이유를 `upgrade.failure` 에 적는다. `endSocket` |
 
 - **요청.** `prepareUpgrade` 가 run 마다 만든다 (run 의 path, 후보가 있으면 `Sec-WebSocket-Protocol`). 키는 `std::random_device` 16 바이트의 base64 이고 기대하는 Accept 를 같이 계산해 둔다. Host 는 address 의 host (IPv6 literal 이면 `[...]`), 포트가 80 (ws) / 443 (wss) 이 아니면 `:port`. run 은 app_context 를 `HttpSite::app_context` 에, 후보를 `upgrade.protocols` 에 두고 `peer`, `failure`, `has_opened`, `has_failed` 를 지운다.

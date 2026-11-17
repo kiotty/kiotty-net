@@ -12,22 +12,18 @@ namespace kiotty::net::implementation
     namespace
     {
         using Next = KiottyNet_Transition<HttpState>;
-        using Session = KiottyNetConnectionContext;
-        using Handle = KiottyNetConnectionHandle;
-        using Event = KiottyNetConnectionEvent;
 
         void callOpen(HttpSession& session);
     }
 
-    KiottyNetTransition onSocketWritten(Session context, Handle, Event event)
+    KiottyNetTransition sendOpening(HttpSession& session, size_t written)
     {
-        HttpSession& session = sessionOf(context);
-        session.sent += event.length;
+        session.sent += written;
         const PieceResult piece = pieceAt(session, session.sent);
         if (!piece) { return closeWith(piece.code); }
         if (piece.value.empty()) { return openSocket(session); }
         const KiottyNetSpan data{ piece.value.data, piece.value.length };
-        return Next::moveToNextState(HttpState::SOCKET_OPENING, thenWrite(data, 0));
+        return Next::moveToNextState(HttpState::UPGRADED, thenWrite(data, 0));
     }
 
     KiottyNetTransition openSocket(HttpSession& session)

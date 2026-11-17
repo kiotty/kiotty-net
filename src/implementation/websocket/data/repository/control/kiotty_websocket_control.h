@@ -7,9 +7,7 @@
 
 namespace kiotty::net::implementation
 {
-    KiottyNetTransition onSocketTimeout(KiottyNetConnectionContext context,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event);
+    KiottyNetTransition timeoutSocket(HttpSession& session);
     void                endSocket(HttpSession& session, KiottyNetCode reason);
     KiottyNetTransition finishControl(HttpSession& session);
     KiottyNetTransition failSocket(HttpSession& session, KiottyNetWebSocketStatus failure);

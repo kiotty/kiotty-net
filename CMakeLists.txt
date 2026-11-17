@@ -144,6 +144,9 @@ set(KIOTTY_NET_SOURCES
     src/implementation/websocket/data/repository/handshake/kiotty_websocket_upgrade.cpp
     src/implementation/websocket/data/repository/handshake/kiotty_websocket_opening.cpp
     src/implementation/websocket/data/repository/frame/kiotty_websocket_frame_reader.cpp
+    src/implementation/websocket/data/repository/frame/kiotty_websocket_frame_rules.cpp
+    src/implementation/websocket/data/repository/message/kiotty_websocket_message_rules.cpp
+    src/implementation/websocket/data/repository/control/kiotty_websocket_control_rules.cpp
     src/implementation/websocket/data/repository/message/kiotty_websocket_message.cpp
     src/implementation/websocket/data/repository/control/kiotty_websocket_control.cpp
     src/implementation/websocket/data/repository/control/kiotty_websocket_timing.cpp

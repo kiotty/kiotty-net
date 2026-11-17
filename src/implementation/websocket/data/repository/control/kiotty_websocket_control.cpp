@@ -4,6 +4,7 @@
 #include "core/kiotty_bytes.h"
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/data/repository/control/kiotty_websocket_close_rules.h"
+#include "websocket/data/repository/control/kiotty_websocket_control_rules.h"
 #include "websocket/data/repository/control/kiotty_websocket_timing.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_builder.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_reader.h"
@@ -16,9 +17,6 @@ namespace kiotty::net::implementation
     namespace
     {
         using Next = KiottyNet_Transition<HttpState>;
-        using Session = KiottyNetConnectionContext;
-        using Handle = KiottyNetConnectionHandle;
-        using Event = KiottyNetConnectionEvent;
         using Status = KiottyNetWebSocketStatus;
 
         constexpr Status TOO_BIG = KIOTTY_NET_WEB_SOCKET_STATUS_MESSAGE_TOO_BIG;
@@ -32,14 +30,15 @@ namespace kiotty::net::implementation
         void                callClose(HttpSession& session, const KiottyNetWebSocketClose& close);
     }
 
-    KiottyNetTransition onSocketTimeout(Session context, Handle, Event)
+    KiottyNetTransition timeoutSocket(HttpSession& session)
     {
-        HttpSession& session = sessionOf(context);
-        if (isClosing(session)) { return closeWith(KIOTTY_NET_CODE_TIMEOUT); }
+        SocketState& socket = socketOf(session);
+        const bool is_closing = isClosing(session);
+        const TimeoutAction action = timeoutActionOf(is_closing, socket.ping_deadline);
+        if (action == TimeoutAction::CLOSE) { return closeWith(KIOTTY_NET_CODE_TIMEOUT); }
         const Span<const char> empty{ nullptr, 0 };
         PushLane& lane = *handlerOf(session).lane;
-        SocketState& socket = socketOf(session);
-        const bool is_pong_late = socket.ping_deadline != 0;
+        const bool is_pong_late = action == TimeoutAction::SEND_CLOSE;
         if (is_pong_late) { (void)pushClose(lane, linkOf(session), GOING_AWAY, empty); }
         else
         {
@@ -47,8 +46,7 @@ namespace kiotty::net::implementation
             const uint32_t pong_timeout = session.site.limits.websocket_pong_timeout_milliseconds;
             socket.ping_deadline = deadlineAfter(pong_timeout);
         }
-        const SocketRead read = socket.read;
-        return readNext(session, static_cast<HttpState>(read.state), read.length);
+        return readNext(session, socket.read);
     }
 
     void endSocket(HttpSession& session, KiottyNetCode reason)
@@ -67,11 +65,11 @@ namespace kiotty::net::implementation
     {
         SocketState& socket = socketOf(session);
         const Span<const char> payload{ socket.control, socket.control_length };
-        const FrameOpcode opcode = socket.frame.opcode;
-        if (opcode == FrameOpcode::CLOSE) { return answerClose(session); }
-        if (opcode == FrameOpcode::PONG) { socket.ping_deadline = 0; }
-        const bool is_ping = opcode == FrameOpcode::PING;
-        if (is_ping && !isClosing(session))
+        const bool is_closing = isClosing(session);
+        const ControlAction action = controlActionOf(socket.frame.opcode, is_closing);
+        if (action == ControlAction::ANSWER_CLOSE) { return answerClose(session); }
+        if (action == ControlAction::CLEAR_PING) { socket.ping_deadline = 0; }
+        if (action == ControlAction::SEND_PONG)
         {
             PushLane& lane = *handlerOf(session).lane;
             (void)pushFrame(lane, linkOf(session), FrameOpcode::PONG, payload);

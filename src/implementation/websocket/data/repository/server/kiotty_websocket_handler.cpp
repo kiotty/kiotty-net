@@ -3,18 +3,10 @@
 #include "http/data/repository/machine/kiotty_http_exchange.h"
 #include "websocket/data/repository/control/kiotty_websocket_control.h"
 #include "websocket/data/repository/frame/kiotty_websocket_frame_reader.h"
-#include "websocket/data/repository/handshake/kiotty_websocket_opening.h"
 #include "websocket/data/repository/handshake/kiotty_websocket_upgrade.h"
 
 namespace kiotty::net::implementation
 {
-    namespace
-    {
-        KiottyNetTransition onFrameRead(HttpSession& session,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event);
-    }
-
     WebSocketHandler::WebSocketHandler()
         : HttpUpgradeHandler()
         , owner(nullptr)
@@ -79,19 +71,10 @@ namespace kiotty::net::implementation
     }
 
     KiottyNetTransition WebSocketHandler::step(HttpSession& session,
-                                               KiottyNetConnectionHandle connection,
+                                               KiottyNetConnectionHandle,
                                                KiottyNetConnectionEvent event)
     {
-        const KiottyNetConnectionEventType type = event.type;
-        if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_WRITTEN)
-        {
-            return onSocketWritten(&session, connection, event);
-        }
-        if (type == KIOTTY_NET_CONNECTION_EVENT_TYPE_TIMEOUT)
-        {
-            return onSocketTimeout(&session, connection, event);
-        }
-        return onFrameRead(session, connection, event);
+        return stepFrame(session, event);
     }
 
     void WebSocketHandler::end(HttpSession& session, KiottyNetCode reason)
@@ -119,27 +102,4 @@ namespace kiotty::net::implementation
         return handlerOf(session).linkAt(session.id.index);
     }
 
-    namespace
-    {
-        KiottyNetTransition onFrameRead(HttpSession& session,
-                                        KiottyNetConnectionHandle connection,
-                                        KiottyNetConnectionEvent event)
-        {
-            const HttpState state = static_cast<HttpState>(socketOf(session).read.state);
-            HttpSession* const context = &session;
-            if (state == HttpState::FRAME_LENGTH)
-            {
-                return onFrameLength(context, connection, event);
-            }
-            if (state == HttpState::FRAME_MASK)
-            {
-                return onFrameMask(context, connection, event);
-            }
-            if (state == HttpState::FRAME_PAYLOAD)
-            {
-                return onFramePayload(context, connection, event);
-            }
-            return onFrameStart(context, connection, event);
-        }
-    }
 }
