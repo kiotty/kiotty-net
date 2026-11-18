@@ -57,6 +57,22 @@ namespace kiotty::net::implementation
     {
         const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
+        const Deadline deadline(timeout_milliseconds);
+        return start(request, body_length, deadline);
+    }
+
+    KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
+    {
+        const BusyGuard guard(_state.busy);
+        if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
+        const Deadline deadline(timeout_milliseconds);
+        return end(deadline);
+    }
+
+    KiottyNetCode HttpClientExchange::start(const ClientRequest& request,
+                                            uint64_t body_length,
+                                            const Deadline& deadline)
+    {
         settleStop(_line);
         const KiottyNetCode checked = checkStart(request);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
@@ -64,7 +80,6 @@ namespace kiotty::net::implementation
         if (!head) { return head.code; }
         dropUpload();
         dropUnreadReply(_line, _state);
-        const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode sent = sendHead(head.value, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
         {
@@ -94,14 +109,11 @@ namespace kiotty::net::implementation
         return resultOf(data.length, KIOTTY_NET_CODE_SUCCESS);
     }
 
-    KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
+    KiottyNetHttpReply HttpClientExchange::end(const Deadline& deadline)
     {
-        const BusyGuard guard(_state.busy);
-        if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
         settleUpload();
         if (_state.upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
         const KiottyNetHttpMethod method = _state.upload.method;
-        const Deadline deadline(timeout_milliseconds);
         const bool is_refused = _state.upload.mode == UploadMode::REFUSED;
         const bool is_stopped = is_refused || _state.upload.mode == UploadMode::ANSWERED;
         if (is_stopped) { return stoppedReply(deadline); }

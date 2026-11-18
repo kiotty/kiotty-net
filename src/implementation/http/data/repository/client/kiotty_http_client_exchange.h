@@ -1,5 +1,6 @@
 #pragma once
 
+#include "base/data/infra/file/kiotty_input_file.h"
 #include "base/data/repository/endpoint/kiotty_stream_client.h"
 #include "core/kiotty_deadline.h"
 #include "core/kiotty_span.h"
@@ -24,6 +25,9 @@ namespace kiotty::net::implementation
                                  uint32_t timeout_milliseconds);
         KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
         KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+        KiottyNetHttpReply sendFile(const ClientRequest& request,
+                                    Span<const char> path,
+                                    uint32_t timeout_milliseconds);
 
     private:
         struct Attempt
@@ -41,6 +45,16 @@ namespace kiotty::net::implementation
                                     Span<const char> body,
                                     const Connected& link,
                                     const Deadline& deadline);
+        KiottyNetCode      start(const ClientRequest& request,
+                                 uint64_t body_length,
+                                 const Deadline& deadline);
+        KiottyNetHttpReply end(const Deadline& deadline);
+        KiottyNetCode      sendFileBody(Span<const char> path,
+                                        uint64_t length,
+                                        const Deadline& deadline);
+        KiottyNetCode      sendFilePart(Span<const char> path,
+                                        FileRange part,
+                                        const Deadline& deadline);
         KiottyNetCode      checkStart(const ClientRequest& request);
         KiottyNetCode      sendHead(Span<const char> head, const Deadline& deadline);
         KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);

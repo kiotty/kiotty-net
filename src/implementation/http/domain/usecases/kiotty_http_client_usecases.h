@@ -34,4 +34,8 @@ namespace kiotty::net::implementation
                                              Span<const char> data,
                                              uint32_t timeout_milliseconds);
     KiottyNetHttpReply  finishHttpRequest(HttpClient& client, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply  sendHttpFile(HttpClient& client,
+                                     const ClientRequest& request,
+                                     Span<const char> path,
+                                     uint32_t timeout_milliseconds);
 }

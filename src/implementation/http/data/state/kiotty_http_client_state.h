@@ -32,7 +32,8 @@ namespace kiotty::net::implementation
         HttpClientTarget  target;
         Span<char>        head_area;
         size_t            max_headers;
-        Persistence       persistence;
+        size_t            file_piece;
+        Persistence      persistence;
         BusyFlag          busy;
     };
 

@@ -12,6 +12,7 @@ namespace kiotty::net::implementation
         , target{}
         , head_area{ nullptr, 0 }
         , max_headers(0)
+        , file_piece(0)
         , persistence(Persistence::CLOSE)
         , busy()
     {

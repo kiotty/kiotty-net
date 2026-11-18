@@ -543,6 +543,11 @@ KiottyNetHttpReply KiottyNet_patchHttp  (client, path, headers, header_count, ty
 KiottyNetHttpReply KiottyNet_headHttp   (client, path, headers, header_count, timeout_milliseconds);
 KiottyNetHttpReply KiottyNet_optionsHttp(client, path, headers, header_count, timeout_milliseconds);   /* path "*" 는 서버 전체 */
 
+KiottyNetCode      KiottyNet_beginHttpRequest(client, request, headers, header_count, uint64_t body_length, timeout_milliseconds);   /* 2.14 */
+KiottyNetResult    KiottyNet_writeHttpRequestBody(client, const void* data, size_t length, timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_finishHttpRequest(client, timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_sendHttpFile(client, request, headers, header_count, const char* path, timeout_milliseconds);
+
 KiottyNetResult    KiottyNet_readHttpReplyBody(KiottyNetHttpClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);
 KiottyNetSpan      KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name);   /* 대소문자 무시. 없으면 { NULL, 0 } */
 uint32_t           KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);                   /* Allow 를 KIOTTY_NET_HTTP_METHOD_BIT 의 합으로. 없으면 0 */
@@ -560,6 +565,7 @@ uint32_t           KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* rep
 | `makeHttpClientRequest` | `{ method, path, OCTET_STREAM, { NULL, 0 } }`. type 과 body 는 앱이 채운다 |
 | `sendHttpRequest` | struct 하나로 요청. 메서드별 일곱은 안에서 이것을 부른다. 메서드별 함수에 없는 조합 (body 있는 DELETE 등) 은 이것으로 |
 | `readHttpReplyBody` | 마지막 요청의 body 를 받은 만큼 (2.5) |
+| `beginHttpRequest`, `writeHttpRequestBody`, `finishHttpRequest`, `sendHttpFile` | 요청 body 를 조각으로, 파일을 올리기 (2.14) |
 | `findHttpReplyHeader` | 응답 헤더 찾기. 같은 이름 여럿이면 첫 것 |
 | `getHttpAllowedMethods` | OPTIONS 응답의 `Allow`. 여러 줄은 합치고 모르는 이름은 버린다 |
 
@@ -619,7 +625,7 @@ typedef struct KiottyNetHttpClientRequest {
 | body 가 없다 | 라이브러리는 쓰지 않는다 |
 
 - type `BY_EXTENSION` 은 `INVALID_ARGUMENT`. 텍스트 계열 type 의 body 가 UTF-8 이 아니면 `INVALID_ENCODING` (서버의 body setter 와 같다).
-- body 는 복사하지 않고 앱 버퍼에서 바로 보낸다. 요청 호출 동안만 살아 있으면 된다. 요청을 chunked 로 올리는 길은 없다. 언제나 `Content-Length` 다.
+- body 는 복사하지 않고 앱 버퍼에서 바로 보낸다. 요청 호출 동안만 살아 있으면 된다. 이 요청은 언제나 `Content-Length` 다. 큰 body, 길이를 모르는 body (chunked), 파일은 2.14 의 올리기로.
 - 머리 전체 (요청줄, Host, 헤더) 는 `max_header_bytes` 안이어야 하고 넘으면 `REQUEST_TOO_LARGE`. 헤더 줄 수 (Host 포함) 가 `max_headers` 를 넘으면 `TABLE_FULL`. 둘 다 아무것도 보내지 않는다.
 - 인자 검사에서 실패한 요청 (`INVALID_ARGUMENT`, `INVALID_ENCODING`, `REQUEST_TOO_LARGE`, `TABLE_FULL`) 은 이전 응답과 읽지 않은 body 를 건드리지 않는다.
 
@@ -923,6 +929,10 @@ int main()
 | `get / head / del / options(path[, headers], timeout)` | `getHttp`, `headHttp`, `deleteHttp`, `optionsHttp` |
 | `post / put / patch(path[, headers], type, body, timeout)` | `postHttp`, `putHttp`, `patchHttp` |
 | `readBody(buffer, length, timeout)` | `readHttpReplyBody` |
+| `begin(request[, headers], body_length, timeout)` | `beginHttpRequest` |
+| `write(data, length, timeout)`, `write(span, timeout)` | `writeHttpRequestBody` |
+| `finish(timeout)` | `finishHttpRequest` |
+| `sendFile(request[, headers], path, timeout)` | `sendHttpFile` |
 | `KiottyNet_HttpHeaders<N>` : `KiottyNet_HttpHeaderList` | 헤더 배열. `add(name, value)` 사슬, `data()`, `count()`, `code()` (넘쳤으면 `TABLE_FULL`) |
 
 - 요청 함수마다 헤더 없는 판과 `const KiottyNet_HttpHeaderList&` 를 받는 판이 있다.
@@ -945,7 +955,15 @@ int main()
 | `readHttpReplyBody` | `TIMEOUT` | 연결은 그대로. 다시 read 하면 이어서 |
 | | `PROTOCOL_ERROR`, `PEER_CLOSED`, `CLOSED` | 연결은 닫혔다 |
 | | `INVALID_ARGUMENT` | NULL client / buffer, length 0 |
-| connect, 요청, read, 공통 헤더 | `BUSY` | 다른 thread 의 호출이 걸려 있다 |
+| `beginHttpRequest` | 2.4 의 검사 code, `INVALID_ARGUMENT` | request.body 가 비어 있지 않음. 연결 / 머리 송신의 실패는 연결을 닫는다 |
+| `writeHttpRequestBody` | `DATA_ARRIVED_WHILE_WRITING` | 서버의 최종 응답이 와 있다. 보내기를 멈췄다. finish 를 부른다 (2.14) |
+| | `PEER_CLOSED`, `SOCKET_ERROR` | 연결을 잃었다. finish 가 먼저 온 응답을 준다 (없으면 같은 code) |
+| | `TIMEOUT`, `CLOSED`, `TLS_*` | 연결을 닫고 올리기가 끝났다 |
+| | `INVALID_ARGUMENT` | 올리는 중이 아님, NULL data, 선언한 길이를 넘음 (올리기는 그대로) |
+| `finishHttpRequest` | 2.4 의 Reply code | 먼저 온 응답이면 그 응답 (`SUCCESS`). 선언보다 적게 씀, 올리는 중이 아님은 `INVALID_ARGUMENT` |
+| `sendHttpFile` | 2.4 의 Reply code | 먼저 온 응답도 그 응답이다 |
+| | `NOT_FOUND` | 파일을 열 수 없다. 보낸 것 없음 |
+| connect, 요청, read, 공통 헤더, 올리기 | `BUSY` | 다른 thread 의 호출이 걸려 있다 |
 
 ### 2.13 하지 않는 것
 
@@ -953,6 +971,78 @@ int main()
 - `Transfer-Encoding` 이 `chunked` 하나가 아닌 응답 (`gzip, chunked` 등) 은 `PROTOCOL_ERROR`. 압축을 풀지 않으므로 읽을 수 없다.
 - `Content-Length` 가 여럿인 응답은 값이 같아도 `PROTOCOL_ERROR` (서버의 요청 파서와 같다).
 - 비동기 판 (콜백으로 응답) 은 없다. 동시 요청은 client 여럿과 thread 로 한다.
-- 요청 body 를 조각으로 올리기 (chunked 요청, 큰 파일 업로드) 는 없다. body 는 한 Span 이다.
 - SSE 를 이벤트로 나누는 도우미, body 를 한 번에 모으는 함수는 없다.
 - `Expect: 100-continue` 를 보내지 않는다 (서버가 보낸 1xx 는 건너뛴다).
+
+### 2.14 요청 body 를 조각으로 올리기
+
+설계는 [design_http_client_v1.html](../design/design_http_client_v1.html) (U1 ~ U3), 보내는 중에 온 응답은 [design_write_arrival_v0.html](../design/design_write_arrival_v0.html) (A3). 펌웨어 / 로그 파일, 만들면서 보내는 측정값처럼 body 가 한 Span 이 아닐 때 쓴다.
+
+```c
+#define KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN UINT64_MAX
+
+KiottyNetCode      KiottyNet_beginHttpRequest(client, const KiottyNetHttpClientRequest* request /* body 는 비움 */, headers, header_count, uint64_t body_length /* UNKNOWN = chunked */, timeout_milliseconds);
+KiottyNetResult    KiottyNet_writeHttpRequestBody(client, const void* data, size_t length, timeout_milliseconds);   /* { length, SUCCESS } 또는 { 0, 오류 } */
+KiottyNetHttpReply KiottyNet_finishHttpRequest(client, timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_sendHttpFile(client, const KiottyNetHttpClientRequest* request, headers, header_count, const char* path, timeout_milliseconds);
+```
+
+```c
+KiottyNetHttpClientRequest request = KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_PUT, "/devices/7/logs/today.log");
+KiottyNetCode began = KiottyNet_beginHttpRequest(client, &request, NULL, 0, file_size, 5000);
+size_t n = 0;
+while (began == KIOTTY_NET_CODE_SUCCESS && (n = fread(piece, 1, sizeof(piece), file)) > 0)
+{
+    KiottyNetResult sent = KiottyNet_writeHttpRequestBody(client, piece, n, 10000);
+    if (sent.code != KIOTTY_NET_CODE_SUCCESS) { break; }   /* DATA_ARRIVED_WHILE_WRITING: 서버가 먼저 응답했다 */
+}
+KiottyNetHttpReply reply = KiottyNet_finishHttpRequest(client, 30000);   /* 201, 또는 먼저 온 413 / 401 */
+
+/* 파일 하나면 한 줄로 */
+reply = KiottyNet_sendHttpFile(client, &request, NULL, 0, "/var/log/device.log", 30000);
+```
+
+| 함수 | 하는 일 |
+|---|---|
+| `beginHttpRequest` | 머리를 보낸다. `body_length` 를 알면 `Content-Length: n` (0 도), `KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN` 이면 `Transfer-Encoding: chunked`. `request.body` 는 비어 있어야 한다. 머리 규칙과 검사 code 는 2.4 와 같다. 다시 쓰는 연결은 보내기 전에 살아 있는지 보고 (닫힘, reset, 묻지 않은 바이트) 아니면 다시 연결한다. 읽지 않은 앞 응답 body 는 버린다 |
+| `writeHttpRequestBody` | 조각 하나를 다 보내고 `{ length, SUCCESS }`. chunked 면 조각 하나가 chunk 하나다. 길이 0 은 아무것도 보내지 않고 `{ 0, SUCCESS }`. 부분 송신은 돌려주지 않는다 |
+| `finishHttpRequest` | chunked 면 끝 chunk (`0\r\n\r\n`) 를 보내고 응답 머리를 받아 2.4 의 Reply 로 준다. body 는 `readHttpReplyBody` |
+| `sendHttpFile` | 파일 크기로 `Content-Length` 를 쓰고 파일을 조각으로 보낸 뒤 응답 머리까지 받는다. begin + write + finish 를 한 호출로 |
+
+**서버가 먼저 응답할 때.** 서버는 body 를 다 받기 전에 401, 413, 507 을 보내고 닫을 수 있다.
+
+- write 는 보내는 동안 서버 바이트가 오면 응답 머리 하나를 읽는다. 1xx (100 Continue, 103) 는 버리고 이어 보낸다.
+- 최종 응답이면 보내기를 멈추고 `{ 0, KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING }` 을 돌려준다. **뜻은 "서버의 최종 응답이 와 있다. finish 를 부른다"** 이다. 그 조각은 다 나가지 않았을 수 있다. 그 뒤의 write 는 `INVALID_ARGUMENT`.
+- finish 는 받아 둔 응답을 돌려준다 (code `SUCCESS`, status 413 등). 요청 body 를 다 보내지 못한 연결이므로 응답 body 를 다 읽으면 닫고, 다음 요청은 새 연결로 간다.
+- write 가 연결을 잃었을 때 (`PEER_CLOSED`, `SOCKET_ERROR`) 도 finish 를 부르면 이미 와 있는 응답을 돌려준다. 와 있는 것이 없으면 읽기의 code (`PEER_CLOSED` / `SOCKET_ERROR`).
+- Windows 에서도 응답이 보인다. 라이브러리가 응답 바이트를 RST 전에 수신 Stage 로 옮기므로 Windows 의 RST 가 지우지 못한다 ([early-reply-and-rst.html](../learning/early-reply-and-rst.html)).
+- `sendHttpFile` 은 이것을 안에서 처리하고 응답을 돌려준다.
+
+**규칙.**
+
+- `Content-Length` 보다 많이 쓰는 write 는 아무것도 보내지 않고 `INVALID_ARGUMENT` 이다 (올리기는 그대로라 맞는 길이로 다시 쓴다). 적게 쓰고 finish 하면 `INVALID_ARGUMENT` 이고 연결을 닫는다. write 의 length 는 `INT32_MAX` 까지.
+- begin 뒤 finish 전에 다른 요청이나 begin 을 부르면 올리던 것을 버리고 (연결을 닫고) 새 요청을 보낸다. 올리는 중의 `readHttpReplyBody` 는 `INVALID_ARGUMENT`. disconnect / close / connect 도 올리기를 버린다.
+- begin 이 머리를 보낸 뒤의 실패, write 의 `TIMEOUT` / `CLOSED` / TLS 오류는 연결을 닫고 올리기가 끝난다. 다시 보내기는 없다 (body 를 라이브러리가 갖고 있지 않다). 앱이 begin 부터 다시 한다.
+- **timeout 은 호출마다.** begin 은 (다시) 연결 + 머리, write 는 그 조각, finish 는 끝 표시 + 응답 머리다. 큰 파일도 write 마다 새로 시작한다. `sendHttpFile` 은 연결부터 응답 머리까지 전체가 하나다.
+- 다른 thread 의 `closeHttpClient` 는 걸린 write / finish / `sendHttpFile` 을 `CLOSED` 로 깨우고 올리기를 버린다.
+- `Expect: 100-continue` 는 보내지 않는다. 텍스트 type 이어도 조각의 UTF-8 은 보지 않는다 (글자 하나가 write 둘에 나뉠 수 있다).
+
+**`sendHttpFile`.**
+
+- path 는 NUL 로 끝나는 문자열 (`KIOTTY_NET_MAX_PATH_LENGTH` 안). 열 수 없으면 `NOT_FOUND` 이고 아무것도 보내지 않는다. NULL / 빈 path 는 `INVALID_ARGUMENT`.
+- 조각 크기는 설정의 `send_capacity` (0 이면 16 KiB) 다. 조각마다 파일을 다시 열어 base 의 파일 송신 (평문은 sendfile / TransmitFile, TLS 는 읽어서 암호화) 으로 보낸다. 서버 바이트는 조각을 시작할 때마다 본다.
+- 보내는 중에 파일이 줄면 `INVALID_ARGUMENT` 이고 연결을 닫는다.
+- 만들면서 보내는 데이터, 압축하며 보내는 파일은 begin / write / finish 로 한다.
+
+C++ 는 `begin(request[, headers], body_length, timeout)`, `write(data, length, timeout)` / `write(span, timeout)`, `finish(timeout)`, `sendFile(request[, headers], path, timeout)` 이다.
+
+```cpp
+KiottyNetHttpClientRequest samples = KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_POST, "/v1/samples");
+samples.type = KIOTTY_NET_HTTP_CONTENT_TYPE_NDJSON;
+client.begin(samples, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN, 5000);   // chunked
+client.write(nextLine(), 1000);                                      // 줄 하나가 chunk 하나
+KiottyNetHttpReply reply = client.finish(5000);
+
+KiottyNetHttpClientRequest upload = KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_PUT, "/devices/7/logs/today.log");
+reply = client.sendFile(upload, headers, "/var/log/device.log", 30000);
+```

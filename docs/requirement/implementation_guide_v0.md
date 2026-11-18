@@ -2097,6 +2097,23 @@ void HttpClientLink::close()                          // 아무 thread
 - 이번에 생긴 공유 헤더: `core/kiotty_bytes.h` (`BITS_PER_BYTE`, `BYTE_MASK`), `core/kiotty_codes.h` (`INVALID`, `PROTOCOL_ERROR`, `RESULT_MAXIMUM_BYTES`, `resultOf`), `http/domain/entity/kiotty_http_constants.h` (HTTP status 상수, `CONTENT_LENGTH`), `http/data/repository/machine/kiotty_http_rule_names.h` (서버 / 클라이언트 machine 이 같이 쓰는 상태 / 이벤트 이름). `core/kiotty_text.h` 에 줄 끝 상수와 `literalOf`, `core/kiotty_clock.h` 에 `EXPIRED_MILLISECONDS`.
 - 깨졌는지는 `tests/single_header/` 가 매 빌드에 본다 (생성 → 컴파일 → smoke).
 
+### 6.9 올리기 : begin / write / finish, sendFile (U1 ~ U3, A3)
+
+`HttpClientExchange` (`kiotty_http_client_exchange.cpp`, 파일은 `_file.cpp`) 가 맡는다. 상태는 `HttpClientState::upload` (`HttpUpload { left, method, mode }`) 하나이고 규칙 함수는 `kiotty_http_upload_rules.*` 다.
+
+| mode | 뜻 | 들어가는 곳 |
+|---|---|---|
+| `IDLE` | 올리는 중이 아님 | finish 끝, 버림 (`dropUpload`), disconnect / close / connect, close 깨움 (`settleUpload`) |
+| `LENGTH` / `CHUNKED` | 보내는 중 | begin (`startUpload`) |
+| `REFUSED` | 송신이 연결을 잃음 (`PEER_CLOSED` / `SOCKET_ERROR`). 소켓과 수신 Stage 는 남긴다 | write (`stopUpload`) |
+| `ANSWERED` | 보내는 중에 최종 응답을 읽음. 응답 머리는 저장소에 있다 | write (`stopUpload` 의 `DATA_ARRIVED_WHILE_WRITING`) |
+
+- **begin** (`start`): 검사 → 머리 조립 → `dropUpload` / `dropUnreadReply` → `sendHead`. `sendHead` 는 `ensureIdleConnected` (1 ms peek) 뒤, 다시 쓰는 연결이면 길이 0 의 `writeOnce` 로 시작 확인을 한 번 더 한다 (peek 와 머리 사이에 온 바이트 / EOF / reset). 아니면 끊고 다시 연결한다.
+- **조각 보내기** (`sendUploadBytes`): `takeEarlyReplies` (수신 Stage 에 바이트가 있으면 `receiveOneReply` 로 응답 머리 하나. 1xx 면 계속, 최종이면 `DATA_ARRIVED_WHILE_WRITING`) → `writeOnce`. write 가 `DATA_ARRIVED_WHILE_WRITING` 이면 남은 바이트로 되풀이한다. chunked 는 chunk 머리, 데이터, 줄 끝을 각각 이것으로 보낸다.
+- **finish** (`end`): `REFUSED` / `ANSWERED` 면 `stoppedReply` (REFUSED 는 `receiveReply` 로 읽고, ANSWERED 는 이미 읽음) 와 `closingReplyOf` (`Persistence::CLOSE`, body 가 이미 끝났으면 바로 닫음). 아니면 끝 표시와 `receiveReply`.
+- **sendFile**: `fileSizeOf` (열지 못하면 `NOT_FOUND`) → `start(size)` → `sendFileBody` (`file_piece` = `send_capacity`, 0 이면 16 KiB 씩 `sendFilePart`) → `end`. `sendFilePart` 는 `takeEarlyReplies` 와 `ConnectionStream::writeFile(path, offset, length)` 을 되풀이한다. writeFile 은 시작할 때만 도착을 보므로 (A1 결정) 조각이 확인 간격이다. 조각마다 파일을 다시 연다. deadline 은 호출 전체 하나.
+- BusyGuard 는 public 함수 (begin / write / finish / sendFile) 만 잡는다. sendFile 이 안에서 부르는 `start` / `end` 는 잡지 않는 private 판이다.
+
 ## 7. 미결
 
 - done ring 의 MPSC 구현은 1.5 대로 lock-free 로 간다. 32 client 라 mutex 로도 충분하지만 IO Thread 가 worker 에 막히는 일이 없어야 해서다.

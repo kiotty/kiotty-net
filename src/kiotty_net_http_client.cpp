@@ -14,6 +14,7 @@ namespace
 {
     using net::INVALID;
     constexpr size_t        MAX_TEXT = net::MAX_HTTP_HEADER_BYTES;
+    constexpr size_t        MAX_FILE_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
     constexpr KiottyNetSpan NO_TEXT = { nullptr, 0 };
 
     KiottyNetHttpReply failedReply(KiottyNetCode code)
@@ -274,6 +275,22 @@ KiottyNetHttpReply KiottyNet_finishHttpRequest(KiottyNetHttpClientHandle client,
 {
     if (client == nullptr) { return failedReply(INVALID); }
     return net::finishHttpRequest(*client, timeout_milliseconds);
+}
+
+KiottyNetHttpReply KiottyNet_sendHttpFile(KiottyNetHttpClientHandle client,
+                                          const KiottyNetHttpClientRequest* request,
+                                          const KiottyNetHttpHeader* headers,
+                                          size_t header_count,
+                                          const char* path,
+                                          uint32_t timeout_milliseconds)
+{
+    if (client == nullptr) { return failedReply(INVALID); }
+    const net::TextResult file = net::parseText(path, MAX_FILE_PATH_TEXT);
+    if (!file) { return failedReply(file.code); }
+    if (file.value.empty()) { return failedReply(INVALID); }
+    const net::ClientRequestResult made = requestOf(request, headers, header_count);
+    if (!made) { return failedReply(made.code); }
+    return net::sendHttpFile(*client, made.value, file.value, timeout_milliseconds);
 }
 
 KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name)

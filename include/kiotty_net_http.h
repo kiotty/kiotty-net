@@ -423,6 +423,13 @@ KIOTTY_NET_API KiottyNetResult    KiottyNet_writeHttpRequestBody(
 KIOTTY_NET_API KiottyNetHttpReply KiottyNet_finishHttpRequest(
     KiottyNetHttpClientHandle client,
     uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_sendHttpFile(
+    KiottyNetHttpClientHandle client,
+    const KiottyNetHttpClientRequest* request,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    const char* path,
+    uint32_t timeout_milliseconds);
 
 KIOTTY_NET_API KiottyNetResult KiottyNet_readHttpReplyBody(
     KiottyNetHttpClientHandle client,
@@ -790,6 +797,28 @@ public:
         uint32_t timeout_milliseconds);
 
     KiottyNetResult readBody(void* buffer, size_t length, uint32_t timeout_milliseconds);
+
+    KiottyNetCode begin(
+        const KiottyNetHttpClientRequest& request,
+        uint64_t body_length,
+        uint32_t timeout_milliseconds);
+    KiottyNetCode begin(
+        const KiottyNetHttpClientRequest& request,
+        const KiottyNet_HttpHeaderList& headers,
+        uint64_t body_length,
+        uint32_t timeout_milliseconds);
+    KiottyNetResult    write(const void* data, size_t length, uint32_t timeout_milliseconds);
+    KiottyNetResult    write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+    KiottyNetHttpReply sendFile(
+        const KiottyNetHttpClientRequest& request,
+        const char* path,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply sendFile(
+        const KiottyNetHttpClientRequest& request,
+        const KiottyNet_HttpHeaderList& headers,
+        const char* path,
+        uint32_t timeout_milliseconds);
 
 private:
     KiottyNet_HttpClient(KiottyNetContext context, KiottyNetHttpClientResult result);
@@ -1479,6 +1508,90 @@ inline KiottyNetResult KiottyNet_HttpClient::readBody(
     uint32_t timeout_milliseconds)
 {
     return KiottyNet_readHttpReplyBody(_handle.get(), buffer, length, timeout_milliseconds);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::begin(
+    const KiottyNetHttpClientRequest& request,
+    uint64_t body_length,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_beginHttpRequest(
+        _handle.get(),
+        &request,
+        nullptr,
+        0,
+        body_length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::begin(
+    const KiottyNetHttpClientRequest& request,
+    const KiottyNet_HttpHeaderList& headers,
+    uint64_t body_length,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return headers.code();
+    }
+    return KiottyNet_beginHttpRequest(
+        _handle.get(),
+        &request,
+        headers.data(),
+        headers.count(),
+        body_length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetResult KiottyNet_HttpClient::write(
+    const void* data,
+    size_t length,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_writeHttpRequestBody(_handle.get(), data, length, timeout_milliseconds);
+}
+
+inline KiottyNetResult KiottyNet_HttpClient::write(
+    KiottyNetSpan data,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_writeHttpRequestBody(
+        _handle.get(),
+        data.data,
+        data.length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::finish(uint32_t timeout_milliseconds)
+{
+    return KiottyNet_finishHttpRequest(_handle.get(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::sendFile(
+    const KiottyNetHttpClientRequest& request,
+    const char* path,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_sendHttpFile(_handle.get(), &request, nullptr, 0, path, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::sendFile(
+    const KiottyNetHttpClientRequest& request,
+    const KiottyNet_HttpHeaderList& headers,
+    const char* path,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_sendHttpFile(
+        _handle.get(),
+        &request,
+        headers.data(),
+        headers.count(),
+        path,
+        timeout_milliseconds);
 }
 
 inline KiottyNetHttpReply KiottyNet_HttpClient::refusedReply(KiottyNetCode code)

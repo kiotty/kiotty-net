@@ -7,6 +7,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -22,6 +24,7 @@ namespace
     const uint32_t KEEP_ALIVE_MS = 150;
     const uint32_t PAST_KEEP_ALIVE_MS = 800;
     const int      KEPT_REQUESTS = 4;
+    const size_t   TLS_FILE_BYTES = 40000;
 
     using kiotty_test::readBody;
     using kiotty_test::replyHeader;
@@ -173,6 +176,29 @@ TEST_F(HttpClientTlsTest, UploadsWithLengthAndChunkedOverOneKeptConnection)
     const KiottyNetHttpReply post = KiottyNet_finishHttpRequest(client, WAIT_MS);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, post.code);
     EXPECT_EQ("POST:ghij", readBody(client, WAIT_MS).text);
+    EXPECT_EQ(1u, site->connections());
+}
+
+TEST_F(HttpClientTlsTest, FileIsSentInPiecesOverTls)
+{
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("kiotty_tls_file_" + std::to_string(stamp) + ".bin");
+    std::string content(TLS_FILE_BYTES, 'a');
+    for (size_t i = 0; i < content.size(); ++i) { content[i] = static_cast<char>('a' + i % 26); }
+    {
+        std::ofstream out(path, std::ios::binary);
+        out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    }
+    const KiottyNetHttpClientRequest request =
+        KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_PUT, "/echo");
+    const KiottyNetHttpReply put =
+        KiottyNet_sendHttpFile(client, &request, nullptr, 0, path.string().c_str(), WAIT_MS);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, put.code);
+    EXPECT_EQ(200, put.status);
+    EXPECT_EQ("PUT:" + content, readBody(client, WAIT_MS).text);
     EXPECT_EQ(1u, site->connections());
 }
 

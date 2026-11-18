@@ -19,6 +19,7 @@ namespace kiotty::net::implementation
         KiottyNetCode                checkLimits(const KiottyNetHttpLimits& limits);
         uint16_t                     defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
+        size_t                       filePieceOf(size_t send_capacity);
     }
 
     HttpClient::HttpClient()
@@ -54,6 +55,7 @@ namespace kiotty::net::implementation
         _state.reply = HttpReplyStore(reply_area, reply);
         _state.head_area = Span<char>{ _head_bytes.data() + half, half };
         _state.max_headers = limits.max_headers;
+        _state.file_piece = filePieceOf(configuration.client.send_capacity);
         dropReply(_state);
         _state.upload = idleUpload();
         _state.target = HttpClientTarget{};
@@ -125,6 +127,12 @@ namespace kiotty::net::implementation
             const size_t wanted = std::max(client.receive_capacity, line_bytes);
             client.receive_capacity = std::min(wanted, MemoryLimits::RECEIVE_CAPACITY);
             return client;
+        }
+
+        size_t filePieceOf(size_t send_capacity)
+        {
+            const bool is_set = send_capacity > 0;
+            return is_set ? send_capacity : MemoryLimits::SEND_CAPACITY;
         }
     }
 }

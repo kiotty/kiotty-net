@@ -7,6 +7,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -272,6 +274,44 @@ TEST_F(HttpClientCppTest, FailedConstructionIsFalseWithTheCode)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, client.readBody(buffer, sizeof(buffer), WAIT_MS).code);
     client.disconnect();
     client.close();
+}
+
+TEST_F(HttpClientCppTest, UploadInPiecesAndAFileThroughTheWrapper)
+{
+    KiottyNet_HttpClient client(context, configuration, &limits);
+    ASSERT_TRUE(static_cast<bool>(client));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.connect(site->address()));
+    KiottyNet_HttpHeaders<> headers;
+    headers.add("X-Request-Id", "u-1");
+
+    KiottyNetHttpClientRequest request = KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_PUT, "/echo");
+    request.type = KIOTTY_NET_HTTP_CONTENT_TYPE_OCTET_STREAM;
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.begin(request, headers, 6, WAIT_MS));
+    EXPECT_EQ(3, client.write("abc", 3, WAIT_MS).bytes);
+    EXPECT_EQ(3, client.write(textSpan("def"), WAIT_MS).bytes);
+    KiottyNetHttpReply reply = client.finish(WAIT_MS);
+    EXPECT_EQ(200, reply.status);
+    EXPECT_EQ("PUT:abcdef", bodyOf(client, reply));
+
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, client.begin(request, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN, WAIT_MS));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client.write(textSpan("chunk"), WAIT_MS).code);
+    reply = client.finish(WAIT_MS);
+    EXPECT_EQ("PUT:chunk", bodyOf(client, reply));
+
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("kiotty_cpp_file_" + std::to_string(stamp) + ".txt");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "from a file";
+    }
+    reply = client.sendFile(request, path.string().c_str(), WAIT_MS);
+    EXPECT_EQ("PUT:from a file", bodyOf(client, reply));
+    reply = client.sendFile(request, headers, path.string().c_str(), WAIT_MS);
+    EXPECT_EQ("PUT:from a file", bodyOf(client, reply));
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, client.finish(WAIT_MS).code);
 }
 
 #endif

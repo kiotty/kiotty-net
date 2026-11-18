@@ -1733,7 +1733,8 @@ for (KiottyNetWebSocketHandle ws : app.clients.snapshot()) KiottyNet_WebSocket(w
 - **timeout** 은 호출마다 하나다. 요청은 (다시) 연결 + 송신 + 머리 수신 전체이고 다시 연결의 connect 시도, TLS handshake, 재시도 쉼을 남은 시간으로 자른다 (시간이 다 되면 마지막 시도의 code). read 는 read 한 번. 0 은 제한 없음 (요청 timeout 0 이면 다시 연결은 설정의 connect 값). connect 는 timeout 인자가 없고 설정을 따른다.
 - **thread.** client 하나는 한 번에 한 thread 가 쓴다. 다른 thread 의 호출이 걸려 있으면 connect, 요청, read, 공통 헤더 set / clear 는 `KIOTTY_NET_CODE_BUSY`, disconnect 는 아무것도 하지 않는다. **`closeHttpClient` 만 아무 thread 에서나** 부른다. 걸린 호출 (요청, read, 다시 연결, connect) 을 `KIOTTY_NET_CODE_CLOSED` 로 돌아오게 하고 연결을 닫는다. 걸린 호출이 없으면 그 자리에서 닫는다. 대상과 공통 헤더는 남고 다음 요청이 다시 연다 (close 는 그때 걸린 호출만 멈춘다). connect 안의 이름 풀기는 깨우지 못한다.
 - **메모리.** create 때 머리 버퍼 `2 × max_header_bytes` (반은 공통 헤더, 반은 요청 머리), 응답 머리 저장소 `max_header_bytes`, 헤더 표 둘 (`max_headers` 칸씩), StreamClient 의 Stage (수신은 `max(receive_capacity, max_header_bytes + 2)`, 상한 64 KiB) 를 잡는다. body 버퍼는 없다. StreamClient 는 저마다 깨우는 handle (POSIX pipe 의 fd 2 개, Windows UDP socket 1 개) 을 가진다. 열지 못하면 (fd / socket 부족) create 가 `{ KIOTTY_NET_CODE_SOCKET_ERROR, NULL }`.
-- **하지 않는 것.** redirect (3xx 는 그대로 돌려준다), 쿠키, 압축, 인증 흐름, 프록시, HTTP/2, 비동기 판, 요청 body 를 조각으로 올리기, SSE 도우미.
+- **요청 body 올리기** (v1, cycle U1 ~ U3 와 A3, 2026-11-16 ~ 18). `beginHttpRequest(client, request, headers, header_count, body_length, timeout)` 이 머리를 보낸다 (`body_length` 를 알면 `Content-Length`, `KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN` 이면 chunked. `request.body` 는 비어 있어야 한다). `writeHttpRequestBody(client, data, length, timeout)` 는 조각 하나를 다 보내고 `{ length, SUCCESS }` (chunked 면 조각 하나 = chunk 하나, 길이 0 은 보내지 않음). `finishHttpRequest(client, timeout)` 는 끝 표시를 보내고 응답 머리를 Reply 로 준다. 선언보다 많이 쓰는 write 는 아무것도 보내지 않고 `INVALID_ARGUMENT`, 적게 쓰고 finish 하면 `INVALID_ARGUMENT` 와 연결 닫음. 올리는 중의 다른 요청 / begin / disconnect / close / connect 는 올리기를 버린다. 다시 보내기는 없다. timeout 은 호출마다. **서버가 먼저 응답하면** write 는 응답 머리 하나를 읽어 1xx 는 버리고 이어 보내고, 최종 응답이면 `{ 0, KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING }` ("최종 응답이 와 있다. finish 를 부른다") 을 돌려준다. finish 가 그 응답을 주고 응답 body 뒤에 연결을 닫는다. write 가 연결을 잃었을 때 (`PEER_CLOSED` / `SOCKET_ERROR`) 도 finish 가 이미 온 응답을 준다. **`sendHttpFile(client, request, headers, header_count, path, timeout)`** 은 파일 크기로 `Content-Length` 를 쓰고 `send_capacity` 조각마다 base 의 파일 송신으로 보낸 뒤 응답 머리까지 받는다 (조각을 시작할 때마다 서버 바이트를 본다). timeout 은 전체 하나, 열 수 없는 파일은 `NOT_FOUND`. 사용법은 `user_guide_http.md` 2.14.
+- **하지 않는 것.** redirect (3xx 는 그대로 돌려준다), 쿠키, 압축, 인증 흐름, 프록시, HTTP/2, 비동기 판, `Expect: 100-continue`, SSE 도우미.
 
 | 메서드 | C | C++ | body 인자 | 응답에서 볼 것 |
 |---|---|---|---|---|
@@ -1805,6 +1806,12 @@ KiottyNetHttpReply KiottyNet_optionsHttp(KiottyNetHttpClientHandle client, const
 
 KiottyNetResult KiottyNet_readHttpReplyBody(KiottyNetHttpClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 받은 만큼. { 0, SUCCESS } 가 끝 */
 
+#define KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN UINT64_MAX
+KiottyNetCode      KiottyNet_beginHttpRequest(KiottyNetHttpClientHandle client, const KiottyNetHttpClientRequest* request, const KiottyNetHttpHeader* headers, size_t header_count, uint64_t body_length, uint32_t timeout_milliseconds);   /* UNKNOWN = chunked */
+KiottyNetResult    KiottyNet_writeHttpRequestBody(KiottyNetHttpClientHandle client, const void* data, size_t length, uint32_t timeout_milliseconds);   /* { length, SUCCESS }, 먼저 온 최종 응답이면 { 0, DATA_ARRIVED_WHILE_WRITING } */
+KiottyNetHttpReply KiottyNet_finishHttpRequest(KiottyNetHttpClientHandle client, uint32_t timeout_milliseconds);
+KiottyNetHttpReply KiottyNet_sendHttpFile(KiottyNetHttpClientHandle client, const KiottyNetHttpClientRequest* request, const KiottyNetHttpHeader* headers, size_t header_count, const char* path, uint32_t timeout_milliseconds);   /* 열 수 없으면 NOT_FOUND */
+
 KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name);    /* 대소문자 무시. 없으면 { NULL, 0 } */
 uint32_t      KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* reply);                    /* Allow 를 KIOTTY_NET_HTTP_METHOD_BIT 의 합으로. 없으면 0 */
 ```
@@ -1846,6 +1853,10 @@ public:
     KiottyNetHttpReply post(const char* path, const KiottyNet_HttpHeaderList& headers, KiottyNetHttpContentType type, KiottyNetSpan body, uint32_t timeout_milliseconds);
 
     KiottyNetResult    readBody(void* buffer, size_t length, uint32_t timeout_milliseconds);
+    KiottyNetCode      begin(const KiottyNetHttpClientRequest& request, uint64_t body_length, uint32_t timeout_milliseconds);   // headers 판도 있다
+    KiottyNetResult    write(const void* data, size_t length, uint32_t timeout_milliseconds);                              // write(KiottyNetSpan, timeout) 도
+    KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+    KiottyNetHttpReply sendFile(const KiottyNetHttpClientRequest& request, const char* path, uint32_t timeout_milliseconds); // headers 판도 있다
 };
 ```
 

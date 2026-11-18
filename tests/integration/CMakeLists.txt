@@ -28,6 +28,7 @@ kiotty_net_add_test_target(kiotty_net_integration_tests integration
     kiotty_test_http_client_tls.cpp
     kiotty_test_http_client_cpp.cpp
     kiotty_test_http_client_upload.cpp
+    kiotty_test_http_client_file.cpp
     kiotty_test_stateful_c.c
     ${PROJECT_SOURCE_DIR}/tests/unit/support/kiotty_test_handler.cpp
 )

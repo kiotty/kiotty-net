@@ -86,4 +86,12 @@ namespace kiotty::net::implementation
     {
         return client.exchange().finish(timeout_milliseconds);
     }
+
+    KiottyNetHttpReply sendHttpFile(HttpClient& client,
+                                    const ClientRequest& request,
+                                    Span<const char> path,
+                                    uint32_t timeout_milliseconds)
+    {
+        return client.exchange().sendFile(request, path, timeout_milliseconds);
+    }
 }
