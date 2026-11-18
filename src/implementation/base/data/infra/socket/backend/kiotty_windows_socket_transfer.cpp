@@ -48,6 +48,14 @@ namespace kiotty::net::implementation
         return waitReady(native, WaitDirection::WRITE, timeout_milliseconds, traits.stop);
     }
 
+    SocketCode waitWritableOrReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
+    {
+        if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
+        const SOCKET native = socketOf(socket.handle());
+        const SocketTraits traits = socket.traits();
+        return waitReady(native, WaitDirection::EITHER, timeout_milliseconds, traits.stop);
+    }
+
     SocketCode shutdownWrite(const ActiveSocket& socket)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }

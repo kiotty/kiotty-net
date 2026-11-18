@@ -13,7 +13,8 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        const size_t BIO_PAIR_BYTES = 4096;
+        constexpr size_t BIO_PAIR_BYTES =
+            TLS_RECORD_PLAIN_BYTES + TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
 
         const char* const HANDSHAKE_CLOSED_MESSAGE = "tls: peer closed during handshake";
     }

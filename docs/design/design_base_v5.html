@@ -581,7 +581,7 @@ public:
 };</code></pre>
 
 <ul>
-  <li>v4 8절의 동작은 그대로다: BIO pair 하나 (양쪽 4 KiB), <code>feed / flush</code> 로 옮긴 길이만큼, 상대의 KeyUpdate 답장을 decode 끝에 cipherSend 로, OpenSSL 은 자기 malloc (DV2), <code>SSL_OP_NO_RENEGOTIATION</code>, <code>SSL_CTX_set_num_tickets(0)</code>.</li>
+  <li>v4 8절의 동작은 그대로다: BIO pair 하나 (양쪽 4 KiB. 2026-11-18 A1 에서 레코드 하나가 통째로 들어가는 16960 바이트로 키움, <code>design_write_arrival_v0.html</code>), <code>feed / flush</code> 로 옮긴 길이만큼, 상대의 KeyUpdate 답장을 decode 끝에 cipherSend 로, OpenSSL 은 자기 malloc (DV2), <code>SSL_OP_NO_RENEGOTIATION</code>, <code>SSL_CTX_set_num_tickets(0)</code>.</li>
   <li>v4 의 <code>TlsEngine(Pool&amp;, receive, send)</code> 생성자와 <code>limit</code> 은 <code>open(..., TlsCapacity)</code> 안으로 들어갔다. Connection 은 <code>{ limits.receive, largerOf(limits.send, limits.notify) }</code> 를 넘긴다.</li>
   <li><code>TlsProfile</code> 의 <code>server / verifyHostname / handshakeTimeoutMilliseconds</code> 는 <code>TlsSettings settings()</code> 하나다.</li>
   <li>OpenSSL backend 는 835 줄 한 파일 (<code>kiotty_openssl_tls.cpp</code>) 이었다. v5 는 <code>openssl_context</code> (SSL_CTX 설정), <code>openssl_session</code> (SSL 과 BIO), <code>openssl_tls_engine</code>, <code>openssl_tls_pipe</code>, <code>openssl_tls_profile</code> 다. <code>strlen / memcpy</code> 는 <code>strnlen</code> 과 <code>Span::copyFrom</code>.</li>
@@ -1174,7 +1174,7 @@ private:
 <table>
 <tr><th>#</th><th>수칙</th><th>편차</th><th>자리</th></tr>
 <tr><td>DV1</td><td>1.1, MISRA 21.6.1</td><td><code>create*</code> 의 할당과 listener 의 완료 배열. 초기화 단계에서만</td><td><code>context/owner</code>, <code>infra/event/backend</code></td></tr>
-<tr><td>DV2</td><td>1.1</td><td>OpenSSL 의 자기 malloc. 연결당 128 KiB 상한을 테스트가 본다</td><td><code>infra/tls/backend</code></td></tr>
+<tr><td>DV2</td><td>1.1</td><td>OpenSSL 의 자기 malloc. 연결당 160 KiB 상한을 테스트가 본다 (A1 에서 128 에서 올림)</td><td><code>infra/tls/backend</code></td></tr>
 <tr><td>DV3</td><td>1.10, 3.2</td><td>OS 가 주소를 드는 raw pointer (OVERLAPPED owner, epoll <code>data.ptr</code>, ready 목록, listener)</td><td><code>infra/*/backend</code></td></tr>
 <tr><td>DV4</td><td>5.6</td><td><code>SocketCode</code> 는 I/O 진행 상태. 경계에서 <code>toNetCode</code></td><td><code>infra/error</code>, <code>domain/entity</code></td></tr>
 <tr><td>DV5</td><td>4.14</td><td><code>KIOTTY_NET_USE_TLS</code> 의 backend 선택 <code>#if</code></td><td><code>infra/tls/backend</code></td></tr>

@@ -61,12 +61,19 @@ namespace kiotty::net::implementation
 
     KiottyNetCode writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline)
     {
-        const TimeLeftResult left = timeLeftOf(deadline);
-        if (!left) { return left.code; }
-        const StreamResult stream = line.stream();
-        if (!stream) { return stream.code; }
-        const KiottyNetSpan bytes{ data.data, data.length };
-        return stream.value().write(bytes, left.value).code;
+        size_t done = 0;
+        for (;;)
+        {
+            const TimeLeftResult left = timeLeftOf(deadline);
+            if (!left) { return left.code; }
+            const StreamResult stream = line.stream();
+            if (!stream) { return stream.code; }
+            const Span<const char> rest = data.skip(done);
+            const KiottyNetSpan bytes{ rest.data, rest.length };
+            const KiottyNetResult sent = stream.value().write(bytes, left.value);
+            done += static_cast<size_t>(sent.bytes);
+            if (sent.code != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent.code; }
+        }
     }
 
     KiottyNetCode sendBytes(StreamClient& line,
@@ -83,6 +90,7 @@ namespace kiotty::net::implementation
     {
         bool isIdle(ConnectionStream& stream)
         {
+            if (!stream.connected()) { return false; }
             const StagedResult staged = stream.peek(0, IDLE_PROBE_MILLISECONDS);
             const bool has_staged = !staged || staged.value.length > 0;
             if (has_staged) { return false; }

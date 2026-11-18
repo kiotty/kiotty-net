@@ -22,7 +22,8 @@ namespace kiotty::net::implementation
         OUT_OF_RESOURCE,
         NOT_SUPPORTED,
         BUSY,
-        UNKNOWN
+        UNKNOWN,
+        READABLE
     };
 
     inline KiottyNetCode toNetCode(SocketCode code)
@@ -49,6 +50,7 @@ namespace kiotty::net::implementation
         case SocketCode::OUT_OF_RESOURCE:
         case SocketCode::NOT_SUPPORTED:
         case SocketCode::UNKNOWN:
+        case SocketCode::READABLE:
             return KIOTTY_NET_CODE_SOCKET_ERROR;
         }
         return KIOTTY_NET_CODE_SOCKET_ERROR;

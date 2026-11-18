@@ -14,7 +14,7 @@
 - **`UploadMode::REFUSED`** (`http/domain/entity/kiotty_http_upload.h`) 와 규칙 `refuseUpload` (`kiotty_http_upload_rules.*`). `checkUploadPiece` / `checkUploadEnd` 는 LENGTH / CHUNKED 가 아니면 `INVALID_ARGUMENT` (`isSending`).
 - **`HttpClientExchange`**: write 실패는 `stopUpload(code)` (연결 잃음이면 `REFUSED`, 아니면 `dropUpload`). finish 는 `REFUSED` 면 끝 표시를 보내지 않고 `refusedReply`: `receiveReply` 가 성공하면 `persistence = CLOSE` 로 두어 응답 body 뒤 연결을 닫고, body 가 이미 끝났으면 바로 닫는다. begin / 다른 요청 / disconnect / close 는 U1 처럼 `REFUSED` 도 연결과 함께 버린다. `REFUSED` 에서 readBody 는 `INVALID_ARGUMENT`.
 
-## 설계와 다른 것 (확인 부탁)
+## 설계와 다른 것 (2026-11-18 사용자 확인: 1, 2 그대로 받아들임)
 
 1. 정할 것 1 의 "와 있는 것이 없으면 write 의 code": write 의 code 를 따로 담지 않고 finish 의 읽기 code 를 돌려준다. 둘 다 `PEER_CLOSED` 또는 `SOCKET_ERROR` 이고 (write 는 `SOCKET_ERROR`, 읽기는 `PEER_CLOSED` 처럼 갈릴 수 있음), 담으려면 `HttpUpload` 에 칸 하나와 채움 4 바이트가 는다.
 2. 살아 있는지 보기는 `connected()` 가 아니라 1 ms peek (위).

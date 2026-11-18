@@ -30,12 +30,12 @@
 | C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 남음 |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
-| A1 ~ A3 | (쓸 것) write 중 도착 설계 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 전 |
+| A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), A1 끝 (commit 전) |
 
 ## 2. 앞으로의 순서
 
 ```text
-R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → (설계) → A1 → A2 → A3 → U3
+R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → A1 → A2 → A3 → U3
 ```
 
 | 사이클 | 하는 것 | 완료 |
@@ -87,3 +87,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 2026-11-17 모듈 정리 R7-2 (`1c2e99e`), R7-3 (`cd92ede`), R7-4 (`ffc708e`), `docs/progress/261117_progress_module_layout_r7_{2,3,4}.md`: access 가 websocket 의 칸만 봄, 클라이언트가 자기 `WebSocketClientState` (`HttpReplyStore`), `WebSocketHandler` 공개 필드 0 (`SocketSide`). MSVC 847, WSL 848 × 6, release-tls 847.
 
 2026-11-18 HttpClient v1 U2 (`docs/progress/261118_progress_http_client_u2.md`): begin 이 다시 쓰는 연결을 1 ms peek 로 확인 (닫힘, 남은 바이트, TLS close_notify 면 다시 연결), write 가 연결을 잃으면 `REFUSED` 로 두고 finish 가 먼저 온 응답 (413, 401) 을 돌려줌, close 가 걸린 write 를 깨움, https 올리기. MSVC 857, WSL 858 × 6, release-tls 857.
+
+2026-11-18 write 중 도착 설계 (`docs/design/design_write_arrival_v0.html`, 정할 것 넷 닫음) 와 A1 (commit 전, `docs/progress/261118_progress_write_arrival_a1.md`): `DATA_ARRIVED_WHILE_WRITING`, write 가 시작할 때와 막힐 때 상대 바이트를 수신 Stage 로 옮기고 멈춤, TLS BIO pair 를 레코드 하나보다 크게 (TlsMemory 상한 160 KiB), 기다림의 0 = 무한 경주 고침, U2 `isIdle` 의 EOF 확인. MSVC 866, WSL 867 × 6, release 866.

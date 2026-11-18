@@ -19,6 +19,8 @@ namespace kiotty::net::implementation
     TransferResult peek(const ActiveSocket& socket, Span<char> buffer);
     SocketCode     waitReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds);
     SocketCode     waitWritable(const ActiveSocket& socket, uint32_t timeout_milliseconds);
+    SocketCode     waitWritableOrReadable(const ActiveSocket& socket,
+                                          uint32_t timeout_milliseconds);
     SocketCode     shutdownWrite(const ActiveSocket& socket);
     SocketCode     configureNoDelay(const ActiveSocket& socket, NoDelay no_delay);
 }

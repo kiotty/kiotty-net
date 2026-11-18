@@ -474,6 +474,34 @@ TEST_F(BaseApiTest, CloseWithSendsOnlyItsDataThenClosesWithItsReason)
     KiottyNet_destroyServer(context, server);
 }
 
+TEST_F(BaseApiTest, StreamClientWriteStopsWhenThePeerSpeaksFirstAndReadGetsTheBytes)
+{
+    kiotty_test::LoopbackPeer peer;
+    ASSERT_TRUE(peer.listenTcp(0));
+    KiottyNetClientConfiguration configuration = clientConfiguration();
+    KiottyNetStreamClientResult created = KiottyNet_createStreamClient(context, &configuration);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
+    KiottyNetStreamClientHandle client = created.handle;
+    const KiottyNetAddress address = loopbackAddress(peer.port());
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_connectStreamClient(client, &address, nullptr));
+    ASSERT_TRUE(peer.accept(WAIT_MS));
+    ASSERT_TRUE(peer.sendAll("hi", 2));
+    KiottyNetResult written = {};
+    EXPECT_TRUE(kiotty_test::waitUntil([&]() {
+        written = KiottyNet_writeStreamClient(client, spanOf("x"), WAIT_MS);
+        return written.code != KIOTTY_NET_CODE_SUCCESS;
+    }, WAIT_MS));
+    EXPECT_EQ(KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING, written.code);
+    EXPECT_EQ(0, written.bytes);
+    char buffer[8] = {};
+    const KiottyNetResult read = KiottyNet_readStreamClient(client, buffer, sizeof(buffer), WAIT_MS);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, read.code);
+    EXPECT_EQ("hi", std::string(buffer, static_cast<size_t>(read.bytes)));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeStreamClient(client, spanOf("x"), WAIT_MS).code);
+    KiottyNet_disconnectStreamClient(client);
+    KiottyNet_destroyStreamClient(context, client);
+}
+
 TEST_F(BaseApiTest, StreamClientTalksToAWorkerAndTheIoThreadGetsBusy)
 {
     const uint16_t port = kiotty_test::unusedPort();

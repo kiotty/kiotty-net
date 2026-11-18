@@ -1,6 +1,7 @@
 #include "base/data/infra/socket/kiotty_passive_socket.h"
 #include "base/data/infra/socket/kiotty_socket_transfer.h"
 #include "base/data/infra/tls/kiotty_tls_engine.h"
+#include "base/data/infra/tls/kiotty_tls_pipe.h"
 #include "base/data/infra/tls/kiotty_tls_profile.h"
 #include "base/data/repository/stream/kiotty_connection_stream.h"
 
@@ -14,6 +15,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -688,4 +690,232 @@ TEST(ConnectionStream, ReadLineTlsDecodesIntoTheStage)
     EXPECT_EQ(first_text, "line one");
     EXPECT_EQ(second_text, "line two");
     EXPECT_EQ(tail, "tail");
+}
+
+namespace
+{
+    const KiottyNetCode ARRIVED = KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING;
+    const size_t        FLOOD_BYTES = 16 * 1024 * 1024;
+    const size_t        PIECE_BYTES = 1024 * 1024;
+    const size_t        FLOOD_PIECES = 512;
+    const uint32_t      ARRIVAL_DELAY_MS = 200;
+    const uint32_t      SHORT_WAIT_MS = 300;
+
+    bool waitArrival(ActiveSocket& socket)
+    {
+        return waitReadable(socket, WAIT_MS) == SocketCode::SUCCESS;
+    }
+
+    KiottyNetResult writeOnward(ConnectionStream stream, const std::string& data, size_t from)
+    {
+        size_t done = from;
+        for (;;)
+        {
+            const KiottyNetSpan rest = { data.data() + done, data.size() - done };
+            const KiottyNetResult sent = stream.write(rest, WAIT_MS);
+            done += static_cast<size_t>(sent.bytes);
+            if (sent.code != ARRIVED) { return KiottyNetResult{ static_cast<int32_t>(done), sent.code }; }
+        }
+    }
+
+    struct Flooded
+    {
+        KiottyNetResult last;
+        size_t          whole;
+    };
+
+    Flooded floodUntilStopped(ConnectionStream stream, const std::string& piece, uint32_t timeout_milliseconds)
+    {
+        for (size_t whole = 0; whole < FLOOD_PIECES; ++whole)
+        {
+            const KiottyNetResult sent = stream.write(spanOf(piece), timeout_milliseconds);
+            if (sent.code != KIOTTY_NET_CODE_SUCCESS) { return Flooded{ sent, whole }; }
+        }
+        return Flooded{ KiottyNetResult{ 0, KIOTTY_NET_CODE_SUCCESS }, FLOOD_PIECES };
+    }
+
+    std::string receiveExactly(LoopbackPeer& peer, size_t length)
+    {
+        std::string received(length, 'x');
+        if (!peer.recvExactly(&received[0], length, WAIT_MS)) { return std::string(); }
+        return received;
+    }
+}
+
+TEST(ConnectionStream, WriteStopsAtOnceWhenBytesWaitBeforeIt)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("413", 3));
+    ASSERT_TRUE(waitArrival(side.socket));
+    const KiottyNetResult sent = side.stream().write(spanOf(std::string("body")), WAIT_MS);
+    EXPECT_EQ(ARRIVED, sent.code);
+    EXPECT_EQ(0, sent.bytes);
+    EXPECT_EQ("413", readOnce(side.stream()));
+    const KiottyNetResult again = side.stream().write(spanOf(std::string("body")), WAIT_MS);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, again.code);
+    EXPECT_EQ(4, again.bytes);
+    EXPECT_EQ("body", receiveExactly(peer, 4));
+}
+
+TEST(ConnectionStream, BlockedWriteStopsWhenThePeerAnswersAndGoesOnFromWhereItStopped)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    const std::string piece = pattern(PIECE_BYTES);
+    std::thread answer([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_DELAY_MS));
+        peer.sendAll("stop", 4);
+    });
+    const Flooded stopped = floodUntilStopped(side.stream(), piece, WAIT_MS);
+    answer.join();
+    ASSERT_EQ(ARRIVED, stopped.last.code);
+    EXPECT_LT(static_cast<size_t>(stopped.last.bytes), piece.size());
+    EXPECT_EQ("stop", readOnce(side.stream()));
+    size_t mismatched = 0;
+    std::thread drain([&]() {
+        std::string received(piece.size(), 'x');
+        for (size_t i = 0; i <= stopped.whole; ++i)
+        {
+            const bool is_same = peer.recvExactly(&received[0], received.size(), WAIT_MS) && received == piece;
+            mismatched += is_same ? 0 : 1;
+        }
+    });
+    const KiottyNetResult rest = writeOnward(side.stream(), piece, static_cast<size_t>(stopped.last.bytes));
+    drain.join();
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, rest.code);
+    EXPECT_EQ(static_cast<int32_t>(piece.size()), rest.bytes);
+    EXPECT_EQ(0u, mismatched);
+}
+
+TEST(ConnectionStream, WriteAfterThePeerEndedIsPeerClosedAndTheBytesBeforeStayReadable)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("bye", 3));
+    ASSERT_TRUE(peer.shutdownWrite());
+    ASSERT_TRUE(waitArrival(side.socket));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_DELAY_MS));
+    EXPECT_EQ(ARRIVED, side.stream().write(spanOf(std::string("x")), WAIT_MS).code);
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, side.stream().write(spanOf(std::string("x")), WAIT_MS).code);
+    EXPECT_EQ("bye", readOnce(side.stream()));
+    char buffer[8];
+    EXPECT_EQ(KIOTTY_NET_CODE_PEER_CLOSED, side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS).code);
+}
+
+TEST(ConnectionStream, BytesTakenBeforeAResetStayReadableOnEveryPlatform)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    ASSERT_TRUE(peer.sendAll("HTTP/1.1 413", 12));
+    ASSERT_TRUE(waitArrival(side.socket));
+    ASSERT_EQ(ARRIVED, side.stream().write(spanOf(std::string("body")), WAIT_MS).code);
+    ASSERT_TRUE(peer.reset());
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_DELAY_MS));
+    EXPECT_EQ(KIOTTY_NET_CODE_SOCKET_ERROR, side.stream().write(spanOf(std::string("body")), WAIT_MS).code);
+    EXPECT_EQ("HTTP/1.1 413", readOnce(side.stream()));
+    char buffer[8];
+    const KiottyNetCode after = side.stream().read(Span<char>{ buffer, sizeof(buffer) }, WAIT_MS).code;
+    EXPECT_TRUE(after == KIOTTY_NET_CODE_SOCKET_ERROR || after == KIOTTY_NET_CODE_PEER_CLOSED) << after;
+}
+
+TEST(ConnectionStream, FullStageStopsWatchingSoTheWriteGoesOnAndTimesOutWithoutSpinning)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    const std::string flood = pattern(2 * CAPACITY);
+    ASSERT_TRUE(peer.sendAll(flood.data(), flood.size()));
+    ASSERT_TRUE(kiotty_test::waitUntil([&]() {
+        side.stream().write(spanOf(std::string("x")), WAIT_MS);
+        return side.receive.consumer().readable() == CAPACITY;
+    }, WAIT_MS));
+    const KiottyNetResult sent = side.stream().write(spanOf(std::string("y")), WAIT_MS);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, sent.code);
+    const std::string piece = pattern(PIECE_BYTES);
+    const Flooded filled = floodUntilStopped(side.stream(), piece, SHORT_WAIT_MS);
+    ASSERT_EQ(KIOTTY_NET_CODE_TIMEOUT, filled.last.code);
+    const std::clock_t cpu = std::clock();
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    const KiottyNetResult blocked = side.stream().write(spanOf(piece), SHORT_WAIT_MS);
+    const uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
+    EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, blocked.code);
+    EXPECT_GE(elapsed + 20, SHORT_WAIT_MS);
+#if !defined(_WIN32)
+    const double busy = static_cast<double>(std::clock() - cpu) * 1000.0 / CLOCKS_PER_SEC;
+    EXPECT_LT(busy, SHORT_WAIT_MS / 2.0);
+#else
+    static_cast<void>(cpu);
+#endif
+    EXPECT_EQ(flood.substr(0, 16), readOnce(side.stream()).substr(0, 16));
+}
+
+TEST(ConnectionStream, TlsWriteStopsOnlyForApplicationBytes)
+{
+    REQUIRE_TLS();
+    Profiles profiles;
+    std::unique_ptr<Side> server(new Side());
+    std::unique_ptr<Side> client(new Side());
+    ASSERT_TRUE(handshake(profiles, *server, *client));
+    kiotty::net::implementation::TlsPipe(server->engine).requestKeyUpdate();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server->stream().write(spanOf(std::string()), WAIT_MS).code);
+    ASSERT_TRUE(waitArrival(client->socket));
+    const KiottyNetResult quiet = client->stream().write(spanOf(std::string("ping")), WAIT_MS);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, quiet.code);
+    EXPECT_EQ(4, quiet.bytes);
+    EXPECT_EQ("ping", readExactly(server->stream(), 4));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, server->stream().write(spanOf(std::string("pong")), WAIT_MS).code);
+    ASSERT_TRUE(waitArrival(client->socket));
+    const KiottyNetResult stopped = client->stream().write(spanOf(std::string("more")), WAIT_MS);
+    EXPECT_EQ(ARRIVED, stopped.code);
+    EXPECT_EQ(0, stopped.bytes);
+    EXPECT_EQ("pong", readExactly(client->stream(), 4));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, client->stream().write(spanOf(std::string("more")), WAIT_MS).code);
+    EXPECT_EQ("more", readExactly(server->stream(), 4));
+}
+
+TEST(ConnectionStream, BlockedTlsWriteStopsWhenThePeerAnswersAndGoesOnWithoutLosingARecord)
+{
+    REQUIRE_TLS();
+    Profiles profiles;
+    std::unique_ptr<Side> server(new Side());
+    std::unique_ptr<Side> client(new Side());
+    ASSERT_TRUE(handshake(profiles, *server, *client));
+    const std::string data = pattern(FLOOD_BYTES);
+    std::thread answer([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_DELAY_MS));
+        writeOnward(server->stream(), std::string("stop"), 0);
+    });
+    const KiottyNetResult stopped = client->stream().write(spanOf(data), WAIT_MS);
+    answer.join();
+    ASSERT_EQ(ARRIVED, stopped.code);
+    EXPECT_GT(stopped.bytes, 0);
+    EXPECT_LT(static_cast<size_t>(stopped.bytes), data.size());
+    EXPECT_EQ("stop", readExactly(client->stream(), 4));
+    std::string received;
+    std::thread drain([&]() { received = readExactly(server->stream(), data.size()); });
+    const KiottyNetResult rest = writeOnward(client->stream(), data, static_cast<size_t>(stopped.bytes));
+    drain.join();
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, rest.code);
+    EXPECT_TRUE(received == data);
+}
+
+TEST(ConnectionStream, WriteFileLooksForArrivalOnlyAtTheStart)
+{
+    LoopbackPeer peer;
+    Side side;
+    ASSERT_TRUE(connect(peer, side));
+    const std::string content = pattern(1000);
+    const std::string path = writeFileWith(content);
+    ASSERT_TRUE(peer.sendAll("no", 2));
+    ASSERT_TRUE(waitArrival(side.socket));
+    EXPECT_EQ(ARRIVED, side.stream().writeFile(kiotty_test::textOf(path.c_str()), 0, 1000, WAIT_MS));
+    EXPECT_EQ("no", readOnce(side.stream()));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, side.stream().writeFile(kiotty_test::textOf(path.c_str()), 0, 1000, WAIT_MS));
+    EXPECT_EQ(content, receiveExactly(peer, 1000));
+    kiotty_test::removeFile(path.c_str());
 }

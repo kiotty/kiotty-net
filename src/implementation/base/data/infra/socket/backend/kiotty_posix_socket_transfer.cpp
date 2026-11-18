@@ -56,6 +56,14 @@ namespace kiotty::net::implementation
         return waitFor(descriptor, POLLOUT, timeout_milliseconds, socket.traits().stop);
     }
 
+    SocketCode waitWritableOrReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
+    {
+        if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
+        const int descriptor = descriptorOf(socket.handle());
+        const short events = POLLIN | POLLOUT;
+        return waitFor(descriptor, events, timeout_milliseconds, socket.traits().stop);
+    }
+
     SocketCode shutdownWrite(const ActiveSocket& socket)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }

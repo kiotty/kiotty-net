@@ -103,7 +103,7 @@ namespace kiotty::net::implementation
         SocketCode awaitWritable(const ActiveSocket& socket, const Deadline& deadline)
         {
             if (deadline.expired()) { return SocketCode::TIMEOUT; }
-            return implementation::waitWritable(socket, deadline.remaining());
+            return implementation::waitWritable(socket, deadline.bound(0));
         }
     }
 

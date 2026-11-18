@@ -39,7 +39,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;

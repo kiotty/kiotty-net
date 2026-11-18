@@ -194,14 +194,21 @@ namespace kiotty::net::implementation
                                Span<const char> data,
                                const Deadline& deadline)
         {
-            if (data.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
-            if (deadline.expired()) { return KIOTTY_NET_CODE_TIMEOUT; }
-            const uint32_t left = deadline.remaining();
-            const bool is_short = deadline.limited() && left < SHORTEST_WAIT_MILLISECONDS;
-            const uint32_t wait = is_short ? SHORTEST_WAIT_MILLISECONDS : left;
-            const KiottyNetSpan bytes{ data.data, data.length };
-            const KiottyNetConnectionStream stream = session.stream;
-            return stream.owner->writeStream(stream.id, bytes, wait).code;
+            size_t done = 0;
+            for (;;)
+            {
+                const Span<const char> rest = data.skip(done);
+                if (rest.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
+                if (deadline.expired()) { return KIOTTY_NET_CODE_TIMEOUT; }
+                const uint32_t left = deadline.remaining();
+                const bool is_short = deadline.limited() && left < SHORTEST_WAIT_MILLISECONDS;
+                const uint32_t wait = is_short ? SHORTEST_WAIT_MILLISECONDS : left;
+                const KiottyNetSpan bytes{ rest.data, rest.length };
+                const KiottyNetConnectionStream stream = session.stream;
+                const KiottyNetResult sent = stream.owner->writeStream(stream.id, bytes, wait);
+                done += static_cast<size_t>(sent.bytes);
+                if (sent.code != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent.code; }
+            }
         }
 
         KiottyNetCode failureOf(const HttpSession& session, KiottyNetCode code)

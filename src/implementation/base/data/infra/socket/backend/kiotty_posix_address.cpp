@@ -34,6 +34,7 @@ namespace kiotty::net::implementation
         bool          isStopped(const StopSignal* stop);
         pollfd        entryOf(int descriptor, short events);
         pollfd        stopEntryOf(const StopSignal* stop);
+        SocketCode    readinessOf(const pollfd& entry);
     }
 
     int descriptorOf(SocketHandle handle)
@@ -112,7 +113,7 @@ namespace kiotty::net::implementation
             }
             else if (ready > 0)
             {
-                return SocketCode::SUCCESS;
+                return readinessOf(entries[0]);
             }
         }
     }
@@ -184,6 +185,15 @@ namespace kiotty::net::implementation
         bool isStopped(const StopSignal* stop)
         {
             return stop != nullptr && stop->isRaised();
+        }
+
+        SocketCode readinessOf(const pollfd& entry)
+        {
+            const short both = POLLIN | POLLOUT;
+            const bool is_either = (entry.events & both) == both;
+            const short arrival = POLLIN | POLLHUP | POLLERR;
+            const bool is_readable = (entry.revents & arrival) != 0;
+            return is_either && is_readable ? SocketCode::READABLE : SocketCode::SUCCESS;
         }
 
         pollfd entryOf(int descriptor, short events)

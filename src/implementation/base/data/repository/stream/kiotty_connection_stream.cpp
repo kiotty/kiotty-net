@@ -22,6 +22,7 @@ namespace kiotty::net::implementation
         , _pipe(tls)
         , _receive(receive)
         , _send(send)
+        , _watch(ArrivalWatch::OFF)
     {
     }
 
@@ -29,11 +30,13 @@ namespace kiotty::net::implementation
     {
         const bool is_empty = buffer.data == nullptr || buffer.length == 0;
         if (is_empty) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+        const size_t capped = std::min(buffer.length, RESULT_MAXIMUM_BYTES);
+        const Span<char> target{ buffer.data, capped };
+        const size_t staged = takeReceived(target);
+        if (staged > 0) { return resultOf(staged, KIOTTY_NET_CODE_SUCCESS); }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
         if (flushed != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, flushed); }
-        const size_t capped = std::min(buffer.length, RESULT_MAXIMUM_BYTES);
-        const Span<char> target{ buffer.data, capped };
         return readInto(target, deadline);
     }
 
@@ -43,9 +46,10 @@ namespace kiotty::net::implementation
         const bool too_large = data.length > RESULT_MAXIMUM_BYTES;
         if (too_large || missing) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }
         const Deadline deadline(timeout_milliseconds);
-        const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, flushed); }
-        return send(data, deadline);
+        _watch = ArrivalWatch::ON;
+        const KiottyNetResult sent = sendWatched(data, deadline);
+        _watch = ArrivalWatch::OFF;
+        return sent;
     }
 
     KiottyNetCode ConnectionStream::writeFile(Span<const char> path,
@@ -58,6 +62,8 @@ namespace kiotty::net::implementation
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
         const uint64_t size = file.size();
         if (offset > size || length > size - offset) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const KiottyNetCode arrived = takeArrival();
+        if (arrived != KIOTTY_NET_CODE_SUCCESS) { return arrived; }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
         if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
@@ -231,9 +237,16 @@ namespace kiotty::net::implementation
         {
             return KIOTTY_NET_CODE_SUCCESS;
         }
-        const KiottyNetCode drained = flushCipherStage(deadline);
-        if (drained != KIOTTY_NET_CODE_SUCCESS) { return drained; }
-        return flushPipe(deadline);
+        for (;;)
+        {
+            const KiottyNetCode drained = flushCipherStage(deadline);
+            if (drained != KIOTTY_NET_CODE_SUCCESS) { return drained; }
+            const KiottyNetCode piped = flushPipe(deadline);
+            if (piped != KIOTTY_NET_CODE_SUCCESS) { return piped; }
+            const bool is_staged = _tls.stages().send.consumer().readable() > 0;
+            const bool is_piped = _pipe.outgoing().length > 0;
+            if (!is_staged && !is_piped) { return KIOTTY_NET_CODE_SUCCESS; }
+        }
     }
 
     KiottyNetCode ConnectionStream::flushCipherStage(const Deadline& deadline)
@@ -248,6 +261,7 @@ namespace kiotty::net::implementation
         const Sent sent = sendAll(Span<const char>{ waiting.peek(), readable }, deadline);
         waiting.commit(sent.length);
         cipher.compact();
+        if (sent.code == SocketCode::READABLE) { return takeArrival(); }
         return toNetCode(sent.code);
     }
 
@@ -258,6 +272,7 @@ namespace kiotty::net::implementation
         {
             const Sent sent = sendAll(outgoing, deadline);
             _pipe.sent(sent.length);
+            if (sent.code == SocketCode::READABLE) { return takeArrival(); }
             if (sent.code != SocketCode::SUCCESS) { return toNetCode(sent.code); }
             outgoing = _pipe.outgoing();
         }
@@ -267,34 +282,39 @@ namespace kiotty::net::implementation
     KiottyNetResult ConnectionStream::send(KiottyNetSpan data, const Deadline& deadline)
     {
         const bool secure = _tls.status().is_active;
-        if (!secure)
-        {
-            const Sent sent = sendAll(Span<const char>{ data.data, data.length }, deadline);
-            return resultOf(sent.length, toNetCode(sent.code));
-        }
+        if (!secure) { return sendPlain(data, deadline); }
         size_t done = 0;
         while (done < data.length)
         {
+            const KiottyNetCode emptied = flush(deadline);
+            if (emptied != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, emptied); }
             const size_t piece = std::min(TLS_WRITE_PIECE_BYTES, data.length - done);
             const KiottyNetSpan part{ data.data + done, piece };
             const KiottyNetCode written = sendRecord(part, deadline);
+            if (written == KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING)
+            {
+                return resultOf(done + piece, written);
+            }
             if (written != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, written); }
             done += piece;
         }
-        return resultOf(done, KIOTTY_NET_CODE_SUCCESS);
+        return resultOf(done, flush(deadline));
     }
 
     KiottyNetCode ConnectionStream::sendRecord(KiottyNetSpan part, const Deadline& deadline)
     {
-        TlsStep step = TlsStep::SEND;
+        bool is_arrived = false;
+        TlsStep step = _pipe.write(part);
         while (step == TlsStep::SEND)
         {
-            step = _pipe.write(part);
             const KiottyNetCode flushed = flush(deadline);
-            if (step == TlsStep::FAILED) { return _tls.status().failure.code; }
-            if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
+            const bool is_arrival = flushed == KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING;
+            if (!is_arrival && flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
+            is_arrived = is_arrived || is_arrival;
+            step = _pipe.write(part);
         }
-        return KIOTTY_NET_CODE_SUCCESS;
+        if (step == TlsStep::FAILED) { return _tls.status().failure.code; }
+        return is_arrived ? KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING : KIOTTY_NET_CODE_SUCCESS;
     }
 
     ConnectionStream::Sent ConnectionStream::sendAll(Span<const char> data,
@@ -309,25 +329,17 @@ namespace kiotty::net::implementation
                 sent += moved.value;
                 continue;
             }
-            const SocketCode waited = awaitWritable(moved.code, deadline);
+            const SocketCode waited = awaitSendable(moved.code, deadline);
             if (waited != SocketCode::SUCCESS) { return Sent{ sent, waited }; }
         }
         return Sent{ sent, SocketCode::SUCCESS };
-    }
-
-    SocketCode ConnectionStream::awaitWritable(SocketCode code, const Deadline& deadline)
-    {
-        if (code != SocketCode::WOULD_BLOCK) { return code; }
-        const bool expired = deadline.expired();
-        if (expired) { return SocketCode::TIMEOUT; }
-        return implementation::waitWritable(_socket, deadline.remaining());
     }
 
     SocketCode ConnectionStream::waitReadable(const Deadline& deadline)
     {
         const bool expired = deadline.expired();
         if (expired) { return SocketCode::TIMEOUT; }
-        return implementation::waitReadable(_socket, deadline.remaining());
+        return implementation::waitReadable(_socket, deadline.bound(0));
     }
 
     SocketCode ConnectionStream::receiveCipher()

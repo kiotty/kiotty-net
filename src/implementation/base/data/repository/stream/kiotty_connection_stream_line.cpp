@@ -60,7 +60,7 @@ namespace kiotty::net::implementation
         for (;;)
         {
             if (deadline.expired()) { return LineResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
-            const StagedResult staged = stream.peek(searched + 1, deadline.remaining());
+            const StagedResult staged = stream.peek(searched + 1, deadline.bound(0));
             if (!staged) { return LineResult::failure(staged.code); }
             const size_t line_feed = findLineFeed(staged.value, searched);
             if (line_feed < staged.value.length)

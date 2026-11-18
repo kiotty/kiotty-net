@@ -97,6 +97,7 @@ set(KIOTTY_NET_SOURCES
     src/implementation/base/data/infra/tls/backend/kiotty_openssl_tls_profile.cpp
     src/implementation/base/data/infra/tls/backend/kiotty_stub_tls.cpp
     src/implementation/base/data/repository/stream/kiotty_connection_stream.cpp
+    src/implementation/base/data/repository/stream/kiotty_connection_stream_arrival.cpp
     src/implementation/base/data/repository/stream/kiotty_connection_stream_line.cpp
     src/implementation/base/data/infra/file/backend/kiotty_posix_file.cpp
     src/implementation/base/data/infra/file/backend/kiotty_windows_file.cpp

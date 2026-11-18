@@ -173,7 +173,8 @@ typedef enum KiottyNetCode {
     KIOTTY_NET_CODE_TLS_RECORD_ERROR,           /* handshake 뒤 : 복호화 실패 */
     KIOTTY_NET_CODE_OUT_OF_MEMORY,              /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
     KIOTTY_NET_CODE_INVALID_ENCODING,           /* 문자열 인자 (host, pipe 이름, 경로, password) 가 UTF-8 이 아님 */
-    KIOTTY_NET_CODE_PEER_NOT_READING            /* 상대가 읽지 않아 send_timeout 안에 송신이 끝나지 않음. onDisconnected 의 reason (4절) */
+    KIOTTY_NET_CODE_PEER_NOT_READING,           /* 상대가 읽지 않아 send_timeout 안에 송신이 끝나지 않음. onDisconnected 의 reason (4절) */
+    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING  /* 동기 write 가 보내는 동안 상대 바이트가 와서 멈춤. bytes 만큼은 보냈고 온 바이트는 read 가 바로 준다 (A1, design_write_arrival_v0) */
 } KiottyNetCode;
 ```
 
@@ -581,8 +582,8 @@ HOLD 뒤의 timeout 처럼 걸린 요청이 없으면 return 은 보통의 actio
 | Stream 함수 | 하는 일 |
 |---|---|
 | `readConnectionStream(stream, buffer, length, timeout_milliseconds)` | 수신 Stage 에 남은 것을 먼저, 비면 socket 에서 최대 length. 0 바이트 (peer 가 닫음) 면 `KIOTTY_NET_CODE_PEER_CLOSED` |
-| `writeConnectionStream(stream, data, timeout_milliseconds)` | 전부 보낼 때까지 돌아오지 않는다. 평문은 사용자 버퍼에서 바로 보낸다 (복사 없음). TLS 는 send_capacity 씩 암호화한다 |
-| `writeConnectionStreamFile(stream, path, offset, length, timeout_milliseconds)` | 파일의 [offset, offset + length) 를 send_capacity 씩 읽어 write 와 같은 길로 보낸다. 파일이 없거나 범위가 넘으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT` |
+| `writeConnectionStream(stream, data, timeout_milliseconds)` | 전부 보낼 때까지 돌아오지 않는다. 평문은 사용자 버퍼에서 바로 보낸다 (복사 없음). TLS 는 send_capacity 씩 암호화한다. 시작할 때와 송신이 막힐 때 상대 바이트가 오면 수신 Stage 로 옮기고 `{ 보낸 만큼, KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING }` 으로 멈춘다 (TLS 는 평문이 나올 때만, Stage 가 차 있으면 보지 않음). 이어 보내려면 `data + bytes` 부터 다시 write. 상대가 닫았으면 EOF 는 `PEER_CLOSED`, RST 는 `SOCKET_ERROR` 이고 그 전에 온 바이트는 read 로 받는다 (A1) |
+| `writeConnectionStreamFile(stream, path, offset, length, timeout_milliseconds)` | 파일의 [offset, offset + length) 를 send_capacity 씩 읽어 write 와 같은 길로 보낸다. 파일이 없거나 범위가 넘으면 `KIOTTY_NET_CODE_INVALID_ARGUMENT`. 상대 바이트는 시작할 때만 본다 (`DATA_ARRIVED_WHILE_WRITING`, 아무것도 보내지 않음). 보내는 중의 도착을 보려면 파일을 읽어 조각 write 로 보낸다 |
 | `isConnectionStreamOpen(stream)` | peer 가 아직 연결돼 있는가. 비용 없는 확인 (recv peek). 오래 걸리는 작업 중에 주기적으로 본다 |
 | `closeConnectionStream(stream, then)` | Work 를 끝내고 다음 action 을 돌려준다. 한 번만 |
 
@@ -800,7 +801,7 @@ void            KiottyNet_destroyStreamClient(KiottyNetContext context, KiottyNe
 KiottyNetCode   KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls);   /* 연결돼 있으면 먼저 끊는다. tls 가 NULL 이면 평문. max_trial / trial_interval_milliseconds 만큼 재시도 */
 void            KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client);
 KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 최대 length. 0 바이트면 KIOTTY_NET_CODE_PEER_CLOSED */
-KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client, KiottyNetSpan data, uint32_t timeout_milliseconds);
+KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client, KiottyNetSpan data, uint32_t timeout_milliseconds);   /* 상대 바이트가 오면 { 보낸 만큼, KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING } 로 멈춘다. writeConnectionStream 과 같은 규칙 */
 
 typedef struct KiottyNetEventClient* KiottyNetEventClientHandle;
 typedef struct KiottyNetEventClientResult { KiottyNetCode code; KiottyNetEventClientHandle handle; } KiottyNetEventClientResult;

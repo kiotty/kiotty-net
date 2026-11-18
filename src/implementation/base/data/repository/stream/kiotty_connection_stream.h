@@ -38,6 +38,12 @@ namespace kiotty::net::implementation
         KiottyNetCode   handshake(uint32_t timeout_milliseconds);
 
     private:
+        enum class ArrivalWatch : uint8_t
+        {
+            OFF,
+            ON
+        };
+
         struct Sent
         {
             size_t     length;
@@ -59,10 +65,18 @@ namespace kiotty::net::implementation
         KiottyNetCode   flush(const Deadline& deadline);
         KiottyNetCode   flushCipherStage(const Deadline& deadline);
         KiottyNetCode   flushPipe(const Deadline& deadline);
+        KiottyNetResult sendWatched(KiottyNetSpan data, const Deadline& deadline);
         KiottyNetResult send(KiottyNetSpan data, const Deadline& deadline);
+        KiottyNetResult sendPlain(KiottyNetSpan data, const Deadline& deadline);
         KiottyNetCode   sendRecord(KiottyNetSpan part, const Deadline& deadline);
         Sent            sendAll(Span<const char> data, const Deadline& deadline);
-        SocketCode      awaitWritable(SocketCode code, const Deadline& deadline);
+        SocketCode      awaitSendable(SocketCode code, const Deadline& deadline);
+        bool            hasArrivalRoom();
+        KiottyNetCode   takeArrival();
+        KiottyNetCode   absorb();
+        KiottyNetCode   absorbPlain();
+        KiottyNetCode   absorbCipher();
+        KiottyNetCode   decodeArrival();
         SocketCode      waitReadable(const Deadline& deadline);
         SocketCode      receiveCipher();
         SocketCode      receiveIntoStage();
@@ -73,6 +87,7 @@ namespace kiotty::net::implementation
         TlsPipe       _pipe;
         StageBase&    _receive;
         StageBase&    _send;
+        ArrivalWatch  _watch;
     };
 
     LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds);

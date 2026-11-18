@@ -524,7 +524,7 @@ TEST(TlsMemory, EachConnectedPairHoldsABoundedAmountOfOpenSslMemory)
     REQUIRE_TLS();
     ASSERT_TRUE(openSslMemory().counting);
     const size_t pairs = 4;
-    const size_t bound_bytes = 128 * 1024;
+    const size_t bound_bytes = 160 * 1024;
     Profiles profiles;
     openDefaults(profiles);
     {

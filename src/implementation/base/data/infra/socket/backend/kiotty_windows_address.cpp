@@ -38,6 +38,7 @@ namespace kiotty::net::implementation
         {
             SocketCode code;
             bool       is_woken;
+            bool       is_readable;
         };
 
         AddressResult unixAddressOf(Span<const char> path);
@@ -119,7 +120,11 @@ namespace kiotty::net::implementation
             if (slice.is_expired) { return SocketCode::TIMEOUT; }
             const Readiness ready = selectOnce(Watch{ socket, wakeOf(stop), direction }, slice);
             if (ready.code != SocketCode::SUCCESS) { return ready.code; }
-            if (!ready.is_woken) { return SocketCode::SUCCESS; }
+            if (!ready.is_woken)
+            {
+                const bool is_arrival = direction == WaitDirection::EITHER && ready.is_readable;
+                return is_arrival ? SocketCode::READABLE : SocketCode::SUCCESS;
+            }
             stop->drain();
         }
     }
@@ -203,16 +208,21 @@ namespace kiotty::net::implementation
             FD_ZERO(&readable);
             FD_ZERO(&writable);
             FD_ZERO(&failed);
-            FD_SET(watch.socket, watch.direction == WaitDirection::READ ? &readable : &writable);
+            const bool is_reading = watch.direction != WaitDirection::WRITE;
+            const bool is_writing = watch.direction != WaitDirection::READ;
+            if (is_reading) { FD_SET(watch.socket, &readable); }
+            if (is_writing) { FD_SET(watch.socket, &writable); }
             FD_SET(watch.socket, &failed);
             if (watch.wake != INVALID_SOCKET) { FD_SET(watch.wake, &readable); }
             timeval limit = timevalOf(slice.milliseconds);
             timeval* wait = slice.milliseconds == 0 ? nullptr : &limit;
             const int found = ::select(0, &readable, &writable, &failed, wait);
-            if (found == 0) { return Readiness{ SocketCode::TIMEOUT, false }; }
-            if (found < 0) { return Readiness{ lastSocketCode(), false }; }
+            if (found == 0) { return Readiness{ SocketCode::TIMEOUT, false, false }; }
+            if (found < 0) { return Readiness{ lastSocketCode(), false, false }; }
             const bool is_woken = watch.wake != INVALID_SOCKET && FD_ISSET(watch.wake, &readable);
-            return Readiness{ SocketCode::SUCCESS, is_woken };
+            const bool is_readable = FD_ISSET(watch.socket, &readable) != 0;
+            const bool is_failed = FD_ISSET(watch.socket, &failed) != 0;
+            return Readiness{ SocketCode::SUCCESS, is_woken, is_readable || is_failed };
         }
     }
 }
