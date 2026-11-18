@@ -4,6 +4,11 @@
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        bool isSending(const HttpUpload& upload);
+    }
+
     HttpUpload idleUpload()
     {
         return HttpUpload{ 0, KIOTTY_NET_HTTP_METHOD_GET, UploadMode::IDLE };
@@ -18,7 +23,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode checkUploadPiece(const HttpUpload& upload, size_t length)
     {
-        if (upload.mode == UploadMode::IDLE) { return INVALID; }
+        if (!isSending(upload)) { return INVALID; }
         if (length > RESULT_MAXIMUM_BYTES) { return INVALID; }
         const bool is_counted = upload.mode == UploadMode::LENGTH;
         const bool is_over = is_counted && length > upload.left;
@@ -34,11 +39,24 @@ namespace kiotty::net::implementation
         return taken;
     }
 
+    HttpUpload refuseUpload(const HttpUpload& upload)
+    {
+        return HttpUpload{ 0, upload.method, UploadMode::REFUSED };
+    }
+
     KiottyNetCode checkUploadEnd(const HttpUpload& upload)
     {
-        if (upload.mode == UploadMode::IDLE) { return INVALID; }
+        if (!isSending(upload)) { return INVALID; }
         const bool is_short = upload.mode == UploadMode::LENGTH && upload.left > 0;
         if (is_short) { return INVALID; }
         return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    namespace
+    {
+        bool isSending(const HttpUpload& upload)
+        {
+            return upload.mode == UploadMode::LENGTH || upload.mode == UploadMode::CHUNKED;
+        }
     }
 }

@@ -154,4 +154,42 @@ TEST_F(HttpClientTlsTest, CloseWakesAReadBlockedOnASilentStream)
     EXPECT_EQ("GET:", readBody(client, WAIT_MS).text);
 }
 
+TEST_F(HttpClientTlsTest, UploadsWithLengthAndChunkedOverOneKeptConnection)
+{
+    const KiottyNetHttpClientRequest request =
+        KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_PUT, "/echo");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_beginHttpRequest(client, &request, nullptr, 0, 6, WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeHttpRequestBody(client, "abc", 3, WAIT_MS).code);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeHttpRequestBody(client, "def", 3, WAIT_MS).code);
+    const KiottyNetHttpReply put = KiottyNet_finishHttpRequest(client, WAIT_MS);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, put.code);
+    EXPECT_EQ("PUT:abcdef", readBody(client, WAIT_MS).text);
+    const KiottyNetHttpClientRequest chunked =
+        KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_POST, "/echo");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS,
+              KiottyNet_beginHttpRequest(client, &chunked, nullptr, 0, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN, WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeHttpRequestBody(client, "gh", 2, WAIT_MS).code);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeHttpRequestBody(client, "ij", 2, WAIT_MS).code);
+    const KiottyNetHttpReply post = KiottyNet_finishHttpRequest(client, WAIT_MS);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, post.code);
+    EXPECT_EQ("POST:ghij", readBody(client, WAIT_MS).text);
+    EXPECT_EQ(1u, site->connections());
+}
+
+TEST_F(HttpClientTlsTest, BeginOnAnIdleConnectionTheServerClosedOpensANewOne)
+{
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_getHttp(client, "/echo", nullptr, 0, WAIT_MS).code);
+    EXPECT_EQ("GET:", readBody(client, WAIT_MS).text);
+    std::this_thread::sleep_for(std::chrono::milliseconds(PAST_KEEP_ALIVE_MS));
+    const KiottyNetHttpClientRequest request =
+        KiottyNet_makeHttpClientRequest(KIOTTY_NET_HTTP_METHOD_POST, "/echo");
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS,
+              KiottyNet_beginHttpRequest(client, &request, nullptr, 0, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN, WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_writeHttpRequestBody(client, "abc", 3, WAIT_MS).code);
+    const KiottyNetHttpReply posted = KiottyNet_finishHttpRequest(client, WAIT_MS);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, posted.code);
+    EXPECT_EQ("POST:abc", readBody(client, WAIT_MS).text);
+    EXPECT_EQ(2u, site->connections());
+}
+
 #endif

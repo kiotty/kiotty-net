@@ -4,6 +4,13 @@
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        constexpr uint32_t IDLE_PROBE_MILLISECONDS = 1;
+
+        bool isIdle(ConnectionStream& stream);
+    }
+
     TimeLeftResult timeLeftOf(const Deadline& deadline)
     {
         const uint32_t left = deadline.remaining();
@@ -42,6 +49,16 @@ namespace kiotty::net::implementation
         return Connected{ line.reconnect(target.address, deadline), false };
     }
 
+    Connected ensureIdleConnected(StreamClient& line,
+                                  const HttpClientTarget& target,
+                                  const Deadline& deadline)
+    {
+        const StreamResult stream = line.stream();
+        const bool is_stale = stream && !isIdle(stream.value());
+        if (is_stale) { line.disconnect(); }
+        return ensureConnected(line, target, deadline);
+    }
+
     KiottyNetCode writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline)
     {
         const TimeLeftResult left = timeLeftOf(deadline);
@@ -60,5 +77,17 @@ namespace kiotty::net::implementation
         const KiottyNetCode sent = writeAll(line, head, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS || body.empty()) { return sent; }
         return writeAll(line, body, deadline);
+    }
+
+    namespace
+    {
+        bool isIdle(ConnectionStream& stream)
+        {
+            const StagedResult staged = stream.peek(0, IDLE_PROBE_MILLISECONDS);
+            const bool has_staged = !staged || staged.value.length > 0;
+            if (has_staged) { return false; }
+            const StagedResult probed = stream.peek(1, IDLE_PROBE_MILLISECONDS);
+            return !probed && probed.code == KIOTTY_NET_CODE_TIMEOUT;
+        }
     }
 }

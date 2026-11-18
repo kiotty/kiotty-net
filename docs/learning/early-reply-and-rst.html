@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>먼저 온 응답과 RST : 올리는 중에 서버가 거절하면</title>
+<meta name="description" content="kiotty-net HttpClient v1 U2: 올리는 중 서버가 413 / 401 을 먼저 보내고 RST 로 닫을 때 Linux 와 Windows 가 다른 이유와 고치는 세 길">
+<style>
+:root{--bg:#fbfbfa;--fg:#1f2328;--muted:#59636e;--line:#d8dee4;--code-bg:#f3f5f7;--accent:#0b6bcb;--note:#e8f1fb;--tip:#e9f7ee;--warn:#fdf1e1;--th:#eef1f4;--mark:#fff3bf}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}}
+:root[data-theme="dark"]{--bg:#0f1418;--fg:#dde3e9;--muted:#9aa5b1;--line:#2a333d;--code-bg:#161c22;--accent:#6cb2ff;--note:#122233;--tip:#102a1a;--warn:#2e2410;--th:#1b232b;--mark:#4a3f12}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",Roboto,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+main{max-width:1000px;margin:0 auto;padding:32px 16px 96px}
+header.top{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+h1{font-size:1.9rem;line-height:1.3;margin:0 0 10px}
+h2{font-size:1.45rem;margin:56px 0 14px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:34px 0 10px}
+h4{font-size:1rem;margin:24px 0 8px;color:var(--muted)}
+p{margin:10px 0}
+.sub{color:var(--muted);margin:0}
+.meta{color:var(--muted);font-size:.9rem}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:ui-monospace,"Cascadia Code",Consolas,"D2Coding",Menlo,monospace;font-size:.88em;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre.code{position:relative;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:.84rem;line-height:1.55;margin:12px 0}
+pre.code code{background:none;padding:0;font-size:inherit;white-space:pre}
+pre.code::before{content:attr(data-lang);position:absolute;right:10px;top:6px;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;vertical-align:top;text-align:left}
+th{background:var(--th);white-space:nowrap}
+td code{white-space:nowrap}
+.box{border-left:4px solid var(--accent);background:var(--note);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+.box.tip{border-color:#2e9e5b;background:var(--tip)}
+.box.warn{border-color:#d9822b;background:var(--warn)}
+.box>strong:first-child{display:block;margin-bottom:4px}
+nav.toc{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:20px 0}
+nav.toc ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:28px}
+nav.toc li{margin:3px 0;break-inside:avoid}
+@media (max-width:640px){nav.toc ol{columns:1}}
+ul,ol{padding-left:24px}li{margin:4px 0}
+mark{background:var(--mark);color:inherit;padding:0 3px;border-radius:3px}
+figure{margin:18px 0}figcaption{color:var(--muted);font-size:.88rem;text-align:center;margin-top:6px}
+svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:0 8px;font-size:.8rem;color:var(--muted);margin-right:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+footer{margin-top:60px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<main>
+<header class="top">
+<h1>먼저 온 응답과 RST : 올리는 중에 서버가 거절하면</h1>
+<p class="sub">HttpClient v1 U2 의 정할 것 1 이 Windows 에서 왜 깨지는지, 그리고 고치는 세 길</p>
+<p class="meta">작성일 2026-11-18 · 관련 문서: <code>docs/design/design_http_client_v1.html</code> 4절, 8절 정할 것 1, 7절의 U2 note · <code>docs/progress/261118_progress_http_client_u2.md</code> · 코드: <code>src/implementation/http/data/repository/client/kiotty_http_client_exchange.cpp</code> (<code>write</code>, <code>finish</code>, <code>refusedReply</code>), <code>src/implementation/base/data/repository/stream/kiotty_connection_stream.cpp</code> (<code>send</code>, <code>awaitWritable</code>) · 테스트: <code>tests/integration/kiotty_test_http_client_upload.cpp</code> 의 <code>FinishShowsTheReplyOfAServerThatRefusedTheBodyEarly</code>, <code>FinishAfterAWriteThePeerCutOffShowsTheReplyItSentFirst</code></p>
+</header>
+
+<nav class="toc"><strong>차례</strong>
+<ol>
+<li><a href="#s0">한 줄 요약</a></li>
+<li><a href="#s1">장면</a></li>
+<li><a href="#s2">바이트가 머무는 자리</a></li>
+<li><a href="#s3">FIN 과 RST</a></li>
+<li><a href="#s4">시간 순서로 보기</a></li>
+<li><a href="#s5">Linux 와 Windows 의 차이</a></li>
+<li><a href="#s6">지금 kiotty 가 하는 일</a></li>
+<li><a href="#s7">왜 문제인가</a></li>
+<li><a href="#s8">언제 일어나고 언제 숨는가</a></li>
+<li><a href="#s9">write 가 막혀 있는 동안 온 응답</a></li>
+<li><a href="#s10">고치는 세 길</a></li>
+<li><a href="#s11">TLS 에서는</a></li>
+<li><a href="#s12">다른 라이브러리는</a></li>
+<li><a href="#s13">정해야 할 것</a></li>
+</ol>
+</nav>
+
+<h2 id="s0">0. 한 줄 요약</h2>
+<p>올리기 (begin → write 여러 번 → finish) 도중에 서버가 413 / 401 같은 응답을 먼저 보내고 연결을 끊으면, 그 응답 바이트는 <b>운영체제의 수신 버퍼</b>에 와 있지만 kiotty 는 올리는 동안 읽지 않으므로 <b>우리 수신 Stage 에는 아직 없다</b>. 서버의 끊음이 RST 로 오면 <mark>Linux 는 그 바이트를 남겨 두고 Windows 는 버린다</mark>. 그래서 같은 코드가 Linux 에서는 finish 로 413 을 돌려주고, Windows 에서는 <code>SOCKET_ERROR</code> 를 돌려준다. 고치려면 RST 가 오기 전에 그 바이트를 우리 Stage 로 옮겨야 한다.</p>
+
+<h2 id="s1">1. 장면</h2>
+<p>설계 6.1 의 "펌웨어 / 로그 파일 올리기" 를 그대로 쓴다.</p>
+<pre class="code" data-lang="c"><code>begin(client, { PUT, "/devices/7/logs/today.log", OCTET_STREAM }, [], 4 MiB, 5000)   /* 머리만 */
+loop : write(client, piece, 64 KiB, 10000)                                           /* 64 번 */
+reply = finish(client, 30000)</code></pre>
+<p>서버는 body 를 256 KiB 까지만 받는다 (우리 HttpServer 의 <code>KiottyNet_configureHttpBodyCapacity</code>, nginx 의 <code>client_max_body_size</code> 와 같은 것). 서버는 머리의 <code>Content-Length: 4194304</code> 를 보자마자 받을 수 없다는 것을 안다. 그래서 body 를 기다리지 않고</p>
+<ol>
+<li><code>HTTP/1.1 413 Content Too Large</code> 를 보내고</li>
+<li>연결을 닫는다. 이 연결의 뒤에 오는 바이트는 4 MiB 짜리 body 이므로 다음 요청으로 읽을 수 없기 때문이다.</li>
+</ol>
+<p>앱이 기대하는 것: finish 가 <code>{ SUCCESS, status 413 }</code> 을 돌려주고, 앱은 "파일이 너무 크다" 를 알고 나누어 올리거나 포기한다. 401 이면 토큰을 새로 받고 다시 한다. 이것이 설계의 정할 것 1 "보여준다" 다.</p>
+
+<h2 id="s2">2. 바이트가 머무는 자리</h2>
+<p>TCP 바이트는 상대 앱에 닿기까지 여러 버퍼를 지난다. 이 문제는 "응답 바이트가 지금 <b>어느 칸에</b> 있느냐" 의 문제다.</p>
+<pre class="code" data-lang="text"><code> 서버 앱                                                      클라이언트 (kiotty)
+ ───────                                                      ───────────────────
+ "413 ..." ─▶ [서버 커널 송신 버퍼] ─▶ 네트워크 ─▶ [클라이언트 커널 수신 버퍼] ─▶ [수신 Stage] ─▶ HttpReplyStore
+                                                     (A)                      (B)
+                                                 운영체제가 가진 칸         kiotty 가 가진 칸</code></pre>
+<table>
+<tr><th>칸</th><th>누가 가지나</th><th>언제 채워지나</th><th>언제 비워지나</th></tr>
+<tr><td>(A) 커널 수신 버퍼</td><td>운영체제</td><td>패킷이 오면 운영체제가 알아서</td><td>앱이 <code>recv</code> 를 부르면 앱으로. <b>RST 가 오면 운영체제 마음대로</b> (5절)</td></tr>
+<tr><td>(B) 수신 Stage</td><td>kiotty (<code>StreamClient::_receive</code>)</td><td>kiotty 가 <code>recv</code> 를 불렀을 때 (<code>ConnectionStream::peek</code> / <code>fillStage</code>)</td><td>응답 머리 / body 를 읽어 <code>consume</code> 할 때, 또는 <code>disconnect</code></td></tr>
+</table>
+<p>핵심: <b>올리는 동안 kiotty 는 <code>recv</code> 를 부르지 않는다.</b> begin / write 는 보내기만 한다 (<code>writeAll</code> → <code>ConnectionStream::write</code>). 그래서 서버가 먼저 보낸 413 은 (A) 에 쌓여 있고 (B) 는 비어 있다. (A) 에 있는 동안은 운영체제의 규칙을 따른다.</p>
+
+<h2 id="s3">3. FIN 과 RST</h2>
+<p>TCP 연결을 끝내는 방법은 둘이다.</p>
+<table>
+<tr><th></th><th>FIN (정상 종료)</th><th>RST (강제 종료)</th></tr>
+<tr><td>뜻</td><td>"나는 더 보낼 것이 없다". 반대 방향은 아직 열려 있다</td><td>"이 연결은 없다". 양쪽 모두 끝</td></tr>
+<tr><td>받는 쪽의 읽기</td><td>와 있는 바이트를 다 읽은 뒤 EOF (<code>recv</code> 가 0) → kiotty 의 <code>PEER_CLOSED</code></td><td>오류 (<code>ECONNRESET</code> / <code>WSAECONNRESET</code>) → kiotty 의 <code>SOCKET_ERROR</code></td></tr>
+<tr><td>받는 쪽의 쓰기</td><td>보낼 수는 있다 (상대가 이미 닫았으면 상대가 RST 로 답한다)</td><td>오류 (<code>EPIPE</code> / <code>ECONNRESET</code>)</td></tr>
+</table>
+<div class="box warn"><strong>읽지 않은 바이트가 있는 채로 닫으면 RST 가 나간다</strong>앱이 <code>close</code> 를 부를 때 자기 커널 수신 버퍼에 아직 읽지 않은 바이트가 있으면, 운영체제는 FIN 대신 RST 를 보낸다 (RFC 1122 4.2.2.13, RFC 2525 2.17). "상대가 보낸 것을 아무도 읽지 않았다" 를 상대에게 알리는 것이다. 위 장면의 서버가 바로 이 경우다: 클라이언트가 보낸 body 가 서버의 수신 버퍼에 남아 있는 채로 닫는다. 서버가 413 뒤에 <code>shutdown(SHUT_WR)</code> 로 FIN 을 먼저 보냈더라도, 그 뒤 소켓을 닫는 순간 남은 body 때문에 RST 가 나간다. 이미 닫힌 소켓으로 클라이언트의 body 가 더 도착해도 서버 운영체제는 RST 로 답한다.</div>
+<p>우리 HttpServer 도 같다. 연결을 닫을 때 <code>IoLoop::submit</code> 의 CLOSE 가 <code>shutdownWrite</code> (FIN) 를 한 뒤 소켓을 놓는다. 남은 body 를 끝까지 읽어 주는 "lingering close" (8절) 는 하지 않는다.</p>
+
+<h2 id="s4">4. 시간 순서로 보기</h2>
+<table>
+<tr><th>#</th><th>클라이언트 앱 / kiotty</th><th>클라이언트 커널 수신 버퍼 (A)</th><th>수신 Stage (B)</th><th>서버</th></tr>
+<tr><td>1</td><td><code>begin</code>: 머리를 보냄</td><td>비어 있음</td><td>비어 있음</td><td></td></tr>
+<tr><td>2</td><td><code>write</code> 1 번째 64 KiB 보냄</td><td></td><td></td><td>머리를 읽음. 4 MiB &gt; 256 KiB</td></tr>
+<tr><td>3</td><td><code>write</code> 2 번째 ...</td><td><mark>"HTTP/1.1 413 ..."</mark> 도착</td><td>비어 있음 (읽지 않으므로)</td><td>413 을 보냄, FIN</td></tr>
+<tr><td>4</td><td><code>write</code> 3 번째 ...</td><td>413 + FIN</td><td>비어 있음</td><td>소켓을 닫음. 읽지 않은 body 가 있어 <b>RST</b></td></tr>
+<tr><td>5</td><td></td><td><b>RST 도착</b> → 운영체제가 처리 (5절)</td><td>비어 있음</td><td></td></tr>
+<tr><td>6</td><td><code>write</code> n 번째: <code>SOCKET_ERROR</code> (또는 <code>PEER_CLOSED</code>)</td><td>Linux: 413 이 남아 있음 / Windows: 버려짐</td><td>비어 있음</td><td></td></tr>
+<tr><td>7</td><td><code>finish</code>: 응답 머리를 읽음 (<code>receiveReply</code> → <code>recv</code>)</td><td>Linux: 413 을 내줌 / Windows: <code>WSAECONNRESET</code></td><td>Linux: 413 이 들어옴</td><td></td></tr>
+<tr><td>8</td><td>Linux: <code>{ SUCCESS, 413 }</code> / Windows: <code>{ SOCKET_ERROR }</code></td><td></td><td></td><td></td></tr>
+</table>
+<p>3 과 5 사이는 루프백에서 수 마이크로초, 실제 네트워크에서도 왕복 한 번 안쪽이다. 그 사이에 kiotty 가 (A) 를 (B) 로 옮기지 않으면 5 에서 운영체제의 규칙이 결과를 정한다.</p>
+
+<h2 id="s5">5. Linux 와 Windows 의 차이</h2>
+<div class="two">
+<div class="box tip"><strong>Linux</strong>RST 를 받으면 소켓에 오류 (<code>ECONNRESET</code>) 를 표시하고 연결을 닫힌 상태로 둔다. 그러나 이미 수신 큐에 들어와 있던 바이트는 지우지 않는다. <code>recv</code> 는 큐에 바이트가 있으면 먼저 그것을 돌려주고, 큐가 비었을 때 오류를 돌려준다. 그래서 7 의 finish 가 413 을 읽는다.</div>
+<div class="box warn"><strong>Windows (Winsock)</strong>RST 를 받으면 연결을 끊고 아직 앱이 읽지 않은 수신 바이트를 버린다. 다음 <code>recv</code> 는 바로 <code>WSAECONNRESET</code> 이다. 그래서 7 의 finish 는 아무것도 읽지 못하고 <code>SOCKET_ERROR</code> 를 돌려준다.</div>
+</div>
+<p>이것은 kiotty 가 고를 수 있는 동작이 아니라 운영체제 TCP 구현의 차이다. 우리가 확인한 것은 다음과 같다 (2026-11-18).</p>
+<table>
+<tr><th>테스트</th><th>WSL Ubuntu (gcc / clang, TLS 켬 / 끔, asan, tsan, release)</th><th>Windows MSVC</th></tr>
+<tr><td><code>FinishShowsTheReplyOfAServerThatRefusedTheBodyEarly</code> (우리 HttpServer, 256 KiB 상한에 4 MiB)</td><td>통과: finish 가 413</td><td>실패: finish 가 <code>SOCKET_ERROR</code> (code 2)</td></tr>
+<tr><td><code>FinishAfterAWriteThePeerCutOffShowsTheReplyItSentFirst</code> (raw peer 가 401 을 보내고 FIN 뒤 닫음)</td><td>통과: finish 가 401 과 body <code>nope</code></td><td>실패: finish 가 <code>SOCKET_ERROR</code></td></tr>
+</table>
+<p>macOS / iOS (BSD 계열), Android (Linux 커널) 은 따로 확인하지 않았다. Android 는 Linux 와 같을 것으로 보지만 확인 전에는 기대지 않는다.</p>
+
+<h2 id="s6">6. 지금 kiotty 가 하는 일 (U2 구현)</h2>
+<pre class="code" data-lang="text"><code>write(piece)
+  sendPiece → writeAll → ConnectionStream::write          (보내기만, recv 없음)
+  실패 code 가 PEER_CLOSED / SOCKET_ERROR 면
+      stopUpload: 연결을 닫지 않고 upload.mode = REFUSED   (수신 Stage 와 소켓을 남김)
+  그 밖의 실패 (TIMEOUT, CLOSED) 면 연결을 닫고 IDLE
+
+finish()
+  mode 가 REFUSED 면 끝 표시를 보내지 않고 refusedReply:
+      receiveReply → readLine → ConnectionStream::peek → recv   (여기서 처음으로 (A) 를 읽는다)
+      성공하면 응답을 돌려주고 persistence = CLOSE (body 뒤에 닫음)
+      실패하면 그 code 를 돌려줌</code></pre>
+<p>U2 는 "연결이 끊겨도 (B) 와 소켓을 지우지 않는다" 까지 했다. U1 에서는 write 실패 때 바로 <code>disconnect</code> 해서 (B) 와 소켓을 모두 지웠으므로 Linux 에서도 응답을 볼 수 없었다. 남은 문제는 (A) 에 있는 동안 RST 가 오는 경우다. 그때 Windows 의 운영체제가 (A) 를 지운다.</p>
+
+<h2 id="s7">7. 왜 문제인가</h2>
+<ul>
+<li><b>이유를 잃는다.</b> 앱은 413 (너무 큼), 401 (토큰 만료), 403 (권한 없음), 507 (저장소 가득) 을 네트워크 장애 (<code>SOCKET_ERROR</code>) 와 구별하지 못한다.</li>
+<li><b>헛된 재시도.</b> 네트워크 장애로 보이면 보통 앱은 같은 올리기를 다시 한다. 413 이나 401 이면 몇 번을 해도 같은 결과다. 장비에서는 그만큼 회선과 전력을 쓰고, 로그 올리기가 밀린다.</li>
+<li><b>플랫폼마다 결과가 다르다.</b> 같은 앱 코드가 Linux 장비에서는 413 을 보고 Windows 의 시험 도구 / PC 앱에서는 <code>SOCKET_ERROR</code> 를 본다. 테스트와 현장이 갈린다.</li>
+</ul>
+
+<h2 id="s8">8. 언제 일어나고 언제 숨는가</h2>
+<p>이 문제가 드러나려면 세 가지가 모두 맞아야 한다.</p>
+<ol>
+<li>서버가 body 를 다 받기 전에 응답한다 (413, 401, 403, 507, 혹은 라우트가 없음 404).</li>
+<li>서버가 남은 body 를 읽지 않고 닫는다 → RST.</li>
+<li>클라이언트가 그 응답을 RST 가 오기 전에 자기 쪽으로 읽어 두지 않는다.</li>
+</ol>
+<div class="box"><strong>lingering close 가 문제를 숨긴다</strong>HTTP/1.1 (RFC 9112 9.6) 은 서버가 응답 뒤에 바로 닫지 말고 쓰기 쪽만 닫은 다음 (FIN) 상대가 보내는 것을 잠시 읽어 버리라고 권한다. nginx 는 이것을 기본으로 한다 (<code>lingering_close</code>, <code>lingering_time</code> 30 초, <code>lingering_timeout</code> 5 초). 이런 서버를 만나면 2 가 일어나지 않는다. 클라이언트의 write 는 계속 성공하고 (서버가 읽어 버리므로), finish 가 413 을 읽는다. 그러나 lingering 에도 시간 한도가 있어서 느린 회선에서 큰 파일을 올리면 한도가 지나 RST 가 나간다. 또 kiotty 의 HttpServer, 작은 임베디드 서버, 일부 proxy / gateway 는 lingering 을 하지 않는다. 클라이언트는 서버를 고를 수 없으므로 2 가 일어난다고 보아야 한다.</div>
+
+<h2 id="s9">9. write 가 막혀 있는 동안 온 응답</h2>
+<p>4절의 장면은 write 가 짧게 끝나는 경우다. 큰 조각을 느린 회선으로 보내면 write 는 대부분의 시간을 "송신 버퍼에 자리가 날 때까지 기다림" 에서 보낸다.</p>
+<pre class="code" data-lang="text"><code>ConnectionStream::write → send → sendAll
+    send() 가 WOULD_BLOCK  →  awaitWritable → waitWritable (poll POLLOUT / select write)
+                                  ↑ 여기서 몇 초씩 잠들어 있다
+    이 사이에 413 이 (A) 에 도착하고, 이어서 RST 가 도착한다
+    poll 이 오류로 깨어남 → write 가 SOCKET_ERROR</code></pre>
+<p>서버는 머리를 보자마자 413 을 보내므로, <b>413 이 도착하는 때는 거의 언제나 클라이언트가 write 안에서 기다리고 있을 때</b>다. 이 기다림은 "쓸 수 있게 됨" 만 보고 "읽을 것이 옴" 은 보지 않는다. 그래서 "write 를 부르기 전에 한 번 확인" 하는 방법 (10절의 길 2) 은 이 경우를 놓친다.</p>
+
+<h2 id="s10">10. 고치는 세 길</h2>
+<p>목표는 하나다: <b>RST 가 오기 전에 (A) 의 바이트를 (B) 로 옮긴다.</b> (B) 에 들어온 바이트는 kiotty 의 메모리이므로 운영체제가 지울 수 없다. 그 뒤의 finish 는 지금 코드 그대로 (B) 에서 413 을 읽는다.</p>
+
+<h3>길 1. write 의 기다림이 읽을 것도 본다 (추천)</h3>
+<pre class="code" data-lang="text"><code>ConnectionStream 송신의 기다림
+    지금 : poll(POLLOUT)
+    바꿈 : poll(POLLOUT | POLLIN)
+        POLLOUT 이면 → 지금처럼 이어서 보냄
+        POLLIN  이면 → recv 로 (A) 를 수신 Stage (B) 로 옮김 (Stage 가 차면 그만 옮김)
+                       그리고 다시 기다림 (보내기는 계속)
+    송신이 끝내 실패하면 → write 는 SOCKET_ERROR / PEER_CLOSED,
+                          그러나 413 은 이미 (B) 에 있으므로 finish 가 읽는다</code></pre>
+<ul>
+<li><b>되는 것:</b> 9절의 "막혀 있는 동안 온 응답" 까지 잡는다. Windows / Linux 모두. 바이트가 오는 즉시 옮기므로 RST 와의 경주에서 거의 언제나 먼저다 (같은 poll 이 둘을 함께 보고하면 recv 를 먼저 한다).</li>
+<li><b>고치는 자리:</b> base 의 <code>ConnectionStream</code> 송신 경로 (<code>awaitWritable</code>, 소켓 backend 의 <code>waitWritable</code> 옆에 "둘 다 기다림" 하나). 이 경로는 HttpClient 뿐 아니라 StreamClient 의 <code>writeStream</code> 과 서버의 work stream (worker thread 가 <code>ConnectionStream</code> 으로 직접 보냄) 도 쓴다. 이벤트 루프가 보내는 서버의 보통 응답은 이 경로를 쓰지 않는다.</li>
+<li><b>값:</b> 수신 Stage 를 넘치게 받지 않도록 Stage 의 남은 자리만큼만 옮긴다. Stage 가 차면 POLLIN 을 그만 보고 지금처럼 POLLOUT 만 기다린다 (응답 머리는 Stage 하나에 들어가므로 413 의 머리는 잡힌다).</li>
+<li><b>조심할 것:</b> 보내는 중에 들어온 바이트가 "응답" 인지 아닌지는 base 가 판단하지 않는다. 옮기기만 하고, 읽는 것은 지금처럼 http 의 finish 가 한다. 올리기가 아닌 보통 송신에서도 와 있는 바이트를 조금 일찍 Stage 로 옮길 뿐이라 뜻이 바뀌지 않는다.</li>
+<li><b>크기:</b> base 의 소켓 backend (POSIX 의 <code>waitFor</code>, Windows 의 <code>waitReady</code> 에 "읽기 또는 쓰기" 방향 하나) 와 <code>ConnectionStream</code>, 그리고 테스트. 별도의 작은 사이클로 하는 것이 맞다.</li>
+</ul>
+
+<h3>길 2. write 를 부를 때마다 한 번 확인</h3>
+<pre class="code" data-lang="text"><code>HttpClientExchange::write
+    조각을 보내기 전에: 소켓에 읽을 것이 있는지 기다림 없이 한 번 본다
+        있으면 → (B) 로 옮기고, upload.mode = REFUSED, write 는 오류를 돌려줌 (어떤 code 인지 새로 정해야 함)
+        없으면 → 지금처럼 보냄</code></pre>
+<ul>
+<li><b>되는 것:</b> write 와 write 사이에 도착한 응답. http 쪽만 바뀐다.</li>
+<li><b>안 되는 것:</b> 9절의 경우 (write 안에서 기다리는 동안 응답과 RST 가 함께 옴). Windows 에서 가장 흔한 경우를 놓친다.</li>
+<li><b>값:</b> write 마다 시스템 호출 하나. kiotty 의 <code>peek</code> 는 0 ms 를 "끝없이" 로 보므로 (<code>Deadline(0)</code>) 기다림 없는 확인은 새 함수가 필요하다. 그리고 "서버가 아직 열려 있는데 응답을 먼저 보냈다" 를 write 가 어떤 code 로 알릴지 정해야 한다 (설계 4절의 표에 없는 경우).</li>
+</ul>
+
+<h3>길 3. 플랫폼 차이로 둔다</h3>
+<ul>
+<li>코드는 지금 그대로. 설계 정할 것 1 과 user guide 에 "Windows 에서는 서버가 RST 로 닫으면 먼저 온 응답을 잃고 <code>SOCKET_ERROR</code> 가 될 수 있다" 를 적는다.</li>
+<li>두 테스트는 Windows 에서 "응답 또는 연결 잃음 code" 를 받아들이게 한다.</li>
+<li>값: 없음. 대신 7절의 문제가 Windows 에 남는다. 대상 장비가 Linux 만이라면 현장에서는 문제가 없고, Windows 는 개발 / 시험 도구에서만 보인다.</li>
+</ul>
+
+<table>
+<tr><th></th><th>write 사이에 온 응답</th><th>write 가 막혀 있을 때 온 응답</th><th>바뀌는 곳</th><th>값</th></tr>
+<tr><td>길 1</td><td>Linux ○ Windows ○</td><td>Linux ○ Windows ○</td><td>base 송신 경로 + 소켓 backend</td><td>기다림이 읽기도 봄</td></tr>
+<tr><td>길 2</td><td>Linux ○ Windows ○</td><td>Linux ○ Windows ✗</td><td>http (HttpClientExchange) + 기다림 없는 확인 함수</td><td>write 마다 시스템 호출 하나, 새 code 의 뜻</td></tr>
+<tr><td>길 3</td><td>Linux ○ Windows ✗</td><td>Linux ○ Windows ✗</td><td>문서와 테스트</td><td>없음</td></tr>
+</table>
+<p>Linux 의 ○ 는 지금도 된다 (5절). 세 길이 다른 것은 Windows (와 확인하지 않은 BSD 계열) 뿐이다.</p>
+
+<h2 id="s11">11. TLS 에서는</h2>
+<ul>
+<li>(A) 에 오는 것은 암호문 레코드다. 길 1 은 그것을 TLS 의 수신 Stage (<code>TlsEngine::stages().receive</code>) 로 옮기면 된다. 풀기 (decode) 는 지금처럼 finish 의 읽기가 한다.</li>
+<li>지금 코드에는 TLS 만의 걸림이 하나 더 있다. 송신이 깨지면 보내지 못한 암호문이 송신 Stage 에 남을 수 있고, <code>ConnectionStream</code> 의 읽기는 시작할 때 송신 Stage 를 먼저 비우려 한다 (<code>flush</code>). 연결이 이미 끊겼으므로 그 flush 가 실패하고, finish 는 Linux 에서도 응답 대신 연결 잃음 code 를 돌려줄 수 있다. 길 1 을 하면 <code>REFUSED</code> 뒤의 읽기는 보내지 못한 것을 버리고 읽도록 함께 고친다. 길 2 / 3 에서도 이것은 따로 남는다 (U2 progress 의 "설계와 다른 것" 3).</li>
+<li>TLS 1.3 의 NewSessionTicket 처럼 응답이 아닌 레코드도 (A) 에 온다. 길 1 은 옮기기만 하므로 상관없다. 풀어 보면 평문이 없을 뿐이다.</li>
+</ul>
+
+<h2 id="s12">12. 다른 라이브러리는</h2>
+<table>
+<tr><th>라이브러리</th><th>올리는 중에 읽나</th><th>결과</th></tr>
+<tr><td>libcurl</td><td>읽는다. 한 연결의 읽기 / 쓰기를 함께 기다리고, 올리는 중 응답이 오면 받는다. 기본으로 300 이상의 응답이 먼저 오면 body 보내기를 멈춘다 (<code>CURLOPT_KEEP_SENDING_ON_ERROR</code> 로 바꿈)</td><td>길 1 에 가깝다</td></tr>
+<tr><td>Go <code>net/http</code></td><td>읽는다. 연결마다 읽기 goroutine 과 쓰기 goroutine 이 따로 돈다</td><td>응답을 먼저 받으면 쓰기 오류보다 응답을 돌려준다</td></tr>
+<tr><td>Python <code>http.client</code> / <code>requests</code></td><td>읽지 않는다. 다 보낸 뒤에 읽는다 (kiotty 의 지금과 같음)</td><td>큰 올리기에 413 대신 <code>ConnectionResetError</code> / <code>BrokenPipeError</code> 가 나는 것이 널리 알려진 증상이다</td></tr>
+</table>
+<p>위 표는 각 라이브러리의 공개된 동작을 요약한 것이다. 버전마다 세부는 다를 수 있다.</p>
+
+<h2 id="s13">13. 정해야 할 것</h2>
+<div class="box"><strong>질문</strong>Windows (와 확인하지 않은 BSD 계열) 에서 "서버가 먼저 보낸 응답" 을 지킬 것인가.
+<ul>
+<li><b>지킨다 → 길 1.</b> U2 는 지금 상태 (Linux 에서 됨) 로 끝내고, 길 1 을 별도 사이클 (예: U2b) 로 base 송신 경로에 넣는다. 그 사이클이 끝나기 전에는 두 테스트를 Windows 에서 길 3 처럼 받아들이게 해 두어야 U2 를 commit 할 수 있다.</li>
+<li><b>일부만 → 길 2.</b> 9절의 경우를 놓친다는 것을 받아들일 때. 새 write code 의 뜻을 정해야 한다.</li>
+<li><b>지키지 않는다 → 길 3.</b> 대상 장비가 Linux / Android 뿐이고 Windows 는 개발용일 때.</li>
+</ul>
+</div>
+<p>추천은 길 1 이다. 413 / 401 은 올리기에서 가장 흔한 거절이고, 그것은 9절처럼 write 가 막혀 있을 때 오기 때문이다. 길 2 는 고치는 양에 비해 가장 흔한 경우를 놓친다.</p>
+
+<footer>5절의 Linux / Windows 동작은 2026-11-18 의 WSL Ubuntu 24.04 (커널 6.x) 와 Windows 10 (19045) 에서 테스트로 관찰한 것이다. 12절은 각 라이브러리의 공개 문서와 알려진 동작의 요약이며 kiotty 에서 확인한 것은 아니다.</footer>
+</main>
+</body>
+</html>

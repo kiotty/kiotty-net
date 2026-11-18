@@ -66,7 +66,7 @@ namespace kiotty::net::implementation
         dropUpload();
         dropUnreadReply(_line, _state);
         const Deadline deadline(timeout_milliseconds);
-        const Connected link = ensureConnected(_line, _state.target, deadline);
+        const Connected link = ensureIdleConnected(_line, _state.target, deadline);
         const Span<const char> no_body{ nullptr, 0 };
         const KiottyNetCode sent = transmit(head.value, no_body, link, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
@@ -91,7 +91,7 @@ namespace kiotty::net::implementation
         const KiottyNetCode sent = sendPiece(data, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
         {
-            dropUpload();
+            stopUpload(sent);
             return resultOf(0, sent);
         }
         _state.upload = takeUploadPiece(_state.upload, data.length);
@@ -106,13 +106,18 @@ namespace kiotty::net::implementation
         settleUpload();
         if (_state.upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
         const KiottyNetHttpMethod method = _state.upload.method;
+        const Deadline deadline(timeout_milliseconds);
+        if (_state.upload.mode == UploadMode::REFUSED)
+        {
+            _state.upload = idleUpload();
+            return refusedReply(method, deadline);
+        }
         const KiottyNetCode ended = checkUploadEnd(_state.upload);
         if (ended != KIOTTY_NET_CODE_SUCCESS)
         {
             dropUpload();
             return failedReply(ended);
         }
-        const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode sent = sendEnd(deadline);
         _state.upload = idleUpload();
         const bool is_sent = sent == KIOTTY_NET_CODE_SUCCESS;
@@ -198,6 +203,19 @@ namespace kiotty::net::implementation
         return writeAll(_line, textOf(LAST_UPLOAD_CHUNK), deadline);
     }
 
+    KiottyNetHttpReply HttpClientExchange::refusedReply(KiottyNetHttpMethod method,
+                                                        const Deadline& deadline)
+    {
+        const ReplyHead reply = receiveReply(_line, _state, method, deadline);
+        if (reply.code == KIOTTY_NET_CODE_SUCCESS)
+        {
+            _state.persistence = Persistence::CLOSE;
+        }
+        const bool is_read = reply.code == KIOTTY_NET_CODE_SUCCESS && _state.body.isFinished();
+        if (is_read) { _line.disconnect(); }
+        return replyOf(_line, _state, reply.code);
+    }
+
     void HttpClientExchange::settleUpload()
     {
         const bool is_open = static_cast<bool>(_line.stream());
@@ -209,6 +227,16 @@ namespace kiotty::net::implementation
         const bool is_uploading = _state.upload.mode != UploadMode::IDLE;
         if (is_uploading) { _line.disconnect(); }
         _state.upload = idleUpload();
+    }
+
+    void HttpClientExchange::stopUpload(KiottyNetCode code)
+    {
+        if (isConnectionLoss(code))
+        {
+            _state.upload = refuseUpload(_state.upload);
+            return;
+        }
+        dropUpload();
     }
 
     namespace

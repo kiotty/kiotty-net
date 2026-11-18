@@ -13,6 +13,7 @@ namespace kiotty::net::implementation
         IDLE,
         LENGTH,
         CHUNKED,
+        REFUSED,
     };
 
     struct HttpUpload

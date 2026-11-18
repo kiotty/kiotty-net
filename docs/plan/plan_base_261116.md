@@ -28,13 +28,14 @@
 | H1 ~ H5 | `design_http_v0.html` | HTTP 서버 | 끝 |
 | W, V1 ~ V4, B3 | `design_websocket_v0.html`, `design_websocket_v1.html` | WebSocket | 끝 |
 | C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
-| U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1 끝, U2 / U3 남음 |
+| U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 남음 |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
+| A1 ~ A3 | (쓸 것) write 중 도착 설계 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 전 |
 
 ## 2. 앞으로의 순서
 
 ```text
-R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → U3
+R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → (설계) → A1 → A2 → A3 → U3
 ```
 
 | 사이클 | 하는 것 | 완료 |
@@ -49,7 +50,10 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 | R5 client State | `HttpClientState`, `ConnectionStream` 의 peek / consume, StreamClient 공개 메서드 정리, `HttpClientExchange(state, line)` (friend 제거), 값으로 잇는 client 흐름 (`Connected`, `ReplyHead`) | HttpClient 테스트 그대로, friend 0. 끝 (`5a615f5`) |
 | R6 usecases | 모든 모듈의 C ABI 를 usecases 함수로, `src/kiotty_net_*.cpp` 는 인자 변환만 | adapter 에 조합 로직 없음. 끝 (`ce65bd8`) |
 | R7 http ↔ websocket 경계 | 설계 `design_http_websocket_boundary_v0.html` (2026-11-17, 이름 `UpgradeSession`). R7-1 `UpgradeSession` 과 answer / open / step / end, R7-2 access 가 `SocketLink` 만, R7-3 클라이언트 자기 state, R7-4 handler 공개 필드. `HttpUpgradeHandler` 의 answer / step / end 가 session 통째 대신 필요한 것 (요청 view, 응답 store, body 버퍼, 한도) 만 받음. 클라이언트가 `HttpSessionHost` 를 통째로 빌리지 않고 자기 state 를 가짐. `WebSocketHandler` 의 공개 필드 (owner, lane, client, role, mask_state) 정리 | websocket 이 http 의 session / host 를 include 하지 않음 (남은 것: `WebSocketServer : HttpServer` 의 `host().registry` / `push_capacity`). websocket 테스트 그대로. 끝 (R7-1 `4828405`, R7-2 `1c2e99e`, R7-3 `cd92ede`, R7-4 `ffc708e`) |
-| U2 연결과 취소 | begin 의 살아 있는지 보기, close 로 깨우기, 송신 오류 정리, TLS, 먼저 온 응답 (`design_http_client_v1.html` 정할 것 1) | integration: idle 연결 뒤 begin, close 가 걸린 write 를 깨움, 413, https 올리기 |
+| U2 연결과 취소 | begin 의 살아 있는지 보기, close 로 깨우기, 송신 오류 정리, TLS, 먼저 온 응답 (`design_http_client_v1.html` 정할 것 1) | integration: idle 연결 뒤 begin, close 가 걸린 write 를 깨움, 413, https 올리기. 끝 (Windows 의 먼저 온 응답은 A3) |
+| A1 base | `KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING` (enum 끝), 소켓 backend 의 읽기 또는 쓰기 기다림, `ConnectionStream` 의 멈추는 write (시작할 때 한 번 + 막힐 때마다 확인, 수신 Stage 로 옮김, Stage 가 차면 OUT 만, TLS 는 평문이 나올 때만), StreamClient 와 서버 work stream | 평문 / TLS 멈춤, FIN / RST 구별, Stage 가 찼을 때 헛돌지 않음, NewSessionTicket 에 멈추지 않음, Windows 에서 RST 앞의 바이트를 지킴 |
+| A2 HTTP 서버 work | work 층이 도착을 다음 요청으로 보고 계속 씀, `failureOf` 의 `isStreamOpen` 짐작 없앰, `isHttpWorkConnected` 문서 | pipelining 중 긴 응답, SSE 에서 클라이언트가 떠나면 다음 write 가 `PEER_CLOSED` |
+| A3 HttpClient 올리기 | 멈추면 응답 머리를 읽어 1xx 는 버리고 이어 보냄, 최종 응답이면 `REFUSED` 와 새 code, finish 가 그 응답 | Windows 에서도 413 / 401, U2 의 두 테스트를 다시 엄격하게 |
 | U3 도우미, C++, 문서 | `sendHttpFile`, C++ begin / write / finish, user guide / requirement / 구현 가이드 / 테스트 계획, Python `http.server` 외부 확인 | wrapper 테스트, 매트릭스 |
 
 미결 (사이클 없음): WebSocket streaming (보내기 begin / write / finish, 받기는 조각마다 `onMessage`). `requirement_v0.md` 의 메모. 이름 / 켜는 단위 / 조각 크기를 정해야 사이클이 된다.
@@ -81,3 +85,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 2026-11-17 모듈 정리 R7-1 (`4828405`, `docs/progress/261117_progress_module_layout_r7_1.md`): `UpgradeSession` 과 answer / open / step / end, http 가 101 을 보냄, websocket 의 frame / message / control / handshake 가 http session 을 include 하지 않음. MSVC 847, WSL 848 × 6, release-tls 847.
 
 2026-11-17 모듈 정리 R7-2 (`1c2e99e`), R7-3 (`cd92ede`), R7-4 (`ffc708e`), `docs/progress/261117_progress_module_layout_r7_{2,3,4}.md`: access 가 websocket 의 칸만 봄, 클라이언트가 자기 `WebSocketClientState` (`HttpReplyStore`), `WebSocketHandler` 공개 필드 0 (`SocketSide`). MSVC 847, WSL 848 × 6, release-tls 847.
+
+2026-11-18 HttpClient v1 U2 (`docs/progress/261118_progress_http_client_u2.md`): begin 이 다시 쓰는 연결을 1 ms peek 로 확인 (닫힘, 남은 바이트, TLS close_notify 면 다시 연결), write 가 연결을 잃으면 `REFUSED` 로 두고 finish 가 먼저 온 응답 (413, 401) 을 돌려줌, close 가 걸린 write 를 깨움, https 올리기. MSVC 857, WSL 858 × 6, release-tls 857.

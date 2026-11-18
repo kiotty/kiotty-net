@@ -2,14 +2,18 @@
 
 #include "support/kiotty_test_http_site.h"
 #include "support/kiotty_test_peer.h"
+#include "support/kiotty_test_wait.h"
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <future>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 #if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
 
@@ -19,6 +23,21 @@ namespace
     const size_t   SITE_BODY_BYTES = 256 * 1024;
     const size_t   LARGE_BODY_BYTES = 100000;
     const size_t   PIECE_BYTES = 7000;
+    const uint32_t KEEP_ALIVE_MS = 150;
+    const uint32_t PAST_KEEP_ALIVE_MS = 800;
+    const uint32_t ARRIVAL_MS = 100;
+    const uint32_t LONG_CALL_MS = 20000;
+    const uint32_t WAKE_BOUND_MS = 2000;
+    const uint32_t CLOSE_DELAY_MS = 200;
+    const size_t   STUCK_PIECE_BYTES = 1024 * 1024;
+    const size_t   STUCK_ROUNDS = 1024;
+    const size_t   REFUSED_BODY_BYTES = 4 * 1024 * 1024;
+    const size_t   REFUSED_PIECE_BYTES = 64 * 1024;
+#if defined(_WIN32)
+    const bool     RESET_DROPS_RECEIVED_BYTES = true;
+#else
+    const bool     RESET_DROPS_RECEIVED_BYTES = false;
+#endif
 
     using kiotty_test::readBody;
     using kiotty_test::textSpan;
@@ -55,6 +74,16 @@ namespace
             received.push_back(next);
         }
         return true;
+    }
+
+    bool isConnectionLoss(KiottyNetCode code)
+    {
+        return code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
+    }
+
+    bool isReplyDroppedByReset(const KiottyNetHttpReply& reply)
+    {
+        return RESET_DROPS_RECEIVED_BYTES && isConnectionLoss(reply.code);
     }
 
     class HttpClientUploadTest : public ::testing::Test
@@ -345,6 +374,148 @@ TEST_F(HttpClientUploadTest, KnownLengthWireBytesAreTheHeadThenTheRawPieces)
     EXPECT_EQ("PUT /echo HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(peer.port()) + "\r\n"
               "Content-Type: application/octet-stream\r\nContent-Length: 6\r\n\r\nabcdef",
               received);
+}
+
+TEST_F(HttpClientUploadTest, BeginOnAnIdleConnectionTheServerClosedOpensANewOne)
+{
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureHttpTimeouts(&limits, WAIT_MS, KEEP_ALIVE_MS));
+    connectToSite();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_getHttp(client, "/echo", nullptr, 0, WAIT_MS).code);
+    EXPECT_EQ("GET:", readBody(client, WAIT_MS).text);
+    std::this_thread::sleep_for(std::chrono::milliseconds(PAST_KEEP_ALIVE_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_POST, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, write("abc").code);
+    EXPECT_EQ("POST:abc", finishAndRead());
+    EXPECT_EQ(2u, site->connections());
+    EXPECT_EQ(1u, site->count(KIOTTY_NET_HTTP_METHOD_POST));
+}
+
+TEST_F(HttpClientUploadTest, BeginOnAnIdleConnectionTheServerResetOpensANewOne)
+{
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    ASSERT_TRUE(peer.reset());
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_PUT, 3));
+    ASSERT_TRUE(peer.accept(WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, write("abc").code);
+    std::string received;
+    ASSERT_TRUE(readUntil(peer, received, "\r\n\r\nabc"));
+    EXPECT_EQ(0u, received.find("PUT /echo HTTP/1.1\r\n"));
+}
+
+TEST_F(HttpClientUploadTest, BeginDoesNotReuseAConnectionWithUnaskedBytes)
+{
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    const std::string unasked = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+    ASSERT_TRUE(peer.sendAll(unasked.data(), unasked.size()));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_PUT, 3));
+    ASSERT_TRUE(peer.reset());
+    ASSERT_TRUE(peer.accept(WAIT_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, write("abc").code);
+    std::future<KiottyNetHttpReply> finished =
+        std::async(std::launch::async, [this]() { return KiottyNet_finishHttpRequest(client, WAIT_MS); });
+    std::string received;
+    ASSERT_TRUE(readUntil(peer, received, "\r\n\r\nabc"));
+    const std::string reply = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+    ASSERT_TRUE(peer.sendAll(reply.data(), reply.size()));
+    const KiottyNetHttpReply answered = finished.get();
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, answered.code);
+    EXPECT_EQ(201, answered.status);
+}
+
+TEST_F(HttpClientUploadTest, CloseWakesAWriteBlockedOnAPeerThatDoesNotRead)
+{
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_POST, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN));
+    const std::vector<char> stuck(STUCK_PIECE_BYTES, 'x');
+    std::thread closer([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(CLOSE_DELAY_MS));
+        KiottyNet_closeHttpClient(client);
+    });
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    KiottyNetResult woken = { 0, KIOTTY_NET_CODE_SUCCESS };
+    for (size_t round = 0; round < STUCK_ROUNDS && woken.code == KIOTTY_NET_CODE_SUCCESS; ++round)
+    {
+        woken = KiottyNet_writeHttpRequestBody(client, stuck.data(), stuck.size(), LONG_CALL_MS);
+    }
+    const uint32_t elapsed = kiotty_test::elapsedMilliseconds(started);
+    closer.join();
+    EXPECT_EQ(KIOTTY_NET_CODE_CLOSED, woken.code);
+    EXPECT_EQ(0, woken.bytes);
+    EXPECT_LT(elapsed, CLOSE_DELAY_MS + WAKE_BOUND_MS);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, write("abc").code);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_finishHttpRequest(client, WAIT_MS).code);
+}
+
+TEST_F(HttpClientUploadTest, FinishShowsTheReplyOfAServerThatRefusedTheBodyEarly)
+{
+    connectToSite();
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_PUT, REFUSED_BODY_BYTES));
+    const std::string piece = patternText(REFUSED_PIECE_BYTES);
+    for (size_t offset = 0; offset < REFUSED_BODY_BYTES; offset += piece.size())
+    {
+        if (write(piece).code != KIOTTY_NET_CODE_SUCCESS) { break; }
+    }
+    const KiottyNetHttpReply reply = KiottyNet_finishHttpRequest(client, WAIT_MS);
+    if (!isReplyDroppedByReset(reply))
+    {
+        ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, reply.code);
+        EXPECT_EQ(413, reply.status);
+        readBody(client, WAIT_MS);
+    }
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, write(piece).code);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_getHttp(client, "/echo", nullptr, 0, WAIT_MS).code);
+    EXPECT_EQ("GET:", readBody(client, WAIT_MS).text);
+    EXPECT_EQ(0u, site->count(KIOTTY_NET_HTTP_METHOD_PUT));
+}
+
+TEST_F(HttpClientUploadTest, FinishAfterAWriteThePeerCutOffShowsTheReplyItSentFirst)
+{
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_PUT, REFUSED_BODY_BYTES));
+    std::string received;
+    ASSERT_TRUE(readUntil(peer, received, "\r\n\r\n"));
+    const std::string reply = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 4\r\n\r\nnope";
+    ASSERT_TRUE(peer.sendAll(reply.data(), reply.size()));
+    ASSERT_TRUE(peer.shutdownWrite());
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_MS));
+    peer.close();
+    const std::string piece = patternText(REFUSED_PIECE_BYTES);
+    KiottyNetCode stopped = KIOTTY_NET_CODE_SUCCESS;
+    for (size_t offset = 0; offset < REFUSED_BODY_BYTES && stopped == KIOTTY_NET_CODE_SUCCESS; offset += piece.size())
+    {
+        stopped = write(piece).code;
+    }
+    EXPECT_TRUE(isConnectionLoss(stopped)) << stopped;
+    const KiottyNetHttpReply answered = KiottyNet_finishHttpRequest(client, WAIT_MS);
+    if (isReplyDroppedByReset(answered)) { return; }
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, answered.code);
+    EXPECT_EQ(401, answered.status);
+    EXPECT_EQ("nope", readBody(client, WAIT_MS).text);
+}
+
+TEST_F(HttpClientUploadTest, FinishAfterAWriteThePeerCutOffWithoutAReplyGivesTheLoss)
+{
+    kiotty_test::LoopbackPeer peer;
+    connectToPeer(peer);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, begin(KIOTTY_NET_HTTP_METHOD_PUT, REFUSED_BODY_BYTES));
+    ASSERT_TRUE(peer.reset());
+    std::this_thread::sleep_for(std::chrono::milliseconds(ARRIVAL_MS));
+    const std::string piece = patternText(REFUSED_PIECE_BYTES);
+    KiottyNetCode stopped = KIOTTY_NET_CODE_SUCCESS;
+    for (size_t offset = 0; offset < REFUSED_BODY_BYTES && stopped == KIOTTY_NET_CODE_SUCCESS; offset += piece.size())
+    {
+        stopped = write(piece).code;
+    }
+    EXPECT_TRUE(isConnectionLoss(stopped)) << stopped;
+    const KiottyNetCode finished = KiottyNet_finishHttpRequest(client, WAIT_MS).code;
+    EXPECT_TRUE(isConnectionLoss(finished)) << finished;
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_finishHttpRequest(client, WAIT_MS).code);
 }
 
 #endif

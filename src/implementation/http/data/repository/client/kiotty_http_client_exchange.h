@@ -44,8 +44,10 @@ namespace kiotty::net::implementation
         KiottyNetCode      checkStart(const ClientRequest& request);
         KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
         KiottyNetCode      sendEnd(const Deadline& deadline);
+        KiottyNetHttpReply refusedReply(KiottyNetHttpMethod method, const Deadline& deadline);
         void               settleUpload();
         void               dropUpload();
+        void               stopUpload(KiottyNetCode code);
 
         HttpClientState& _state;
         StreamClient&    _line;

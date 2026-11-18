@@ -12,5 +12,6 @@ namespace kiotty::net::implementation
     HttpUpload    startUpload(KiottyNetHttpMethod method, uint64_t body_length);
     KiottyNetCode checkUploadPiece(const HttpUpload& upload, size_t length);
     HttpUpload    takeUploadPiece(const HttpUpload& upload, size_t length);
+    HttpUpload    refuseUpload(const HttpUpload& upload);
     KiottyNetCode checkUploadEnd(const HttpUpload& upload);
 }

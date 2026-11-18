@@ -24,6 +24,9 @@ namespace kiotty::net::implementation
     Connected       ensureConnected(StreamClient& line,
                                     const HttpClientTarget& target,
                                     const Deadline& deadline);
+    Connected       ensureIdleConnected(StreamClient& line,
+                                        const HttpClientTarget& target,
+                                        const Deadline& deadline);
     KiottyNetCode   writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline);
     KiottyNetCode   sendBytes(StreamClient& line,
                               Span<const char> head,

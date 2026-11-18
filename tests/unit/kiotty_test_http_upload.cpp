@@ -12,6 +12,7 @@ using kiotty::net::implementation::chunkHeadOf;
 using kiotty::net::implementation::ChunkHead;
 using kiotty::net::implementation::HttpUpload;
 using kiotty::net::implementation::idleUpload;
+using kiotty::net::implementation::refuseUpload;
 using kiotty::net::implementation::startUpload;
 using kiotty::net::implementation::takeUploadPiece;
 using kiotty::net::implementation::UploadMode;
@@ -86,6 +87,19 @@ TEST(HttpUpload, IdleRefusesPiecesAndTheEnd)
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadPiece(upload, 0));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadPiece(upload, 1));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadEnd(upload));
+}
+
+TEST(HttpUpload, RefusedKeepsTheMethodAndRefusesPiecesAndTheEnd)
+{
+    const HttpUpload counted = refuseUpload(startUpload(PUT, 10));
+    EXPECT_EQ(UploadMode::REFUSED, counted.mode);
+    EXPECT_EQ(PUT, counted.method);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadPiece(counted, 0));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadPiece(counted, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadEnd(counted));
+    const HttpUpload chunked = refuseUpload(startUpload(PUT, KIOTTY_NET_HTTP_BODY_LENGTH_UNKNOWN));
+    EXPECT_EQ(UploadMode::REFUSED, chunked.mode);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, checkUploadEnd(chunked));
 }
 
 TEST(HttpUpload, ChunkHeadIsLowercaseHexAndLineEnd)
