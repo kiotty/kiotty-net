@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 108b70b
+    KiottyNet single header, generated from commit 53a4393
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -2342,6 +2342,13 @@ KIOTTY_NET_API KiottyNetResult    KiottyNet_writeHttpRequestBody(
 KIOTTY_NET_API KiottyNetHttpReply KiottyNet_finishHttpRequest(
     KiottyNetHttpClientHandle client,
     uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetHttpReply KiottyNet_sendHttpFile(
+    KiottyNetHttpClientHandle client,
+    const KiottyNetHttpClientRequest* request,
+    const KiottyNetHttpHeader* headers,
+    size_t header_count,
+    const char* path,
+    uint32_t timeout_milliseconds);
 
 KIOTTY_NET_API KiottyNetResult KiottyNet_readHttpReplyBody(
     KiottyNetHttpClientHandle client,
@@ -2709,6 +2716,28 @@ public:
         uint32_t timeout_milliseconds);
 
     KiottyNetResult readBody(void* buffer, size_t length, uint32_t timeout_milliseconds);
+
+    KiottyNetCode begin(
+        const KiottyNetHttpClientRequest& request,
+        uint64_t body_length,
+        uint32_t timeout_milliseconds);
+    KiottyNetCode begin(
+        const KiottyNetHttpClientRequest& request,
+        const KiottyNet_HttpHeaderList& headers,
+        uint64_t body_length,
+        uint32_t timeout_milliseconds);
+    KiottyNetResult    write(const void* data, size_t length, uint32_t timeout_milliseconds);
+    KiottyNetResult    write(KiottyNetSpan data, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+    KiottyNetHttpReply sendFile(
+        const KiottyNetHttpClientRequest& request,
+        const char* path,
+        uint32_t timeout_milliseconds);
+    KiottyNetHttpReply sendFile(
+        const KiottyNetHttpClientRequest& request,
+        const KiottyNet_HttpHeaderList& headers,
+        const char* path,
+        uint32_t timeout_milliseconds);
 
 private:
     KiottyNet_HttpClient(KiottyNetContext context, KiottyNetHttpClientResult result);
@@ -3398,6 +3427,90 @@ inline KiottyNetResult KiottyNet_HttpClient::readBody(
     uint32_t timeout_milliseconds)
 {
     return KiottyNet_readHttpReplyBody(_handle.get(), buffer, length, timeout_milliseconds);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::begin(
+    const KiottyNetHttpClientRequest& request,
+    uint64_t body_length,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_beginHttpRequest(
+        _handle.get(),
+        &request,
+        nullptr,
+        0,
+        body_length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetCode KiottyNet_HttpClient::begin(
+    const KiottyNetHttpClientRequest& request,
+    const KiottyNet_HttpHeaderList& headers,
+    uint64_t body_length,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return headers.code();
+    }
+    return KiottyNet_beginHttpRequest(
+        _handle.get(),
+        &request,
+        headers.data(),
+        headers.count(),
+        body_length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetResult KiottyNet_HttpClient::write(
+    const void* data,
+    size_t length,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_writeHttpRequestBody(_handle.get(), data, length, timeout_milliseconds);
+}
+
+inline KiottyNetResult KiottyNet_HttpClient::write(
+    KiottyNetSpan data,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_writeHttpRequestBody(
+        _handle.get(),
+        data.data,
+        data.length,
+        timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::finish(uint32_t timeout_milliseconds)
+{
+    return KiottyNet_finishHttpRequest(_handle.get(), timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::sendFile(
+    const KiottyNetHttpClientRequest& request,
+    const char* path,
+    uint32_t timeout_milliseconds)
+{
+    return KiottyNet_sendHttpFile(_handle.get(), &request, nullptr, 0, path, timeout_milliseconds);
+}
+
+inline KiottyNetHttpReply KiottyNet_HttpClient::sendFile(
+    const KiottyNetHttpClientRequest& request,
+    const KiottyNet_HttpHeaderList& headers,
+    const char* path,
+    uint32_t timeout_milliseconds)
+{
+    if (headers.code() != KIOTTY_NET_CODE_SUCCESS)
+    {
+        return refusedReply(headers.code());
+    }
+    return KiottyNet_sendHttpFile(
+        _handle.get(),
+        &request,
+        headers.data(),
+        headers.count(),
+        path,
+        timeout_milliseconds);
 }
 
 inline KiottyNetHttpReply KiottyNet_HttpClient::refusedReply(KiottyNetCode code)
@@ -8080,7 +8193,8 @@ namespace kiotty::net::implementation
         HttpClientTarget  target;
         Span<char>        head_area;
         size_t            max_headers;
-        Persistence       persistence;
+        size_t            file_piece;
+        Persistence      persistence;
         BusyFlag          busy;
     };
 
@@ -8148,6 +8262,9 @@ namespace kiotty::net::implementation
                                  uint32_t timeout_milliseconds);
         KiottyNetResult    write(Span<const char> data, uint32_t timeout_milliseconds);
         KiottyNetHttpReply finish(uint32_t timeout_milliseconds);
+        KiottyNetHttpReply sendFile(const ClientRequest& request,
+                                    Span<const char> path,
+                                    uint32_t timeout_milliseconds);
 
     private:
         struct Attempt
@@ -8165,6 +8282,16 @@ namespace kiotty::net::implementation
                                     Span<const char> body,
                                     const Connected& link,
                                     const Deadline& deadline);
+        KiottyNetCode      start(const ClientRequest& request,
+                                 uint64_t body_length,
+                                 const Deadline& deadline);
+        KiottyNetHttpReply end(const Deadline& deadline);
+        KiottyNetCode      sendFileBody(Span<const char> path,
+                                        uint64_t length,
+                                        const Deadline& deadline);
+        KiottyNetCode      sendFilePart(Span<const char> path,
+                                        FileRange part,
+                                        const Deadline& deadline);
         KiottyNetCode      checkStart(const ClientRequest& request);
         KiottyNetCode      sendHead(Span<const char> head, const Deadline& deadline);
         KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
@@ -10885,6 +11012,10 @@ namespace kiotty::net::implementation
                                              Span<const char> data,
                                              uint32_t timeout_milliseconds);
     KiottyNetHttpReply  finishHttpRequest(HttpClient& client, uint32_t timeout_milliseconds);
+    KiottyNetHttpReply  sendHttpFile(HttpClient& client,
+                                     const ClientRequest& request,
+                                     Span<const char> path,
+                                     uint32_t timeout_milliseconds);
 }
 
 #endif
@@ -10895,6 +11026,7 @@ namespace
 {
     using net::INVALID;
     constexpr size_t        MAX_TEXT = net::MAX_HTTP_HEADER_BYTES;
+    constexpr size_t        MAX_FILE_PATH_TEXT = KIOTTY_NET_MAX_PATH_LENGTH - 1;
     constexpr KiottyNetSpan NO_TEXT = { nullptr, 0 };
 
     KiottyNetHttpReply failedReply(KiottyNetCode code)
@@ -11155,6 +11287,22 @@ KiottyNetHttpReply KiottyNet_finishHttpRequest(KiottyNetHttpClientHandle client,
 {
     if (client == nullptr) { return failedReply(INVALID); }
     return net::finishHttpRequest(*client, timeout_milliseconds);
+}
+
+KiottyNetHttpReply KiottyNet_sendHttpFile(KiottyNetHttpClientHandle client,
+                                          const KiottyNetHttpClientRequest* request,
+                                          const KiottyNetHttpHeader* headers,
+                                          size_t header_count,
+                                          const char* path,
+                                          uint32_t timeout_milliseconds)
+{
+    if (client == nullptr) { return failedReply(INVALID); }
+    const net::TextResult file = net::parseText(path, MAX_FILE_PATH_TEXT);
+    if (!file) { return failedReply(file.code); }
+    if (file.value.empty()) { return failedReply(INVALID); }
+    const net::ClientRequestResult made = requestOf(request, headers, header_count);
+    if (!made) { return failedReply(made.code); }
+    return net::sendHttpFile(*client, made.value, file.value, timeout_milliseconds);
 }
 
 KiottyNetSpan KiottyNet_findHttpReplyHeader(const KiottyNetHttpReply* reply, const char* name)
@@ -31394,6 +31542,7 @@ namespace kiotty::net::implementation
         KiottyNetCode                checkLimits(const KiottyNetHttpLimits& limits);
         uint16_t                     defaultPortOf(const KiottyNetTlsClientConfiguration* tls);
         KiottyNetClientConfiguration lineReadyOf(const HttpClientConfiguration& configuration);
+        size_t                       filePieceOf(size_t send_capacity);
     }
 
     HttpClient::HttpClient()
@@ -31429,6 +31578,7 @@ namespace kiotty::net::implementation
         _state.reply = HttpReplyStore(reply_area, reply);
         _state.head_area = Span<char>{ _head_bytes.data() + half, half };
         _state.max_headers = limits.max_headers;
+        _state.file_piece = filePieceOf(configuration.client.send_capacity);
         dropReply(_state);
         _state.upload = idleUpload();
         _state.target = HttpClientTarget{};
@@ -31500,6 +31650,12 @@ namespace kiotty::net::implementation
             const size_t wanted = std::max(client.receive_capacity, line_bytes);
             client.receive_capacity = std::min(wanted, MemoryLimits::RECEIVE_CAPACITY);
             return client;
+        }
+
+        size_t filePieceOf(size_t send_capacity)
+        {
+            const bool is_set = send_capacity > 0;
+            return is_set ? send_capacity : MemoryLimits::SEND_CAPACITY;
         }
     }
 }
@@ -31578,6 +31734,22 @@ namespace kiotty::net::implementation
     {
         const BusyGuard guard(_state.busy);
         if (!guard.isHeld()) { return KIOTTY_NET_CODE_BUSY; }
+        const Deadline deadline(timeout_milliseconds);
+        return start(request, body_length, deadline);
+    }
+
+    KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
+    {
+        const BusyGuard guard(_state.busy);
+        if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
+        const Deadline deadline(timeout_milliseconds);
+        return end(deadline);
+    }
+
+    KiottyNetCode HttpClientExchange::start(const ClientRequest& request,
+                                            uint64_t body_length,
+                                            const Deadline& deadline)
+    {
         settleStop(_line);
         const KiottyNetCode checked = checkStart(request);
         if (checked != KIOTTY_NET_CODE_SUCCESS) { return checked; }
@@ -31585,7 +31757,6 @@ namespace kiotty::net::implementation
         if (!head) { return head.code; }
         dropUpload();
         dropUnreadReply(_line, _state);
-        const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode sent = sendHead(head.value, deadline);
         if (sent != KIOTTY_NET_CODE_SUCCESS)
         {
@@ -31615,14 +31786,11 @@ namespace kiotty::net::implementation
         return resultOf(data.length, KIOTTY_NET_CODE_SUCCESS);
     }
 
-    KiottyNetHttpReply HttpClientExchange::finish(uint32_t timeout_milliseconds)
+    KiottyNetHttpReply HttpClientExchange::end(const Deadline& deadline)
     {
-        const BusyGuard guard(_state.busy);
-        if (!guard.isHeld()) { return failedReply(KIOTTY_NET_CODE_BUSY); }
         settleUpload();
         if (_state.upload.mode == UploadMode::IDLE) { return failedReply(INVALID); }
         const KiottyNetHttpMethod method = _state.upload.method;
-        const Deadline deadline(timeout_milliseconds);
         const bool is_refused = _state.upload.mode == UploadMode::REFUSED;
         const bool is_stopped = is_refused || _state.upload.mode == UploadMode::ANSWERED;
         if (is_stopped) { return stoppedReply(deadline); }
@@ -31836,6 +32004,88 @@ namespace kiotty::net::implementation
         bool isConnectionLoss(KiottyNetCode code)
         {
             return code == KIOTTY_NET_CODE_PEER_CLOSED || code == KIOTTY_NET_CODE_SOCKET_ERROR;
+        }
+    }
+}
+
+namespace kiotty::net::implementation
+{
+    namespace
+    {
+        using FileSizeResult = Result<uint64_t, KiottyNetCode>;
+
+        KiottyNetHttpReply unsentReply(KiottyNetCode code);
+        FileSizeResult     fileSizeOf(Span<const char> path);
+    }
+
+    KiottyNetHttpReply HttpClientExchange::sendFile(const ClientRequest& request,
+                                                    Span<const char> path,
+                                                    uint32_t timeout_milliseconds)
+    {
+        const BusyGuard guard(_state.busy);
+        if (!guard.isHeld()) { return unsentReply(KIOTTY_NET_CODE_BUSY); }
+        const FileSizeResult size = fileSizeOf(path);
+        if (!size) { return unsentReply(size.code); }
+        const Deadline deadline(timeout_milliseconds);
+        const KiottyNetCode started = start(request, size.value, deadline);
+        if (started != KIOTTY_NET_CODE_SUCCESS) { return unsentReply(started); }
+        const KiottyNetCode sent = sendFileBody(path, size.value, deadline);
+        if (sent != KIOTTY_NET_CODE_SUCCESS) { stopUpload(sent); }
+        const bool is_dropped = _state.upload.mode == UploadMode::IDLE;
+        if (sent != KIOTTY_NET_CODE_SUCCESS && is_dropped) { return unsentReply(sent); }
+        return end(deadline);
+    }
+
+    KiottyNetCode HttpClientExchange::sendFileBody(Span<const char> path,
+                                                   uint64_t length,
+                                                   const Deadline& deadline)
+    {
+        const uint64_t piece_limit = _state.file_piece;
+        uint64_t       done = 0;
+        while (done < length)
+        {
+            const uint64_t left = length - done;
+            const uint64_t piece = left < piece_limit ? left : piece_limit;
+            const KiottyNetCode sent = sendFilePart(path, FileRange{ done, piece }, deadline);
+            if (sent != KIOTTY_NET_CODE_SUCCESS) { return sent; }
+            _state.upload = takeUploadPiece(_state.upload, static_cast<size_t>(piece));
+            done += piece;
+        }
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode HttpClientExchange::sendFilePart(Span<const char> path,
+                                                   FileRange part,
+                                                   const Deadline& deadline)
+    {
+        for (;;)
+        {
+            const KiottyNetCode early = takeEarlyReplies(deadline);
+            if (early != KIOTTY_NET_CODE_SUCCESS) { return early; }
+            const TimeLeftResult left = timeLeftOf(deadline);
+            if (!left) { return left.code; }
+            const StreamResult stream = _line.stream();
+            if (!stream) { return stream.code; }
+            const KiottyNetCode sent =
+                stream.value().writeFile(path, part.offset, part.length, left.value);
+            if (sent != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent; }
+        }
+    }
+
+    namespace
+    {
+        KiottyNetHttpReply unsentReply(KiottyNetCode code)
+        {
+            return KiottyNetHttpReply{ code, 0, nullptr, 0 };
+        }
+
+        FileSizeResult fileSizeOf(Span<const char> path)
+        {
+            InputFile file;
+            const KiottyNetCode opened = file.open(path);
+            const bool is_open = opened == KIOTTY_NET_CODE_SUCCESS;
+            if (!is_open) { return FileSizeResult::failure(KIOTTY_NET_CODE_NOT_FOUND); }
+            return FileSizeResult::success(file.size());
         }
     }
 }
@@ -32114,6 +32364,7 @@ namespace kiotty::net::implementation
         , target{}
         , head_area{ nullptr, 0 }
         , max_headers(0)
+        , file_piece(0)
         , persistence(Persistence::CLOSE)
         , busy()
     {
@@ -32445,6 +32696,14 @@ namespace kiotty::net::implementation
     KiottyNetHttpReply finishHttpRequest(HttpClient& client, uint32_t timeout_milliseconds)
     {
         return client.exchange().finish(timeout_milliseconds);
+    }
+
+    KiottyNetHttpReply sendHttpFile(HttpClient& client,
+                                    const ClientRequest& request,
+                                    Span<const char> path,
+                                    uint32_t timeout_milliseconds)
+    {
+        return client.exchange().sendFile(request, path, timeout_milliseconds);
     }
 }
 
