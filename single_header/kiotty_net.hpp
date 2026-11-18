@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 90edbc7
+    KiottyNet single header, generated from commit a2aa570
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -96,7 +96,8 @@ typedef enum KiottyNetCode
     KIOTTY_NET_CODE_TLS_RECORD_ERROR,
     KIOTTY_NET_CODE_OUT_OF_MEMORY,
     KIOTTY_NET_CODE_INVALID_ENCODING,
-    KIOTTY_NET_CODE_PEER_NOT_READING
+    KIOTTY_NET_CODE_PEER_NOT_READING,
+    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING
 } KiottyNetCode;
 
 typedef struct KiottyNetResult
@@ -3981,7 +3982,8 @@ namespace kiotty::net::implementation
         OUT_OF_RESOURCE,
         NOT_SUPPORTED,
         BUSY,
-        UNKNOWN
+        UNKNOWN,
+        READABLE
     };
 
     inline KiottyNetCode toNetCode(SocketCode code)
@@ -4008,6 +4010,7 @@ namespace kiotty::net::implementation
         case SocketCode::OUT_OF_RESOURCE:
         case SocketCode::NOT_SUPPORTED:
         case SocketCode::UNKNOWN:
+        case SocketCode::READABLE:
             return KIOTTY_NET_CODE_SOCKET_ERROR;
         }
         return KIOTTY_NET_CODE_SOCKET_ERROR;
@@ -4271,6 +4274,8 @@ namespace kiotty::net::implementation
     TransferResult peek(const ActiveSocket& socket, Span<char> buffer);
     SocketCode     waitReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds);
     SocketCode     waitWritable(const ActiveSocket& socket, uint32_t timeout_milliseconds);
+    SocketCode     waitWritableOrReadable(const ActiveSocket& socket,
+                                          uint32_t timeout_milliseconds);
     SocketCode     shutdownWrite(const ActiveSocket& socket);
     SocketCode     configureNoDelay(const ActiveSocket& socket, NoDelay no_delay);
 }
@@ -6178,6 +6183,12 @@ namespace kiotty::net::implementation
         KiottyNetCode   handshake(uint32_t timeout_milliseconds);
 
     private:
+        enum class ArrivalWatch : uint8_t
+        {
+            OFF,
+            ON
+        };
+
         struct Sent
         {
             size_t     length;
@@ -6199,10 +6210,18 @@ namespace kiotty::net::implementation
         KiottyNetCode   flush(const Deadline& deadline);
         KiottyNetCode   flushCipherStage(const Deadline& deadline);
         KiottyNetCode   flushPipe(const Deadline& deadline);
+        KiottyNetResult sendWatched(KiottyNetSpan data, const Deadline& deadline);
         KiottyNetResult send(KiottyNetSpan data, const Deadline& deadline);
+        KiottyNetResult sendPlain(KiottyNetSpan data, const Deadline& deadline);
         KiottyNetCode   sendRecord(KiottyNetSpan part, const Deadline& deadline);
         Sent            sendAll(Span<const char> data, const Deadline& deadline);
-        SocketCode      awaitWritable(SocketCode code, const Deadline& deadline);
+        SocketCode      awaitSendable(SocketCode code, const Deadline& deadline);
+        bool            hasArrivalRoom();
+        KiottyNetCode   takeArrival();
+        KiottyNetCode   absorb();
+        KiottyNetCode   absorbPlain();
+        KiottyNetCode   absorbCipher();
+        KiottyNetCode   decodeArrival();
         SocketCode      waitReadable(const Deadline& deadline);
         SocketCode      receiveCipher();
         SocketCode      receiveIntoStage();
@@ -6213,6 +6232,7 @@ namespace kiotty::net::implementation
         TlsPipe       _pipe;
         StageBase&    _receive;
         StageBase&    _send;
+        ArrivalWatch  _watch;
     };
 
     LineResult readLine(ConnectionStream stream, uint32_t timeout_milliseconds);
@@ -12613,7 +12633,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -12736,6 +12757,7 @@ namespace kiotty::net::implementation
         bool          isStopped(const StopSignal* stop);
         pollfd        entryOf(int descriptor, short events);
         pollfd        stopEntryOf(const StopSignal* stop);
+        SocketCode    readinessOf(const pollfd& entry);
     }
 
     int descriptorOf(SocketHandle handle)
@@ -12814,7 +12836,7 @@ namespace kiotty::net::implementation
             }
             else if (ready > 0)
             {
-                return SocketCode::SUCCESS;
+                return readinessOf(entries[0]);
             }
         }
     }
@@ -12886,6 +12908,15 @@ namespace kiotty::net::implementation
         bool isStopped(const StopSignal* stop)
         {
             return stop != nullptr && stop->isRaised();
+        }
+
+        SocketCode readinessOf(const pollfd& entry)
+        {
+            const short both = POLLIN | POLLOUT;
+            const bool is_either = (entry.events & both) == both;
+            const short arrival = POLLIN | POLLHUP | POLLERR;
+            const bool is_readable = (entry.revents & arrival) != 0;
+            return is_either && is_readable ? SocketCode::READABLE : SocketCode::SUCCESS;
         }
 
         pollfd entryOf(int descriptor, short events)
@@ -13387,6 +13418,14 @@ namespace kiotty::net::implementation
         return waitFor(descriptor, POLLOUT, timeout_milliseconds, socket.traits().stop);
     }
 
+    SocketCode waitWritableOrReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
+    {
+        if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
+        const int descriptor = descriptorOf(socket.handle());
+        const short events = POLLIN | POLLOUT;
+        return waitFor(descriptor, events, timeout_milliseconds, socket.traits().stop);
+    }
+
     SocketCode shutdownWrite(const ActiveSocket& socket)
     {
         if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
@@ -13468,7 +13507,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -13518,6 +13558,7 @@ namespace kiotty::net::implementation
         {
             SocketCode code;
             bool       is_woken;
+            bool       is_readable;
         };
 
         AddressResult unixAddressOf(Span<const char> path);
@@ -13599,7 +13640,11 @@ namespace kiotty::net::implementation
             if (slice.is_expired) { return SocketCode::TIMEOUT; }
             const Readiness ready = selectOnce(Watch{ socket, wakeOf(stop), direction }, slice);
             if (ready.code != SocketCode::SUCCESS) { return ready.code; }
-            if (!ready.is_woken) { return SocketCode::SUCCESS; }
+            if (!ready.is_woken)
+            {
+                const bool is_arrival = direction == WaitDirection::EITHER && ready.is_readable;
+                return is_arrival ? SocketCode::READABLE : SocketCode::SUCCESS;
+            }
             stop->drain();
         }
     }
@@ -13683,16 +13728,21 @@ namespace kiotty::net::implementation
             FD_ZERO(&readable);
             FD_ZERO(&writable);
             FD_ZERO(&failed);
-            FD_SET(watch.socket, watch.direction == WaitDirection::READ ? &readable : &writable);
+            const bool is_reading = watch.direction != WaitDirection::WRITE;
+            const bool is_writing = watch.direction != WaitDirection::READ;
+            if (is_reading) { FD_SET(watch.socket, &readable); }
+            if (is_writing) { FD_SET(watch.socket, &writable); }
             FD_SET(watch.socket, &failed);
             if (watch.wake != INVALID_SOCKET) { FD_SET(watch.wake, &readable); }
             timeval limit = timevalOf(slice.milliseconds);
             timeval* wait = slice.milliseconds == 0 ? nullptr : &limit;
             const int found = ::select(0, &readable, &writable, &failed, wait);
-            if (found == 0) { return Readiness{ SocketCode::TIMEOUT, false }; }
-            if (found < 0) { return Readiness{ lastSocketCode(), false }; }
+            if (found == 0) { return Readiness{ SocketCode::TIMEOUT, false, false }; }
+            if (found < 0) { return Readiness{ lastSocketCode(), false, false }; }
             const bool is_woken = watch.wake != INVALID_SOCKET && FD_ISSET(watch.wake, &readable);
-            return Readiness{ SocketCode::SUCCESS, is_woken };
+            const bool is_readable = FD_ISSET(watch.socket, &readable) != 0;
+            const bool is_failed = FD_ISSET(watch.socket, &failed) != 0;
+            return Readiness{ SocketCode::SUCCESS, is_woken, is_readable || is_failed };
         }
     }
 }
@@ -13738,7 +13788,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -13940,7 +13991,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -14176,7 +14228,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -14238,6 +14291,14 @@ namespace kiotty::net::implementation
         const SOCKET native = socketOf(socket.handle());
         const SocketTraits traits = socket.traits();
         return waitReady(native, WaitDirection::WRITE, timeout_milliseconds, traits.stop);
+    }
+
+    SocketCode waitWritableOrReadable(const ActiveSocket& socket, uint32_t timeout_milliseconds)
+    {
+        if (!socket.valid()) { return SocketCode::INVALID_ARGUMENT; }
+        const SOCKET native = socketOf(socket.handle());
+        const SocketTraits traits = socket.traits();
+        return waitReady(native, WaitDirection::EITHER, timeout_milliseconds, traits.stop);
     }
 
     SocketCode shutdownWrite(const ActiveSocket& socket)
@@ -14398,7 +14459,8 @@ namespace kiotty::net::implementation
     enum class WaitDirection : uint8_t
     {
         READ,
-        WRITE
+        WRITE,
+        EITHER
     };
 
     using AddressResult = Result<Address, SocketCode>;
@@ -18572,7 +18634,8 @@ namespace kiotty::net::implementation
 {
     namespace
     {
-        const size_t BIO_PAIR_BYTES = 4096;
+        constexpr size_t BIO_PAIR_BYTES =
+            TLS_RECORD_PLAIN_BYTES + TLS_RECORD_OVERHEAD_BYTES + TLS_CONTROL_RESERVE_BYTES;
 
         const char* const HANDSHAKE_CLOSED_MESSAGE = "tls: peer closed during handshake";
     }
@@ -19181,6 +19244,7 @@ namespace kiotty::net::implementation
         , _pipe(tls)
         , _receive(receive)
         , _send(send)
+        , _watch(ArrivalWatch::OFF)
     {
     }
 
@@ -19188,11 +19252,13 @@ namespace kiotty::net::implementation
     {
         const bool is_empty = buffer.data == nullptr || buffer.length == 0;
         if (is_empty) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }
+        const size_t capped = std::min(buffer.length, RESULT_MAXIMUM_BYTES);
+        const Span<char> target{ buffer.data, capped };
+        const size_t staged = takeReceived(target);
+        if (staged > 0) { return resultOf(staged, KIOTTY_NET_CODE_SUCCESS); }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
         if (flushed != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, flushed); }
-        const size_t capped = std::min(buffer.length, RESULT_MAXIMUM_BYTES);
-        const Span<char> target{ buffer.data, capped };
         return readInto(target, deadline);
     }
 
@@ -19202,9 +19268,10 @@ namespace kiotty::net::implementation
         const bool too_large = data.length > RESULT_MAXIMUM_BYTES;
         if (too_large || missing) { return resultOf(0, KIOTTY_NET_CODE_INVALID_ARGUMENT); }
         const Deadline deadline(timeout_milliseconds);
-        const KiottyNetCode flushed = flush(deadline);
-        if (flushed != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, flushed); }
-        return send(data, deadline);
+        _watch = ArrivalWatch::ON;
+        const KiottyNetResult sent = sendWatched(data, deadline);
+        _watch = ArrivalWatch::OFF;
+        return sent;
     }
 
     KiottyNetCode ConnectionStream::writeFile(Span<const char> path,
@@ -19217,6 +19284,8 @@ namespace kiotty::net::implementation
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
         const uint64_t size = file.size();
         if (offset > size || length > size - offset) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        const KiottyNetCode arrived = takeArrival();
+        if (arrived != KIOTTY_NET_CODE_SUCCESS) { return arrived; }
         const Deadline deadline(timeout_milliseconds);
         const KiottyNetCode flushed = flush(deadline);
         if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
@@ -19390,9 +19459,16 @@ namespace kiotty::net::implementation
         {
             return KIOTTY_NET_CODE_SUCCESS;
         }
-        const KiottyNetCode drained = flushCipherStage(deadline);
-        if (drained != KIOTTY_NET_CODE_SUCCESS) { return drained; }
-        return flushPipe(deadline);
+        for (;;)
+        {
+            const KiottyNetCode drained = flushCipherStage(deadline);
+            if (drained != KIOTTY_NET_CODE_SUCCESS) { return drained; }
+            const KiottyNetCode piped = flushPipe(deadline);
+            if (piped != KIOTTY_NET_CODE_SUCCESS) { return piped; }
+            const bool is_staged = _tls.stages().send.consumer().readable() > 0;
+            const bool is_piped = _pipe.outgoing().length > 0;
+            if (!is_staged && !is_piped) { return KIOTTY_NET_CODE_SUCCESS; }
+        }
     }
 
     KiottyNetCode ConnectionStream::flushCipherStage(const Deadline& deadline)
@@ -19407,6 +19483,7 @@ namespace kiotty::net::implementation
         const Sent sent = sendAll(Span<const char>{ waiting.peek(), readable }, deadline);
         waiting.commit(sent.length);
         cipher.compact();
+        if (sent.code == SocketCode::READABLE) { return takeArrival(); }
         return toNetCode(sent.code);
     }
 
@@ -19417,6 +19494,7 @@ namespace kiotty::net::implementation
         {
             const Sent sent = sendAll(outgoing, deadline);
             _pipe.sent(sent.length);
+            if (sent.code == SocketCode::READABLE) { return takeArrival(); }
             if (sent.code != SocketCode::SUCCESS) { return toNetCode(sent.code); }
             outgoing = _pipe.outgoing();
         }
@@ -19426,34 +19504,39 @@ namespace kiotty::net::implementation
     KiottyNetResult ConnectionStream::send(KiottyNetSpan data, const Deadline& deadline)
     {
         const bool secure = _tls.status().is_active;
-        if (!secure)
-        {
-            const Sent sent = sendAll(Span<const char>{ data.data, data.length }, deadline);
-            return resultOf(sent.length, toNetCode(sent.code));
-        }
+        if (!secure) { return sendPlain(data, deadline); }
         size_t done = 0;
         while (done < data.length)
         {
+            const KiottyNetCode emptied = flush(deadline);
+            if (emptied != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, emptied); }
             const size_t piece = std::min(TLS_WRITE_PIECE_BYTES, data.length - done);
             const KiottyNetSpan part{ data.data + done, piece };
             const KiottyNetCode written = sendRecord(part, deadline);
+            if (written == KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING)
+            {
+                return resultOf(done + piece, written);
+            }
             if (written != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, written); }
             done += piece;
         }
-        return resultOf(done, KIOTTY_NET_CODE_SUCCESS);
+        return resultOf(done, flush(deadline));
     }
 
     KiottyNetCode ConnectionStream::sendRecord(KiottyNetSpan part, const Deadline& deadline)
     {
-        TlsStep step = TlsStep::SEND;
+        bool is_arrived = false;
+        TlsStep step = _pipe.write(part);
         while (step == TlsStep::SEND)
         {
-            step = _pipe.write(part);
             const KiottyNetCode flushed = flush(deadline);
-            if (step == TlsStep::FAILED) { return _tls.status().failure.code; }
-            if (flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
+            const bool is_arrival = flushed == KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING;
+            if (!is_arrival && flushed != KIOTTY_NET_CODE_SUCCESS) { return flushed; }
+            is_arrived = is_arrived || is_arrival;
+            step = _pipe.write(part);
         }
-        return KIOTTY_NET_CODE_SUCCESS;
+        if (step == TlsStep::FAILED) { return _tls.status().failure.code; }
+        return is_arrived ? KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING : KIOTTY_NET_CODE_SUCCESS;
     }
 
     ConnectionStream::Sent ConnectionStream::sendAll(Span<const char> data,
@@ -19468,25 +19551,17 @@ namespace kiotty::net::implementation
                 sent += moved.value;
                 continue;
             }
-            const SocketCode waited = awaitWritable(moved.code, deadline);
+            const SocketCode waited = awaitSendable(moved.code, deadline);
             if (waited != SocketCode::SUCCESS) { return Sent{ sent, waited }; }
         }
         return Sent{ sent, SocketCode::SUCCESS };
-    }
-
-    SocketCode ConnectionStream::awaitWritable(SocketCode code, const Deadline& deadline)
-    {
-        if (code != SocketCode::WOULD_BLOCK) { return code; }
-        const bool expired = deadline.expired();
-        if (expired) { return SocketCode::TIMEOUT; }
-        return implementation::waitWritable(_socket, deadline.remaining());
     }
 
     SocketCode ConnectionStream::waitReadable(const Deadline& deadline)
     {
         const bool expired = deadline.expired();
         if (expired) { return SocketCode::TIMEOUT; }
-        return implementation::waitReadable(_socket, deadline.remaining());
+        return implementation::waitReadable(_socket, deadline.bound(0));
     }
 
     SocketCode ConnectionStream::receiveCipher()
@@ -19535,6 +19610,97 @@ namespace kiotty::net::implementation
         {
             return code != SocketCode::SUCCESS && code != SocketCode::WOULD_BLOCK;
         }
+    }
+}
+
+#include <algorithm>
+
+namespace kiotty::net::implementation
+{
+    KiottyNetResult ConnectionStream::sendWatched(KiottyNetSpan data, const Deadline& deadline)
+    {
+        const KiottyNetCode arrived = takeArrival();
+        if (arrived != KIOTTY_NET_CODE_SUCCESS) { return resultOf(0, arrived); }
+        return send(data, deadline);
+    }
+
+    KiottyNetResult ConnectionStream::sendPlain(KiottyNetSpan data, const Deadline& deadline)
+    {
+        size_t done = 0;
+        for (;;)
+        {
+            const Span<const char> rest{ data.data + done, data.length - done };
+            const Sent sent = sendAll(rest, deadline);
+            done += sent.length;
+            if (sent.code != SocketCode::READABLE) { return resultOf(done, toNetCode(sent.code)); }
+            const KiottyNetCode arrived = takeArrival();
+            if (arrived != KIOTTY_NET_CODE_SUCCESS) { return resultOf(done, arrived); }
+        }
+    }
+
+    SocketCode ConnectionStream::awaitSendable(SocketCode code, const Deadline& deadline)
+    {
+        if (code != SocketCode::WOULD_BLOCK) { return code; }
+        const bool expired = deadline.expired();
+        if (expired) { return SocketCode::TIMEOUT; }
+        const bool is_watching = _watch == ArrivalWatch::ON && hasArrivalRoom();
+        if (is_watching) { return waitWritableOrReadable(_socket, deadline.bound(0)); }
+        return implementation::waitWritable(_socket, deadline.bound(0));
+    }
+
+    bool ConnectionStream::hasArrivalRoom()
+    {
+        _receive.compact();
+        return _receive.provider().writable() > 0;
+    }
+
+    KiottyNetCode ConnectionStream::takeArrival()
+    {
+        const KiottyNetCode looked = absorb();
+        if (looked != KIOTTY_NET_CODE_BUFFER_FULL) { return looked; }
+        _watch = ArrivalWatch::OFF;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode ConnectionStream::absorb()
+    {
+        if (!hasArrivalRoom()) { return KIOTTY_NET_CODE_BUFFER_FULL; }
+        const bool secure = _tls.status().is_active;
+        return secure ? absorbCipher() : absorbPlain();
+    }
+
+    KiottyNetCode ConnectionStream::absorbPlain()
+    {
+        StageBase::Provider provider = _receive.provider();
+        const size_t room = std::min(provider.writable(), RESULT_MAXIMUM_BYTES);
+        const Span<char> space{ provider.prepare(room), room };
+        const TransferResult received = implementation::receive(_socket, space);
+        if (received)
+        {
+            provider.commit(received.value);
+            return KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING;
+        }
+        if (received.code == SocketCode::WOULD_BLOCK) { return KIOTTY_NET_CODE_SUCCESS; }
+        return toNetCode(received.code);
+    }
+
+    KiottyNetCode ConnectionStream::absorbCipher()
+    {
+        const KiottyNetCode waiting = decodeArrival();
+        if (waiting != KIOTTY_NET_CODE_SUCCESS) { return waiting; }
+        const SocketCode filled = receiveCipher();
+        if (filled == SocketCode::WOULD_BLOCK) { return KIOTTY_NET_CODE_SUCCESS; }
+        if (filled == SocketCode::OUT_OF_RESOURCE) { return KIOTTY_NET_CODE_BUFFER_FULL; }
+        if (filled != SocketCode::SUCCESS) { return toNetCode(filled); }
+        return decodeArrival();
+    }
+
+    KiottyNetCode ConnectionStream::decodeArrival()
+    {
+        const DecodeResult decoded = _tls.decode(_receive);
+        if (!decoded) { return decoded.code; }
+        const bool is_plain = decoded.value > 0;
+        return is_plain ? KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING : KIOTTY_NET_CODE_SUCCESS;
     }
 }
 
@@ -19595,7 +19761,7 @@ namespace kiotty::net::implementation
         for (;;)
         {
             if (deadline.expired()) { return LineResult::failure(KIOTTY_NET_CODE_TIMEOUT); }
-            const StagedResult staged = stream.peek(searched + 1, deadline.remaining());
+            const StagedResult staged = stream.peek(searched + 1, deadline.bound(0));
             if (!staged) { return LineResult::failure(staged.code); }
             const size_t line_feed = findLineFeed(staged.value, searched);
             if (line_feed < staged.value.length)
@@ -19775,7 +19941,7 @@ namespace kiotty::net::implementation
         SocketCode awaitWritable(const ActiveSocket& socket, const Deadline& deadline)
         {
             if (deadline.expired()) { return SocketCode::TIMEOUT; }
-            return implementation::waitWritable(socket, deadline.remaining());
+            return implementation::waitWritable(socket, deadline.bound(0));
         }
     }
 
@@ -29147,14 +29313,21 @@ namespace kiotty::net::implementation
                                Span<const char> data,
                                const Deadline& deadline)
         {
-            if (data.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
-            if (deadline.expired()) { return KIOTTY_NET_CODE_TIMEOUT; }
-            const uint32_t left = deadline.remaining();
-            const bool is_short = deadline.limited() && left < SHORTEST_WAIT_MILLISECONDS;
-            const uint32_t wait = is_short ? SHORTEST_WAIT_MILLISECONDS : left;
-            const KiottyNetSpan bytes{ data.data, data.length };
-            const KiottyNetConnectionStream stream = session.stream;
-            return stream.owner->writeStream(stream.id, bytes, wait).code;
+            size_t done = 0;
+            for (;;)
+            {
+                const Span<const char> rest = data.skip(done);
+                if (rest.empty()) { return KIOTTY_NET_CODE_SUCCESS; }
+                if (deadline.expired()) { return KIOTTY_NET_CODE_TIMEOUT; }
+                const uint32_t left = deadline.remaining();
+                const bool is_short = deadline.limited() && left < SHORTEST_WAIT_MILLISECONDS;
+                const uint32_t wait = is_short ? SHORTEST_WAIT_MILLISECONDS : left;
+                const KiottyNetSpan bytes{ rest.data, rest.length };
+                const KiottyNetConnectionStream stream = session.stream;
+                const KiottyNetResult sent = stream.owner->writeStream(stream.id, bytes, wait);
+                done += static_cast<size_t>(sent.bytes);
+                if (sent.code != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent.code; }
+            }
         }
 
         KiottyNetCode failureOf(const HttpSession& session, KiottyNetCode code)
@@ -31657,12 +31830,19 @@ namespace kiotty::net::implementation
 
     KiottyNetCode writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline)
     {
-        const TimeLeftResult left = timeLeftOf(deadline);
-        if (!left) { return left.code; }
-        const StreamResult stream = line.stream();
-        if (!stream) { return stream.code; }
-        const KiottyNetSpan bytes{ data.data, data.length };
-        return stream.value().write(bytes, left.value).code;
+        size_t done = 0;
+        for (;;)
+        {
+            const TimeLeftResult left = timeLeftOf(deadline);
+            if (!left) { return left.code; }
+            const StreamResult stream = line.stream();
+            if (!stream) { return stream.code; }
+            const Span<const char> rest = data.skip(done);
+            const KiottyNetSpan bytes{ rest.data, rest.length };
+            const KiottyNetResult sent = stream.value().write(bytes, left.value);
+            done += static_cast<size_t>(sent.bytes);
+            if (sent.code != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent.code; }
+        }
     }
 
     KiottyNetCode sendBytes(StreamClient& line,
@@ -31679,6 +31859,7 @@ namespace kiotty::net::implementation
     {
         bool isIdle(ConnectionStream& stream)
         {
+            if (!stream.connected()) { return false; }
             const StagedResult staged = stream.peek(0, IDLE_PROBE_MILLISECONDS);
             const bool has_staged = !staged || staged.value.length > 0;
             if (has_staged) { return false; }
