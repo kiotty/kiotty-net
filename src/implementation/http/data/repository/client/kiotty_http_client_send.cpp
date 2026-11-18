@@ -1,5 +1,6 @@
 #include "http/data/repository/client/kiotty_http_client_send.h"
 
+#include "core/kiotty_codes.h"
 #include "http/data/repository/request/kiotty_http_request_head_builder.h"
 
 namespace kiotty::net::implementation
@@ -59,18 +60,22 @@ namespace kiotty::net::implementation
         return ensureConnected(line, target, deadline);
     }
 
+    KiottyNetResult writeOnce(StreamClient& line, Span<const char> data, const Deadline& deadline)
+    {
+        const TimeLeftResult left = timeLeftOf(deadline);
+        if (!left) { return resultOf(0, left.code); }
+        const StreamResult stream = line.stream();
+        if (!stream) { return resultOf(0, stream.code); }
+        const KiottyNetSpan bytes{ data.data, data.length };
+        return stream.value().write(bytes, left.value);
+    }
+
     KiottyNetCode writeAll(StreamClient& line, Span<const char> data, const Deadline& deadline)
     {
         size_t done = 0;
         for (;;)
         {
-            const TimeLeftResult left = timeLeftOf(deadline);
-            if (!left) { return left.code; }
-            const StreamResult stream = line.stream();
-            if (!stream) { return stream.code; }
-            const Span<const char> rest = data.skip(done);
-            const KiottyNetSpan bytes{ rest.data, rest.length };
-            const KiottyNetResult sent = stream.value().write(bytes, left.value);
+            const KiottyNetResult sent = writeOnce(line, data.skip(done), deadline);
             done += static_cast<size_t>(sent.bytes);
             if (sent.code != KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING) { return sent.code; }
         }

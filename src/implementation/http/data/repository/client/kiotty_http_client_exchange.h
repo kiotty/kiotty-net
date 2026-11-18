@@ -42,9 +42,13 @@ namespace kiotty::net::implementation
                                     const Connected& link,
                                     const Deadline& deadline);
         KiottyNetCode      checkStart(const ClientRequest& request);
+        KiottyNetCode      sendHead(Span<const char> head, const Deadline& deadline);
         KiottyNetCode      sendPiece(Span<const char> data, const Deadline& deadline);
+        KiottyNetCode      sendUploadBytes(Span<const char> data, const Deadline& deadline);
+        KiottyNetCode      takeEarlyReplies(const Deadline& deadline);
         KiottyNetCode      sendEnd(const Deadline& deadline);
-        KiottyNetHttpReply refusedReply(KiottyNetHttpMethod method, const Deadline& deadline);
+        KiottyNetHttpReply stoppedReply(const Deadline& deadline);
+        KiottyNetHttpReply closingReplyOf(KiottyNetCode code);
         void               settleUpload();
         void               dropUpload();
         void               stopUpload(KiottyNetCode code);

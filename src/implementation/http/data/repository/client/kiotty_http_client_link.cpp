@@ -1,6 +1,7 @@
 #include "http/data/repository/client/kiotty_http_client_link.h"
 
 #include "core/kiotty_busy_guard.h"
+#include "http/data/repository/body/kiotty_http_upload_rules.h"
 
 namespace kiotty::net::implementation
 {
@@ -16,6 +17,7 @@ namespace kiotty::net::implementation
         if (!guard.isHeld()) { return; }
         static_cast<void>(_line.stop().accept());
         _line.disconnect();
+        _state.upload = idleUpload();
     }
 
     void HttpClientLink::close()
@@ -26,6 +28,7 @@ namespace kiotty::net::implementation
             return;
         }
         _line.disconnect();
+        _state.upload = idleUpload();
         _state.busy.leave();
     }
 }

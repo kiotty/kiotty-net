@@ -30,7 +30,7 @@
 | C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 남음 |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
-| A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), A1 끝 (commit 전) |
+| A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), A1 끝 (`a2aa570`), A2 / A3 끝 (commit 전) |
 
 ## 2. 앞으로의 순서
 
@@ -52,8 +52,8 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 | R7 http ↔ websocket 경계 | 설계 `design_http_websocket_boundary_v0.html` (2026-11-17, 이름 `UpgradeSession`). R7-1 `UpgradeSession` 과 answer / open / step / end, R7-2 access 가 `SocketLink` 만, R7-3 클라이언트 자기 state, R7-4 handler 공개 필드. `HttpUpgradeHandler` 의 answer / step / end 가 session 통째 대신 필요한 것 (요청 view, 응답 store, body 버퍼, 한도) 만 받음. 클라이언트가 `HttpSessionHost` 를 통째로 빌리지 않고 자기 state 를 가짐. `WebSocketHandler` 의 공개 필드 (owner, lane, client, role, mask_state) 정리 | websocket 이 http 의 session / host 를 include 하지 않음 (남은 것: `WebSocketServer : HttpServer` 의 `host().registry` / `push_capacity`). websocket 테스트 그대로. 끝 (R7-1 `4828405`, R7-2 `1c2e99e`, R7-3 `cd92ede`, R7-4 `ffc708e`) |
 | U2 연결과 취소 | begin 의 살아 있는지 보기, close 로 깨우기, 송신 오류 정리, TLS, 먼저 온 응답 (`design_http_client_v1.html` 정할 것 1) | integration: idle 연결 뒤 begin, close 가 걸린 write 를 깨움, 413, https 올리기. 끝 (Windows 의 먼저 온 응답은 A3) |
 | A1 base | `KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING` (enum 끝), 소켓 backend 의 읽기 또는 쓰기 기다림, `ConnectionStream` 의 멈추는 write (시작할 때 한 번 + 막힐 때마다 확인, 수신 Stage 로 옮김, Stage 가 차면 OUT 만, TLS 는 평문이 나올 때만), StreamClient 와 서버 work stream | 평문 / TLS 멈춤, FIN / RST 구별, Stage 가 찼을 때 헛돌지 않음, NewSessionTicket 에 멈추지 않음, Windows 에서 RST 앞의 바이트를 지킴 |
-| A2 HTTP 서버 work | work 층이 도착을 다음 요청으로 보고 계속 씀, `failureOf` 의 `isStreamOpen` 짐작 없앰, `isHttpWorkConnected` 문서 | pipelining 중 긴 응답, SSE 에서 클라이언트가 떠나면 다음 write 가 `PEER_CLOSED` |
-| A3 HttpClient 올리기 | 멈추면 응답 머리를 읽어 1xx 는 버리고 이어 보냄, 최종 응답이면 `REFUSED` 와 새 code, finish 가 그 응답 | Windows 에서도 413 / 401, U2 의 두 테스트를 다시 엄격하게 |
+| A2 HTTP 서버 work | work 층이 도착을 다음 요청으로 보고 계속 씀, `failureOf` 의 `isStreamOpen` 짐작 없앰, `isHttpWorkConnected` 문서 | pipelining 중 긴 응답, SSE 에서 클라이언트가 떠나면 다음 write 가 `PEER_CLOSED` (RST 면 `SOCKET_ERROR`, half-close 도 떠남). 끝 (commit 전) |
+| A3 HttpClient 올리기 | 멈추면 응답 머리를 읽어 1xx 는 버리고 이어 보냄, 최종 응답이면 `ANSWERED` 와 `DATA_ARRIVED_WHILE_WRITING`, finish 가 그 응답 | Windows 에서도 413 / 401, U2 의 두 테스트를 다시 엄격하게. 끝 (commit 전) |
 | U3 도우미, C++, 문서 | `sendHttpFile`, C++ begin / write / finish, user guide / requirement / 구현 가이드 / 테스트 계획, Python `http.server` 외부 확인 | wrapper 테스트, 매트릭스 |
 
 미결 (사이클 없음): WebSocket streaming (보내기 begin / write / finish, 받기는 조각마다 `onMessage`). `requirement_v0.md` 의 메모. 이름 / 켜는 단위 / 조각 크기를 정해야 사이클이 된다.
@@ -88,4 +88,6 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 
 2026-11-18 HttpClient v1 U2 (`docs/progress/261118_progress_http_client_u2.md`): begin 이 다시 쓰는 연결을 1 ms peek 로 확인 (닫힘, 남은 바이트, TLS close_notify 면 다시 연결), write 가 연결을 잃으면 `REFUSED` 로 두고 finish 가 먼저 온 응답 (413, 401) 을 돌려줌, close 가 걸린 write 를 깨움, https 올리기. MSVC 857, WSL 858 × 6, release-tls 857.
 
-2026-11-18 write 중 도착 설계 (`docs/design/design_write_arrival_v0.html`, 정할 것 넷 닫음) 와 A1 (commit 전, `docs/progress/261118_progress_write_arrival_a1.md`): `DATA_ARRIVED_WHILE_WRITING`, write 가 시작할 때와 막힐 때 상대 바이트를 수신 Stage 로 옮기고 멈춤, TLS BIO pair 를 레코드 하나보다 크게 (TlsMemory 상한 160 KiB), 기다림의 0 = 무한 경주 고침, U2 `isIdle` 의 EOF 확인. MSVC 866, WSL 867 × 6, release 866.
+2026-11-18 write 중 도착 설계 (`docs/design/design_write_arrival_v0.html`, 정할 것 넷 닫음) 와 A1 (`a2aa570`, 단일 헤더 `64ef5b1`, `docs/progress/261118_progress_write_arrival_a1.md`): `DATA_ARRIVED_WHILE_WRITING`, write 가 시작할 때와 막힐 때 상대 바이트를 수신 Stage 로 옮기고 멈춤, TLS BIO pair 를 레코드 하나보다 크게 (TlsMemory 상한 160 KiB), 기다림의 0 = 무한 경주 고침, U2 `isIdle` 의 EOF 확인. MSVC 866, WSL 867 × 6, release 866.
+
+2026-11-18 write 중 도착 A2 (`docs/progress/261118_progress_write_arrival_a2.md`), A3 (`..._a3.md`), commit 전: HTTP 서버 work 가 도착을 다음 요청으로 받아 두고 응답 뒤 처리, `failureOf` 짐작 없앰 (FIN `PEER_CLOSED`, RST `SOCKET_ERROR`, half-close 도 떠남), HttpClient 올리기가 1xx 를 넘기고 최종 응답에 멈춤 (`ANSWERED`), begin 의 머리 전 길이 0 write 로 도착 확인, Windows 에서도 먼저 온 413 / 401.

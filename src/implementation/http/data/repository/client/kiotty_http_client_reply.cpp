@@ -80,6 +80,25 @@ namespace kiotty::net::implementation
         return KiottyNetHttpReply{ code, state.reply.status(), headers.data, headers.length };
     }
 
+    bool hasStagedReply(StreamClient& line)
+    {
+        return stagedBytesOf(line) > 0;
+    }
+
+    ReplyPhaseResult receiveOneReply(StreamClient& line,
+                                     HttpClientState& state,
+                                     KiottyNetHttpMethod method,
+                                     const Deadline& deadline)
+    {
+        const ReplyHead head = receiveHead(line, state.reply, deadline);
+        if (head.code != KIOTTY_NET_CODE_SUCCESS) { return ReplyPhaseResult::failure(head.code); }
+        const ReplyFramingResult framing = state.reply.finish(method);
+        if (!framing) { return ReplyPhaseResult::failure(framing.code); }
+        const bool is_final = framing.value.phase == ReplyPhase::FINAL;
+        if (is_final) { startBody(line, state, framing.value); }
+        return ReplyPhaseResult::success(framing.value.phase);
+    }
+
     void dropUnreadReply(StreamClient& line, HttpClientState& state)
     {
         if (!state.body.isFinished()) { line.disconnect(); }

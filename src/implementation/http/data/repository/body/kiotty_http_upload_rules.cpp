@@ -44,6 +44,11 @@ namespace kiotty::net::implementation
         return HttpUpload{ 0, upload.method, UploadMode::REFUSED };
     }
 
+    HttpUpload answerUpload(const HttpUpload& upload)
+    {
+        return HttpUpload{ 0, upload.method, UploadMode::ANSWERED };
+    }
+
     KiottyNetCode checkUploadEnd(const HttpUpload& upload)
     {
         if (!isSending(upload)) { return INVALID; }
