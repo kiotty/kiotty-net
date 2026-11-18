@@ -463,7 +463,7 @@ TEST_F(HttpWorkTest, HeadOnAStreamChosenByTheWorkerClosesTheFirstWrite)
     EXPECT_EQ(expected, app.codeList());
 }
 
-TEST_F(HttpWorkTest, PeerThatLeavesEndsTheStreamWithPeerClosed)
+TEST_F(HttpWorkTest, PeerThatEndsItsSideEndsTheStreamWithPeerClosed)
 {
     app.job = [](WorkApp& work_app, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work) {
         KiottyNet_setHttpBodyStream(response, KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);
@@ -471,16 +471,69 @@ TEST_F(HttpWorkTest, PeerThatLeavesEndsTheStreamWithPeerClosed)
     };
     route(KIOTTY_NET_HTTP_METHOD_GET, "/events", onStartWork, onWorkStarted);
     start();
-    {
-        kiotty_test::LoopbackPeer peer;
-        connect(peer);
-        send(peer, "GET /events HTTP/1.1\r\n\r\n");
-        std::string head;
-        ASSERT_TRUE(readHead(peer, head));
-        EXPECT_EQ("chunked", fieldOf(head, "Transfer-Encoding"));
-    }
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    send(peer, "GET /events HTTP/1.1\r\n\r\n");
+    std::string head;
+    ASSERT_TRUE(readHead(peer, head));
+    EXPECT_EQ("chunked", fieldOf(head, "Transfer-Encoding"));
+    ASSERT_TRUE(peer.shutdownWrite());
     ASSERT_TRUE(waitCodes(3));
     const std::vector<KiottyNetCode> expected = { KIOTTY_NET_CODE_SUCCESS, KIOTTY_NET_CODE_PEER_CLOSED,
+                                                  KIOTTY_NET_CODE_SUCCESS };
+    EXPECT_EQ(expected, app.codeList());
+}
+
+TEST_F(HttpWorkTest, PeerThatResetsEndsTheStreamWithSocketError)
+{
+    app.job = [](WorkApp& work_app, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work) {
+        KiottyNet_setHttpBodyStream(response, KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);
+        pingUntilFailure(work_app, response, work);
+    };
+    route(KIOTTY_NET_HTTP_METHOD_GET, "/events", onStartWork, onWorkStarted);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    send(peer, "GET /events HTTP/1.1\r\n\r\n");
+    std::string head;
+    ASSERT_TRUE(readHead(peer, head));
+    ASSERT_TRUE(peer.reset());
+    ASSERT_TRUE(waitCodes(3));
+    const std::vector<KiottyNetCode> expected = { KIOTTY_NET_CODE_SUCCESS, KIOTTY_NET_CODE_SOCKET_ERROR,
+                                                  KIOTTY_NET_CODE_SUCCESS };
+    EXPECT_EQ(expected, app.codeList());
+}
+
+TEST_F(HttpWorkTest, RequestPipelinedDuringAStreamIsAnsweredAfterIt)
+{
+    std::atomic<bool> is_next_sent(false);
+    app.job = [&is_next_sent](WorkApp& work_app, KiottyNetHttpResponseHandle response, KiottyNetHttpWorkHandle work) {
+        KiottyNet_setHttpBodyStream(response, KIOTTY_NET_HTTP_CONTENT_TYPE_EVENT_STREAM);
+        work_app.add(KiottyNet_writeHttpWorkChunk(work, spanOf("data: one\n\n"), WAIT_MS).code);
+        kiotty_test::waitUntil([&is_next_sent]() { return is_next_sent.load(); }, WAIT_MS);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        work_app.add(KiottyNet_writeHttpWorkChunk(work, spanOf("data: two\n\n"), WAIT_MS).code);
+        work_app.add(KiottyNet_writeHttpWorkChunk(work, spanOf("data: three\n\n"), WAIT_MS).code);
+        work_app.add(KiottyNet_finishHttpWorkWithResponse(work));
+    };
+    route(KIOTTY_NET_HTTP_METHOD_GET, "/events", onStartWork, onWorkStarted);
+    start();
+    kiotty_test::LoopbackPeer peer;
+    connect(peer);
+    send(peer, "GET /events HTTP/1.1\r\n\r\n");
+    std::string head;
+    ASSERT_TRUE(readHead(peer, head));
+    send(peer, "GET /health HTTP/1.1\r\n\r\n");
+    is_next_sent.store(true);
+    const std::vector<std::string> chunks = { "data: one\n\n", "data: two\n\n", "data: three\n\n", "<end>" };
+    EXPECT_EQ(chunks, readChunks(peer));
+    std::string next;
+    ASSERT_TRUE(readHead(peer, next));
+    EXPECT_EQ(200, statusOf(next));
+    EXPECT_EQ("{\"ok\":true}", readLengthBody(peer, next));
+    ASSERT_TRUE(waitCodes(5));
+    const std::vector<KiottyNetCode> expected = { KIOTTY_NET_CODE_SUCCESS, KIOTTY_NET_CODE_SUCCESS,
+                                                  KIOTTY_NET_CODE_SUCCESS, KIOTTY_NET_CODE_SUCCESS,
                                                   KIOTTY_NET_CODE_SUCCESS };
     EXPECT_EQ(expected, app.codeList());
 }

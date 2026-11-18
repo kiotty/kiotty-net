@@ -1141,13 +1141,13 @@ Work 와 Work 스트림
 | `writeHttpWorkChunk` | chunk 하나를 보내고 다 나갈 때까지 기다린다 (동기). 첫 호출이면 상태줄 + 헤더를 먼저 보낸다. 라이브러리가 chunk 머리 (길이 hex CRLF) 와 꼬리 (CRLF) 를 씌운다. 돌려주는 `bytes` 는 `data.length` 다. timeout 은 호출 전체의 한도이고 0 은 무한. 돌아오면 data 는 버려도 된다 |
 | `finishHttpWorkWithResponse` | 스트림이면 끝 chunk `0\r\n\r\n` 을 보낸다. chunk 를 한 번도 쓰지 않은 스트림이면 헤더 + 끝 chunk. 실패한 스트림이면 그 코드로 닫는다. 스트림이 아니면 완성 응답을 보낸다 |
 | `finishHttpWorkWithClose` | 보내지 않고 닫는다. reason 은 끊김 action 의 reason 이 된다 |
-| `isHttpWorkConnected` | peer 가 살아 있고 서버가 close 중이 아니면 참. 이벤트를 기다리는 worker 가 끊김을 볼 때 |
+| `isHttpWorkConnected` | peer 가 살아 있고 서버가 close 중이 아니면 참. 이벤트를 기다리는 worker 가 다음 write 전에 끊김을 미리 볼 때 (write 는 스스로 끊김을 알리므로 write 직전에 볼 필요는 없다) |
 
 - finish 는 한 번만이다. 그때까지 request 는 유효하다. worker 가 오래 쓰는 값 (MCP 의 `Mcp-Session-Id`) 은 복사해 두는 것이 안전하다.
 - setter 는 Work 중에도 된다. 스트림의 첫 write 뒤와 finish 뒤에는 `KIOTTY_NET_CODE_BUSY` (헤더가 이미 나갔다).
 - `writeHttpWorkChunk` 의 코드: `SUCCESS`. `PEER_CLOSED` (상대가 끊음). `TIMEOUT` (일부가 나갔을 수 있다). `CLOSED` (서버 close, 또는 body 를 보내지 않는 응답). `BUSY` (finish 뒤). `INVALID_ARGUMENT` (body 가 스트림이 아님, 빈 data. 길이 0 chunk 는 끝이라). `INVALID_ENCODING` (텍스트 계열인데 UTF-8 아님. 아무것도 보내지 않았다). 한 번 실패하면 다음 write 도 같은 코드이고, 그 뒤는 `finishHttpWorkWithClose` 뿐이다.
 - 텍스트 계열 스트림은 chunk 마다 UTF-8 을 보므로 문자 하나를 두 chunk 에 나눠 쓰면 안 된다. SSE 이벤트는 줄 단위라 그럴 일이 없다.
-- 끝을 알리는 콜백은 없다. 상대가 끊으면 다음 write 가 `PEER_CLOSED`, 서버가 close 하면 `CLOSED` 다. 이벤트가 없는 동안 끊김을 빨리 알려면 worker 가 주기적으로 `: ping\n\n` 을 쓰거나 `isHttpWorkConnected` 를 본다.
+- 끝을 알리는 콜백은 없다. 상대가 끊으면 다음 write 가 `PEER_CLOSED` (FIN. 쓰기 쪽만 닫는 half-close 도 떠남으로 본다) 또는 `SOCKET_ERROR` (RST), 서버가 close 하면 `CLOSED` 다. 응답 중에 온 다음 요청 (pipelining) 은 write 가 받아 두었다가 응답이 끝난 뒤 처리한다 (A2). 이벤트가 없는 동안 끊김을 빨리 알려면 worker 가 주기적으로 `: ping\n\n` 을 쓰거나 `isHttpWorkConnected` 를 본다.
 - 큰 chunk 를 여러 write 로 나눠 보내도 사이에 끼어드는 것은 없다. Work 중에는 base 가 이 연결의 send / notify Stage 를 고르지 않는다 (설계 결정 7).
 - 오래 가는 스트림 (MCP 의 GET 스트림) 은 그동안 worker 하나를 쓴다. 동시 스트림 수만큼 worker 가 필요하다 (설계 결정 4, 11).
 - 서버 close: Work 중인 연결의 끊김 action (`CLOSED`) 은 worker 의 finish 전에 온다. worker 의 다음 write 가 `CLOSED` 를 돌려주므로 worker 가 finish 하고 끝난다. run 은 모든 Work 가 finish 된 뒤 `KIOTTY_NET_CODE_CLOSED` 로 돌아온다.

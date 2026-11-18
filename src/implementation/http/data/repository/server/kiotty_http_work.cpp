@@ -216,10 +216,8 @@ namespace kiotty::net::implementation
             const bool is_peer_closed = code == KIOTTY_NET_CODE_PEER_CLOSED;
             const bool is_lost = is_peer_closed || code == KIOTTY_NET_CODE_SOCKET_ERROR;
             if (!is_lost) { return code; }
-            if (session.host.is_closing.load()) { return KIOTTY_NET_CODE_CLOSED; }
-            const KiottyNetConnectionStream stream = session.stream;
-            const bool is_open = stream.owner->isStreamOpen(stream.id);
-            return is_open ? code : KIOTTY_NET_CODE_PEER_CLOSED;
+            const bool is_closing = session.host.is_closing.load();
+            return is_closing ? KIOTTY_NET_CODE_CLOSED : code;
         }
 
         KiottyNetCode handOver(HttpSession& session,

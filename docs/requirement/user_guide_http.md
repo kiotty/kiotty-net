@@ -161,7 +161,7 @@ C++ 은 `KiottyNet_HttpWork` 가 finish 의무를 소유한다. 이동만 되고
 - write 의 실패: `KIOTTY_NET_CODE_PEER_CLOSED` (상대가 끊음), `KIOTTY_NET_CODE_TIMEOUT` (일부가 나갔을 수 있다), `KIOTTY_NET_CODE_CLOSED` (서버 close), `KIOTTY_NET_CODE_BUSY` (이미 finish), `KIOTTY_NET_CODE_INVALID_ARGUMENT` (body 가 스트림이 아님, 빈 data. 길이 0 chunk 는 끝이라 직접 쓰지 않는다), `KIOTTY_NET_CODE_INVALID_ENCODING` (텍스트 계열인데 UTF-8 아님. 아무것도 보내지 않았다). 실패 뒤에는 `finishHttpWorkWithClose` 만 부른다.
 - 텍스트 계열은 chunk 마다 UTF-8 을 보므로 문자 하나를 두 chunk 에 나눠 쓰지 않는다. SSE 이벤트는 줄 단위라 그럴 일이 없다.
 - 스트림 body 는 Work 안에서만 된다. `onRequest` 에서 `setHttpBodyStream` 을 부르고 `startHttpWork` 없이 return 하면 라이브러리가 500 을 보내고 닫는다.
-- 끝을 알리는 콜백은 없다. 이벤트가 없는 동안 끊김을 빨리 보려면 worker 가 주기적으로 `: ping\n\n` 을 쓰거나 `isHttpWorkConnected` 를 본다.
+- 끝을 알리는 콜백은 없다. 상대가 떠나면 다음 write 가 `KIOTTY_NET_CODE_PEER_CLOSED` (FIN, 쓰기 쪽만 닫아도) 또는 `KIOTTY_NET_CODE_SOCKET_ERROR` (RST) 다. 이벤트가 없는 동안 끊김을 빨리 보려면 worker 가 주기적으로 `: ping\n\n` 을 쓰거나 `isHttpWorkConnected` 를 본다.
 - 스트림 하나가 worker thread 하나를 쓴다. 여러 클라이언트에 같은 것을 실시간으로 뿌리는 일은 WebSocket broadcast 의 몫이다.
 - HEAD 가 스트림 라우트에 오면: `onRequest` 에서 `setHttpBodyStream` 과 `startHttpWork` 를 부른 라우트는 Work 를 열지 않는다 (`onWorkStarted` 없음). 헤더만 보내고 같은 연결로 다음 요청을 읽는다. 그래서 스트림 라우트는 status 와 body 종류를 `onRequest` 에서 정하는 것을 권한다. worker 가 스트림을 연 경우는 첫 write 가 헤더만 보내고 `KIOTTY_NET_CODE_CLOSED` 를 돌려준다.
 
