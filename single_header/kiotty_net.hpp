@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 0e6d311
+    KiottyNet single header, generated from commit fecd252
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -97,7 +97,8 @@ typedef enum KiottyNetCode
     KIOTTY_NET_CODE_OUT_OF_MEMORY,
     KIOTTY_NET_CODE_INVALID_ENCODING,
     KIOTTY_NET_CODE_PEER_NOT_READING,
-    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING
+    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING,
+    KIOTTY_NET_CODE_CANCELLED
 } KiottyNetCode;
 
 typedef struct KiottyNetResult
@@ -485,6 +486,8 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_connectStreamClient(
     const KiottyNetTlsClientConfiguration* tls);
 KIOTTY_NET_API void KiottyNet_disconnectStreamClient(
     KiottyNetStreamClientHandle client);
+KIOTTY_NET_API KiottyNetCode KiottyNet_cancelStreamClient(
+    KiottyNetStreamClientHandle client);
 KIOTTY_NET_API KiottyNetResult             KiottyNet_readStreamClient(
     KiottyNetStreamClientHandle client,
     void* buffer,
@@ -843,6 +846,7 @@ public:
     KiottyNetCode   connect(const KiottyNetAddress& address);
     KiottyNetCode   connect(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls);
     void            disconnect();
+    KiottyNetCode   cancel();
     KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
     KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
 
@@ -1409,6 +1413,11 @@ inline KiottyNetCode KiottyNet_StreamClient::connect(
 inline void KiottyNet_StreamClient::disconnect()
 {
     KiottyNet_disconnectStreamClient(_handle.get());
+}
+
+inline KiottyNetCode KiottyNet_StreamClient::cancel()
+{
+    return KiottyNet_cancelStreamClient(_handle.get());
 }
 
 inline KiottyNetResult KiottyNet_StreamClient::read(
@@ -7489,6 +7498,11 @@ namespace kiotty::net::implementation
 namespace kiotty::net::implementation
 {
     size_t          clientMemorySize(const KiottyNetClientConfiguration& configuration);
+    KiottyNetCode   connectStreamClient(StreamClient& client,
+                                        const KiottyNetAddress& address,
+                                        const KiottyNetTlsClientConfiguration* tls);
+    void            disconnectStreamClient(StreamClient& client);
+    KiottyNetCode   cancelStreamClient(StreamClient& client);
     KiottyNetResult readStreamClient(StreamClient& client,
                                      Span<char> buffer,
                                      uint32_t timeout_milliseconds);
@@ -10454,13 +10468,19 @@ KiottyNetCode KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client,
 {
     if (client == nullptr || address == nullptr) { return INVALID; }
     const KiottyNetAddress copied = *address;
-    return client->connect(copied, tls);
+    return net::connectStreamClient(*client, copied, tls);
 }
 
 void KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client)
 {
     if (client == nullptr) { return; }
-    client->disconnect();
+    net::disconnectStreamClient(*client);
+}
+
+KiottyNetCode KiottyNet_cancelStreamClient(KiottyNetStreamClientHandle client)
+{
+    if (client == nullptr) { return INVALID; }
+    return net::cancelStreamClient(*client);
 }
 
 KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client,
@@ -32386,6 +32406,11 @@ namespace kiotty::net::implementation
 
 namespace kiotty::net::implementation
 {
+    namespace
+    {
+        KiottyNetCode cancelledOr(StreamClient& client, KiottyNetCode code);
+    }
+
     size_t clientMemorySize(const KiottyNetClientConfiguration& configuration)
     {
         if (!isInitialized(configuration)) { return 0; }
@@ -32396,28 +32421,66 @@ namespace kiotty::net::implementation
         return largest + stageBytesOf(receive, send, push);
     }
 
+    KiottyNetCode connectStreamClient(StreamClient& client,
+                                      const KiottyNetAddress& address,
+                                      const KiottyNetTlsClientConfiguration* tls)
+    {
+        const bool is_cancelled = client.stop().accept();
+        if (is_cancelled) { return KIOTTY_NET_CODE_CANCELLED; }
+        const KiottyNetCode connected = client.connect(address, tls);
+        return cancelledOr(client, connected);
+    }
+
+    void disconnectStreamClient(StreamClient& client)
+    {
+        client.disconnect();
+        static_cast<void>(client.stop().accept());
+    }
+
+    KiottyNetCode cancelStreamClient(StreamClient& client)
+    {
+        client.stop().raise();
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
     KiottyNetResult readStreamClient(StreamClient& client,
                                      Span<char> buffer,
                                      uint32_t timeout_milliseconds)
     {
+        const bool is_cancelled = client.stop().accept();
+        if (is_cancelled) { return KiottyNetResult{ 0, KIOTTY_NET_CODE_CANCELLED }; }
         const StreamResult stream = client.stream();
         if (!stream) { return KiottyNetResult{ 0, stream.code }; }
-        return stream.value().read(buffer, timeout_milliseconds);
+        const KiottyNetResult got = stream.value().read(buffer, timeout_milliseconds);
+        return KiottyNetResult{ got.bytes, cancelledOr(client, got.code) };
     }
 
     KiottyNetResult writeStreamClient(StreamClient& client,
                                       KiottyNetSpan data,
                                       uint32_t timeout_milliseconds)
     {
+        const bool is_cancelled = client.stop().accept();
+        if (is_cancelled) { return KiottyNetResult{ 0, KIOTTY_NET_CODE_CANCELLED }; }
         const StreamResult stream = client.stream();
         if (!stream) { return KiottyNetResult{ 0, stream.code }; }
-        return stream.value().write(data, timeout_milliseconds);
+        const KiottyNetResult written = stream.value().write(data, timeout_milliseconds);
+        return KiottyNetResult{ written.bytes, cancelledOr(client, written.code) };
     }
 
     KiottyNetCode notifyEventClient(EventClient& client, KiottyNetSpan data)
     {
         const KiottyNetConnectionHandle connection = client.connection();
         return client.notify(connection.id, data);
+    }
+
+    namespace
+    {
+        KiottyNetCode cancelledOr(StreamClient& client, KiottyNetCode code)
+        {
+            if (code != KIOTTY_NET_CODE_CLOSED) { return code; }
+            const bool is_cancelled = client.stop().accept();
+            return is_cancelled ? KIOTTY_NET_CODE_CANCELLED : code;
+        }
     }
 }
 
