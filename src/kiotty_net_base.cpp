@@ -175,6 +175,34 @@ KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const c
     return net::initializePipeAddress(*address, text.value);
 }
 
+KiottyNetCode KiottyNet_setAddressConnectTimeout(KiottyNetAddress* address,
+                                                uint32_t timeout_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressConnectTimeout(*address, timeout_milliseconds);
+}
+
+KiottyNetCode KiottyNet_setAddressRetry(KiottyNetAddress* address,
+                                        uint32_t max_trial,
+                                        uint32_t trial_interval_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressRetry(*address, max_trial, trial_interval_milliseconds);
+}
+
+KiottyNetCode KiottyNet_setAddressNoDelay(KiottyNetAddress* address, KiottyNetNoDelay no_delay)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressNoDelay(*address, no_delay);
+}
+
+KiottyNetCode KiottyNet_setAddressSendTimeout(KiottyNetAddress* address,
+                                             uint32_t timeout_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressSendTimeout(*address, timeout_milliseconds);
+}
+
 KiottyNetCode KiottyNet_initializeServerConfiguration(KiottyNetServerConfiguration* configuration)
 {
     if (configuration == nullptr) { return INVALID; }
@@ -198,20 +226,6 @@ KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfigurati
                                               push_capacity);
 }
 
-KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration,
-                                               KiottyNetNoDelay no_delay)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureServerNoDelay(*configuration, no_delay);
-}
-
-KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration* configuration,
-                                                   uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureServerSendTimeout(*configuration, timeout_milliseconds);
-}
-
 KiottyNetCode KiottyNet_initializeClientConfiguration(KiottyNetClientConfiguration* configuration)
 {
     if (configuration == nullptr) { return INVALID; }
@@ -226,35 +240,6 @@ KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfigurati
     if (configuration == nullptr) { return INVALID; }
     return net::configureClientBufferCapacity(*configuration, receive_capacity, send_capacity,
                                               push_capacity);
-}
-
-KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration,
-                                                      uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientConnectTimeout(*configuration, timeout_milliseconds);
-}
-
-KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration,
-                                             uint32_t max_trial,
-                                             uint32_t trial_interval_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientRetry(*configuration, max_trial, trial_interval_milliseconds);
-}
-
-KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration,
-                                               KiottyNetNoDelay no_delay)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientNoDelay(*configuration, no_delay);
-}
-
-KiottyNetCode KiottyNet_configureClientSendTimeout(KiottyNetClientConfiguration* configuration,
-                                                   uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientSendTimeout(*configuration, timeout_milliseconds);
 }
 
 KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds)

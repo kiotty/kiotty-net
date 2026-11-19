@@ -128,8 +128,9 @@ namespace kiotty::net::implementation
         {
             return;
         }
+        const ConnectionLimits limits{ 0, 0, 0, parts.send_timeout_milliseconds };
         ConnectionConfiguration configuration = { std::move(socket),
-                                                  ConnectionLimits{ 0, 0, 0, 0 },
+                                                  limits,
                                                   decision.connection_context,
                                                   hostname,
                                                   parts.profile };

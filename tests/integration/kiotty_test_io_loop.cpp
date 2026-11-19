@@ -387,7 +387,7 @@ namespace
 
     net::LoopParts Rig::parts()
     {
-        return net::LoopParts{ host, listener, acceptor, profile, handler };
+        return net::LoopParts{ host, listener, acceptor, profile, handler, 0 };
     }
 
     bool Rig::run(net::StopPolicy policy)

@@ -450,6 +450,8 @@ TEST_F(DestinationTest, ABadAddressOrAnUninitializedTlsConfigurationFailsBeforeA
     unknown.transport = static_cast<KiottyNetTransport>(7);
     KiottyNetAddress unterminated = good;
     std::memset(unterminated.host, 'a', sizeof(unterminated.host));
+    KiottyNetAddress hand_filled = good;
+    hand_filled.initialization_mark = 0;
     const KiottyNetTlsServerConfiguration server_tls = {};
     const KiottyNetTlsClientConfiguration client_tls = {};
     const KiottyNetCode invalid = KIOTTY_NET_CODE_INVALID_ARGUMENT;
@@ -457,6 +459,7 @@ TEST_F(DestinationTest, ABadAddressOrAnUninitializedTlsConfigurationFailsBeforeA
     EXPECT_EQ(invalid, KiottyNet_runServer(server, &zero_port, nullptr, &HANDLER, &app));
     EXPECT_EQ(invalid, KiottyNet_runServer(server, &unknown, nullptr, &HANDLER, &app));
     EXPECT_EQ(invalid, KiottyNet_runServer(server, &unterminated, nullptr, &HANDLER, &app));
+    EXPECT_EQ(invalid, KiottyNet_runServer(server, &hand_filled, nullptr, &HANDLER, &app));
     EXPECT_EQ(invalid, KiottyNet_runServer(server, &good, &server_tls, &HANDLER, &app));
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitServer(server, 1));
     kiotty_test::LoopbackPeer peer;
@@ -464,8 +467,10 @@ TEST_F(DestinationTest, ABadAddressOrAnUninitializedTlsConfigurationFailsBeforeA
 
     EXPECT_EQ(invalid, KiottyNet_connectStreamClient(stream, &zero_port, nullptr));
     EXPECT_EQ(invalid, KiottyNet_connectStreamClient(stream, &unterminated, nullptr));
+    EXPECT_EQ(invalid, KiottyNet_connectStreamClient(stream, &hand_filled, nullptr));
     EXPECT_EQ(invalid, KiottyNet_connectStreamClient(stream, &good, &client_tls));
     EXPECT_EQ(invalid, KiottyNet_runEventClient(event, &unknown, nullptr, &HANDLER, &app));
+    EXPECT_EQ(invalid, KiottyNet_runEventClient(event, &hand_filled, nullptr, &HANDLER, &app));
     EXPECT_EQ(invalid, KiottyNet_runEventClient(event, &good, &client_tls, &HANDLER, &app));
     EXPECT_EQ(KIOTTY_NET_CODE_TIMEOUT, KiottyNet_awaitEventClient(event, 1));
     EXPECT_EQ(0, app.ready.load());

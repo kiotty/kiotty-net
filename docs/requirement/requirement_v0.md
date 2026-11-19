@@ -268,10 +268,16 @@ typedef enum KiottyNetTlsV13CipherSuite {
 ```c
 typedef enum KiottyNetTransport { KIOTTY_NET_TRANSPORT_TCP, KIOTTY_NET_TRANSPORT_PIPE } KiottyNetTransport;
 
-typedef struct KiottyNetAddress {
+typedef struct KiottyNetAddress {                      /* 상대: 어디로 (transport, host, port) 와 어떻게 (아래 다섯). 2026-11-19 D1 에서 설정 구조체의 다섯 값을 옮김 */
+    uint32_t           initialization_mark;            /* initialize*Address 를 거치지 않은 address 는 connect / run 이 KIOTTY_NET_CODE_INVALID_ARGUMENT 로 거절 */
     KiottyNetTransport transport;
     char               host[KIOTTY_NET_MAX_HOST_LENGTH];   /* Tcp: ip 또는 hostname. Pipe: pipe 이름 (Windows: \\.\pipe\name, Unix: 경로) */
     uint16_t           port;                           /* Pipe 면 0 */
+    uint32_t           connect_timeout_milliseconds;   /* 기본 5000. 클라이언트의 시도 한 번 (TLS handshake 포함). 서버는 읽지 않음 */
+    uint32_t           max_trial;                      /* 기본 1. 연결 시도 횟수. 서버는 읽지 않음 */
+    uint32_t           trial_interval_milliseconds;    /* 기본 1000. 시도 간격. 서버는 읽지 않음 */
+    KiottyNetNoDelay   no_delay;                       /* 기본 KIOTTY_NET_NO_DELAY_ON. TCP_NODELAY. 서버는 듣는 소켓과 받아들인 연결에. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
+    uint32_t           send_timeout_milliseconds;      /* 기본 30000. 걸린 송신이 이 시간 안에 끝나지 않으면 KIOTTY_NET_CODE_PEER_NOT_READING 으로 끊는다. 0 은 무한 (4절). 서버와 EventClient 가 쓴다. StreamClient 는 호출마다 timeout 을 받는다 */
 } KiottyNetAddress;
 
 typedef enum KiottyNetNoDelay {                        /* TCP_NODELAY. C ABI 에 bool 을 쓰지 않으므로 enum 이다 (수칙 5.7) */
@@ -285,37 +291,29 @@ typedef struct KiottyNetServerConfiguration {
     size_t            receive_capacity;    /* 기본 8 KiB (2026-11-16 에 4 KiB 에서), 상한 64 KiB. Connection 당 수신 Stage 크기. create 때 이만큼 잡는다 */
     size_t            send_capacity;    /* 기본 4 KiB, 상한 16 KiB. Connection 당 write lane 크기 = write 메시지 하나의 최대 길이 (4절) */
     size_t            push_capacity;    /* 기본 4 KiB, 상한 64 KiB. Connection 당 push lane 크기. broadcast 와 WebSocket 의 송신 frame (send, ping / pong, close) 이 쌓이는 곳. frame 하나의 상한이기도 하다 (4절, 10절) */
-    KiottyNetNoDelay  no_delay;         /* 기본 KIOTTY_NET_NO_DELAY_ON. TCP_NODELAY. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
-    uint32_t          send_timeout_milliseconds;   /* 기본 30000. 걸린 송신이 이 시간 안에 끝나지 않으면 KIOTTY_NET_CODE_PEER_NOT_READING 으로 끊는다. 0 은 무한 (4절) */
-} KiottyNetServerConfiguration;
+} KiottyNetServerConfiguration;                        /* create 에 주는 설정은 메모리 크기만 (*MemorySize 가 읽는 값) */
 
 typedef struct KiottyNetClientConfiguration {
     uint32_t          initialization_mark;
     size_t            receive_capacity;     /* 기본 8 KiB (2026-11-16 에 4 KiB 에서) */
     size_t            send_capacity;     /* 기본 4 KiB */
     size_t            push_capacity;     /* 기본 4 KiB. notifyEventClient 가 쌓이는 곳. StreamClient 는 쓰지 않는다 */
-    uint32_t          connect_timeout_milliseconds;/* 기본 5000 */
-    uint32_t          max_trial;         /* 기본 1. 연결 시도 횟수 */
-    uint32_t          trial_interval_milliseconds; /* 기본 1000. 시도 간격 */
-    KiottyNetNoDelay  no_delay;          /* 기본 KIOTTY_NET_NO_DELAY_ON. KIOTTY_NET_TRANSPORT_PIPE 는 무시 */
-    uint32_t          send_timeout_milliseconds;   /* 기본 30000. EventClient 만 쓴다. StreamClient 는 호출마다 timeout 을 받는다 */
 } KiottyNetClientConfiguration;
 
-KiottyNetCode KiottyNet_initializeTcpAddress(KiottyNetAddress* address, const char* host, uint16_t port);   /* port != 0 */
+KiottyNetCode KiottyNet_initializeTcpAddress(KiottyNetAddress* address, const char* host, uint16_t port);   /* port != 0. 다섯 값은 기본값 */
 KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const char* pipe_name);
+KiottyNetCode KiottyNet_setAddressConnectTimeout(KiottyNetAddress* address, uint32_t timeout_milliseconds);
+KiottyNetCode KiottyNet_setAddressRetry(KiottyNetAddress* address, uint32_t max_trial, uint32_t trial_interval_milliseconds);   /* max_trial >= 1 */
+KiottyNetCode KiottyNet_setAddressNoDelay(KiottyNetAddress* address, KiottyNetNoDelay no_delay);   /* 모르는 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
+KiottyNetCode KiottyNet_setAddressSendTimeout(KiottyNetAddress* address, uint32_t timeout_milliseconds);   /* 0 은 무한 */
+/* setAddress* 는 initialize*Address 를 거치지 않은 address 면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 
 KiottyNetCode KiottyNet_initializeServerConfiguration(KiottyNetServerConfiguration* configuration);
 KiottyNetCode KiottyNet_configureServerMaxClients(KiottyNetServerConfiguration* configuration, size_t max_clients);                /* 0 또는 65536 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfiguration* configuration, size_t receive_capacity, size_t send_capacity, size_t push_capacity);   /* 0 이거나 상한 (수신 64 KiB, 송신 16 KiB, push 64 KiB) 초과면 KIOTTY_NET_CODE_INVALID_ARGUMENT. Client 도 같다 */
-KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration, KiottyNetNoDelay no_delay);            /* 모르는 값이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
-KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration* configuration, uint32_t timeout_milliseconds);    /* 0 은 무한 */
 
 KiottyNetCode KiottyNet_initializeClientConfiguration(KiottyNetClientConfiguration* configuration);
 KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfiguration* configuration, size_t receive_capacity, size_t send_capacity, size_t push_capacity);
-KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration, uint32_t timeout_milliseconds);
-KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration, uint32_t max_trial, uint32_t trial_interval_milliseconds);   /* max_trial >= 1 */
-KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration, KiottyNetNoDelay no_delay);
-KiottyNetCode KiottyNet_configureClientSendTimeout(KiottyNetClientConfiguration* configuration, uint32_t timeout_milliseconds);
 ```
 
 ```cpp
@@ -324,8 +322,6 @@ public:
     explicit KiottyNet_ServerConfigurationBuilder(KiottyNetServerConfiguration& configuration);   // KiottyNet_initializeServerConfiguration
     KiottyNet_ServerConfigurationBuilder& maxClients(size_t max_clients);
     KiottyNet_ServerConfigurationBuilder& bufferCapacity(size_t receive_capacity, size_t send_capacity, size_t push_capacity);
-    KiottyNet_ServerConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
-    KiottyNet_ServerConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
     KiottyNetCode build() const;                                                                                  // 처음 실패한 코드
 };
 
@@ -333,11 +329,18 @@ class KiottyNet_ClientConfigurationBuilder {
 public:
     explicit KiottyNet_ClientConfigurationBuilder(KiottyNetClientConfiguration& configuration);   // KiottyNet_initializeClientConfiguration
     KiottyNet_ClientConfigurationBuilder& bufferCapacity(size_t receive_capacity, size_t send_capacity, size_t push_capacity);
-    KiottyNet_ClientConfigurationBuilder& connectTimeout(uint32_t timeout_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& retry(uint32_t max_trial, uint32_t trial_interval_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
-    KiottyNet_ClientConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
     KiottyNetCode build() const;
+};
+
+class KiottyNet_AddressBuilder {
+public:
+    KiottyNet_AddressBuilder(KiottyNetAddress& address, const char* host, uint16_t port);         // KiottyNet_initializeTcpAddress
+    static KiottyNet_AddressBuilder pipe(KiottyNetAddress& address, const char* pipe_name);       // KiottyNet_initializePipeAddress
+    KiottyNet_AddressBuilder& connectTimeout(uint32_t timeout_milliseconds);
+    KiottyNet_AddressBuilder& retry(uint32_t max_trial, uint32_t trial_interval_milliseconds);
+    KiottyNet_AddressBuilder& noDelay(KiottyNetNoDelay no_delay);
+    KiottyNet_AddressBuilder& sendTimeout(uint32_t timeout_milliseconds);
+    KiottyNetCode build() const;                                                                  // 처음 실패한 코드
 };
 ```
 
@@ -455,10 +458,10 @@ server.run(address, tls, handler, &app);                   // TLS. close 뒤 ser
 
 KiottyNetClientConfiguration    client;
 KiottyNetTlsClientConfiguration client_tls;
-code = KiottyNet_ClientConfigurationBuilder(client).retry(3, 500).build();
+code = KiottyNet_ClientConfigurationBuilder(client).build();
 code = KiottyNet_TlsClientConfigurationBuilder(client_tls).build();                 // 기본값 그대로: OS 저장소로 서버 + hostname 검증
 KiottyNetAddress device;
-code = KiottyNet_initializeTcpAddress(&device, "device.local", 8443);             // host 가 SNI 와 hostname 검증의 이름이 된다
+code = KiottyNet_AddressBuilder(device, "device.local", 8443).retry(3, 500).build();   // host 가 SNI 와 hostname 검증의 이름이 된다
 ```
 
 ```c
@@ -829,7 +832,7 @@ public:
 ```
 
 > 고민되는 부분. 생각보다 network 환경이 열악할 때도 있기 때문에 timeout만 걸어두는 게 아니라,
-> 재시도 횟수와 시도와 시도 사이의 time interval도 걸어두는 게 좋다. (KiottyNetClientConfiguration 의 max_trial / trial_interval_milliseconds 로 반영)
+> 재시도 횟수와 시도와 시도 사이의 time interval도 걸어두는 게 좋다. (KiottyNetAddress 의 max_trial / trial_interval_milliseconds 로 반영. 2026-11-19 D1 전에는 KiottyNetClientConfiguration 에 있었다)
 
 ### 7. Server
 

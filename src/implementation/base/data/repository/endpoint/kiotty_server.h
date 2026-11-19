@@ -83,6 +83,5 @@ namespace kiotty::net::implementation
         IoLoop                        _loop;
         RunGate                       _gate;
         std::atomic<bool>             _is_abandoned;
-        KiottyNetServerConfiguration  _configuration;
     };
 }

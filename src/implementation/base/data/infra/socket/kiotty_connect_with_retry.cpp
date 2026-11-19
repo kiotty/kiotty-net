@@ -21,45 +21,40 @@ namespace kiotty::net::implementation
             const StopSignal*        signal;
         };
 
-        ConnectedResult    retry(const KiottyNetClientConfiguration& configuration,
-                                 const KiottyNetAddress& address,
+        ConnectedResult    retry(const KiottyNetAddress& address,
                                  const Halt& halt,
                                  const Deadline& deadline);
         bool               isHalted(const Halt& halt);
         uint32_t           pauseOf(uint32_t interval_milliseconds, const Deadline& deadline);
         bool               waitInterval(uint32_t interval_milliseconds, const Halt& halt);
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
-                                   const KiottyNetAddress& address,
+        ActiveSocketResult tryOnce(const KiottyNetAddress& address,
                                    const StopSignal* stop,
                                    uint32_t timeout_milliseconds);
-        NoDelay            clientNoDelayOf(const KiottyNetClientConfiguration& configuration);
+        NoDelay            clientNoDelayOf(const KiottyNetAddress& address);
     }
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const std::atomic<bool>& stop)
     {
-        return retry(configuration, address, Halt{ &stop, nullptr }, Deadline(0));
+        return retry(address, Halt{ &stop, nullptr }, Deadline(0));
     }
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const StopSignal& stop,
                                      const Deadline& deadline)
     {
-        return retry(configuration, address, Halt{ nullptr, &stop }, deadline);
+        return retry(address, Halt{ nullptr, &stop }, deadline);
     }
 
     namespace
     {
-        ConnectedResult retry(const KiottyNetClientConfiguration& configuration,
-                              const KiottyNetAddress& address,
+        ConnectedResult retry(const KiottyNetAddress& address,
                               const Halt& halt,
                               const Deadline& deadline)
         {
-            const uint32_t trials = configuration.max_trial == 0 ? 1 : configuration.max_trial;
-            const uint32_t interval_milliseconds = configuration.trial_interval_milliseconds;
-            const uint32_t connect_milliseconds = configuration.connect_timeout_milliseconds;
+            const uint32_t trials = address.max_trial == 0 ? 1 : address.max_trial;
+            const uint32_t interval_milliseconds = address.trial_interval_milliseconds;
+            const uint32_t connect_milliseconds = address.connect_timeout_milliseconds;
             SocketCode last = SocketCode::TIMEOUT;
             for (uint32_t trial = 0; trial < trials; ++trial)
             {
@@ -70,7 +65,7 @@ namespace kiotty::net::implementation
                 if (deadline.expired()) { break; }
                 const uint32_t timeout_milliseconds = deadline.bound(connect_milliseconds);
                 ActiveSocketResult attempt =
-                    tryOnce(configuration, address, halt.signal, timeout_milliseconds);
+                    tryOnce(address, halt.signal, timeout_milliseconds);
                 if (attempt) { return ConnectedResult::success(std::move(attempt.value)); }
                 last = attempt.code;
             }
@@ -106,8 +101,7 @@ namespace kiotty::net::implementation
             }
         }
 
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
-                                   const KiottyNetAddress& address,
+        ActiveSocketResult tryOnce(const KiottyNetAddress& address,
                                    const StopSignal* stop,
                                    uint32_t timeout_milliseconds)
         {
@@ -116,14 +110,14 @@ namespace kiotty::net::implementation
             ActiveSocket& socket = opened.value;
             const SocketCode connected = socket.connect(address, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }
-            const SocketCode tuned = configureNoDelay(socket, clientNoDelayOf(configuration));
+            const SocketCode tuned = configureNoDelay(socket, clientNoDelayOf(address));
             if (tuned != SocketCode::SUCCESS) { return ActiveSocketResult::failure(tuned); }
             return ActiveSocketResult::success(std::move(socket));
         }
 
-        NoDelay clientNoDelayOf(const KiottyNetClientConfiguration& configuration)
+        NoDelay clientNoDelayOf(const KiottyNetAddress& address)
         {
-            if (configuration.no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
+            if (address.no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
             return NoDelay::DISABLED;
         }
     }

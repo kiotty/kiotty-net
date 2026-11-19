@@ -83,7 +83,6 @@ namespace kiotty::net::implementation
         TlsProfile                            _profile;
         IoLoop                                _loop;
         RunGate                               _gate;
-        KiottyNetClientConfiguration          _configuration;
         std::atomic<bool>                     _is_closing;
         std::atomic<bool>                     _is_abandoned;
     };

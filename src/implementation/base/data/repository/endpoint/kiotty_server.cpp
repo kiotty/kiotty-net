@@ -26,7 +26,6 @@ namespace kiotty::net::implementation
         , _loop()
         , _gate()
         , _is_abandoned(false)
-        , _configuration()
     {
     }
 
@@ -42,7 +41,6 @@ namespace kiotty::net::implementation
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(server);
         _host.initialize(limits, server.max_clients, cipherOf(limits));
-        _configuration = server;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -71,7 +69,8 @@ namespace kiotty::net::implementation
         _loop.reset();
         const KiottyNetCode secured = openProfile(tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
-        const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
+        const LoopParts parts{ _host,    _listener, _acceptor,
+                               _profile, handler,   address.send_timeout_milliseconds };
         const KiottyNetCode opened = listen(address);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return leave(opened); }
         _gate.start();
@@ -159,7 +158,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode Server::listen(const KiottyNetAddress& address)
     {
-        const NoDelay no_delay = noDelayOf(_configuration.no_delay);
+        const NoDelay no_delay = noDelayOf(address.no_delay);
         const SocketCode opened = _acceptor.open(address, LISTEN_BACKLOG, no_delay);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const SocketCode attached = _acceptor.attach(_listener);
@@ -186,7 +185,7 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity,
-                                     configuration.send_timeout_milliseconds };
+                                     0 };
         }
 
         size_t listenerCapacityOf(size_t max_clients)

@@ -6,6 +6,8 @@
 #include "base/data/repository/connection/kiotty_connection_host.h"
 #include "base/domain/entity/kiotty_handler.h"
 
+#include <cstddef>
+
 namespace kiotty::net::implementation
 {
     struct LoopParts
@@ -15,7 +17,9 @@ namespace kiotty::net::implementation
         Acceptor&       acceptor;
         TlsProfile&     profile;
         const Handler&  handler;
+        size_t          send_timeout_milliseconds;
     };
 
-    static_assert(sizeof(LoopParts) == 5 * sizeof(void*), "LoopParts: unexpected padding");
+    static_assert(sizeof(LoopParts) == 5 * sizeof(void*) + sizeof(size_t),
+                  "LoopParts: unexpected padding");
 }

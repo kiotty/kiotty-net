@@ -556,7 +556,7 @@ uint32_t           KiottyNet_getHttpAllowedMethods(const KiottyNetHttpReply* rep
 | 함수 | 하는 일 |
 |---|---|
 | `createHttpClient` | 버퍼를 잡는다 (2.9). `{ code, handle }`. NULL context / 설정, 초기화하지 않은 설정, 범위 밖 limits 는 `{ INVALID_ARGUMENT, NULL }`. 쓰는 limits 필드는 `max_header_bytes`, `max_headers` 둘이다 |
-| `connectHttpClient` | 대상 (address, tls) 을 기억하고 연결한다. 연결 시도와 재시도는 설정의 `connect_timeout_milliseconds`, `max_trial`, `trial_interval_milliseconds` 를 따른다. 연결만 실패하면 (서버가 없음, 거절, timeout) 대상은 남아 다음 요청이 다시 연다. 인자가 틀리면 (주소, Host 가 될 수 없는 host, TLS 설정) `INVALID_ARGUMENT` 이고 **이전 대상도 지운다**. 그 뒤의 요청은 connect 한 적 없을 때처럼 `INVALID_ARGUMENT` 다. 다시 부르면 대상을 바꾼다 |
+| `connectHttpClient` | 대상 (address, tls) 을 기억하고 연결한다. 연결 시도와 재시도는 address 의 `connect_timeout_milliseconds`, `max_trial`, `trial_interval_milliseconds` 를 따른다. 연결만 실패하면 (서버가 없음, 거절, timeout) 대상은 남아 다음 요청이 다시 연다. 인자가 틀리면 (주소, Host 가 될 수 없는 host, TLS 설정) `INVALID_ARGUMENT` 이고 **이전 대상도 지운다**. 그 뒤의 요청은 connect 한 적 없을 때처럼 `INVALID_ARGUMENT` 다. 다시 부르면 대상을 바꾼다 |
 | `disconnectHttpClient` | 연결만 닫는다. 대상과 공통 헤더는 남는다. 다른 호출이 걸려 있으면 아무것도 하지 않는다 |
 | `closeHttpClient` | 걸린 호출 (요청, read, 연결) 을 `CLOSED` 로 돌아오게 하고 연결을 닫는다. 걸린 호출이 없으면 그 자리에서 연결을 닫는다. 대상과 공통 헤더는 남고 다음 요청이 다시 연다 |
 | `setHttpClientHeader` | 공통 헤더를 더하거나 같은 이름 (대소문자 무시) 을 바꾼다. value NULL 은 그 이름을 지운다 (없어도 `SUCCESS`) |
@@ -813,12 +813,12 @@ int main(void)
 
     KiottyNetClientConfiguration configuration;
     KiottyNet_initializeClientConfiguration(&configuration);
-    KiottyNet_configureClientRetry(&configuration, 3, 1000);
     KiottyNetTlsClientConfiguration tls;
     KiottyNet_initializeTlsClientConfiguration(&tls);
     KiottyNet_configureTlsClientTrustStore(&tls, "ca.pem");
     KiottyNetAddress address;
     KiottyNet_initializeTcpAddress(&address, "cloud.example.com", 443);
+    KiottyNet_setAddressRetry(&address, 3, 1000);
 
     KiottyNetHttpClientResult made_requests = KiottyNet_createHttpClient(context, &configuration, NULL);
     KiottyNetHttpClientResult made_events   = KiottyNet_createHttpClient(context, &configuration, NULL);
@@ -870,11 +870,11 @@ int main()
     KiottyNet_Context context;
 
     KiottyNetClientConfiguration configuration;
-    KiottyNet_ClientConfigurationBuilder(configuration).retry(3, 1000).build();
+    KiottyNet_ClientConfigurationBuilder(configuration).build();
     KiottyNetHttpLimits limits;
     KiottyNet_HttpLimitsBuilder(limits).headerCapacity(16 * 1024, 64).build();
     KiottyNetAddress address;
-    KiottyNet_initializeTcpAddress(&address, "127.0.0.1", 8080);
+    KiottyNet_AddressBuilder(address, "127.0.0.1", 8080).retry(3, 1000).build();
 
     KiottyNet_HttpClient client(context.handle(), configuration, &limits);   // limits nullptr = 기본값
     if (!client)

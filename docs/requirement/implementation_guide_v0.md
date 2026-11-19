@@ -590,8 +590,8 @@ int runEchoClient(const char* host, uint16_t port, KiottyNetSpan message)
 
     KiottyNetClientConfiguration configuration;
     KiottyNetAddress             address;
-    if (KiottyNet_ClientConfigurationBuilder(configuration).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
-        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS)
+    if (KiottyNet_ClientConfigurationBuilder(configuration).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_AddressBuilder(address, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }
@@ -641,8 +641,8 @@ int runEchoClientSync(const char* host, uint16_t port, KiottyNetSpan message)
 
     KiottyNetClientConfiguration configuration;
     KiottyNetAddress             address;
-    if (KiottyNet_ClientConfigurationBuilder(configuration).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
-        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS)
+    if (KiottyNet_ClientConfigurationBuilder(configuration).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_AddressBuilder(address, host, port).connectTimeout(3000).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS)
     {
         return 1;
     }

@@ -178,19 +178,20 @@ namespace
 
     const KiottyNetConnectionHandler HANDLER = { &onConnected, &onReady, &onRead, &onWritten, &onTimeout, &onWorkStarted, &onDisconnected, &onError };
 
-    KiottyNetAddress loopbackAddress(uint16_t port)
+    KiottyNetAddress loopbackAddress(uint16_t port, uint32_t send_timeout_milliseconds = 0)
     {
         KiottyNetAddress address;
         EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, LOOPBACK_HOST, port));
+        EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressSendTimeout(&address, send_timeout_milliseconds));
         return address;
     }
 
     class RunningServer
     {
     public:
-        RunningServer(KiottyNetServerHandle server, uint16_t port, App& app)
+        RunningServer(KiottyNetServerHandle server, uint16_t port, App& app, uint32_t send_timeout_milliseconds = 0)
             : _server(server)
-            , _address(loopbackAddress(port))
+            , _address(loopbackAddress(port, send_timeout_milliseconds))
             , _code(KIOTTY_NET_CODE_SUCCESS)
             , _thread([this, &app]() { _code.store(KiottyNet_runServer(_server, &_address, nullptr, &HANDLER, &app)); })
         {
@@ -241,12 +242,11 @@ namespace
             KiottyNet_releaseContext(context);
         }
 
-        KiottyNetServerHandle createServer(uint32_t send_timeout_milliseconds = 0)
+        KiottyNetServerHandle createServer()
         {
             KiottyNetServerConfiguration configuration;
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeServerConfiguration(&configuration));
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerMaxClients(&configuration, 4));
-            EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerSendTimeout(&configuration, send_timeout_milliseconds));
             KiottyNetServerResult created = KiottyNet_createServer(context, &configuration);
             EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, created.code);
             return created.handle;
@@ -435,10 +435,10 @@ TEST_F(BaseApiTest, ServerAndEventClientRoundTripThroughTheCApi)
 TEST_F(BaseApiTest, APeerThatNeverReadsIsDisconnectedWithPeerNotReadingAfterTheSendTimeout)
 {
     const uint16_t port = kiotty_test::unusedPort();
-    KiottyNetServerHandle server = createServer(SEND_TIMEOUT_MS);
+    KiottyNetServerHandle server = createServer();
     ASSERT_NE(nullptr, server);
     App server_app(Role::FLOOD);
-    RunningServer running(server, port, server_app);
+    RunningServer running(server, port, server_app, SEND_TIMEOUT_MS);
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_awaitServer(server, WAIT_MS));
     kiotty_test::LoopbackPeer peer;
     ASSERT_TRUE(peer.connectTcp(port));

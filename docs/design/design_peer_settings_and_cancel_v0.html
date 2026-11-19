@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>상대에 따른 설정과 StreamClient 취소 v0</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d9dee3; --code-bg: #f3f5f7;
+    --agree: #1a7f37; --partial: #9a6700; --concern: #cf222e; --accent: #0969da; --phase: #eef3f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+      --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --fg: #e6edf3; --muted: #9aa4af; --line: #2c333b; --code-bg: #161b22;
+    --agree: #3fb950; --partial: #d29922; --concern: #f85149; --accent: #58a6ff; --phase: #151c26;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto; padding: 32px 16px 64px; max-width: 1040px;
+    background: var(--bg); color: var(--fg);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  code, pre { font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 3px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc li { break-inside: avoid; }
+  a { color: var(--accent); text-decoration: none; }
+  .flow { background: var(--phase); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-family: "Cascadia Code", Consolas, "D2Coding", monospace; font-size: 13px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 8px 0; color: var(--muted); }
+  .warn { border-left: 3px solid var(--concern); padding: 4px 12px; margin: 8px 0; }
+  @media (max-width: 640px) { .toc { columns: 1; } body { font-size: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>상대에 따른 설정과 StreamClient 취소 v0</h1>
+<p class="sub">2026-11-19 확정 (정할 것 넷 닫음). kiotty-net 을 실제 DICOM 라이브러리에 적용하면서 들어온 변경 요청 둘을 다룬다. (1) 연결 시도와 송신에 관한 다섯 설정은 Endpoint 가 아니라 연결할 상대에 따라 정해진다. (2) 다른 thread 에서 막혀 있는 동기 read / write 를 취소하고 싶다. 사용자와 정한 것 (2026-11-19): 다섯 설정은 <code>KiottyNetAddress</code> 로 옮긴다. 취소는 StreamClient 에만 두고, 취소한 뒤에도 연결은 살려 두며, connect 도 깨운다. 서버 work stream 에는 두지 않는다. 사이클 D1 (설정), D2 (취소).</p>
+
+<ul class="toc">
+  <li><a href="#s0">0. 한눈에</a></li>
+  <li><a href="#s1">1. 결정</a></li>
+  <li><a href="#s2">2. D1 상대에 따른 설정</a></li>
+  <li><a href="#s3">3. D2 StreamClient 취소</a></li>
+  <li><a href="#s4">4. 장면</a></li>
+  <li><a href="#s5">5. 안에서</a></li>
+  <li><a href="#s6">6. 정할 것</a></li>
+  <li><a href="#s7">7. 사이클</a></li>
+</ul>
+
+<h2 id="s0">0. 한눈에</h2>
+<pre><code>/* create: 메모리만 */
+KiottyNetClientConfiguration configuration;
+KiottyNet_initializeClientConfiguration(&amp;configuration);
+KiottyNet_configureClientBuffer(&amp;configuration, 64 * 1024, 64 * 1024, 0);
+KiottyNetStreamClientResult made = KiottyNet_createStreamClient(context, &amp;configuration);
+
+/* connect: 어디로, 어떻게 */
+KiottyNetAddress pacs;
+KiottyNet_initializeTcpAddress(&amp;pacs, "10.0.0.5", 104);
+KiottyNet_setAddressConnectTimeout(&amp;pacs, 3000);
+KiottyNet_setAddressRetry(&amp;pacs, 5, 1000);                 /* 시도 횟수, 시도 간격 */
+KiottyNet_setAddressSendTimeout(&amp;pacs, 30000);
+KiottyNet_connectStreamClient(made.handle, &amp;pacs, NULL);
+
+/* 다른 thread: 막혀 있는 read / write / connect 를 깨운다. 연결은 그대로 */
+KiottyNet_cancelStreamClient(made.handle);
+
+/* 막혀 있던 thread */
+KiottyNetResult got = KiottyNet_readStreamClient(made.handle, buffer, sizeof(buffer), 0);
+if (got.code == KIOTTY_NET_CODE_CANCELLED) {
+    /* 같은 연결로 C-CANCEL 을 보내고 다시 read 하거나, disconnect */
+}</code></pre>
+<table>
+  <tr><th>것</th><th>무엇</th></tr>
+  <tr><td>create 의 설정</td><td><code>*MemorySize</code> 가 읽는 값만: 서버는 <code>max_clients</code> 와 세 capacity, 클라이언트는 세 capacity</td></tr>
+  <tr><td>address</td><td>"어디로" (transport, host, port) 에 "어떻게" (<code>connect_timeout_milliseconds</code>, <code>max_trial</code>, <code>trial_interval_milliseconds</code>, <code>no_delay</code>, <code>send_timeout_milliseconds</code>) 가 붙는다</td></tr>
+  <tr><td>취소</td><td><code>KiottyNet_cancelStreamClient(client)</code>, code <code>KIOTTY_NET_CODE_CANCELLED</code> (enum 맨 끝). 연결은 닫지 않는다</td></tr>
+  <tr><td>바뀌지 않는 것</td><td>connect / run 의 모양 <code>(address, tls_or_null)</code>. HttpClient 의 close (지금처럼 <code>CLOSED</code>). 서버 / EventClient 의 close / await. 이미 있는 code 의 번호</td></tr>
+</table>
+
+<h2 id="s1">1. 결정</h2>
+<table>
+  <tr><th>#</th><th>결정</th><th>이유</th></tr>
+  <tr><td>1</td><td>다섯 설정을 <code>KiottyNetClientConfiguration</code> / <code>KiottyNetServerConfiguration</code> 에서 빼서 <code>KiottyNetAddress</code> 에 넣는다</td><td>DICOM 에서는 한 SCU 가 여러 PACS 에 붙고, PACS 마다 응답 속도, 재시도 정책, Nagle 의 득실이 다르다. 상대에 따라 정해지는 값은 상대를 정하는 자리 (connect / run) 에서 받는 것이 맞다. connect / run 은 이미 address 를 받으므로 함수 모양이 바뀌지 않는다</td></tr>
+  <tr><td>2</td><td>create 의 설정은 메모리 크기만 남긴다. 이름은 그대로 (<code>KiottyNetClientConfiguration</code>, <code>KiottyNetServerConfiguration</code>). 세 번째 설정 구조체를 만들지 않는다</td><td>"create 에 주는 것은 메모리를 정하는 값" 이라는 규칙 하나로 설명된다. 특수한 이름의 구조체가 하나 더 생기면 앱이 어느 것을 어디에 주는지 헷갈린다</td></tr>
+  <tr><td>3</td><td>메모리 크기는 <code>createContext</code> 가 아니라 지금처럼 <code>create*</code> 에서 받는다</td><td>Context 는 process 에 하나다. 한 process 에 SCP (서버) 와 SCU (클라이언트) 가 같이 있고 capacity 가 서로 다르다</td></tr>
+  <tr><td>4</td><td>취소는 StreamClient 에만 둔다. 서버 work stream 에는 두지 않는다</td><td>사용자 결정 (2026-11-19). 서버는 이미 close 가 있고, 연결마다 깨움 handle 을 두는 값을 지금 낼 필요가 없다</td></tr>
+  <tr><td>5</td><td>취소는 연결을 닫지 않는다. read / write 는 <code>{ 그때까지 읽거나 보낸 길이, CANCELLED }</code></td><td>DICOM 에서 오래 걸리는 C-MOVE / C-FIND 를 기다리다 취소하면 같은 association 으로 C-CANCEL 을 보내야 한다. 끊으면 상대는 association 이 비정상으로 끝난 것으로 본다</td></tr>
+  <tr><td>6</td><td>취소는 connect (연결 시도, 시도 사이의 쉼, TLS handshake) 도 깨운다. 이때는 연결이 아직 없으므로 연결되지 않은 채 <code>CANCELLED</code></td><td>사용자 결정. 꺼진 PACS 에 5 회 × 3 초를 기다리는 동안 앱이 멈출 수 있어야 한다. 반쯤 된 TLS handshake 는 이어 쓸 수 없다</td></tr>
+  <tr><td>7</td><td>새 code <code>KIOTTY_NET_CODE_CANCELLED</code> 는 <code>KiottyNetCode</code> 의 맨 끝 (<code>DATA_ARRIVED_WHILE_WRITING</code> 뒤) 에 붙인다</td><td>이미 있는 번호를 바꾸지 않는다. <code>CLOSED</code> 는 "닫혀서 끝남" 이므로 "연결은 그대로, 이 호출만 끝남" 과 갈라야 앱이 다음 동작을 고를 수 있다</td></tr>
+  <tr><td>8</td><td>깨움은 이미 있는 <code>StopSignal</code> 을 쓴다. 새 운영체제 자원이 없다</td><td>StreamClient 는 <code>_stop</code> 을 가지고 있고, 소켓 backend 의 기다림 (Windows <code>waitReady</code>, POSIX <code>waitFor</code>) 은 소켓과 stop handle 을 한 번에 기다린다. A1 에서 write 의 기다림도 IN | OUT | stop 이 되었다. Windows / Linux 의 차이는 이미 backend 가 푼다 (Windows 는 자기에게 bind 한 UDP 소켓, POSIX 는 pipe)</td></tr>
+</table>
+
+<h2 id="s2">2. D1 상대에 따른 설정</h2>
+<h3>2.1 두 묶음</h3>
+<table>
+  <tr><th>묶음</th><th>필드</th><th>정해지는 때</th><th>읽는 곳</th></tr>
+  <tr><td>메모리</td><td><code>max_clients</code> (서버), <code>receive_capacity</code>, <code>send_capacity</code>, <code>push_capacity</code></td><td>create</td><td><code>*MemorySize</code>, Owner 의 Stage / 배열</td></tr>
+  <tr><td>상대</td><td><code>connect_timeout_milliseconds</code>, <code>max_trial</code>, <code>trial_interval_milliseconds</code>, <code>no_delay</code>, <code>send_timeout_milliseconds</code></td><td>connect / run (address)</td><td><code>connectWithRetry</code>, <code>configureNoDelay</code>, StreamClient 의 handshake 시간, 연결의 송신 시간 (<code>ConnectionLimits</code>)</td></tr>
+</table>
+
+<h3>2.2 헤더 초안 (C)</h3>
+<pre><code>typedef struct KiottyNetAddress
+{
+    uint32_t           initialization_mark;
+    KiottyNetTransport transport;
+    char               host[KIOTTY_NET_MAX_HOST_LENGTH];
+    uint16_t           port;
+    uint32_t           connect_timeout_milliseconds;
+    uint32_t           max_trial;
+    uint32_t           trial_interval_milliseconds;
+    KiottyNetNoDelay   no_delay;
+    uint32_t           send_timeout_milliseconds;
+} KiottyNetAddress;
+
+KiottyNetCode KiottyNet_initializeTcpAddress(KiottyNetAddress* address, const char* host, uint16_t port);
+KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const char* pipe_name);
+KiottyNetCode KiottyNet_setAddressConnectTimeout(KiottyNetAddress* address, uint32_t timeout_milliseconds);
+KiottyNetCode KiottyNet_setAddressRetry(KiottyNetAddress* address, uint32_t max_trial, uint32_t trial_interval_milliseconds);
+KiottyNetCode KiottyNet_setAddressNoDelay(KiottyNetAddress* address, KiottyNetNoDelay no_delay);
+KiottyNetCode KiottyNet_setAddressSendTimeout(KiottyNetAddress* address, uint32_t timeout_milliseconds);
+
+typedef struct KiottyNetClientConfiguration
+{
+    uint32_t initialization_mark;
+    size_t   receive_capacity;
+    size_t   send_capacity;
+    size_t   push_capacity;
+} KiottyNetClientConfiguration;
+
+typedef struct KiottyNetServerConfiguration
+{
+    uint32_t initialization_mark;
+    size_t   max_clients;
+    size_t   receive_capacity;
+    size_t   send_capacity;
+    size_t   push_capacity;
+} KiottyNetServerConfiguration;</code></pre>
+<ul>
+  <li><code>initialize*Address</code> 가 지금의 설정 기본값을 그대로 채운다 (연결 시간, 시도 횟수, 간격, <code>NO_DELAY_ON</code>, 송신 시간). 앱이 기본값만 쓰고 있었다면 동작은 같다.</li>
+  <li>지금의 <code>KiottyNet_configureClientConnectTimeout</code> / <code>configureClientRetry</code> / <code>configureClientNoDelay</code> / <code>configureClientSendTimeout</code>, <code>configureServerNoDelay</code> / <code>configureServerSendTimeout</code> 은 없앤다. 같은 값의 setter 가 address 쪽에 생긴다. 검사 (<code>max_trial == 0</code> 이면 <code>INVALID_ARGUMENT</code> 등) 는 그대로 옮긴다.</li>
+  <li>setter 이름은 지금의 <code>configure*</code> 와 갈라 <code>setAddress*</code> 로 한다. address 는 "설정 구조체" 가 아니라 상대를 나타내는 값이라는 것을 이름이 보이게 한다. (정할 것 4)</li>
+</ul>
+
+<h3>2.3 address 의 initialization_mark</h3>
+<p>지금 address 에는 표시가 없어서 <code>KiottyNetAddress address{}</code> 뒤에 필드를 직접 채울 수 있다. 새 필드가 0 이면 뜻이 바뀐다: <code>connect_timeout 0</code> 과 <code>send_timeout 0</code> 은 "끝없이" (timeout 0 규칙), <code>no_delay 0</code> 은 <code>OFF</code>. 직접 채운 address 가 조용히 끝없이 기다리는 것을 막으려고, 설정 구조체처럼 <code>initialization_mark</code> 를 두고 connect / run 은 <code>initialize*Address</code> 를 거치지 않은 address 를 <code>INVALID_ARGUMENT</code> 로 거절한다. (정할 것 2)</p>
+<p>직접 채우는 곳은 지금 테스트 다섯 파일이다 (<code>kiotty_test_acceptor</code>, <code>kiotty_test_active_socket</code>, <code>kiotty_test_connection_stream</code>, <code>kiotty_test_connect_with_retry</code>, <code>kiotty_test_endpoint</code>). D1 에서 <code>initializeTcpAddress</code> 로 바꾼다.</p>
+
+<h3>2.4 서버의 address</h3>
+<table>
+  <tr><th>필드</th><th>서버 run 에서</th></tr>
+  <tr><td><code>no_delay</code></td><td>듣는 소켓과 받아들인 모든 연결에 (지금 <code>Server::listen</code> 이 설정에서 읽던 것)</td></tr>
+  <tr><td><code>send_timeout_milliseconds</code></td><td>받아들인 연결마다 <code>ConnectionConfiguration</code> 으로 넘겨 <code>Connection::initialize</code> 가 송신 흐름에 건다 (지금도 연결마다 <code>limits</code> 를 넘기므로 자리만 바뀐다). <code>ConnectionLimits</code> 는 메모리 셋만 남는다</td></tr>
+  <tr><td><code>connect_timeout_milliseconds</code>, <code>max_trial</code>, <code>trial_interval_milliseconds</code></td><td>읽지 않는다</td></tr>
+</table>
+<p class="note">D1 구현 (2026-11-19): 송신 시간은 <code>ConnectionConfiguration</code> 의 새 칸이 아니라 run 마다 만드는 <code>LoopParts</code> 의 <code>send_timeout_milliseconds</code> 로 넘긴다. IoLoop 가 받아들인 연결의 <code>ConnectionLimits</code> 에 그 값을 넣고, <code>ConnectionHost::acquire</code> 는 메모리 셋만 create 때의 값으로 채운다. <code>ConnectionLimits</code> 의 모양은 그대로이고 ConnectionHost 에 공개 메서드를 더하지 않는다 (수칙의 PUBLIC). EventClient 도 같은 길이다. Server / EventClient 의 <code>_configuration</code> 멤버는 읽는 곳이 없어져 뺐다.</p>
+<div class="warn">2026-11-19 의 대화에서는 "서버 address 의 connect 값이 0 이 아니면 <code>INVALID_ARGUMENT</code>" 로 적었다. 그런데 <code>initializeTcpAddress</code> 가 클라이언트 기본값 (0 이 아님) 을 채우므로, 그 규칙이면 기본 address 로 서버를 run 할 수 없다. 이 문서는 "서버는 그 셋을 읽지 않는다" 로 고쳐 제안한다. (정할 것 1)</div>
+
+<h3>2.5 위 층</h3>
+<ul>
+  <li>HttpClient 는 이미 <code>HttpClientTarget::address</code> 에 address 를 통째로 가지고 다시 연결할 때 쓴다. 새 필드도 함께 따라간다. 바꿀 것 없음.</li>
+  <li>HTTP 서버, WebSocket 서버 / 클라이언트, statemachine 의 run / connect 는 address 를 base 에 그대로 넘긴다. 함수 모양은 바뀌지 않는다.</li>
+  <li><code>connectWithRetry</code> 는 <code>(configuration, address, …)</code> 에서 <code>(address, …)</code> 로. 다섯 값 중 연결에 쓰는 넷을 address 에서 읽는다.</li>
+  <li>EventClient 의 <code>limitsOf</code> 와 StreamClient 의 handshake 시간 (지금 <code>_configuration.connect_timeout_milliseconds</code>) 도 address 에서 읽는다. StreamClient 는 address 를 새 멤버로 두지 않는다. 다시 연결 (<code>reconnect</code>) 은 지금처럼 address 를 인자로 받는다.</li>
+</ul>
+
+<h3>2.6 C++</h3>
+<pre><code>KiottyNetClientConfiguration configuration;
+KiottyNet_ClientConfigurationBuilder(configuration).bufferCapacity(64 * 1024, 64 * 1024, 0);
+
+KiottyNetAddress pacs;
+KiottyNet_AddressBuilder(pacs, "10.0.0.5", 104).connectTimeout(3000).retry(5, 1000).sendTimeout(30000);</code></pre>
+<p><code>ClientConfigurationBuilder</code> 는 <code>bufferCapacity</code> 만, <code>ServerConfigurationBuilder</code> 는 <code>maxClients</code> / <code>bufferCapacity</code> 만 남는다. <code>connectTimeout</code> / <code>retry</code> / <code>noDelay</code> / <code>sendTimeout</code> 은 address builder 로 옮긴다. 이름은 지금 builder 들과 같은 꼴로 <code>KiottyNet_AddressBuilder</code>, 파이프는 <code>KiottyNet_AddressBuilder::pipe(address, name)</code>. (정할 것 4)</p>
+
+<h3>2.7 호환</h3>
+<p>설정 구조체와 address 의 배치가 바뀌므로 ABI 가 깨진다. 앱은 다시 컴파일해야 하고, 없어진 <code>configure*</code> 함수를 부르던 코드는 컴파일 오류로 드러난다 (조용히 다르게 동작하지 않는다). 단일 헤더를 다시 만든다.</p>
+
+<h2 id="s3">3. D2 StreamClient 취소</h2>
+<h3>3.1 헤더 초안</h3>
+<pre><code>KIOTTY_NET_API KiottyNetCode KiottyNet_cancelStreamClient(KiottyNetStreamClientHandle client);
+/* KiottyNetCode 맨 끝 */ KIOTTY_NET_CODE_CANCELLED
+
+/* C++ */
+KiottyNetCode KiottyNet_StreamClient::cancel();</code></pre>
+<p>돌려주는 값: <code>SUCCESS</code>. client 가 <code>NULL</code> 이면 <code>INVALID_ARGUMENT</code>. 연결되어 있지 않아도 <code>SUCCESS</code> (다음 connect 가 받는다, 3.3).</p>
+
+<h3>3.2 막혀 있던 호출이 받는 것</h3>
+<table>
+  <tr><th>막혀 있던 호출</th><th>돌려받는 것</th><th>연결</th></tr>
+  <tr><td>read</td><td><code>{ 0, CANCELLED }</code>. read 는 바이트를 하나라도 받으면 바로 돌아오므로, 기다리는 중에는 받은 것이 없다. TLS 의 반쯤 온 레코드는 TLS 수신 Stage 에 남아 다음 read 가 잇는다</td><td>그대로</td></tr>
+  <tr><td>write (평문)</td><td><code>{ 보낸 길이, CANCELLED }</code>. 앱은 <code>data + bytes</code> 부터 이어 보낼 수 있다</td><td>그대로</td></tr>
+  <tr><td>write (TLS)</td><td><code>{ 받아들인 길이, CANCELLED }</code>. 레코드로 만들어진 조각은 받아들인 것으로 센다 (A1 의 <code>DATA_ARRIVED_WHILE_WRITING</code> 과 같은 셈). 그 조각의 보내지 못한 암호문은 송신 쪽 Stage 에 남고, 다음 read / write 가 먼저 보낸다. 레코드를 반만 보낸 채 다른 레코드를 보내면 TLS 가 깨지기 때문이다</td><td>그대로</td></tr>
+  <tr><td>connect (시도, 시도 사이 쉼, TLS handshake)</td><td><code>CANCELLED</code></td><td>없음. connect 는 시작할 때 이전 연결을 이미 닫는다. 반쯤 된 시도와 handshake 는 닫는다</td></tr>
+</table>
+<p>write 가 <code>CANCELLED</code> 로 끝나면 앱 프로토콜의 메시지가 중간에서 끊겨 있을 수 있다. 같은 연결을 계속 쓰려면 앱이 메시지 경계를 지킨다: 남은 바이트를 보내 메시지를 끝내거나, 끊는다 (4.2).</p>
+
+<h3>3.3 막혀 있지 않을 때의 취소</h3>
+<p>cancel 은 다른 thread 에서 오므로 "막히기 직전" 과 "막힌 뒤" 를 앱이 가를 수 없다. 그래서 cancel 은 <b>받아질 때까지 남는다</b>.</p>
+<table>
+  <tr><th>때</th><th>동작</th></tr>
+  <tr><td>호출이 막혀 있음</td><td>그 호출이 깨어 <code>CANCELLED</code> 를 돌려주고 cancel 을 받는다 (지운다)</td></tr>
+  <tr><td>호출이 없음</td><td>다음 read / write / connect 가 시작하자마자 <code>{ 0, CANCELLED }</code> 를 돌려주고 cancel 을 받는다. 수신 Stage 에 바이트가 있어도 cancel 이 먼저다 (바이트는 남아 그 다음 read 가 준다)</td></tr>
+  <tr><td>cancel 이 여러 번</td><td>받을 때 한 번으로 친다 (<code>StopSignal</code> 의 raised / accepted 셈 그대로)</td></tr>
+  <tr><td>호출이 cancel 과 거의 같이 성공으로 끝남</td><td>그 호출은 성공을 돌려주고, cancel 은 남아 다음 호출이 받는다</td></tr>
+  <tr><td>disconnect</td><td>남은 cancel 을 지운다 (정할 것 3). 연결을 버리는 앱은 그 cancel 이 다음 연결에 걸리기를 바라지 않는다</td></tr>
+</table>
+
+<h3>3.4 thread 규칙</h3>
+<ul>
+  <li><code>KiottyNet_cancelStreamClient</code> 는 create 뒤, destroy 전이면 어느 thread 에서나 부를 수 있다. destroy 와 겹치면 안 된다 (앱의 몫, 다른 handle 함수와 같다).</li>
+  <li>read / write / connect / disconnect 는 지금처럼 한 번에 한 thread 에서만. cancel 은 그 thread 를 깨우기만 한다.</li>
+  <li>cancel 은 막히지 않는다 (stop handle 에 1 바이트를 보낼 뿐이다).</li>
+</ul>
+
+<h3>3.5 HttpClient 와의 관계</h3>
+<p>HttpClient 의 close 도 같은 <code>StopSignal</code> 로 걸린 write 를 깨운다 (U2). HttpClient 는 base 의 StreamClient 를 안에서 쓰지만 <code>readStreamClient</code> / <code>writeStreamClient</code> usecases 를 거치지 않고, 깨어나면 stop 을 받아 연결을 닫고 <code>CLOSED</code> 를 돌려준다 (<code>settleStop</code>). D2 는 base 의 StreamClient usecases 에서만 <code>CLOSED</code> 를 <code>CANCELLED</code> 로 바꾸므로 HttpClient 의 공개 동작은 바뀌지 않는다. HttpClient 에는 "연결을 살리는 취소" 를 두지 않는다 (요청 중간에 끊긴 HTTP/1.1 연결은 다시 쓸 수 없다).</p>
+
+<h2 id="s4">4. 장면</h2>
+<h3>4.1 오래 걸리는 C-MOVE 를 취소 (read)</h3>
+<div class="flow">SCU thread : write(C-MOVE-RQ) → read(..., 0)          (PACS 가 수천 장을 옮기는 동안 막힘)
+UI thread  : cancelStreamClient(client)
+SCU thread : read → { 0, CANCELLED }
+             write(C-CANCEL-RQ) → read(C-MOVE-RSP, status Cancel) → 다음 작업 (association 그대로)</div>
+
+<h3>4.2 큰 C-STORE 를 보내는 중 취소 (write)</h3>
+<div class="flow">SCU thread : write(P-DATA-TF, 16 MiB, 60000)            (느린 회선에서 막힘)
+UI thread  : cancelStreamClient(client)
+SCU thread : write → { 5 242 880, CANCELLED }
+             PDU 가 반만 나갔다. 둘 중 하나:
+               a. 나머지 (data + 5 242 880 부터) 를 보내 PDU 를 끝낸 뒤 A-ABORT
+               b. disconnect (상대는 연결 끊김으로 본다)</div>
+
+<h3>4.3 꺼진 PACS 에 연결 시도 중 취소 (connect)</h3>
+<div class="flow">address    : setAddressConnectTimeout(&amp;pacs, 3000), setAddressRetry(&amp;pacs, 5, 1000)   (최대 약 19 초)
+SCU thread : connectStreamClient(client, &amp;pacs, NULL)     (두 번째 시도 중)
+UI thread  : cancelStreamClient(client)
+SCU thread : connect → CANCELLED (연결 없음). 다른 PACS 로 connect 하면 바로 시작한다 (cancel 은 받아졌다)</div>
+
+<h2 id="s5">5. 안에서</h2>
+<ul>
+  <li><b>깨움.</b> 이미 된다. 소켓 backend 의 기다림은 시작할 때 <code>isStopped(stop)</code> 를 보고, 기다리는 동안 stop handle 을 같이 본다. 둘 다 <code>SocketCode::CANCELLED</code> 를 돌려주고 <code>toNetCode</code> 가 <code>KIOTTY_NET_CODE_CLOSED</code> 로 바꾼다. <code>connectWithRetry</code> 의 쉼도 stop 을 보고 <code>CLOSED</code> 를 돌려준다. StreamClient 의 소켓은 <code>ActiveSocket::open(transport, &amp;_stop)</code> 로 만들어져 이미 stop 을 가진다.</li>
+  <li><b>code 바꾸기.</b> <code>toNetCode</code> 는 바꾸지 않는다 (HttpClient 와 서버의 이벤트 경로가 <code>CLOSED</code> 에 기댄다). 대신 base 의 StreamClient usecases (<code>readStreamClient</code>, <code>writeStreamClient</code>, connect) 가 결과 code 가 <code>CLOSED</code> 이고 <code>_stop.accept()</code> 가 참이면 <code>CANCELLED</code> 로 돌려준다. StreamClient 의 <code>ConnectionStream</code> 이 <code>CLOSED</code> 를 내는 길은 stop 뿐이므로 다른 뜻을 덮지 않는다.</li>
+  <li><b>시작 확인.</b> 세 usecases 는 시작할 때 <code>_stop.accept()</code> 가 참이면 기다리지 않고 <code>{ 0, CANCELLED }</code> (3.3). 확인 뒤, 기다림에 들어가기 전에 온 cancel 은 backend 의 시작 검사 (<code>isStopped</code>) 가 잡고, 기다리는 동안 온 cancel 은 stop handle 이 깨운다.</li>
+  <li><b>연결 유지.</b> read / write 의 <code>CANCELLED</code> 에서는 <code>disconnect</code> 를 부르지 않는다. connect 의 <code>CANCELLED</code> 는 지금의 실패 경로대로 <code>disconnect</code>.</li>
+  <li><b>disconnect.</b> <code>StreamClient::disconnect</code> 가 끝에 <code>_stop.accept()</code> 로 남은 cancel 을 지운다. <code>reset</code> (destroy) 의 raise → disconnect 순서는 그대로 둔다.</li>
+  <li><b>새 메모리 / 운영체제 자원 없음.</b> <code>StopSignal</code> 은 StreamClient 마다 이미 하나 있다.</li>
+</ul>
+
+<h2 id="s6">6. 정할 것</h2>
+<p>모두 닫음 (2026-11-19, 사용자).</p>
+<ol>
+  <li><b>서버 address 의 connect 값.</b> 닫음: 읽지 않는다 (2.4).</li>
+  <li><b>address 의 initialization_mark.</b> 닫음: 둔다 (2.3). <code>initialize*Address</code> 는 host / port (파이프는 이름) 를 반드시 받고, 연결 시간 / 재시도 / 송신 시간 / <code>no_delay</code> 는 기본값으로 채운다. 바꾸려면 <code>setAddress*</code>.</li>
+  <li><b>disconnect 가 남은 cancel 을 지우는가.</b> 닫음: 지운다 (3.3).</li>
+  <li><b>이름.</b> 닫음: setter <code>KiottyNet_setAddress*</code>, C++ <code>KiottyNet_AddressBuilder</code>, code <code>KIOTTY_NET_CODE_CANCELLED</code>, 이 문서 <code>design_peer_settings_and_cancel_v0.html</code>, 사이클 D1 / D2.</li>
+</ol>
+
+<h2 id="s7">7. 사이클</h2>
+<table>
+  <tr><th>사이클</th><th>하는 것</th><th>완료</th></tr>
+  <tr><td>D1 상대에 따른 설정</td><td>address 의 다섯 필드와 표시, <code>setAddress*</code>, 설정 구조체에서 빼기, <code>connectWithRetry</code> / Server listen / 연결의 송신 시간 / EventClient / StreamClient handshake 가 address 에서 읽음, C++ builder 가름, 테스트의 직접 채운 address 고침, user guide / requirement / 구현 가이드, 단일 헤더</td><td>기존 테스트 그대로 (address 로 옮긴 값), 직접 채운 address 거절, 서버가 address 의 <code>no_delay</code> / 송신 시간을 연결에 검, 두 상대에 다른 재시도로 connect, HTTP / WebSocket 층의 address 전달</td></tr>
+  <tr><td>D2 StreamClient 취소</td><td><code>KIOTTY_NET_CODE_CANCELLED</code> (enum 끝), <code>KiottyNet_cancelStreamClient</code>, C++ <code>cancel</code>, usecases 의 시작 확인과 <code>CLOSED</code> → <code>CANCELLED</code>, disconnect 가 지움, 문서</td><td>integration: 다른 thread 가 read / write (평문, TLS) / connect 시도 / 시도 사이 쉼 / TLS handshake 를 깨움 (시간 안), 깨운 뒤 같은 연결로 이어 read / write (TLS 는 남은 암호문 먼저), 막힌 호출 없을 때의 cancel 은 다음 호출이 받고 그 다음은 보통, disconnect 뒤 connect 는 cancel 을 받지 않음, HttpClient close 는 그대로 <code>CLOSED</code></td></tr>
+</table>
+
+</body>
+</html>

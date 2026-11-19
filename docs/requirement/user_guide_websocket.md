@@ -300,7 +300,7 @@ KiottyNetCode KiottyNet_sendWebSocketClient(KiottyNetWebSocketClientHandle clien
 
 | Error 의 `code` | 언제 |
 |---|---|
-| EventClient run 의 실패 코드 (`SOCKET_ERROR` 등) | 연결 재시도를 다 했다 (`KiottyNet_configureClientRetry`). info 는 빈 값 |
+| EventClient run 의 실패 코드 (`SOCKET_ERROR` 등) | 연결 재시도를 다 했다 (`KiottyNet_setAddressRetry`). info 는 빈 값 |
 | `KIOTTY_NET_CODE_TLS_*` | TLS handshake 실패 (base 의 오류 보고를 그대로 넘긴다) |
 | `KIOTTY_NET_CODE_PROTOCOL_ERROR` | 101 이 아닌 응답, `Sec-WebSocket-Accept` 가 틀림, `Sec-WebSocket-Protocol` 이 후보 밖 (후보를 보내지 않았는데 온 것도) |
 | `KIOTTY_NET_CODE_TIMEOUT` | 101 이 `header_timeout_milliseconds` 안에 오지 않았다 |
@@ -591,8 +591,8 @@ int runDevice(const char* host, uint16_t port)
     KiottyNetClientConfiguration    configuration;
     KiottyNetAddress                address;
     KiottyNetTlsClientConfiguration tls;
-    if (KiottyNet_ClientConfigurationBuilder(configuration).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS
-        || KiottyNet_initializeTcpAddress(&address, host, port) != KIOTTY_NET_CODE_SUCCESS                  // host 가 Host 헤더와 SNI
+    if (KiottyNet_ClientConfigurationBuilder(configuration).build() != KIOTTY_NET_CODE_SUCCESS
+        || KiottyNet_AddressBuilder(address, host, port).retry(3, 1000).build() != KIOTTY_NET_CODE_SUCCESS    // host 가 Host 헤더와 SNI
         || KiottyNet_TlsClientConfigurationBuilder(tls).build() != KIOTTY_NET_CODE_SUCCESS)                  // 기본값 : OS 저장소로 서버 + hostname 검증
     {
         return 1;

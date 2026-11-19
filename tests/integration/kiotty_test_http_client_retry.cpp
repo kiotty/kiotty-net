@@ -207,11 +207,11 @@ TEST_F(HttpClientRetryTest, FailureOnAConnectionTheRequestOpenedIsNotRetried)
 
 TEST_F(HttpClientRetryTest, CallTimeoutBoundsTheReconnectAndItsRetryInterval)
 {
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 3, LONG_INTERVAL_MS));
     kiotty_test::LoopbackPeer peer;
     ASSERT_TRUE(peer.listenTcp(0));
     createClient();
-    const KiottyNetAddress address = tcpAddress(peer.port());
+    KiottyNetAddress address = tcpAddress(peer.port());
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressRetry(&address, 3, LONG_INTERVAL_MS));
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_connectHttpClient(client, &address, nullptr));
     peer.close();
     KiottyNet_disconnectHttpClient(client);

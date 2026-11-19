@@ -27,7 +27,6 @@ namespace kiotty::net::implementation
         , _profile()
         , _loop()
         , _gate()
-        , _configuration()
         , _is_closing(false)
         , _is_abandoned(false)
     {
@@ -43,7 +42,6 @@ namespace kiotty::net::implementation
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(client);
         _host.initialize(limits, CONNECTIONS, cipherOf(limits));
-        _configuration = client;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -74,9 +72,10 @@ namespace kiotty::net::implementation
         _loop.reset();
         const KiottyNetCode secured = openProfile(tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
-        ConnectedResult connected = connectWithRetry(_configuration, address, _is_closing);
+        ConnectedResult connected = connectWithRetry(address, _is_closing);
         if (!connected) { return leave(connected.code); }
-        const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
+        const LoopParts parts{ _host,    _listener, _acceptor,
+                               _profile, handler,   address.send_timeout_milliseconds };
         _gate.start();
         _loop.admit(parts, std::move(connected.value), hostnameOf(address));
         (void)_loop.run(parts, StopPolicy::WHEN_EMPTY);
@@ -179,7 +178,7 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity,
-                                     configuration.send_timeout_milliseconds };
+                                     0 };
         }
     }
 }

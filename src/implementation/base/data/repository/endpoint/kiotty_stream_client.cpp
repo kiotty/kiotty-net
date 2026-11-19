@@ -58,7 +58,7 @@ namespace kiotty::net::implementation
     KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
     {
         disconnect();
-        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
+        ConnectedResult connected = connectWithRetry(address, _stop, deadline);
         if (!connected) { return connected.code; }
         _socket = std::move(connected.value);
         const KiottyNetCode secured = secure(address, deadline);
@@ -174,6 +174,6 @@ namespace kiotty::net::implementation
                                     _configuration.send_capacity };
         const KiottyNetCode opened = _tls.open(_profile, hostnameOf(address), capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        return _stream.handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
+        return _stream.handshake(deadline.bound(address.connect_timeout_milliseconds));
     }
 }

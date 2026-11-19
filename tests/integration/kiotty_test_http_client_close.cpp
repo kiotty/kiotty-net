@@ -179,12 +179,12 @@ TEST_F(HttpClientCloseTest, CloseWakesARequestWaitingForTheHead)
 
 TEST_F(HttpClientCloseTest, CloseWakesAReconnectWaitingBetweenTrials)
 {
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 2, LONG_INTERVAL_MS));
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientConnectTimeout(&client_configuration, WAIT_MS));
     kiotty_test::LoopbackPeer peer;
     ASSERT_TRUE(peer.listenTcp(0));
     createClient();
-    const KiottyNetAddress address = tcpAddress("127.0.0.1", peer.port());
+    KiottyNetAddress address = tcpAddress("127.0.0.1", peer.port());
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressRetry(&address, 2, LONG_INTERVAL_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressConnectTimeout(&address, WAIT_MS));
     ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_connectHttpClient(client, &address, nullptr));
     peer.close();
     KiottyNet_disconnectHttpClient(client);
@@ -197,10 +197,10 @@ TEST_F(HttpClientCloseTest, CloseWakesAReconnectWaitingBetweenTrials)
 
 TEST_F(HttpClientCloseTest, CloseWakesAConnectInProgress)
 {
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientConnectTimeout(&client_configuration, LONG_CALL_MS));
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 1, 0));
     createClient();
-    const KiottyNetAddress address = tcpAddress(UNROUTABLE_HOST, UNROUTABLE_PORT);
+    KiottyNetAddress address = tcpAddress(UNROUTABLE_HOST, UNROUTABLE_PORT);
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressConnectTimeout(&address, LONG_CALL_MS));
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressRetry(&address, 1, 0));
     const Timed woken = closeDuring([&]() { return KiottyNet_connectHttpClient(client, &address, nullptr); },
                                     CLOSE_DELAY_MS * 3);
     if (woken.code != KIOTTY_NET_CODE_CLOSED && woken.elapsed < CLOSE_DELAY_MS * 3)

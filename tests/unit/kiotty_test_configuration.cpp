@@ -48,19 +48,50 @@ TEST(Configuration, ServerDefaultsAreTheRequirementValues)
     EXPECT_EQ(8192u, configuration.receive_capacity);
     EXPECT_EQ(4096u, configuration.send_capacity);
     EXPECT_EQ(4096u, configuration.push_capacity);
-    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
-    EXPECT_EQ(30000u, configuration.send_timeout_milliseconds);
 }
 
 TEST(Configuration, ClientDefaultsAreTheRequirementValues)
 {
     KiottyNetClientConfiguration configuration = tcpClient();
     EXPECT_TRUE(net::isInitialized(configuration));
-    EXPECT_EQ(5000u, configuration.connect_timeout_milliseconds);
-    EXPECT_EQ(1u, configuration.max_trial);
-    EXPECT_EQ(1000u, configuration.trial_interval_milliseconds);
-    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, configuration.no_delay);
-    EXPECT_EQ(30000u, configuration.send_timeout_milliseconds);
+    EXPECT_EQ(8192u, configuration.receive_capacity);
+    EXPECT_EQ(4096u, configuration.send_capacity);
+    EXPECT_EQ(4096u, configuration.push_capacity);
+}
+
+TEST(Address, TcpAndPipeAddressesCarryThePeerDefaults)
+{
+    KiottyNetAddress tcp{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&tcp, "127.0.0.1", PORT));
+    KiottyNetAddress pipe{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializePipeAddress(&pipe, "/tmp/kiotty.sock"));
+    for (const KiottyNetAddress& address : { tcp, pipe })
+    {
+        EXPECT_TRUE(net::isInitialized(address));
+        EXPECT_EQ(5000u, address.connect_timeout_milliseconds);
+        EXPECT_EQ(1u, address.max_trial);
+        EXPECT_EQ(1000u, address.trial_interval_milliseconds);
+        EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, address.no_delay);
+        EXPECT_EQ(30000u, address.send_timeout_milliseconds);
+    }
+}
+
+TEST(Address, AHandFilledAddressIsNotValidAndCannotBeSet)
+{
+    KiottyNetAddress address{};
+    address.transport = KIOTTY_NET_TRANSPORT_TCP;
+    std::memcpy(address.host, "127.0.0.1", 10);
+    address.port = PORT;
+    EXPECT_FALSE(net::isInitialized(address));
+    EXPECT_FALSE(net::isAddressValid(address));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressConnectTimeout(&address, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressRetry(&address, 1, 0));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressNoDelay(&address, KIOTTY_NET_NO_DELAY_OFF));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressSendTimeout(&address, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressConnectTimeout(nullptr, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressRetry(nullptr, 1, 0));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressNoDelay(nullptr, KIOTTY_NET_NO_DELAY_OFF));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_setAddressSendTimeout(nullptr, 1));
 }
 
 TEST(Configuration, InitializeWithNullIsInvalidArgument)
@@ -134,43 +165,57 @@ TEST(Configuration, ConfigureWithoutInitializeIsInvalidArgument)
     KiottyNetClientConfiguration client{};
     EXPECT_FALSE(net::isInitialized(server));
     EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerMaxClients(server, 1));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, KIOTTY_NET_NO_DELAY_OFF));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientRetry(client, 1, 0));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientConnectTimeout(client, 1));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerSendTimeout(server, 1));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientSendTimeout(client, 1));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerBufferCapacity(server, 1024, 1024, 1024));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientBufferCapacity(client, 1024, 1024, 1024));
 }
 
-TEST(Configuration, SendTimeoutAcceptsZeroAsInfiniteAndAnyOtherValue)
+TEST(Address, SendTimeoutAcceptsZeroAsInfiniteAndAnyOtherValue)
 {
-    KiottyNetServerConfiguration server = tcpServer();
-    KiottyNetClientConfiguration client = tcpClient();
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureServerSendTimeout(&server, 0));
-    EXPECT_EQ(0u, server.send_timeout_milliseconds);
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientSendTimeout(&client, 60000));
-    EXPECT_EQ(60000u, client.send_timeout_milliseconds);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureServerSendTimeout(nullptr, 1));
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_configureClientSendTimeout(nullptr, 1));
+    KiottyNetAddress address{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, "127.0.0.1", PORT));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressSendTimeout(&address, 0));
+    EXPECT_EQ(0u, address.send_timeout_milliseconds);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressSendTimeout(&address, 60000));
+    EXPECT_EQ(60000u, address.send_timeout_milliseconds);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressConnectTimeout(&address, 2500));
+    EXPECT_EQ(2500u, address.connect_timeout_milliseconds);
 }
 
-TEST(Configuration, BuildersSetTheSendTimeout)
+TEST(Address, BuilderSetsEveryPeerValueAndStopsAtTheFirstError)
 {
-    KiottyNetServerConfiguration server{};
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_ServerConfigurationBuilder(server).sendTimeout(1500).build());
-    EXPECT_EQ(1500u, server.send_timeout_milliseconds);
-    KiottyNetClientConfiguration client{};
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_ClientConfigurationBuilder(client).sendTimeout(0).build());
-    EXPECT_EQ(0u, client.send_timeout_milliseconds);
+    KiottyNetAddress address{};
+    const KiottyNetCode built = KiottyNet_AddressBuilder(address, "127.0.0.1", PORT)
+                                    .connectTimeout(3000)
+                                    .retry(5, 1000)
+                                    .noDelay(KIOTTY_NET_NO_DELAY_OFF)
+                                    .sendTimeout(1500)
+                                    .build();
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, built);
+    EXPECT_EQ(3000u, address.connect_timeout_milliseconds);
+    EXPECT_EQ(5u, address.max_trial);
+    EXPECT_EQ(1000u, address.trial_interval_milliseconds);
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_OFF, address.no_delay);
+    EXPECT_EQ(1500u, address.send_timeout_milliseconds);
+    KiottyNetAddress pipe{};
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_AddressBuilder::pipe(pipe, "/tmp/kiotty.sock").sendTimeout(0).build());
+    EXPECT_EQ(KIOTTY_NET_TRANSPORT_PIPE, pipe.transport);
+    EXPECT_EQ(0u, pipe.send_timeout_milliseconds);
+    KiottyNetAddress bad{};
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_AddressBuilder(bad, "127.0.0.1", 0).sendTimeout(1).build());
+    KiottyNetAddress zero_trials{};
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, KiottyNet_AddressBuilder(zero_trials, "127.0.0.1", PORT).retry(0, 10).sendTimeout(1).build());
+    EXPECT_EQ(1u, zero_trials.send_timeout_milliseconds);
 }
 
-TEST(Configuration, UnknownNoDelayIsInvalidArgument)
+TEST(Address, UnknownNoDelayIsInvalidArgument)
 {
-    KiottyNetServerConfiguration server = tcpServer();
+    KiottyNetAddress address{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, "127.0.0.1", PORT));
     const KiottyNetNoDelay unknown = static_cast<KiottyNetNoDelay>(2);
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureServerNoDelay(server, unknown));
-    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, server.no_delay);
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureServerNoDelay(server, KIOTTY_NET_NO_DELAY_OFF));
-    EXPECT_EQ(KIOTTY_NET_NO_DELAY_OFF, server.no_delay);
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::setAddressNoDelay(address, unknown));
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_ON, address.no_delay);
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::setAddressNoDelay(address, KIOTTY_NET_NO_DELAY_OFF));
+    EXPECT_EQ(KIOTTY_NET_NO_DELAY_OFF, address.no_delay);
 }
 
 TEST(Address, InitializeRejectsMissingHostZeroPortAndTooLongHost)
@@ -229,13 +274,14 @@ TEST(Address, ValidityRejectsUnknownTransportZeroTcpPortEmptyAndUnterminatedHost
     EXPECT_TRUE(net::isAddressValid(pipe));
 }
 
-TEST(Configuration, RetryRejectsZeroTrials)
+TEST(Address, RetryRejectsZeroTrials)
 {
-    KiottyNetClientConfiguration configuration = tcpClient();
-    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::configureClientRetry(configuration, 0, 10));
-    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::configureClientRetry(configuration, 3, 10));
-    EXPECT_EQ(3u, configuration.max_trial);
-    EXPECT_EQ(10u, configuration.trial_interval_milliseconds);
+    KiottyNetAddress address{};
+    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&address, "127.0.0.1", PORT));
+    EXPECT_EQ(KIOTTY_NET_CODE_INVALID_ARGUMENT, net::setAddressRetry(address, 0, 10));
+    EXPECT_EQ(KIOTTY_NET_CODE_SUCCESS, net::setAddressRetry(address, 3, 10));
+    EXPECT_EQ(3u, address.max_trial);
+    EXPECT_EQ(10u, address.trial_interval_milliseconds);
 }
 
 TEST(TlsConfiguration, ServerDefaultsAndRejectedValues)

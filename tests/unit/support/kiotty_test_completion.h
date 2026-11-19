@@ -91,13 +91,16 @@ namespace kiotty_test
             , recorder()
             , callbacks(Recorder::callbacks())
             , handler(callbacks, &recorder, owner)
+            , send_timeout_milliseconds(limits.send_timeout_milliseconds)
         {
             host.initialize(limits, N, cipherCapacityOf(limits));
         }
 
         kiotty::net::implementation::ConnectionResult acquire()
         {
-            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), limitsOf(0, 0, 0), &recorder, kiotty_test::textOf(""), profile };
+            kiotty::net::implementation::ConnectionLimits limits = limitsOf(0, 0, 0);
+            limits.send_timeout_milliseconds = send_timeout_milliseconds;
+            kiotty::net::implementation::ConnectionConfiguration configuration = { kiotty::net::implementation::ActiveSocket(), limits, &recorder, kiotty_test::textOf(""), profile };
             return host.acquire(std::move(configuration));
         }
 
@@ -163,6 +166,7 @@ namespace kiotty_test
         Recorder                                            recorder;
         const KiottyNetConnectionHandler                    callbacks;
         kiotty::net::implementation::CallbackHandler        handler;
+        size_t                                              send_timeout_milliseconds;
     };
 
     inline kiotty::net::implementation::IoEvent& readEventOf(kiotty::net::implementation::Connection& connection)

@@ -31,11 +31,12 @@
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 끝 (commit 전) |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
 | A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), 끝 (A1 `a2aa570`, A2 `ad5a0b2`, A3 `108b70b`) |
+| D1 ~ D2 | `design_peer_settings_and_cancel_v0.html` 7절 | 상대에 따른 설정을 `KiottyNetAddress` 로, `cancelStreamClient` | 설계 확정 (2026-11-19), D1 끝 |
 
 ## 2. 앞으로의 순서
 
 ```text
-R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → A1 → A2 → A3 → U3
+R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → A1 → A2 → A3 → U3 → (설계) → D1 → D2
 ```
 
 | 사이클 | 하는 것 | 완료 |
@@ -55,6 +56,8 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 | A2 HTTP 서버 work | work 층이 도착을 다음 요청으로 보고 계속 씀, `failureOf` 의 `isStreamOpen` 짐작 없앰, `isHttpWorkConnected` 문서 | pipelining 중 긴 응답, SSE 에서 클라이언트가 떠나면 다음 write 가 `PEER_CLOSED` (RST 면 `SOCKET_ERROR`, half-close 도 떠남). 끝 (`ad5a0b2`) |
 | A3 HttpClient 올리기 | 멈추면 응답 머리를 읽어 1xx 는 버리고 이어 보냄, 최종 응답이면 `ANSWERED` 와 `DATA_ARRIVED_WHILE_WRITING`, finish 가 그 응답 | Windows 에서도 413 / 401, U2 의 두 테스트를 다시 엄격하게. 끝 (`108b70b`) |
 | U3 도우미, C++, 문서 | `sendHttpFile`, C++ begin / write / finish, user guide / requirement / 구현 가이드 / 테스트 계획, Python `http.server` 외부 확인 | wrapper 테스트, 매트릭스. 끝 (commit 전, 파일은 조각마다 base writeFile) |
+| D1 상대에 따른 설정 | `connect_timeout_milliseconds`, `max_trial`, `trial_interval_milliseconds`, `no_delay`, `send_timeout_milliseconds` 를 `KiottyNetClientConfiguration` / `KiottyNetServerConfiguration` 에서 빼서 `KiottyNetAddress` 로 (`initialize*Address` 가 기본값, `KiottyNet_setAddressRetry` / `setAddressNoDelay` / `setAddressSendTimeout`). create 의 설정은 `*MemorySize` 가 읽는 값 (`max_clients`, 세 capacity) 만. 서버 run 의 address 는 `no_delay` / `send_timeout` 만 읽고 `connect_*` 셋은 읽지 않는다. address 에 `initialization_mark`. C++ builder 도 같이 가름 (2026-11-19 결정) | 기존 테스트 그대로, 서버 address 의 connect 값 거부, HTTP / WebSocket 층의 address 전달. 끝 (2026-11-19) |
+| D2 StreamClient 취소 | `KiottyNet_cancelStreamClient(client)` 와 `KIOTTY_NET_CODE_CANCELLED` (enum 끝). 다른 thread 의 cancel 은 `_stop.raise()`. 막힌 read / write / connect 는 기다림이 stop 을 돌려주면 `accept()` 하고 `{ 읽거나 보낸 길이, CANCELLED }`. 연결은 살려 둔다. cancel 은 accept 될 때까지 남는다 (막힌 호출이 없으면 다음 호출이 바로 `CANCELLED`). 서버 work stream 에는 넣지 않는다 (2026-11-19 결정) | 다른 thread 가 read / write / connect / TLS handshake 를 깨움, 깨운 뒤 같은 연결로 이어서 read / write, 막힌 호출 없을 때의 cancel 은 다음 호출에 |
 
 미결 (사이클 없음): WebSocket streaming (보내기 begin / write / finish, 받기는 조각마다 `onMessage`). `requirement_v0.md` 의 메모. 이름 / 켜는 단위 / 조각 크기를 정해야 사이클이 된다.
 
@@ -93,3 +96,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 2026-11-18 write 중 도착 A2 (`ad5a0b2`, `docs/progress/261118_progress_write_arrival_a2.md`), A3 (`108b70b`, 단일 헤더 `0d2454f`, `..._a3.md`): HTTP 서버 work 가 도착을 다음 요청으로 받아 두고 응답 뒤 처리, `failureOf` 짐작 없앰 (FIN `PEER_CLOSED`, RST `SOCKET_ERROR`, half-close 도 떠남), HttpClient 올리기가 1xx 를 넘기고 최종 응답에 멈춤 (`ANSWERED`), begin 의 머리 전 길이 0 write 로 도착 확인, Windows 에서도 먼저 온 413 / 401.
 
 2026-11-18 HttpClient v1 U3 (`docs/progress/261118_progress_http_client_u3.md`), commit 전: `KiottyNet_sendHttpFile` (파일 크기로 Content-Length, `send_capacity` 조각마다 base writeFile, 조각을 시작할 때 먼저 온 응답을 봄, 열 수 없으면 `NOT_FOUND`, timeout 은 전체 하나), C++ `begin` / `write` / `finish` / `sendFile`, user guide 2.14, requirement 11절, 구현 가이드 6.9, 테스트 계획 25.6, Python http.server 외부 확인 46 개. MSVC 879, WSL 880 x 6, release 879.
+
+2026-11-19 상대에 따른 설정과 취소 설계 (`docs/design/design_peer_settings_and_cancel_v0.html`, 정할 것 넷 닫음) 와 D1 (`docs/progress/261119_progress_peer_settings_d1.md`): 연결 시간 / 재시도 / `no_delay` / 송신 시간을 `KiottyNetAddress` 로 (`initialization_mark`, `KiottyNet_setAddress*`, C++ `KiottyNet_AddressBuilder`), create 의 설정은 메모리 크기만, 서버 run 은 address 의 `no_delay` / 송신 시간, 송신 시간은 `LoopParts` 로. MSVC 881, WSL 882 × 6, release-tls 881.

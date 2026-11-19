@@ -39,7 +39,9 @@ namespace kiotty::net::implementation
 
     ConnectionResult ConnectionHost::acquire(ConnectionConfiguration&& configuration)
     {
-        configuration.limits = _limits;
+        ConnectionLimits limits = _limits;
+        limits.send_timeout_milliseconds = configuration.limits.send_timeout_milliseconds;
+        configuration.limits = limits;
         const std::lock_guard<std::mutex> lock(_notification);
         if (full()) { return ConnectionResult::failure(KIOTTY_NET_CODE_TABLE_FULL); }
         ConnectionResult acquired = _connections.acquire(std::move(configuration));

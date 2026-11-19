@@ -12,11 +12,9 @@ namespace kiotty::net::implementation
 {
     using ConnectedResult = Result<ActiveSocket, KiottyNetCode>;
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const std::atomic<bool>& stop);
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const StopSignal& stop,
                                      const Deadline& deadline);
 }

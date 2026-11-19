@@ -181,6 +181,8 @@ namespace
             , client_side()
             , limits()
             , client_configuration()
+            , client_max_trial(1)
+            , client_trial_interval_milliseconds(0)
             , run_code(KIOTTY_NET_CODE_SUCCESS)
             , _server_address()
             , _client_address()
@@ -247,6 +249,7 @@ namespace
         {
             if (_client_thread.joinable()) { _client_thread.join(); }
             ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_initializeTcpAddress(&_client_address, LOOPBACK_HOST, port));
+            ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_setAddressRetry(&_client_address, client_max_trial, client_trial_interval_milliseconds));
             run_code.store(KIOTTY_NET_CODE_SUCCESS);
             _client_path = path;
             _client_thread = std::thread([this, tls]() {
@@ -295,6 +298,8 @@ namespace
         Side                           client_side;
         KiottyNetHttpLimits            limits;
         KiottyNetClientConfiguration   client_configuration;
+        uint32_t                       client_max_trial;
+        uint32_t                       client_trial_interval_milliseconds;
         std::atomic<KiottyNetCode>     run_code;
 
     private:
@@ -567,7 +572,8 @@ TEST_F(WebSocketClientTest, SilentServerEndsTheHandshakeWithTimeout)
 
 TEST_F(WebSocketClientTest, GivingUpOnConnectingIsReportedOnceThroughOnError)
 {
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 2, 50));
+    client_max_trial = 2;
+    client_trial_interval_milliseconds = 50;
     createClient();
     startClient(nullptr);
     const KiottyNetCode code = finishClient();
@@ -608,7 +614,8 @@ TEST_F(WebSocketClientTest, CppClientRegistersRunsSendsAndSaysBye)
 
 TEST_F(WebSocketClientTest, RetriesUntilTheServerListens)
 {
-    ASSERT_EQ(KIOTTY_NET_CODE_SUCCESS, KiottyNet_configureClientRetry(&client_configuration, 50, 100));
+    client_max_trial = 50;
+    client_trial_interval_milliseconds = 100;
     createClient();
     startClient(nullptr);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

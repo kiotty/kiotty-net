@@ -62,12 +62,46 @@ namespace kiotty::net::implementation
 
     bool isAddressValid(const KiottyNetAddress& address)
     {
+        if (!isInitialized(address)) { return false; }
         if (!isTransportKnown(address.transport)) { return false; }
         const bool is_tcp = address.transport == KIOTTY_NET_TRANSPORT_TCP;
         if (is_tcp && address.port == 0) { return false; }
         const Span<const char> host = textOf(address.host);
         const bool is_terminated = host.length < sizeof(address.host);
         return is_terminated && !host.empty();
+    }
+
+    KiottyNetCode setAddressConnectTimeout(KiottyNetAddress& address, uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.connect_timeout_milliseconds = timeout_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressRetry(KiottyNetAddress& address,
+                                  uint32_t max_trial,
+                                  uint32_t trial_interval_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (max_trial == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.max_trial = max_trial;
+        address.trial_interval_milliseconds = trial_interval_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressNoDelay(KiottyNetAddress& address, KiottyNetNoDelay no_delay)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.no_delay = no_delay;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressSendTimeout(KiottyNetAddress& address, uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.send_timeout_milliseconds = timeout_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode initializeServerConfiguration(KiottyNetServerConfiguration& configuration)
@@ -100,23 +134,6 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
-                                             uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.send_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
     KiottyNetCode initializeClientConfiguration(KiottyNetClientConfiguration& configuration)
     {
         configuration = defaultClient();
@@ -137,42 +154,6 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode configureClientConnectTimeout(KiottyNetClientConfiguration& configuration,
-                                                uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.connect_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientRetry(KiottyNetClientConfiguration& configuration,
-                                       uint32_t max_trial,
-                                       uint32_t trial_interval_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (max_trial == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.max_trial = max_trial;
-        configuration.trial_interval_milliseconds = trial_interval_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientSendTimeout(KiottyNetClientConfiguration& configuration,
-                                             uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.send_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
     bool isInitialized(const KiottyNetServerConfiguration& configuration)
     {
         return configuration.initialization_mark == INITIALIZATION_MARK;
@@ -181,6 +162,11 @@ namespace kiotty::net::implementation
     bool isInitialized(const KiottyNetClientConfiguration& configuration)
     {
         return configuration.initialization_mark == INITIALIZATION_MARK;
+    }
+
+    bool isInitialized(const KiottyNetAddress& address)
+    {
+        return address.initialization_mark == INITIALIZATION_MARK;
     }
 
     Span<const char> hostnameOf(const KiottyNetAddress& address)
@@ -223,11 +209,17 @@ namespace kiotty::net::implementation
         {
             if (name.empty()) { return MadeAddressResult::failure(INVALID); }
             KiottyNetAddress address{};
+            address.initialization_mark = INITIALIZATION_MARK;
             address.transport = transport;
             const Span<char> field{ address.host, sizeof(address.host) };
             const bool written = writeText(field, name);
             if (!written) { return MadeAddressResult::failure(INVALID); }
             address.port = port;
+            address.connect_timeout_milliseconds = DEFAULT_CONNECT_TIMEOUT_MILLISECONDS;
+            address.max_trial = DEFAULT_MAX_TRIAL;
+            address.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
+            address.no_delay = KIOTTY_NET_NO_DELAY_ON;
+            address.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return MadeAddressResult::success(address);
         }
 
@@ -251,8 +243,6 @@ namespace kiotty::net::implementation
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
-            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
-            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 
@@ -264,11 +254,6 @@ namespace kiotty::net::implementation
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
-            configuration.connect_timeout_milliseconds = DEFAULT_CONNECT_TIMEOUT_MILLISECONDS;
-            configuration.max_trial = DEFAULT_MAX_TRIAL;
-            configuration.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
-            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
-            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 
