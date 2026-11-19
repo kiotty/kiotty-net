@@ -1,5 +1,5 @@
 /*
-    KiottyNet single header, generated from commit 12b5280
+    KiottyNet single header, generated from commit 0e6d311
     by tools/make_single_header.py. Do not edit; regenerate.
 
     Use
@@ -234,9 +234,15 @@ typedef enum KiottyNetTransport
 
 typedef struct KiottyNetAddress
 {
+    uint32_t           initialization_mark;
     KiottyNetTransport transport;
     char               host[KIOTTY_NET_MAX_HOST_LENGTH];
     uint16_t           port;
+    uint32_t           connect_timeout_milliseconds;
+    uint32_t           max_trial;
+    uint32_t           trial_interval_milliseconds;
+    KiottyNetNoDelay   no_delay;
+    uint32_t           send_timeout_milliseconds;
 } KiottyNetAddress;
 
 typedef struct KiottyNetServerConfiguration
@@ -246,8 +252,6 @@ typedef struct KiottyNetServerConfiguration
     size_t            receive_capacity;
     size_t            send_capacity;
     size_t            push_capacity;
-    KiottyNetNoDelay  no_delay;
-    uint32_t          send_timeout_milliseconds;
 } KiottyNetServerConfiguration;
 
 typedef struct KiottyNetClientConfiguration
@@ -256,11 +260,6 @@ typedef struct KiottyNetClientConfiguration
     size_t            receive_capacity;
     size_t            send_capacity;
     size_t            push_capacity;
-    uint32_t          connect_timeout_milliseconds;
-    uint32_t          max_trial;
-    uint32_t          trial_interval_milliseconds;
-    KiottyNetNoDelay  no_delay;
-    uint32_t          send_timeout_milliseconds;
 } KiottyNetClientConfiguration;
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTcpAddress(
@@ -270,6 +269,19 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_initializeTcpAddress(
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializePipeAddress(
     KiottyNetAddress* address,
     const char* pipe_name);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setAddressConnectTimeout(
+    KiottyNetAddress* address,
+    uint32_t timeout_milliseconds);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setAddressRetry(
+    KiottyNetAddress* address,
+    uint32_t max_trial,
+    uint32_t trial_interval_milliseconds);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setAddressNoDelay(
+    KiottyNetAddress* address,
+    KiottyNetNoDelay no_delay);
+KIOTTY_NET_API KiottyNetCode KiottyNet_setAddressSendTimeout(
+    KiottyNetAddress* address,
+    uint32_t timeout_milliseconds);
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeServerConfiguration(
     KiottyNetServerConfiguration* configuration);
@@ -281,12 +293,6 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerBufferCapacity(
     size_t receive_capacity,
     size_t send_capacity,
     size_t push_capacity);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerNoDelay(
-    KiottyNetServerConfiguration* configuration,
-    KiottyNetNoDelay no_delay);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureServerSendTimeout(
-    KiottyNetServerConfiguration* configuration,
-    uint32_t timeout_milliseconds);
 
 KIOTTY_NET_API KiottyNetCode KiottyNet_initializeClientConfiguration(
     KiottyNetClientConfiguration* configuration);
@@ -295,19 +301,6 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientBufferCapacity(
     size_t receive_capacity,
     size_t send_capacity,
     size_t push_capacity);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientConnectTimeout(
-    KiottyNetClientConfiguration* configuration,
-    uint32_t timeout_milliseconds);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientRetry(
-    KiottyNetClientConfiguration* configuration,
-    uint32_t max_trial,
-    uint32_t trial_interval_milliseconds);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientNoDelay(
-    KiottyNetClientConfiguration* configuration,
-    KiottyNetNoDelay no_delay);
-KIOTTY_NET_API KiottyNetCode KiottyNet_configureClientSendTimeout(
-    KiottyNetClientConfiguration* configuration,
-    uint32_t timeout_milliseconds);
 
 typedef struct KiottyNetEndpoint KiottyNetEndpoint;
 
@@ -667,8 +660,6 @@ public:
         size_t receive_capacity,
         size_t send_capacity,
         size_t push_capacity);
-    KiottyNet_ServerConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
-    KiottyNet_ServerConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
 
     KiottyNetCode build() const;
 
@@ -688,12 +679,6 @@ public:
         size_t receive_capacity,
         size_t send_capacity,
         size_t push_capacity);
-    KiottyNet_ClientConfigurationBuilder& connectTimeout(uint32_t timeout_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& retry(
-        uint32_t max_trial,
-        uint32_t trial_interval_milliseconds);
-    KiottyNet_ClientConfigurationBuilder& noDelay(KiottyNetNoDelay no_delay);
-    KiottyNet_ClientConfigurationBuilder& sendTimeout(uint32_t timeout_milliseconds);
 
     KiottyNetCode build() const;
 
@@ -702,6 +687,29 @@ private:
 
     KiottyNetClientConfiguration&    _configuration;
     KiottyNetCode             _code;
+};
+
+class KiottyNet_AddressBuilder
+{
+public:
+    KiottyNet_AddressBuilder(KiottyNetAddress& address, const char* host, uint16_t port);
+
+    static KiottyNet_AddressBuilder pipe(KiottyNetAddress& address, const char* pipe_name);
+
+    KiottyNet_AddressBuilder& connectTimeout(uint32_t timeout_milliseconds);
+    KiottyNet_AddressBuilder& retry(uint32_t max_trial, uint32_t trial_interval_milliseconds);
+    KiottyNet_AddressBuilder& noDelay(KiottyNetNoDelay no_delay);
+    KiottyNet_AddressBuilder& sendTimeout(uint32_t timeout_milliseconds);
+
+    KiottyNetCode build() const;
+
+private:
+    KiottyNet_AddressBuilder(KiottyNetAddress& address, KiottyNetCode code);
+
+    void record(KiottyNetCode code);
+
+    KiottyNetAddress& _address;
+    KiottyNetCode     _code;
 };
 
 class KiottyNet_TlsServerConfigurationBuilder
@@ -931,20 +939,6 @@ inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilde
     return *this;
 }
 
-inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilder::noDelay(
-    KiottyNetNoDelay no_delay)
-{
-    record(KiottyNet_configureServerNoDelay(&_configuration, no_delay));
-    return *this;
-}
-
-inline KiottyNet_ServerConfigurationBuilder& KiottyNet_ServerConfigurationBuilder::sendTimeout(
-    uint32_t timeout_milliseconds)
-{
-    record(KiottyNet_configureServerSendTimeout(&_configuration, timeout_milliseconds));
-    return *this;
-}
-
 inline KiottyNetCode KiottyNet_ServerConfigurationBuilder::build() const
 {
     return _code;
@@ -978,41 +972,78 @@ inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilde
     return *this;
 }
 
-inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::connectTimeout(
-    uint32_t timeout_milliseconds)
-{
-    record(KiottyNet_configureClientConnectTimeout(&_configuration, timeout_milliseconds));
-    return *this;
-}
-
-inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::retry(
-    uint32_t max_trial,
-    uint32_t trial_interval_milliseconds)
-{
-    record(KiottyNet_configureClientRetry(&_configuration, max_trial, trial_interval_milliseconds));
-    return *this;
-}
-
-inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::noDelay(
-    KiottyNetNoDelay no_delay)
-{
-    record(KiottyNet_configureClientNoDelay(&_configuration, no_delay));
-    return *this;
-}
-
-inline KiottyNet_ClientConfigurationBuilder& KiottyNet_ClientConfigurationBuilder::sendTimeout(
-    uint32_t timeout_milliseconds)
-{
-    record(KiottyNet_configureClientSendTimeout(&_configuration, timeout_milliseconds));
-    return *this;
-}
-
 inline KiottyNetCode KiottyNet_ClientConfigurationBuilder::build() const
 {
     return _code;
 }
 
 inline void KiottyNet_ClientConfigurationBuilder::record(KiottyNetCode code)
+{
+    if (_code == KIOTTY_NET_CODE_SUCCESS)
+    {
+        _code = code;
+    }
+}
+
+inline KiottyNet_AddressBuilder::KiottyNet_AddressBuilder(
+    KiottyNetAddress& address,
+    const char* host,
+    uint16_t port)
+    : _address(address)
+    , _code(KiottyNet_initializeTcpAddress(&address, host, port))
+{
+}
+
+inline KiottyNet_AddressBuilder::KiottyNet_AddressBuilder(
+    KiottyNetAddress& address,
+    KiottyNetCode code)
+    : _address(address)
+    , _code(code)
+{
+}
+
+inline KiottyNet_AddressBuilder KiottyNet_AddressBuilder::pipe(
+    KiottyNetAddress& address,
+    const char* pipe_name)
+{
+    const KiottyNetCode code = KiottyNet_initializePipeAddress(&address, pipe_name);
+    return KiottyNet_AddressBuilder(address, code);
+}
+
+inline KiottyNet_AddressBuilder& KiottyNet_AddressBuilder::connectTimeout(
+    uint32_t timeout_milliseconds)
+{
+    record(KiottyNet_setAddressConnectTimeout(&_address, timeout_milliseconds));
+    return *this;
+}
+
+inline KiottyNet_AddressBuilder& KiottyNet_AddressBuilder::retry(
+    uint32_t max_trial,
+    uint32_t trial_interval_milliseconds)
+{
+    record(KiottyNet_setAddressRetry(&_address, max_trial, trial_interval_milliseconds));
+    return *this;
+}
+
+inline KiottyNet_AddressBuilder& KiottyNet_AddressBuilder::noDelay(KiottyNetNoDelay no_delay)
+{
+    record(KiottyNet_setAddressNoDelay(&_address, no_delay));
+    return *this;
+}
+
+inline KiottyNet_AddressBuilder& KiottyNet_AddressBuilder::sendTimeout(
+    uint32_t timeout_milliseconds)
+{
+    record(KiottyNet_setAddressSendTimeout(&_address, timeout_milliseconds));
+    return *this;
+}
+
+inline KiottyNetCode KiottyNet_AddressBuilder::build() const
+{
+    return _code;
+}
+
+inline void KiottyNet_AddressBuilder::record(KiottyNetCode code)
 {
     if (_code == KIOTTY_NET_CODE_SUCCESS)
     {
@@ -4406,6 +4437,13 @@ namespace kiotty::net::implementation
                                        Span<const char> host,
                                        uint16_t port);
     KiottyNetCode initializePipeAddress(KiottyNetAddress& address, Span<const char> pipe_name);
+    KiottyNetCode setAddressConnectTimeout(KiottyNetAddress& address,
+                                           uint32_t timeout_milliseconds);
+    KiottyNetCode setAddressRetry(KiottyNetAddress& address,
+                                  uint32_t max_trial,
+                                  uint32_t trial_interval_milliseconds);
+    KiottyNetCode setAddressNoDelay(KiottyNetAddress& address, KiottyNetNoDelay no_delay);
+    KiottyNetCode setAddressSendTimeout(KiottyNetAddress& address, uint32_t timeout_milliseconds);
     bool          isAddressValid(const KiottyNetAddress& address);
 
     KiottyNetCode initializeServerConfiguration(KiottyNetServerConfiguration& configuration);
@@ -4415,29 +4453,17 @@ namespace kiotty::net::implementation
                                                 size_t receive_capacity,
                                                 size_t send_capacity,
                                                 size_t push_capacity);
-    KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay);
-    KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
-                                             uint32_t timeout_milliseconds);
 
     KiottyNetCode initializeClientConfiguration(KiottyNetClientConfiguration& configuration);
     KiottyNetCode configureClientBufferCapacity(KiottyNetClientConfiguration& configuration,
                                                 size_t receive_capacity,
                                                 size_t send_capacity,
                                                 size_t push_capacity);
-    KiottyNetCode configureClientConnectTimeout(KiottyNetClientConfiguration& configuration,
-                                                uint32_t timeout_milliseconds);
-    KiottyNetCode configureClientRetry(KiottyNetClientConfiguration& configuration,
-                                       uint32_t max_trial,
-                                       uint32_t trial_interval_milliseconds);
-    KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay);
-    KiottyNetCode configureClientSendTimeout(KiottyNetClientConfiguration& configuration,
-                                             uint32_t timeout_milliseconds);
 
     NoDelay          noDelayOf(KiottyNetNoDelay no_delay);
     bool             isInitialized(const KiottyNetServerConfiguration& configuration);
     bool             isInitialized(const KiottyNetClientConfiguration& configuration);
+    bool             isInitialized(const KiottyNetAddress& address);
     Span<const char> hostnameOf(const KiottyNetAddress& address);
 
     bool writeText(Span<char> field, Span<const char> text);
@@ -6978,6 +7004,8 @@ namespace kiotty::net::implementation
 #ifndef KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
 #define KIOTTY_NET_INTERNAL_BASE_DOMAIN_USECASES_IO_LOOP_LOOP_PARTS_H
 
+#include <cstddef>
+
 namespace kiotty::net::implementation
 {
     struct LoopParts
@@ -6987,9 +7015,11 @@ namespace kiotty::net::implementation
         Acceptor&       acceptor;
         TlsProfile&     profile;
         const Handler&  handler;
+        size_t          send_timeout_milliseconds;
     };
 
-    static_assert(sizeof(LoopParts) == 5 * sizeof(void*), "LoopParts: unexpected padding");
+    static_assert(sizeof(LoopParts) == 5 * sizeof(void*) + sizeof(size_t),
+                  "LoopParts: unexpected padding");
 }
 
 #endif
@@ -7336,7 +7366,6 @@ namespace kiotty::net::implementation
         TlsProfile                            _profile;
         IoLoop                                _loop;
         RunGate                               _gate;
-        KiottyNetClientConfiguration          _configuration;
         std::atomic<bool>                     _is_closing;
         std::atomic<bool>                     _is_abandoned;
     };
@@ -7621,7 +7650,6 @@ namespace kiotty::net::implementation
         IoLoop                        _loop;
         RunGate                       _gate;
         std::atomic<bool>             _is_abandoned;
-        KiottyNetServerConfiguration  _configuration;
     };
 }
 
@@ -10204,6 +10232,34 @@ KiottyNetCode KiottyNet_initializePipeAddress(KiottyNetAddress* address, const c
     return net::initializePipeAddress(*address, text.value);
 }
 
+KiottyNetCode KiottyNet_setAddressConnectTimeout(KiottyNetAddress* address,
+                                                uint32_t timeout_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressConnectTimeout(*address, timeout_milliseconds);
+}
+
+KiottyNetCode KiottyNet_setAddressRetry(KiottyNetAddress* address,
+                                        uint32_t max_trial,
+                                        uint32_t trial_interval_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressRetry(*address, max_trial, trial_interval_milliseconds);
+}
+
+KiottyNetCode KiottyNet_setAddressNoDelay(KiottyNetAddress* address, KiottyNetNoDelay no_delay)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressNoDelay(*address, no_delay);
+}
+
+KiottyNetCode KiottyNet_setAddressSendTimeout(KiottyNetAddress* address,
+                                             uint32_t timeout_milliseconds)
+{
+    if (address == nullptr) { return INVALID; }
+    return net::setAddressSendTimeout(*address, timeout_milliseconds);
+}
+
 KiottyNetCode KiottyNet_initializeServerConfiguration(KiottyNetServerConfiguration* configuration)
 {
     if (configuration == nullptr) { return INVALID; }
@@ -10227,20 +10283,6 @@ KiottyNetCode KiottyNet_configureServerBufferCapacity(KiottyNetServerConfigurati
                                               push_capacity);
 }
 
-KiottyNetCode KiottyNet_configureServerNoDelay(KiottyNetServerConfiguration* configuration,
-                                               KiottyNetNoDelay no_delay)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureServerNoDelay(*configuration, no_delay);
-}
-
-KiottyNetCode KiottyNet_configureServerSendTimeout(KiottyNetServerConfiguration* configuration,
-                                                   uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureServerSendTimeout(*configuration, timeout_milliseconds);
-}
-
 KiottyNetCode KiottyNet_initializeClientConfiguration(KiottyNetClientConfiguration* configuration)
 {
     if (configuration == nullptr) { return INVALID; }
@@ -10255,35 +10297,6 @@ KiottyNetCode KiottyNet_configureClientBufferCapacity(KiottyNetClientConfigurati
     if (configuration == nullptr) { return INVALID; }
     return net::configureClientBufferCapacity(*configuration, receive_capacity, send_capacity,
                                               push_capacity);
-}
-
-KiottyNetCode KiottyNet_configureClientConnectTimeout(KiottyNetClientConfiguration* configuration,
-                                                      uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientConnectTimeout(*configuration, timeout_milliseconds);
-}
-
-KiottyNetCode KiottyNet_configureClientRetry(KiottyNetClientConfiguration* configuration,
-                                             uint32_t max_trial,
-                                             uint32_t trial_interval_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientRetry(*configuration, max_trial, trial_interval_milliseconds);
-}
-
-KiottyNetCode KiottyNet_configureClientNoDelay(KiottyNetClientConfiguration* configuration,
-                                               KiottyNetNoDelay no_delay)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientNoDelay(*configuration, no_delay);
-}
-
-KiottyNetCode KiottyNet_configureClientSendTimeout(KiottyNetClientConfiguration* configuration,
-                                                   uint32_t timeout_milliseconds)
-{
-    if (configuration == nullptr) { return INVALID; }
-    return net::configureClientSendTimeout(*configuration, timeout_milliseconds);
 }
 
 KiottyNetConnectionAction KiottyNet_thenHold(uint32_t timeout_milliseconds)
@@ -12541,11 +12554,9 @@ namespace kiotty::net::implementation
 {
     using ConnectedResult = Result<ActiveSocket, KiottyNetCode>;
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const std::atomic<bool>& stop);
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const StopSignal& stop,
                                      const Deadline& deadline);
 }
@@ -12571,45 +12582,40 @@ namespace kiotty::net::implementation
             const StopSignal*        signal;
         };
 
-        ConnectedResult    retry(const KiottyNetClientConfiguration& configuration,
-                                 const KiottyNetAddress& address,
+        ConnectedResult    retry(const KiottyNetAddress& address,
                                  const Halt& halt,
                                  const Deadline& deadline);
         bool               isHalted(const Halt& halt);
         uint32_t           pauseOf(uint32_t interval_milliseconds, const Deadline& deadline);
         bool               waitInterval(uint32_t interval_milliseconds, const Halt& halt);
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
-                                   const KiottyNetAddress& address,
+        ActiveSocketResult tryOnce(const KiottyNetAddress& address,
                                    const StopSignal* stop,
                                    uint32_t timeout_milliseconds);
-        NoDelay            clientNoDelayOf(const KiottyNetClientConfiguration& configuration);
+        NoDelay            clientNoDelayOf(const KiottyNetAddress& address);
     }
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const std::atomic<bool>& stop)
     {
-        return retry(configuration, address, Halt{ &stop, nullptr }, Deadline(0));
+        return retry(address, Halt{ &stop, nullptr }, Deadline(0));
     }
 
-    ConnectedResult connectWithRetry(const KiottyNetClientConfiguration& configuration,
-                                     const KiottyNetAddress& address,
+    ConnectedResult connectWithRetry(const KiottyNetAddress& address,
                                      const StopSignal& stop,
                                      const Deadline& deadline)
     {
-        return retry(configuration, address, Halt{ nullptr, &stop }, deadline);
+        return retry(address, Halt{ nullptr, &stop }, deadline);
     }
 
     namespace
     {
-        ConnectedResult retry(const KiottyNetClientConfiguration& configuration,
-                              const KiottyNetAddress& address,
+        ConnectedResult retry(const KiottyNetAddress& address,
                               const Halt& halt,
                               const Deadline& deadline)
         {
-            const uint32_t trials = configuration.max_trial == 0 ? 1 : configuration.max_trial;
-            const uint32_t interval_milliseconds = configuration.trial_interval_milliseconds;
-            const uint32_t connect_milliseconds = configuration.connect_timeout_milliseconds;
+            const uint32_t trials = address.max_trial == 0 ? 1 : address.max_trial;
+            const uint32_t interval_milliseconds = address.trial_interval_milliseconds;
+            const uint32_t connect_milliseconds = address.connect_timeout_milliseconds;
             SocketCode last = SocketCode::TIMEOUT;
             for (uint32_t trial = 0; trial < trials; ++trial)
             {
@@ -12620,7 +12626,7 @@ namespace kiotty::net::implementation
                 if (deadline.expired()) { break; }
                 const uint32_t timeout_milliseconds = deadline.bound(connect_milliseconds);
                 ActiveSocketResult attempt =
-                    tryOnce(configuration, address, halt.signal, timeout_milliseconds);
+                    tryOnce(address, halt.signal, timeout_milliseconds);
                 if (attempt) { return ConnectedResult::success(std::move(attempt.value)); }
                 last = attempt.code;
             }
@@ -12656,8 +12662,7 @@ namespace kiotty::net::implementation
             }
         }
 
-        ActiveSocketResult tryOnce(const KiottyNetClientConfiguration& configuration,
-                                   const KiottyNetAddress& address,
+        ActiveSocketResult tryOnce(const KiottyNetAddress& address,
                                    const StopSignal* stop,
                                    uint32_t timeout_milliseconds)
         {
@@ -12666,14 +12671,14 @@ namespace kiotty::net::implementation
             ActiveSocket& socket = opened.value;
             const SocketCode connected = socket.connect(address, timeout_milliseconds);
             if (connected != SocketCode::SUCCESS) { return ActiveSocketResult::failure(connected); }
-            const SocketCode tuned = configureNoDelay(socket, clientNoDelayOf(configuration));
+            const SocketCode tuned = configureNoDelay(socket, clientNoDelayOf(address));
             if (tuned != SocketCode::SUCCESS) { return ActiveSocketResult::failure(tuned); }
             return ActiveSocketResult::success(std::move(socket));
         }
 
-        NoDelay clientNoDelayOf(const KiottyNetClientConfiguration& configuration)
+        NoDelay clientNoDelayOf(const KiottyNetAddress& address)
         {
-            if (configuration.no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
+            if (address.no_delay == KIOTTY_NET_NO_DELAY_ON) { return NoDelay::ENABLED; }
             return NoDelay::DISABLED;
         }
     }
@@ -21854,7 +21859,9 @@ namespace kiotty::net::implementation
 
     ConnectionResult ConnectionHost::acquire(ConnectionConfiguration&& configuration)
     {
-        configuration.limits = _limits;
+        ConnectionLimits limits = _limits;
+        limits.send_timeout_milliseconds = configuration.limits.send_timeout_milliseconds;
+        configuration.limits = limits;
         const std::lock_guard<std::mutex> lock(_notification);
         if (full()) { return ConnectionResult::failure(KIOTTY_NET_CODE_TABLE_FULL); }
         ConnectionResult acquired = _connections.acquire(std::move(configuration));
@@ -22352,8 +22359,9 @@ namespace kiotty::net::implementation
         {
             return;
         }
+        const ConnectionLimits limits{ 0, 0, 0, parts.send_timeout_milliseconds };
         ConnectionConfiguration configuration = { std::move(socket),
-                                                  ConnectionLimits{ 0, 0, 0, 0 },
+                                                  limits,
                                                   decision.connection_context,
                                                   hostname,
                                                   parts.profile };
@@ -30192,12 +30200,46 @@ namespace kiotty::net::implementation
 
     bool isAddressValid(const KiottyNetAddress& address)
     {
+        if (!isInitialized(address)) { return false; }
         if (!isTransportKnown(address.transport)) { return false; }
         const bool is_tcp = address.transport == KIOTTY_NET_TRANSPORT_TCP;
         if (is_tcp && address.port == 0) { return false; }
         const Span<const char> host = textOf(address.host);
         const bool is_terminated = host.length < sizeof(address.host);
         return is_terminated && !host.empty();
+    }
+
+    KiottyNetCode setAddressConnectTimeout(KiottyNetAddress& address, uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.connect_timeout_milliseconds = timeout_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressRetry(KiottyNetAddress& address,
+                                  uint32_t max_trial,
+                                  uint32_t trial_interval_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (max_trial == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.max_trial = max_trial;
+        address.trial_interval_milliseconds = trial_interval_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressNoDelay(KiottyNetAddress& address, KiottyNetNoDelay no_delay)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.no_delay = no_delay;
+        return KIOTTY_NET_CODE_SUCCESS;
+    }
+
+    KiottyNetCode setAddressSendTimeout(KiottyNetAddress& address, uint32_t timeout_milliseconds)
+    {
+        if (!isInitialized(address)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
+        address.send_timeout_milliseconds = timeout_milliseconds;
+        return KIOTTY_NET_CODE_SUCCESS;
     }
 
     KiottyNetCode initializeServerConfiguration(KiottyNetServerConfiguration& configuration)
@@ -30230,23 +30272,6 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode configureServerNoDelay(KiottyNetServerConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureServerSendTimeout(KiottyNetServerConfiguration& configuration,
-                                             uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.send_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
     KiottyNetCode initializeClientConfiguration(KiottyNetClientConfiguration& configuration)
     {
         configuration = defaultClient();
@@ -30267,42 +30292,6 @@ namespace kiotty::net::implementation
         return KIOTTY_NET_CODE_SUCCESS;
     }
 
-    KiottyNetCode configureClientConnectTimeout(KiottyNetClientConfiguration& configuration,
-                                                uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.connect_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientRetry(KiottyNetClientConfiguration& configuration,
-                                       uint32_t max_trial,
-                                       uint32_t trial_interval_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (max_trial == 0) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.max_trial = max_trial;
-        configuration.trial_interval_milliseconds = trial_interval_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientNoDelay(KiottyNetClientConfiguration& configuration,
-                                         KiottyNetNoDelay no_delay)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        if (!isNoDelayKnown(no_delay)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.no_delay = no_delay;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
-    KiottyNetCode configureClientSendTimeout(KiottyNetClientConfiguration& configuration,
-                                             uint32_t timeout_milliseconds)
-    {
-        if (!isInitialized(configuration)) { return KIOTTY_NET_CODE_INVALID_ARGUMENT; }
-        configuration.send_timeout_milliseconds = timeout_milliseconds;
-        return KIOTTY_NET_CODE_SUCCESS;
-    }
-
     bool isInitialized(const KiottyNetServerConfiguration& configuration)
     {
         return configuration.initialization_mark == INITIALIZATION_MARK;
@@ -30311,6 +30300,11 @@ namespace kiotty::net::implementation
     bool isInitialized(const KiottyNetClientConfiguration& configuration)
     {
         return configuration.initialization_mark == INITIALIZATION_MARK;
+    }
+
+    bool isInitialized(const KiottyNetAddress& address)
+    {
+        return address.initialization_mark == INITIALIZATION_MARK;
     }
 
     Span<const char> hostnameOf(const KiottyNetAddress& address)
@@ -30353,11 +30347,17 @@ namespace kiotty::net::implementation
         {
             if (name.empty()) { return MadeAddressResult::failure(INVALID); }
             KiottyNetAddress address{};
+            address.initialization_mark = INITIALIZATION_MARK;
             address.transport = transport;
             const Span<char> field{ address.host, sizeof(address.host) };
             const bool written = writeText(field, name);
             if (!written) { return MadeAddressResult::failure(INVALID); }
             address.port = port;
+            address.connect_timeout_milliseconds = DEFAULT_CONNECT_TIMEOUT_MILLISECONDS;
+            address.max_trial = DEFAULT_MAX_TRIAL;
+            address.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
+            address.no_delay = KIOTTY_NET_NO_DELAY_ON;
+            address.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return MadeAddressResult::success(address);
         }
 
@@ -30381,8 +30381,6 @@ namespace kiotty::net::implementation
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
-            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
-            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 
@@ -30394,11 +30392,6 @@ namespace kiotty::net::implementation
             configuration.receive_capacity = capacities.receive;
             configuration.send_capacity = capacities.send;
             configuration.push_capacity = capacities.push;
-            configuration.connect_timeout_milliseconds = DEFAULT_CONNECT_TIMEOUT_MILLISECONDS;
-            configuration.max_trial = DEFAULT_MAX_TRIAL;
-            configuration.trial_interval_milliseconds = DEFAULT_TRIAL_INTERVAL_MILLISECONDS;
-            configuration.no_delay = KIOTTY_NET_NO_DELAY_ON;
-            configuration.send_timeout_milliseconds = DEFAULT_SEND_TIMEOUT_MILLISECONDS;
             return configuration;
         }
 
@@ -30921,7 +30914,6 @@ namespace kiotty::net::implementation
         , _loop()
         , _gate()
         , _is_abandoned(false)
-        , _configuration()
     {
     }
 
@@ -30937,7 +30929,6 @@ namespace kiotty::net::implementation
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(server);
         _host.initialize(limits, server.max_clients, cipherOf(limits));
-        _configuration = server;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -30966,7 +30957,8 @@ namespace kiotty::net::implementation
         _loop.reset();
         const KiottyNetCode secured = openProfile(tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
-        const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
+        const LoopParts parts{ _host,    _listener, _acceptor,
+                               _profile, handler,   address.send_timeout_milliseconds };
         const KiottyNetCode opened = listen(address);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return leave(opened); }
         _gate.start();
@@ -31054,7 +31046,7 @@ namespace kiotty::net::implementation
 
     KiottyNetCode Server::listen(const KiottyNetAddress& address)
     {
-        const NoDelay no_delay = noDelayOf(_configuration.no_delay);
+        const NoDelay no_delay = noDelayOf(address.no_delay);
         const SocketCode opened = _acceptor.open(address, LISTEN_BACKLOG, no_delay);
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const SocketCode attached = _acceptor.attach(_listener);
@@ -31081,7 +31073,7 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity,
-                                     configuration.send_timeout_milliseconds };
+                                     0 };
         }
 
         size_t listenerCapacityOf(size_t max_clients)
@@ -31109,7 +31101,6 @@ namespace kiotty::net::implementation
         , _profile()
         , _loop()
         , _gate()
-        , _configuration()
         , _is_closing(false)
         , _is_abandoned(false)
     {
@@ -31125,7 +31116,6 @@ namespace kiotty::net::implementation
         if (opened != SocketCode::SUCCESS) { return toNetCode(opened); }
         const ConnectionLimits limits = limitsOf(client);
         _host.initialize(limits, CONNECTIONS, cipherOf(limits));
-        _configuration = client;
         _gate.clear();
         return KIOTTY_NET_CODE_SUCCESS;
     }
@@ -31156,9 +31146,10 @@ namespace kiotty::net::implementation
         _loop.reset();
         const KiottyNetCode secured = openProfile(tls);
         if (secured != KIOTTY_NET_CODE_SUCCESS) { return leave(secured); }
-        ConnectedResult connected = connectWithRetry(_configuration, address, _is_closing);
+        ConnectedResult connected = connectWithRetry(address, _is_closing);
         if (!connected) { return leave(connected.code); }
-        const LoopParts parts{ _host, _listener, _acceptor, _profile, handler };
+        const LoopParts parts{ _host,    _listener, _acceptor,
+                               _profile, handler,   address.send_timeout_milliseconds };
         _gate.start();
         _loop.admit(parts, std::move(connected.value), hostnameOf(address));
         (void)_loop.run(parts, StopPolicy::WHEN_EMPTY);
@@ -31261,7 +31252,7 @@ namespace kiotty::net::implementation
             return ConnectionLimits{ configuration.receive_capacity,
                                      configuration.send_capacity,
                                      configuration.push_capacity,
-                                     configuration.send_timeout_milliseconds };
+                                     0 };
         }
     }
 }
@@ -31320,7 +31311,7 @@ namespace kiotty::net::implementation
     KiottyNetCode StreamClient::reconnect(const KiottyNetAddress& address, const Deadline& deadline)
     {
         disconnect();
-        ConnectedResult connected = connectWithRetry(_configuration, address, _stop, deadline);
+        ConnectedResult connected = connectWithRetry(address, _stop, deadline);
         if (!connected) { return connected.code; }
         _socket = std::move(connected.value);
         const KiottyNetCode secured = secure(address, deadline);
@@ -31436,7 +31427,7 @@ namespace kiotty::net::implementation
                                     _configuration.send_capacity };
         const KiottyNetCode opened = _tls.open(_profile, hostnameOf(address), capacity);
         if (opened != KIOTTY_NET_CODE_SUCCESS) { return opened; }
-        return _stream.handshake(deadline.bound(_configuration.connect_timeout_milliseconds));
+        return _stream.handshake(deadline.bound(address.connect_timeout_milliseconds));
     }
 }
 
