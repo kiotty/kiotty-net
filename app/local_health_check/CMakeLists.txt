@@ -1,0 +1,7 @@
+add_executable(kiotty_local_health_check_server server/main.cpp)
+target_include_directories(kiotty_local_health_check_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kiotty_local_health_check_server PRIVATE kiotty_health_check_common kiotty_net_warnings)
+
+add_executable(kiotty_local_health_check_client client/main.cpp)
+target_include_directories(kiotty_local_health_check_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kiotty_local_health_check_client PRIVATE kiotty_health_check_common kiotty_net_warnings)

@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kiotty health check · Streamable HTTP</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1419;
+    --panel: #171d24;
+    --line: #26303b;
+    --text: #d8dee6;
+    --muted: #8593a3;
+    --accent: #4aa3ff;
+    --ok: #3fbf7f;
+    --warn: #e0b341;
+    --error: #ef5f5f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; font-weight: 600; }
+  input[type=text] {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font: inherit;
+  }
+  #url { width: 260px; }
+  .session { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; color: var(--muted); }
+  button {
+    background: #22303d;
+    color: var(--text);
+    border: 1px solid #33475a;
+    padding: 7px 14px;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #2b3e50; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { background: #1f5f99; border-color: #2c78bd; }
+  button.primary:hover:not(:disabled) { background: #2570b3; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.on { color: var(--ok); border-color: #2c5c45; }
+  .pill.on .dot { background: var(--ok); }
+  .pill.off .dot { background: var(--error); }
+  main {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 16px;
+    padding: 16px 20px;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 260px;
+  }
+  section h2 {
+    font-size: 13px;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .stats { display: flex; gap: 20px; }
+  .stat .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .beat {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--line);
+    transition: background 0.15s;
+  }
+  .beat.flash { background: var(--ok); transition: none; }
+  .list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 260px;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+    border-top: 1px solid var(--line);
+    padding-top: 6px;
+  }
+  .list div { padding: 2px 0; white-space: pre-wrap; border-bottom: 1px dashed #1f2832; }
+  .muted { color: var(--muted); }
+  .status-OK { color: var(--ok); }
+  .status-END { color: var(--warn); }
+  .status-ERROR { color: var(--error); }
+  .progress { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #1f2832; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .table-wrap { flex: 1; overflow-y: auto; max-height: 220px; }
+  #single-result {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    min-height: 60px;
+    white-space: pre-wrap;
+  }
+  #log-section { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>kiotty health check · Streamable HTTP</h1>
+  <input type="text" id="url" spellcheck="false">
+  <button id="connect" class="primary">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <span id="state" class="pill off"><span class="dot"></span><span id="state-text">no session</span></span>
+  <span id="stream" class="pill off"><span class="dot"></span><span id="stream-text">stream closed</span></span>
+  <span class="session" id="session-id"></span>
+</header>
+
+<main>
+  <section>
+    <h2>Events <span class="beat" id="beat"></span></h2>
+    <div class="row">
+      <button id="start-events" data-needs-socket>1 · Start events</button>
+      <button id="stop-events" data-needs-socket>2 · Stop events</button>
+      <span id="events-state" class="pill off"><span class="dot"></span><span id="events-state-text">stopped</span></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="value" id="event-count">0</div><div class="label">3 · events received</div></div>
+      <div class="stat"><div class="value" id="event-interval">-</div><div class="label">last interval ms</div></div>
+      <div class="stat"><div class="value" id="event-seq">-</div><div class="label">server seq</div></div>
+    </div>
+    <div class="list" id="event-list"></div>
+  </section>
+
+  <section>
+    <h2>Cursor <span id="cursor-state" class="muted">closed</span></h2>
+    <div class="row">
+      <button id="open-cursor" data-needs-socket>4 · Open</button>
+      <button id="fetch-cursor" data-needs-socket>5 · Fetch ×10</button>
+      <button id="close-cursor" data-needs-socket>6 · Close</button>
+      <span id="fetch-progress-text" class="muted"></span>
+    </div>
+    <div class="progress"><div id="cursor-progress"></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>row</th><th>value</th><th>request</th></tr></thead>
+        <tbody id="cursor-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Single request</h2>
+    <div class="row">
+      <input type="text" id="single-text" placeholder="optional text to echo" style="flex:1">
+      <button id="single" data-needs-socket>7 · Send</button>
+    </div>
+    <div id="single-result" class="muted">no response yet</div>
+  </section>
+
+  <section id="log-section">
+    <h2>Requests and responses <button id="clear-log">Clear</button></h2>
+    <div class="list" id="log"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const HEADER_SIZE = 12;
+  const KIND = { REQUEST: 1, RESPONSE: 2, EVENT: 3 };
+  const COMMAND = { START_EVENTS: 1, STOP_EVENTS: 2, EVENT: 3, OPEN_CURSOR: 4, FETCH_CURSOR: 5, CLOSE_CURSOR: 6, SINGLE: 7 };
+  const COMMAND_NAME = {};
+  Object.keys(COMMAND).forEach(function (name) { COMMAND_NAME[COMMAND[name]] = name; });
+  const STATUS_NAME = { 0: "OK", 1: "ERROR", 2: "END" };
+  const SESSION_HEADER = "Mcp-Session-Id";
+  const AUTO_FETCH_COUNT = 10;
+  const TOTAL_ROWS = 50;
+  const MAX_LIST = 200;
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  let endpoint = "";
+  let sessionId = "";
+  let streamAbort = null;
+  let nextRequestId = 0;
+  let fetchLeft = 0;
+  let eventCount = 0;
+  let lastEventAt = 0;
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  function defaultUrl() {
+    const host = location.host || "127.0.0.1:9300";
+    return "http://" + host + "/mcp";
+  }
+
+  function encodeRequest(command, requestId, text) {
+    const body = encoder.encode(text || "");
+    const buffer = new ArrayBuffer(HEADER_SIZE + body.length);
+    const view = new DataView(buffer);
+    view.setUint8(0, KIND.REQUEST);
+    view.setUint8(1, command);
+    view.setUint16(2, 0);
+    view.setUint32(4, requestId);
+    view.setUint32(8, body.length);
+    new Uint8Array(buffer, HEADER_SIZE).set(body);
+    return buffer;
+  }
+
+  function decodeMessage(buffer) {
+    const view = new DataView(buffer);
+    const length = view.getUint32(8);
+    return {
+      kind: view.getUint8(0),
+      command: view.getUint8(1),
+      status: view.getUint16(2),
+      requestId: view.getUint32(4),
+      body: decoder.decode(new Uint8Array(buffer, HEADER_SIZE, length))
+    };
+  }
+
+  function decodeBase64(text) {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) { bytes[i] = binary.charCodeAt(i); }
+    return bytes.buffer;
+  }
+
+  function addLine(list, text, className, newestFirst) {
+    const line = document.createElement("div");
+    line.textContent = text;
+    if (className) { line.className = className; }
+    if (newestFirst) {
+      list.insertBefore(line, list.firstChild);
+      while (list.childNodes.length > MAX_LIST) { list.removeChild(list.lastChild); }
+    } else {
+      list.appendChild(line);
+      while (list.childNodes.length > MAX_LIST) { list.removeChild(list.firstChild); }
+      list.scrollTop = list.scrollHeight;
+    }
+  }
+
+  function time() {
+    const now = new Date();
+    return now.toLocaleTimeString("en-GB") + "." + String(now.getMilliseconds()).padStart(3, "0");
+  }
+
+  function log(text, className) {
+    addLine($("log"), time() + "  " + text, className, false);
+  }
+
+  function setPill(id, on, text) {
+    const pill = $(id);
+    pill.className = "pill " + (on ? "on" : "off");
+    $(id + "-text").textContent = text;
+  }
+
+  function setConnected(connected) {
+    document.querySelectorAll("[data-needs-socket]").forEach(function (button) { button.disabled = !connected; });
+    $("connect").disabled = connected;
+    $("disconnect").disabled = !connected;
+    $("url").disabled = connected;
+  }
+
+  async function post(command, text) {
+    nextRequestId += 1;
+    const requestId = nextRequestId;
+    const headers = { "Content-Type": "application/octet-stream" };
+    if (sessionId) { headers[SESSION_HEADER] = sessionId; }
+    log("-> POST #" + requestId + " " + COMMAND_NAME[command] + (text ? " " + text : ""), "muted");
+    const reply = await fetch(endpoint, { method: "POST", headers: headers, body: encodeRequest(command, requestId, text) });
+    if (!reply.ok) {
+      const reason = await reply.text();
+      throw new Error("HTTP " + reply.status + " " + reason);
+    }
+    const session = reply.headers.get(SESSION_HEADER);
+    if (session) { sessionId = session; }
+    return decodeMessage(await reply.arrayBuffer());
+  }
+
+  async function send(command, text) {
+    if (!sessionId) {
+      log("no session", "status-ERROR");
+      return;
+    }
+    let message;
+    try {
+      message = await post(command, text);
+    } catch (error) {
+      log(String(error.message || error), "status-ERROR");
+      if (String(error.message).indexOf("HTTP 404") === 0) { lostSession(); }
+      return;
+    }
+    onResponse(message);
+  }
+
+  function onEvent(message) {
+    eventCount += 1;
+    const now = performance.now();
+    if (lastEventAt) { $("event-interval").textContent = Math.round(now - lastEventAt); }
+    lastEventAt = now;
+    $("event-count").textContent = eventCount;
+    const seq = /seq=(\d+)/.exec(message.body);
+    if (seq) { $("event-seq").textContent = seq[1]; }
+    addLine($("event-list"), time() + "  " + message.body, "", true);
+    const beat = $("beat");
+    beat.classList.add("flash");
+    setTimeout(function () { beat.classList.remove("flash"); }, 60);
+  }
+
+  function addCursorRows(message) {
+    const tbody = $("cursor-rows");
+    let last = 0;
+    message.body.split("\n").forEach(function (line) {
+      const match = /row (\d+) value=(\d+)/.exec(line);
+      if (!match) { return; }
+      const tr = document.createElement("tr");
+      [match[1], match[2], "#" + message.requestId].forEach(function (value) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+      last = Number(match[1]);
+    });
+    if (last) { $("cursor-progress").style.width = (last / TOTAL_ROWS * 100) + "%"; }
+    tbody.parentNode.parentNode.scrollTop = tbody.parentNode.parentNode.scrollHeight;
+  }
+
+  function continueFetch(message) {
+    if (fetchLeft === 0) { return; }
+    if (message.status !== 0) {
+      fetchLeft = 0;
+      $("fetch-progress-text").textContent = "auto fetch stopped: " + STATUS_NAME[message.status];
+      return;
+    }
+    fetchLeft -= 1;
+    const done = AUTO_FETCH_COUNT - fetchLeft;
+    $("fetch-progress-text").textContent = "fetch " + done + " / " + AUTO_FETCH_COUNT;
+    if (fetchLeft > 0) { send(COMMAND.FETCH_CURSOR, ""); }
+  }
+
+  function onResponse(message) {
+    const status = STATUS_NAME[message.status] || String(message.status);
+    log("<- #" + message.requestId + " " + COMMAND_NAME[message.command] + " " + status + ": " + message.body, "status-" + status);
+    const ok = message.status === 0;
+    switch (message.command) {
+      case COMMAND.START_EVENTS:
+        if (ok) { setPill("events-state", true, "running"); }
+        break;
+      case COMMAND.STOP_EVENTS:
+        if (ok) { setPill("events-state", false, "stopped"); }
+        break;
+      case COMMAND.OPEN_CURSOR:
+        if (ok) {
+          $("cursor-state").textContent = "open";
+          $("cursor-rows").innerHTML = "";
+          $("cursor-progress").style.width = "0";
+        }
+        break;
+      case COMMAND.FETCH_CURSOR:
+        if (ok) { addCursorRows(message); }
+        continueFetch(message);
+        break;
+      case COMMAND.CLOSE_CURSOR:
+        if (ok) { $("cursor-state").textContent = "closed"; }
+        break;
+      case COMMAND.SINGLE:
+        $("single-result").classList.remove("muted");
+        $("single-result").textContent = "#" + message.requestId + " " + status + "\n" + message.body.replace(/ (?=\w+=)/g, "\n");
+        break;
+    }
+  }
+
+  function onStreamEvent(block) {
+    let data = "";
+    block.split("\n").forEach(function (line) {
+      if (line.indexOf("data:") === 0) { data += line.slice(5).trim(); }
+    });
+    if (!data) { return; }
+    const buffer = decodeBase64(data);
+    if (buffer.byteLength < HEADER_SIZE) {
+      log("short event", "status-ERROR");
+      return;
+    }
+    const message = decodeMessage(buffer);
+    if (message.kind === KIND.EVENT) { onEvent(message); return; }
+    if (message.kind === KIND.RESPONSE) { onResponse(message); return; }
+    log("unknown kind " + message.kind, "status-ERROR");
+  }
+
+  async function openStream() {
+    streamAbort = new AbortController();
+    const abort = streamAbort;
+    let reply;
+    try {
+      const headers = { "Accept": "text/event-stream" };
+      headers[SESSION_HEADER] = sessionId;
+      reply = await fetch(endpoint, { method: "GET", headers: headers, signal: abort.signal });
+    } catch (error) {
+      log("stream failed: " + error, "status-ERROR");
+      return;
+    }
+    if (!reply.ok) {
+      log("stream refused: HTTP " + reply.status + " " + await reply.text(), "status-ERROR");
+      return;
+    }
+    setPill("stream", true, "stream open");
+    log("GET event stream open", "status-OK");
+    const reader = reply.body.getReader();
+    const textDecoder = new TextDecoder();
+    let pending = "";
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) { break; }
+        pending += textDecoder.decode(chunk.value, { stream: true });
+        let end = pending.indexOf("\n\n");
+        while (end >= 0) {
+          onStreamEvent(pending.slice(0, end));
+          pending = pending.slice(end + 2);
+          end = pending.indexOf("\n\n");
+        }
+      }
+      log("event stream ended by the server", "status-END");
+    } catch (error) {
+      if (!abort.signal.aborted) { log("event stream error: " + error, "status-ERROR"); }
+    }
+    setPill("stream", false, "stream closed");
+  }
+
+  function resetView() {
+    fetchLeft = 0;
+    lastEventAt = 0;
+    setPill("events-state", false, "stopped");
+    $("cursor-state").textContent = "closed";
+    $("fetch-progress-text").textContent = "";
+  }
+
+  function lostSession() {
+    if (streamAbort) { streamAbort.abort(); streamAbort = null; }
+    sessionId = "";
+    $("session-id").textContent = "";
+    setPill("state", false, "no session");
+    setConnected(false);
+    resetView();
+  }
+
+  async function connect() {
+    endpoint = $("url").value.trim();
+    setPill("state", false, "connecting...");
+    sessionId = "";
+    let message;
+    try {
+      message = await post(COMMAND.SINGLE, "initialize");
+    } catch (error) {
+      setPill("state", false, "failed");
+      log("connect failed: " + (error.message || error), "status-ERROR");
+      return;
+    }
+    if (!sessionId) {
+      setPill("state", false, "no session id");
+      log("server did not return " + SESSION_HEADER, "status-ERROR");
+      return;
+    }
+    setPill("state", true, "session");
+    $("session-id").textContent = SESSION_HEADER + ": " + sessionId;
+    setConnected(true);
+    log("session " + sessionId, "status-OK");
+    onResponse(message);
+    openStream();
+  }
+
+  async function disconnect() {
+    const id = sessionId;
+    if (streamAbort) { streamAbort.abort(); streamAbort = null; }
+    if (id) {
+      const headers = {};
+      headers[SESSION_HEADER] = id;
+      try {
+        const reply = await fetch(endpoint, { method: "DELETE", headers: headers });
+        log("DELETE session -> HTTP " + reply.status + " " + await reply.text(), reply.ok ? "status-END" : "status-ERROR");
+      } catch (error) {
+        log("DELETE failed: " + error, "status-ERROR");
+      }
+    }
+    lostSession();
+  }
+
+  $("url").value = defaultUrl();
+  $("connect").onclick = connect;
+  $("disconnect").onclick = disconnect;
+  $("start-events").onclick = function () { send(COMMAND.START_EVENTS, ""); };
+  $("stop-events").onclick = function () { send(COMMAND.STOP_EVENTS, ""); };
+  $("open-cursor").onclick = function () { send(COMMAND.OPEN_CURSOR, ""); };
+  $("fetch-cursor").onclick = function () {
+    if (fetchLeft > 0) { log("auto fetch already running", "status-END"); return; }
+    fetchLeft = AUTO_FETCH_COUNT;
+    $("fetch-progress-text").textContent = "fetch 0 / " + AUTO_FETCH_COUNT;
+    send(COMMAND.FETCH_CURSOR, "");
+  };
+  $("close-cursor").onclick = function () { send(COMMAND.CLOSE_CURSOR, ""); };
+  $("single").onclick = function () { send(COMMAND.SINGLE, $("single-text").value); };
+  $("single-text").addEventListener("keydown", function (event) { if (event.key === "Enter") { $("single").click(); } });
+  $("clear-log").onclick = function () { $("log").innerHTML = ""; };
+  window.addEventListener("pagehide", function () {
+    if (!sessionId) { return; }
+    const headers = {};
+    headers[SESSION_HEADER] = sessionId;
+    fetch(endpoint, { method: "DELETE", headers: headers, keepalive: true });
+  });
+  setConnected(false);
+  if (location.protocol.indexOf("http") === 0) { connect(); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+add_executable(kiotty_chat_server server/chat_server.cpp)
+target_link_libraries(kiotty_chat_server PRIVATE kiotty_net kiotty_net_warnings)
+
+add_executable(kiotty_chat_client client/chat_client.cpp)
+target_link_libraries(kiotty_chat_client PRIVATE kiotty_net kiotty_net_warnings)

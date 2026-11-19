@@ -1,0 +1,5 @@
+add_subdirectory(chat)
+add_subdirectory(health_check)
+add_subdirectory(local_health_check)
+add_subdirectory(websocket_health_check)
+add_subdirectory(streamable_http_health_check)

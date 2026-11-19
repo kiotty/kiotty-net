@@ -1,0 +1,13 @@
+add_library(kiotty_health_check_common STATIC
+    common/health_check_service.cpp
+    common/health_check_server_app.cpp
+    common/health_check_client_app.cpp
+)
+target_include_directories(kiotty_health_check_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(kiotty_health_check_common PUBLIC kiotty_net PRIVATE kiotty_net_warnings)
+
+add_executable(kiotty_health_check_server server/main.cpp)
+target_link_libraries(kiotty_health_check_server PRIVATE kiotty_health_check_common kiotty_net_warnings)
+
+add_executable(kiotty_health_check_client client/main.cpp)
+target_link_libraries(kiotty_health_check_client PRIVATE kiotty_health_check_common kiotty_net_warnings)

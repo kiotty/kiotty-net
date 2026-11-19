@@ -1,0 +1,5 @@
+add_executable(kiotty_websocket_health_check_server server/main.cpp)
+target_link_libraries(kiotty_websocket_health_check_server PRIVATE kiotty_health_check_common kiotty_net_warnings)
+target_compile_definitions(kiotty_websocket_health_check_server PRIVATE
+    KIOTTY_WEBSOCKET_HEALTH_CHECK_PAGE="${CMAKE_CURRENT_SOURCE_DIR}/client/index.html"
+)
