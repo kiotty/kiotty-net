@@ -2,7 +2,7 @@
 
 사용자가 헤더를 어떻게 쓰는지 적는 메모다. 인터페이스의 기준은 [requirement_v0.md](requirement_v0.md) 이고, 여기서는 "무엇을 어떤 순서로 부르는가" 만 다룬다. 내부 동작은 [implementation_guide_v0.md](implementation_guide_v0.md) 에 있다.
 
-이 문서는 `include/kiotty_net_http.h` 를 따른다. 1절 서버는 공개 API 판 v2 ([design_http_v0.html](../design/design_http_v0.html), 사이클 H1 ~ H6), 2절 클라이언트는 [design_http_client_v0.html](../design/design_http_client_v0.html) (사이클 C1 ~ C5) 이다. 둘 다 구현되어 있다.
+이 문서는 `include/kiotty_net_http.h` 를 따른다. 1절 서버는 공개 API 판 v2 ([design_http_v0.html](../design/design_http_v0.html), 사이클 H1 ~ H6), 2절 클라이언트는 `design_http_client_v0.html` (v0.1.0 에서 지움, git `6f3db91`) (사이클 C1 ~ C5) 이다. 둘 다 구현되어 있다.
 
 ## 헤더 구성
 
@@ -492,13 +492,13 @@ int main()
 ### 1.11 아직 없는 것
 
 - WebSocket Upgrade 경로는 `kiotty_net_websocket.h` 에 있다 (`KiottyNet_addWebSocket(http_server, "/chat")` 과 `KiottyNet_onWebSocket*`, C++ `KiottyNet_WebSocketRoute(server, "/chat")`). 이 헤더는 그것을 모른다. 사용법은 [user_guide_websocket.md](user_guide_websocket.md).
-- HttpClient 는 2절이다 ([design_http_client_v0.html](../design/design_http_client_v0.html)).
+- HttpClient 는 2절이다 (`design_http_client_v0.html` (v0.1.0 에서 지움, git `6f3db91`)).
 - JSON 은 라이브러리 밖이다. body 는 바이트이고 텍스트 계열이면 UTF-8 만 본다.
 - 간단한 CORS 설정, `:id` 파라미터 파싱, 응답 압축, Range 요청, 요청 body 스트리밍, sendfile 은 지원하지 않는다.
 
 ## 2. HTTP 클라이언트
 
-`KiottyNetHttpClientHandle` 은 동기 HTTP/1.1 클라이언트다. base 의 StreamClient 위에 있고 IO Thread 도 콜백도 없다. 부른 thread 가 보내고 기다린다. 선언은 서버와 같은 `kiotty_net_http.h` 에 있다. 설계는 [design_http_client_v0.html](../design/design_http_client_v0.html), 사이클 C1 ~ C5.
+`KiottyNetHttpClientHandle` 은 동기 HTTP/1.1 클라이언트다. base 의 StreamClient 위에 있고 IO Thread 도 콜백도 없다. 부른 thread 가 보내고 기다린다. 선언은 서버와 같은 `kiotty_net_http.h` 에 있다. 설계는 `design_http_client_v0.html` (v0.1.0 에서 지움, git `6f3db91`), 사이클 C1 ~ C5.
 
 | 것 | 무엇 |
 |---|---|

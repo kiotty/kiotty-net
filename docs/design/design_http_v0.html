@@ -57,7 +57,7 @@
 <body>
 
 <h1>kiotty_net_http.h 설계 v0</h1>
-<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 전부 반영: content type 목록 확장, 서버 handler, HEAD. 같은 날 base 2.3: 주소와 TLS 를 create 가 아니라 run / connect 때), 2026-11-12 (결정 19: 끊김 / 오류는 action 등록 함수, 끊김 콜백에 handle 없음). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> 이다.</p>
+<p class="sub">2026-11-10 (같은 날 두 번 고침), 2026-11-11 (정할 것 전부 반영: content type 목록 확장, 서버 handler, HEAD. 같은 날 base 2.3: 주소와 TLS 를 create 가 아니라 run / connect 때), 2026-11-12 (결정 19: 끊김 / 오류는 action 등록 함수, 끊김 콜백에 handle 없음). HTTP/1.1 서버 층의 첫 설계다. base (<code>design_base_v5.html</code>) 와 StateMachine (<code>design_statemachine_v0.md</code>) 위에 얹히고, <code>include/kiotty_net_http.h</code> 의 지금 판 (2026-11-09, 공개 API v1) 을 MCP 의 Streamable HTTP 가 되도록 고친 판 v2 를 정한다. 공개 인터페이스가 중심이다. WebSocket 은 <code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 이다.</p>
 
 <p>우선순위: 공개 헤더의 모양은 사용자가 정한 것을 따른다 (수칙 0.2, DV13). <code>requirement_v0.md</code> 9절, <code>user_guide_http.md</code> 와 다르면 이 문서가 새것이다 (9절이 차이). 이 문서의 코드 블록 안 주석은 설명용이고 소스에는 주석을 두지 않는다 (수칙 4.9).</p>
 
@@ -101,7 +101,7 @@
   <tr><td><code>createHttpServer</code></td><td>handle</td><td><span class="tag new">추가</span> <code>{ code, handle }</code></td></tr>
   <tr><td>push 스트림 (아무 thread 의 push)</td><td>—</td><td><span class="tag drop">제거</span> 첫 판에 있던 <code>pushHttpChunk / endHttpStream / onStreamClosed</code> 는 넣지 않는다 (1절 결정 4)</td></tr>
   <tr><td>sendfile / TransmitFile</td><td>"가능하면"</td><td><span class="tag drop">제거</span> 파일은 응답 버퍼 조각으로 보낸다 (1절 결정 6)</td></tr>
-  <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> websocket.h 의 <code>KiottyNet_addWebSocket(server, "/chat", handler, app_context)</code>, <code>KiottyNet_broadcastWebSocket(server, "/chat", ...)</code> (<code>design_websocket_v0.html</code> 3.2). WebSocketServer 는 없고 서버 쪽 WebSocket 은 HttpServer 의 Upgrade 경로뿐이다. websocket.h 가 http.h 를 include 한다</td></tr>
+  <tr><td>WebSocket Upgrade</td><td>http.h 에 없음</td><td><span class="tag keep">유지</span> websocket.h 의 <code>KiottyNet_addWebSocket(server, "/chat", handler, app_context)</code>, <code>KiottyNet_broadcastWebSocket(server, "/chat", ...)</code> (<code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 3.2). WebSocketServer 는 없고 서버 쪽 WebSocket 은 HttpServer 의 Upgrade 경로뿐이다. websocket.h 가 http.h 를 include 한다</td></tr>
   <tr><td>base</td><td></td><td><span class="tag new">추가</span> 2절. 한 WRITE 에 send Stage 와 notify Stage 를 같이 싣는다. 송신 timeout 과 <code>KIOTTY_NET_CODE_PEER_NOT_READING</code>. 주소와 TLS 설정은 create 가 아니라 run / connect 가 받는다 (2.3)</td></tr>
 </table>
 
@@ -249,7 +249,7 @@ KiottyNetCode KiottyNet_runStatefulEventClient(KiottyNetEventClientHandle client
   <li><b>TLS Stage.</b> 지금은 tls 인자가 있을 때만 cipher Stage 를 잡는다. B2 뒤에는 TLS 를 넣어 빌드했으면 언제나 잡는다. 크기는 지금 공식 그대로 (receive, <code>gatheredPlainBytes(send, notify)</code> 의 암호문 상한). TLS 를 빼고 빌드하면 잡지 않고, run / connect 에 tls 를 주면 <code>TLS_NOT_SUPPORTED</code>. <code>serverMemorySize</code> / <code>clientMemorySize</code> 는 TLS 빌드에서 이 Stage 를 늘 더한다.</li>
   <li><b>주소 검사.</b> run / connect 가 받은 주소를 다시 본다: transport 가 TCP / PIPE 중 하나, host 가 비지 않고 배열 안에서 끝남 (NUL), TCP 면 port 가 0 이 아님. 어긋나면 <code>INVALID_ARGUMENT</code> 이고 소켓을 열지 않는다. TLS 설정은 지금처럼 <code>initialization_mark</code> 를 본다.</li>
   <li><b>실패의 순서.</b> run: 인자 검사 (handler, 주소, TLS 설정의 mark) → 이미 도는 중이면 <code>INVALID_ARGUMENT</code> → TLS 면 SSL_CTX (<code>TLS_*</code>) → bind / listen (클라이언트는 연결과 재시도) → 핸드셰이크. connect 도 같은 순서다.</li>
-  <li><b>HTTP / WebSocket.</b> <code>createHttpServer(context, configuration, limits)</code>, <code>runHttpServer(server, address, tls)</code> (handler 는 결정 19 로 등록 함수가 되었다). WebSocketClient 도 create 가 tls 를 받지 않고 run 이 주소와 tls 를 받는다 (<code>design_websocket_v0.html</code> 결정 13). 둘 다 아직 구현 전이라 B2 는 헤더 선언과 wrapper 만 고친다.</li>
+  <li><b>HTTP / WebSocket.</b> <code>createHttpServer(context, configuration, limits)</code>, <code>runHttpServer(server, address, tls)</code> (handler 는 결정 19 로 등록 함수가 되었다). WebSocketClient 도 create 가 tls 를 받지 않고 run 이 주소와 tls 를 받는다 (<code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 결정 13). 둘 다 아직 구현 전이라 B2 는 헤더 선언과 wrapper 만 고친다.</li>
 </ul>
 
 <h2 id="s3">3. 응답의 두 모양</h2>
@@ -323,7 +323,7 @@ typedef struct KiottyNetHttpLimits {
 KiottyNetCode KiottyNet_configureHttpWebSocketTimers(KiottyNetHttpLimits* limits, uint32_t ping_interval_milliseconds, uint32_t pong_timeout_milliseconds, uint32_t close_timeout_milliseconds);   /* 추가 */
 /* C++ builder : KiottyNet_HttpLimitsBuilder::webSocketTimers(ping, pong, close) 추가 */</code></pre>
 
-<p>WebSocket 전용 설정 struct 는 없다 (<code>design_websocket_v0.html</code> 결정 11). WebSocket 메시지 상한은 <code>max_body_bytes</code>, 핸드셰이크 timeout 은 <code>header_timeout</code> 이고, 남는 타이머 셋만 여기에 둔다. 필드는 숫자일 뿐이라 http.h 는 websocket.h 를 모르는 채로 남는다.</p>
+<p>WebSocket 전용 설정 struct 는 없다 (<code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 결정 11). WebSocket 메시지 상한은 <code>max_body_bytes</code>, 핸드셰이크 timeout 은 <code>header_timeout</code> 이고, 남는 타이머 셋만 여기에 둔다. 필드는 숫자일 뿐이라 http.h 는 websocket.h 를 모르는 채로 남는다.</p>
 
 <h3>4.2 status <span class="tag new">추가</span></h3>
 
@@ -856,7 +856,7 @@ int main()
   <tr><td>H6 문서와 MCP 예제</td><td>requirement 9절을 이 판으로, 구현 가이드 4절에 스트림과 content type, 테스트 계획 17절, <code>tests/integration</code> 에 6절의 MCP 서버 골격을 테스트로 (JSON 없이 문자열), progress</td><td>MCP 예제 테스트 초록</td></tr>
 </table>
 
-<p>WebSocket (<code>design_websocket_v0.html</code> 의 W1 ~ W5) 은 B1, B2 와 H3 뒤에 시작할 수 있다.</p>
+<p>WebSocket (<code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 의 W1 ~ W5) 은 B1, B2 와 H3 뒤에 시작할 수 있다.</p>
 
 </body>
 </html>

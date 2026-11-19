@@ -986,7 +986,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p>하지 않은 것: 연결 수 초과의 <code>onError(TABLE_FULL)</code> 는 재현하지 않는다 (base 가 accept 를 멈추므로 경합 때만 난다. 대신 19.2 의 <code>ConnectionOverMaxClientsWaitsUntilASlotFrees</code>). 설계 11절의 benchmark 둘 (Work 스트림의 chunk 1 KiB × 1000 latency, 큰 파일) 은 아직 없다.</p>
 
 <h2 id="s20">20. 케이스 : WebSocket (W1 ~ W4)</h2>
-<p><code>docs/design/design_websocket_v0.html</code> 10절의 W1 ~ W4 사이클 (2026-11-12 ~ 13) 의 테스트다. 설계는 이것을 "테스트 계획 18절" 이라 했지만 17 / 18절이 B1 / B2, 19절이 HttpServer 라서 20절이다. progress 는 <code>261112_progress_websocket_w1 / w2 / w3.md</code>, <code>261113_progress_websocket_w4.md</code>. codec 은 unit, 나머지는 integration 이고 integration 은 공개 C API (<code>kiotty_net_websocket.h</code>) 만 쓴다. 서버 테스트의 상대는 mask 한 frame 을 손으로 만드는 raw socket 클라이언트, 클라이언트 테스트의 상대는 W3 의 HttpServer 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (wss 케이스 하나는 TLS 빌드에서만).</p>
+<p><code>docs/design/design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 10절의 W1 ~ W4 사이클 (2026-11-12 ~ 13) 의 테스트다. 설계는 이것을 "테스트 계획 18절" 이라 했지만 17 / 18절이 B1 / B2, 19절이 HttpServer 라서 20절이다. progress 는 <code>261112_progress_websocket_w1 / w2 / w3.md</code>, <code>261113_progress_websocket_w4.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). codec 은 unit, 나머지는 integration 이고 integration 은 공개 C API (<code>kiotty_net_websocket.h</code>) 만 쓴다. 서버 테스트의 상대는 mask 한 frame 을 손으로 만드는 raw socket 클라이언트, 클라이언트 테스트의 상대는 W3 의 HttpServer 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (wss 케이스 하나는 TLS 빌드에서만).</p>
 
 <h3>20.1 헤더 (W1 unit, <code>kiotty_test_headers_c.c</code>, <code>kiotty_test_headers_cpp.cpp</code>)</h3>
 <table>
@@ -1041,7 +1041,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p>하지 않은 것: 외부 클라이언트 (Python websockets, 브라우저) 와의 왕복 (WSL 에 <code>websockets</code> 와 pip 가 없다. 설계 10절의 W3 완료 조건 하나). push lane 이 찬 send 의 BUFFER_FULL, broadcast 의 건너뜀, pong timeout 0 / close timeout 0 (무한) 은 integration 으로 재현하지 않았다. WebSocket benchmark 는 없다.</p>
 
 <h2 id="s21">21. 케이스 : 보내고 닫기 (B3, thenCloseWith)</h2>
-<p><code>docs/design/design_websocket_v1.html</code> 결정 14 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_base_b3.md</code>. base 의 새 action 은 base integration 하나로, 그것을 쓰는 HTTP (<code>Connection: close</code> 응답의 마지막 조각) 와 WebSocket (1002 / 1007 / 1009, 상대 close 의 답) 은 19, 20절의 기존 테스트가 그대로 지나는 것으로 본다.</p>
+<p><code>docs/design/design_websocket_v1.html</code> 결정 14 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_base_b3.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). base 의 새 action 은 base integration 하나로, 그것을 쓰는 HTTP (<code>Connection: close</code> 응답의 마지막 조각) 와 WebSocket (1002 / 1007 / 1009, 상대 close 의 답) 은 19, 20절의 기존 테스트가 그대로 지나는 것으로 본다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>BaseApiTest</td><td>CloseWithSendsOnlyItsDataThenClosesWithItsReason</td><td><span class="tag ok">정상</span></td><td><code>KiottyNet_thenCloseWith</code> 의 필드 (CLOSE, data, reason). onReady 에서 push lane 에 "late" 를 넣고 <code>thenCloseWith("bye!", PROTOCOL_ERROR)</code>: 상대는 "bye!" 만 받고 EOF, onWritten 없음, 끊김 reason <code>PROTOCOL_ERROR</code></td></tr>
@@ -1050,7 +1050,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 <p>하지 않은 것: TLS 위의 thenCloseWith 를 따로 재현하지 않았다 (cipher 가 다 나간 뒤 닫는 것은 <code>SendFlow::isDrained</code> 가 본다). push lane 에 데이터가 남은 채 WebSocket 이 1002 로 닫히는 장면도 따로 만들지 않았다.</p>
 
 <h2 id="s22">22. 케이스 : HttpServer 의 app_context 는 run 에 한 번 (V1)</h2>
-<p><code>docs/design/design_websocket_v1.html</code> 3절 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v1.md</code>. 새 테스트는 없다. 19절의 테스트가 라우트, Work, 끊김, 오류 콜백에서 받은 app_context 를 그대로 앱 객체로 써서 기록하므로, run 에 준 포인터가 네 곳에 다 닿지 않으면 그 테스트들이 기록을 못 보고 실패한다.</p>
+<p><code>docs/design/design_websocket_v1.html</code> 3절 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v1.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). 새 테스트는 없다. 19절의 테스트가 라우트, Work, 끊김, 오류 콜백에서 받은 app_context 를 그대로 앱 객체로 써서 기록하므로, run 에 준 포인터가 네 곳에 다 닿지 않으면 그 테스트들이 기록을 못 보고 실패한다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>HttpServer</td><td>19.2 의 라우트 테스트 전부, <code>UnknownPathIsNotFoundAndTheNotFoundRouteCanAnswer</code>, 끊김 reason 을 보는 테스트</td><td><span class="tag ok">정상</span></td><td><code>runHttpServer(server, address, tls, &amp;app)</code> 의 app 이 onRequest 와 <code>onHttpDisconnected</code> / <code>onHttpError</code> 의 첫 인자로 온다</td></tr>
@@ -1059,7 +1059,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s23">23. 케이스 : 서버 WebSocketRoute (V2)</h2>
-<p><code>docs/design/design_websocket_v1.html</code> 4절, 7절 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v2.md</code>. 20.3 의 서버 테스트는 등록을 <code>addWebSocket(server, path)</code> 와 <code>onWebSocket*</code> 의 사슬로 바꾸고 app_context 를 run 의 <code>SocketApp</code> 하나로 받는다. 경로마다의 구분은 Open 콜백 둘 (<code>onChatOpen</code>, <code>onTelemetryOpen</code>) 이 돌려주는 websocket_context 로 한다.</p>
+<p><code>docs/design/design_websocket_v1.html</code> 4절, 7절 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v2.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). 20.3 의 서버 테스트는 등록을 <code>addWebSocket(server, path)</code> 와 <code>onWebSocket*</code> 의 사슬로 바꾸고 app_context 를 run 의 <code>SocketApp</code> 하나로 받는다. 경로마다의 구분은 Open 콜백 둘 (<code>onChatOpen</code>, <code>onTelemetryOpen</code>) 이 돌려주는 websocket_context 로 한다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>WebSocketServer</td><td>HttpRoutesAndTwoSocketPathsShareOneServerAndBroadcastByPath</td><td><span class="tag ok">정상</span></td><td><code>/telemetry</code> 를 C++ <code>KiottyNet_WebSocketRoute(server, path).onUpgrade().onOpen().onMessage().onClose().build()</code> 로 등록. 경로별 broadcast 와 메시지의 websocket_context 가 경로마다 다르다</td></tr>
@@ -1069,7 +1069,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s24">24. 케이스 : 클라이언트 이벤트 등록, subprotocol, bye, onError (V3)</h2>
-<p><code>docs/design/design_websocket_v1.html</code> 5절, 결정 6 ~ 9, 12, 15 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v3.md</code>. 20.4 의 클라이언트 테스트는 <code>onWebSocketClient*</code> 로 등록하고 <code>runWebSocketClient(client, address, path, tls, &amp;side)</code> 로 돈다.</p>
+<p><code>docs/design/design_websocket_v1.html</code> 5절, 결정 6 ~ 9, 12, 15 (2026-11-13) 의 테스트다. progress 는 <code>261113_progress_websocket_v3.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). 20.4 의 클라이언트 테스트는 <code>onWebSocketClient*</code> 로 등록하고 <code>runWebSocketClient(client, address, path, tls, &amp;side)</code> 로 돈다.</p>
 <table>
   <tr><th class="t">모듈</th><th>테스트</th><th class="t">분류</th><th>확인하는 것</th></tr>
   <tr><td>WebSocketClient</td><td>RoundTripsWithTheServerThenClosesFromTheClient</td><td><span class="tag ok">정상</span></td><td>열리기 전 <code>byeWebSocketClient</code> 는 <code>PEER_CLOSED</code>. run 중 등록 / <code>setWebSocketClientProtocols</code> 는 <code>BUSY</code>. 1005 는 <code>INVALID_ARGUMENT</code>. <code>bye(1000, "bye")</code> 로 서버가 1000 / "bye" 를 받고 run 은 <code>PEER_CLOSED</code>. onError 없음</td></tr>
@@ -1084,7 +1084,7 @@ BENCHMARK(EchoRoundtrip1KiB)                                              // ben
 </table>
 
 <h2 id="s25">25. 케이스 : HttpClient (C1 ~ C5)</h2>
-<p><code>docs/design/design_http_client_v0.html</code> 11절의 C1 ~ C5 사이클 (2026-11-15 ~ 16) 의 테스트다. C3 의 몫 (chunked, 닫힘까지의 body, read 의 TIMEOUT, 남긴 body 뒤의 요청) 은 C2 에 들어갔다. progress 는 <code>261115_progress_http_client_c1.md</code>, <code>261116_progress_http_client_c2.md</code>, <code>261116_progress_http_client_c4.md</code>. 파서와 머리는 unit, 나머지는 integration 이고 integration 은 공개 API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 우리 HttpServer (<code>tests/integration/support/kiotty_test_http_site.*</code>) 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (TLS 케이스는 TLS 빌드에서만, MSVC 는 <code>tlsSupported()</code> 로 skip). C5 뒤의 수: MSVC 819, WSL 의 gcc / gcc-notls / clang / clang-notls / clang-asan / clang-tsan 820, clang-release 819.</p>
+<p><code>docs/design/design_http_client_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 11절의 C1 ~ C5 사이클 (2026-11-15 ~ 16) 의 테스트다. C3 의 몫 (chunked, 닫힘까지의 body, read 의 TIMEOUT, 남긴 body 뒤의 요청) 은 C2 에 들어갔다. progress 는 <code>261115_progress_http_client_c1.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>), <code>261116_progress_http_client_c2.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>), <code>261116_progress_http_client_c4.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>). 파서와 머리는 unit, 나머지는 integration 이고 integration 은 공개 API (<code>kiotty_net_http.h</code>) 만 쓴다. 상대는 우리 HttpServer (<code>tests/integration/support/kiotty_test_http_site.*</code>) 또는 날 바이트를 보내는 가짜 서버다. 매트릭스는 15절과 같다 (TLS 케이스는 TLS 빌드에서만, MSVC 는 <code>tlsSupported()</code> 로 skip). C5 뒤의 수: MSVC 819, WSL 의 gcc / gcc-notls / clang / clang-notls / clang-asan / clang-tsan 820, clang-release 819.</p>
 
 <h3>25.1 파서와 머리 (C1 unit)</h3>
 <p><code>http/domain/entity/</code>, <code>http/data/repository/</code> 의 함수를 직접 부른다. 수칙 2.10 의 다섯 입력을 상태줄에 넣는다. 할당은 없다.</p>

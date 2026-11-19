@@ -2,7 +2,7 @@
 
 `include/kiotty_net_websocket.h` 를 쓰는 방법이다. requirement_v0.md 10, 11절의 WebSocket 을 1~8절의 지금 모양 (run / close / await, 두 context, write lane / push lane, notify, StateMachine) 과 HttpServer 에 맞춰 다시 쓴 것이고, WebSocket 에 대해서는 이 문서가 10, 11절보다 우선한다.
 
-이 문서는 헤더 판 v3 을 따른다. 설계는 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 결정 1 ~ 13 과, 등록 모양을 HTTP 에 맞춘 [design_websocket_v1.html](../design/design_websocket_v1.html) 의 결정 1 ~ 15 다. 판 v2 와 달라진 점은 10절에 모아 두었다.
+이 문서는 헤더 판 v3 을 따른다. 설계는 `design_websocket_v0.html` (v0.1.0 에서 지움, git `6f3db91`) 의 결정 1 ~ 13 과, 등록 모양을 HTTP 에 맞춘 [design_websocket_v1.html](../design/design_websocket_v1.html) 의 결정 1 ~ 15 다. 판 v2 와 달라진 점은 10절에 모아 두었다.
 
 헤더는 `kiotty_net_http.h` 를 포함하고, 그것이 `kiotty_net_base.h` 를 포함한다. 서버 쪽 WebSocket 은 HttpServer 의 경로이므로 의존은 WebSocket → HTTP 한 방향이다. `kiotty_net_http.h` 는 `kiotty_net_websocket.h` 를 모른다. 사용자는 `kiotty_net_websocket.h` 하나만 포함하면 HTTP 와 WebSocket 을 같이 쓸 수 있다. `kiotty_net_statemachine.h` 는 포함하지 않는다 (사용자는 표를 보지 않는다). 위는 C 인터페이스, 아래는 C 함수를 하나씩 부르는 C++ 래퍼다. `kiotty::net::OwnedHandle` 은 `kiotty_net_base.h` 의 것을 쓴다.
 
@@ -702,7 +702,7 @@ WebSocket 소켓을 가질 수 있는 Endpoint 는 둘이고 (HttpServer, WebSoc
 | 라이브러리가 닫을 때의 close frame | write lane 으로 보낸 뒤 WRITTEN 에서 닫기. push lane 의 frame 이 뒤에 붙을 수 있었다 | `thenCloseWith`. push lane 은 버린다 | v1 결정 14 (base B3). RFC 6455 5.5.1 |
 | 클라이언트 close frame 의 mask key | 단조 시계에서 | push lane 과 같은 생성기 | v1 결정 15. RFC 6455 10.3 |
 
-판 v1 에서 v2 로 달라진 점 (WebSocketServer 를 HttpServer 의 경로로, 설정을 `KiottyNetHttpLimits` 로, handle 을 `{ owner, id }` 로 등) 은 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 결정 1 ~ 13 이다.
+판 v1 에서 v2 로 달라진 점 (WebSocketServer 를 HttpServer 의 경로로, 설정을 `KiottyNetHttpLimits` 로, handle 을 `{ owner, id }` 로 등) 은 `design_websocket_v0.html` (v0.1.0 에서 지움, git `6f3db91`) 의 결정 1 ~ 13 이다.
 
 ## 11. 두지 않은 것
 

@@ -1547,7 +1547,7 @@ MCP Streamable HTTP 서버의 골격 (POST / GET / DELETE `/mcp`, 202, 404, 406,
 
 ### 10. WebSocket (HttpServer 의 Upgrade 경로)
 
-> 이 절은 `include/kiotty_net_websocket.h` 의 공개 API 판 v3 (cycle V2 / V3, 2026-11-13) 과 그 구현을 적는다. 판 v2 (cycle W1 ~ W4) 의 모양은 [design_websocket_v0.html](../design/design_websocket_v0.html) 의 결정 1 ~ 13, 등록을 HTTP 모양으로 바꾼 판 v3 은 [design_websocket_v1.html](../design/design_websocket_v1.html) 의 결정 1 ~ 15 다. 사용법은 [user_guide_websocket.md](user_guide_websocket.md), 안의 모양은 [implementation_guide_v0.md](implementation_guide_v0.md) 5절이다. 판 v1 의 `KiottyNet_WebSocketServer`, `KiottyNetWebSocketConfiguration` 과 판 v2 의 `KiottyNetWebSocketHandler` 는 없다.
+> 이 절은 `include/kiotty_net_websocket.h` 의 공개 API 판 v3 (cycle V2 / V3, 2026-11-13) 과 그 구현을 적는다. 판 v2 (cycle W1 ~ W4) 의 모양은 `design_websocket_v0.html` (v0.1.0 에서 지움, git `6f3db91`) 의 결정 1 ~ 13, 등록을 HTTP 모양으로 바꾼 판 v3 은 [design_websocket_v1.html](../design/design_websocket_v1.html) 의 결정 1 ~ 15 다. 사용법은 [user_guide_websocket.md](user_guide_websocket.md), 안의 모양은 [implementation_guide_v0.md](implementation_guide_v0.md) 5절이다. 판 v1 의 `KiottyNet_WebSocketServer`, `KiottyNetWebSocketConfiguration` 과 판 v2 의 `KiottyNetWebSocketHandler` 는 없다.
 
 WebSocket (RFC 6455) 은 HTTP 연결에서 시작한다. 서버 쪽 WebSocket 은 따로 선 서버가 아니라 **HttpServer (9절) 에 등록한 Upgrade 경로**다. 한 HttpServer, 한 포트에 HTTP 라우트, 정적 경로, WebSocket 경로 여럿이 같이 있다. 클라이언트 쪽은 6절 EventClient 위의 WebSocketClient 다 (11절).
 
@@ -1737,7 +1737,7 @@ for (KiottyNetWebSocketHandle ws : app.clients.snapshot()) KiottyNet_WebSocket(w
 
 ### 11. HttpClient / WebSocketClient
 
-**HttpClient.** 6절 StreamClient 위에 얹은 동기 API 다 (cycle C1 ~ C5, 2026-11-15 ~ 16). IO Thread 도 콜백도 없고 호출한 thread 에서 보내고 기다린다. 선언은 서버와 같은 `kiotty_net_http.h` 에 있고, 설계는 `docs/design/design_http_client_v0.html`, 사용법은 [user_guide_http.md](user_guide_http.md) 2절이다. 2026-11-09 의 초안 (create 가 tls 를 받음, `KiottyNetHttpClientLimits`, Reply 의 body, `requestHttp`) 을 이 절이 대신한다.
+**HttpClient.** 6절 StreamClient 위에 얹은 동기 API 다 (cycle C1 ~ C5, 2026-11-15 ~ 16). IO Thread 도 콜백도 없고 호출한 thread 에서 보내고 기다린다. 선언은 서버와 같은 `kiotty_net_http.h` 에 있고, 설계는 `docs/design/design_http_client_v0.html` (v0.1.0 에서 지움, git `6f3db91`), 사용법은 [user_guide_http.md](user_guide_http.md) 2절이다. 2026-11-09 의 초안 (create 가 tls 를 받음, `KiottyNetHttpClientLimits`, Reply 의 body, `requestHttp`) 을 이 절이 대신한다.
 
 - **create** 는 `(context, configuration, limits)` 이고 `KiottyNetHttpClientResult { code, handle }` 을 돌려준다. 자원만 잡는다. `limits` 가 NULL 이면 `KiottyNet_initializeHttpLimits` 의 기본값이다. 쓰는 필드는 `max_header_bytes` / `max_headers` 둘이고 응답 머리, 보내는 머리, 공통 헤더 저장소에 같이 쓰인다. NULL context / 설정, 초기화하지 않은 설정 / limits, 범위 밖 limits 는 `{ KIOTTY_NET_CODE_INVALID_ARGUMENT, NULL }`, 자리가 없으면 `KIOTTY_NET_CODE_TABLE_FULL`.
 - **connect** 는 `(client, address, tls)` 이다. 대상 (address, tls) 을 기억하고 6절의 재시도로 연결한다. tls 가 NULL 이면 http. 연결만 실패하면 (서버가 없음, 거절, timeout) 그 code 이고 대상은 남는다. 인자가 틀리면 (주소, Host 가 될 수 없는 host, TLS 설정) `KIOTTY_NET_CODE_INVALID_ARGUMENT` 이고 이전 대상도 지운다 (그 뒤의 요청은 connect 한 적 없음과 같다). 다시 부르면 대상을 바꾼다. **Host 와 SNI 는 address 의 host** 다 (기본 포트 80 / 443 이 아니면 `:port`, IPv6 literal 은 `[...]`, pipe 연결은 `localhost`).
@@ -2006,10 +2006,10 @@ io.join();
 열린 질문
 
 1. (닫힘, 2026-11-11) 동기 WebSocketClient 는 두지 않는다. 서버 push 를 받으려면 결국 loop 가 필요하다 (user_guide_websocket 11절). 요청 / 응답 모양은 앱이 onMessage 와 큐로 놓는다 (user guide 8절).
-2. (닫힘, 2026-11-15) HttpClient 의 응답 이름은 `HttpReply` (사용자가 읽는 것. 서버의 `HttpResponse` 는 사용자가 채우는 것), 요청은 `HttpClientRequest` (서버의 `KiottyNetHttpRequest` 는 서버가 받은 요청) 다 (design_http_client_v0 정할 것 9).
-3. (닫힘, 2026-11-13) HttpClient 의 비동기 버전 (EventClient 위, 콜백으로 응답) 은 두지 않는다. 동시 요청은 client 여럿과 thread 로 한다 (design_http_client_v0 결정 1).
+2. (닫힘, 2026-11-15) HttpClient 의 응답 이름은 `HttpReply` (사용자가 읽는 것. 서버의 `HttpResponse` 는 사용자가 채우는 것), 요청은 `HttpClientRequest` (서버의 `KiottyNetHttpRequest` 는 서버가 받은 요청) 다 (design_http_client_v0 (v0.1.0 에서 지움, git `6f3db91`) 정할 것 9).
+3. (닫힘, 2026-11-13) HttpClient 의 비동기 버전 (EventClient 위, 콜백으로 응답) 은 두지 않는다. 동시 요청은 client 여럿과 thread 로 한다 (design_http_client_v0 (v0.1.0 에서 지움, git `6f3db91`) 결정 1).
 4. (닫힘, 2026-11-15) `request_bytes` 는 없다. 요청 머리는 client 의 머리 버퍼 (`2 × max_header_bytes` 의 뒤 반) 에 만들고 body 는 사용자 버퍼에서 바로 보낸다 (결정 3, 8. C2 에서 반으로 나눔).
-5. (닫힘, 2026-11-16) HttpClient 의 선언은 서버와 같은 `kiotty_net_http.h` 에 둔다 (design_http_client_v0 결정 10, 정할 것 1). SSE 를 이벤트로 나누는 도우미와 요청 body 를 조각으로 올리기는 지금은 두지 않는다 (정할 것 4, 8).
+5. (닫힘, 2026-11-16) HttpClient 의 선언은 서버와 같은 `kiotty_net_http.h` 에 둔다 (design_http_client_v0 (v0.1.0 에서 지움, git `6f3db91`) 결정 10, 정할 것 1). SSE 를 이벤트로 나누는 도우미와 요청 body 를 조각으로 올리기는 지금은 두지 않는다 (정할 것 4, 8).
 
 미결
 

@@ -57,9 +57,11 @@
 
 
 <h1>kiotty_net_websocket.h 설계 v1</h1>
-<p class="sub">2026-11-13 첫 판, 같은 날 고침 (정할 것 전부 답: 후보 없는 101 은 통과, broadcast 는 판 v2 그대로, 클라이언트 close handshake 는 byeWebSocketClient (인사하듯 닫는다), HTTP 라우트는 그대로, C++ 경로 등록은 생성자라 http.h 는 손대지 않음). <code>design_websocket_v0.html</code> 의 판 v2 (W1 ~ W5 로 구현) 를 쓰기 쉽게 고친 판 v3 를 정한다. 사용자 피드백: user guide 에서 받기가 어디 있는지 보이지 않고, handler struct 를 넘기는 모양이 HTTP 와 달라 보인다. JavaScript WebSocket API 와 libwebsockets 를 견주어 보고, <b>서버와 클라이언트 모두 kiotty HTTP 의 등록 모양을 따른다</b> 로 정했다. 같이 HTTP 의 app_context 를 run 한 번으로 모은다 (<code>design_http_v0.html</code> 결정 19 를 고친다). 공개 인터페이스가 중심이다. frame 행, Session, 송신의 두 길, 타이머는 v0 6, 7절과 구현 가이드 5절 그대로다.</p>
+<p class="sub">2026-11-13 첫 판, 같은 날 고침 (정할 것 전부 답: 후보 없는 101 은 통과, broadcast 는 판 v2 그대로, 클라이언트 close handshake 는 byeWebSocketClient (인사하듯 닫는다), HTTP 라우트는 그대로, C++ 경로 등록은 생성자라 http.h 는 손대지 않음). <code>design_websocket_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) 의 판 v2 (W1 ~ W5 로 구현) 를 쓰기 쉽게 고친 판 v3 를 정한다. 사용자 피드백: user guide 에서 받기가 어디 있는지 보이지 않고, handler struct 를 넘기는 모양이 HTTP 와 달라 보인다. JavaScript WebSocket API 와 libwebsockets 를 견주어 보고, <b>서버와 클라이언트 모두 kiotty HTTP 의 등록 모양을 따른다</b> 로 정했다. 같이 HTTP 의 app_context 를 run 한 번으로 모은다 (<code>design_http_v0.html</code> 결정 19 를 고친다). 공개 인터페이스가 중심이다. frame 행, Session, 송신의 두 길, 타이머는 v0 6, 7절과 구현 가이드 5절 그대로다.</p>
 
 <p>표기: <span class="tag keep">유지</span> 지금 헤더 그대로, <span class="tag new">추가</span> 이 판이 더하거나 바꾸는 것, <span class="tag drop">제거</span> 이 판이 빼는 것.</p>
+
+<p class="note">v0.1.0 (2026-11-19) 에서 v0 문서 <code>design_websocket_v0.html</code> 를 지웠다. 이 문서의 "v0 결정 N", "v0 N절", "판 v2" 는 git <code>6f3db91</code> 의 그 문서를 가리킨다. frame, 송신의 두 길, 타이머의 지금 규칙은 <code>docs/requirement/requirement_v0.md</code> 10절과 <code>docs/requirement/user_guide_websocket.md</code>, 구현 가이드 5절에 있다.</p>
 
 <h3>목차</h3>
 <ol class="toc">
@@ -369,7 +371,7 @@ IO thread : 서버의 close frame → onClose(&amp;app, { SUCCESS, 1000, 서버�
 </table>
 <p>W5 progress 에 남긴 두 문제: close frame 뒤의 push lane 데이터는 B3 (결정 14), close frame 의 mask key 는 V3 (결정 15) 에서 고친다.</p>
 
-<p><b>모두 끝났다 (2026-11-13).</b> B3 <code>d0d6c58</code>, V1 <code>1308168</code>, V2 <code>1a0e53e</code>, V3 <code>a87af46</code>, V4 (이 문서 판의 user guide, requirement, 구현 가이드). progress 는 <code>261113_progress_base_b3.md</code>, <code>261113_progress_websocket_v1.md</code> ~ <code>v4.md</code>. 구현에서 정한 것:</p>
+<p><b>모두 끝났다 (2026-11-13).</b> B3 <code>d0d6c58</code>, V1 <code>1308168</code>, V2 <code>1a0e53e</code>, V3 <code>a87af46</code>, V4 (이 문서 판의 user guide, requirement, 구현 가이드). progress 는 <code>261113_progress_base_b3.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>), <code>261113_progress_websocket_v1.md</code> (v0.1.0 에서 지움, git <code>6f3db91</code>) ~ <code>v4.md</code>. 구현에서 정한 것:</p>
 <ul>
   <li>V1: C++ <code>run(address, [tls,] app_context)</code> 의 app_context 는 기본값 없이 필수 (base 의 <code>KiottyNet_Server::run</code> 과 같다).</li>
   <li>V2: <code>HttpRegistry</code> 의 public 함수 수를 늘리지 않으려고 route 의 칸은 <code>find(index)</code> 오버로드로 받는다. onMessage 검사는 <code>HttpServer::run</code> 의 첫 줄.</li>

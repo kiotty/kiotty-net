@@ -1490,7 +1490,7 @@ bool isNamedType(KiottyNetHttpContentType type, BodyStorage storage)            
 
 ## 5. WebSocket : HttpSession 위의 frame 행
 
-[requirement_v0.md](requirement_v0.md) 10, 11절과 [design_websocket_v0.html](../design/design_websocket_v0.html) 6, 7절을 코드로 옮긴 것이다 (cycle W2 ~ W4). 등록을 HTTP 모양으로 바꾼 것 ([design_websocket_v1.html](../design/design_websocket_v1.html) 9절) 은 cycle V1 ~ V3 이다. 새 Session 종류도 새 버퍼 묶음도 없다. 4절의 HttpSession 이 Upgrade 뒤에 frame 상태를 들고, HTTP 표에 frame 행을 더한다. 서버와 클라이언트가 같은 frame 행을 쓰고 차이는 `HttpSessionHost::role` 하나다 (mask 와 부르는 콜백).
+[requirement_v0.md](requirement_v0.md) 10, 11절과 `design_websocket_v0.html` (v0.1.0 에서 지움, git `6f3db91`) 6, 7절을 코드로 옮긴 것이다 (cycle W2 ~ W4). 등록을 HTTP 모양으로 바꾼 것 ([design_websocket_v1.html](../design/design_websocket_v1.html) 9절) 은 cycle V1 ~ V3 이다. 새 Session 종류도 새 버퍼 묶음도 없다. 4절의 HttpSession 이 Upgrade 뒤에 frame 상태를 들고, HTTP 표에 frame 행을 더한다. 서버와 클라이언트가 같은 frame 행을 쓰고 차이는 `HttpSessionHost::role` 하나다 (mask 와 부르는 콜백).
 
 ### 5.1 어디에 무엇이 있나
 
@@ -1835,7 +1835,7 @@ IO thread 는 깨우지 않는다. push lane 의 drain 은 base 의 notify 가 I
 
 ## 6. HttpClient : StreamClient 위의 동기 요청
 
-requirement_v0.md 11절의 HttpClient 와 `include/kiotty_net_http.h` 의 클라이언트 부분의 구현이다. cycle C1 (파서와 머리), C2 (요청과 read. C3 의 스트림 몫도), C4 (다시 연결, close, TLS), C5 (C++ wrapper) 에서 만들었고 progress 는 `docs/progress/261115_progress_http_client_c1.md`, `261116_progress_http_client_c2.md`, `261116_progress_http_client_c4.md` 다. 설계는 `docs/design/design_http_client_v0.html` 9절이다.
+requirement_v0.md 11절의 HttpClient 와 `include/kiotty_net_http.h` 의 클라이언트 부분의 구현이다. cycle C1 (파서와 머리), C2 (요청과 read. C3 의 스트림 몫도), C4 (다시 연결, close, TLS), C5 (C++ wrapper) 에서 만들었고 progress 는 `docs/progress/261115_progress_http_client_c1.md`, `261116_progress_http_client_c2.md`, `261116_progress_http_client_c4.md` 다. 설계는 `docs/design/design_http_client_v0.html` (v0.1.0 에서 지움, git `6f3db91`) 9절이다.
 
 핵심은 다섯 가지다.
 

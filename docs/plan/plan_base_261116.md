@@ -26,8 +26,8 @@
 | 0 ~ 8, R4 ~ R8, 4b, 5a, 5b, 7b | `design_base_v5.html` | base (core, socket, event, tls, connection, io_loop, server / client, C API) | 끝 |
 | M1 ~ M5 | `design_statemachine_v0.md` | 상태 기계 | 끝 |
 | H1 ~ H5 | `design_http_v0.html` | HTTP 서버 | 끝 |
-| W, V1 ~ V4, B3 | `design_websocket_v0.html`, `design_websocket_v1.html` | WebSocket | 끝 |
-| C1 ~ C5 | `design_http_client_v0.html` 11절 | HttpClient v0 | 끝 |
+| W, V1 ~ V4, B3 | `design_websocket_v0.html` (v0.1.0 에서 지움), `design_websocket_v1.html` | WebSocket | 끝 |
+| C1 ~ C5 | `design_http_client_v0.html` 11절 (v0.1.0 에서 지움, git `6f3db91`) | HttpClient v0 | 끝 |
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 끝 (commit 전) |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
 | A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), 끝 (A1 `a2aa570`, A2 `ad5a0b2`, A3 `108b70b`) |
@@ -62,6 +62,8 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 미결 (사이클 없음): WebSocket streaming (보내기 begin / write / finish, 받기는 조각마다 `onMessage`). `requirement_v0.md` 의 메모. 이름 / 켜는 단위 / 조각 크기를 정해야 사이클이 된다.
 
 ## 3. 기록
+
+v0.1.0 (2026-11-19) 에서 `docs/progress/` 의 사이클 기록 74 개와 옛 판 설계 둘 (`design_websocket_v0.html`, `design_http_client_v0.html`) 을 지웠다. 아래 줄의 `docs/progress/...` 와 지운 설계는 git `6f3db91` 에 있다. 앞으로의 사이클 기록은 0절대로 다시 `docs/progress/` 에 쓴다.
 
 2026-11-16 HttpClient v1 U1 (`9ad71d9`, 단일 헤더 `6548b85`, `docs/progress/261116_progress_http_client_u1.md`): 요청 body 를 begin / write / finish 로 조각 올리기, Content-Length 또는 chunked. MSVC 847, WSL 848 × 6, release-tls 847.
 

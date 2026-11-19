@@ -56,7 +56,9 @@
 <body>
 
 <h1>HttpClient 설계 v1 (초안) : 요청 body 를 조각으로 올리기</h1>
-<p class="sub">2026-11-16 초안. v0 (<code>design_http_client_v0.html</code>, C1 ~ C5 끝) 의 정할 것 8 "요청 body 를 조각으로 올리기" 를 지금 하기로 했다 (사용자 결정 2026-11-16). v0 의 요청은 body 를 앱 메모리 한 덩어리 (<code>KiottyNetSpan</code>) 로 받으므로 펌웨어 / 로그 파일 올리기, 만들면서 보내는 센서 데이터에 맞지 않는다. 동기 모양 (begin → write 여러 번 → finish) 을 더한다. v0 의 요청 함수는 그대로다.</p>
+<p class="sub">2026-11-16 초안. v0 (<code>design_http_client_v0.html</code> (v0.1.0 에서 지움, git <code>6f3db91</code>), C1 ~ C5 끝) 의 정할 것 8 "요청 body 를 조각으로 올리기" 를 지금 하기로 했다 (사용자 결정 2026-11-16). v0 의 요청은 body 를 앱 메모리 한 덩어리 (<code>KiottyNetSpan</code>) 로 받으므로 펌웨어 / 로그 파일 올리기, 만들면서 보내는 센서 데이터에 맞지 않는다. 동기 모양 (begin → write 여러 번 → finish) 을 더한다. v0 의 요청 함수는 그대로다.</p>
+
+<p class="note">v0.1.0 (2026-11-19) 에서 v0 문서 <code>design_http_client_v0.html</code> 를 지웠다. 이 문서의 "v0 결정 N", "v0 N절" 은 git <code>6f3db91</code> 의 그 문서를 가리킨다. HttpClient 의 요청 / 응답 기본 (동기 API, 다시 연결, 응답 body 읽기, TLS) 의 지금 규칙은 <code>docs/requirement/requirement_v0.md</code> 11절과 <code>docs/requirement/user_guide_http.md</code> 2절에 있다.</p>
 
 <ul class="toc">
   <li><a href="#s0">0. 한눈에</a></li>
