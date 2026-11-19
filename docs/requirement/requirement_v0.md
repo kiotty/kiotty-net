@@ -174,7 +174,8 @@ typedef enum KiottyNetCode {
     KIOTTY_NET_CODE_OUT_OF_MEMORY,              /* create* : 소유자 하나를 만들 메모리가 없음. 그 소유자의 실행 중에는 나오지 않는다 */
     KIOTTY_NET_CODE_INVALID_ENCODING,           /* 문자열 인자 (host, pipe 이름, 경로, password) 가 UTF-8 이 아님 */
     KIOTTY_NET_CODE_PEER_NOT_READING,           /* 상대가 읽지 않아 send_timeout 안에 송신이 끝나지 않음. onDisconnected 의 reason (4절) */
-    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING  /* 동기 write 가 보내는 동안 상대 바이트가 와서 멈춤. bytes 만큼은 보냈고 온 바이트는 read 가 바로 준다 (A1, design_write_arrival_v0) */
+    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING, /* 동기 write 가 보내는 동안 상대 바이트가 와서 멈춤. bytes 만큼은 보냈고 온 바이트는 read 가 바로 준다 (A1, design_write_arrival_v0) */
+    KIOTTY_NET_CODE_CANCELLED                   /* KiottyNet_cancelStreamClient 로 취소됨. 연결은 그대로 (D2, design_peer_settings_and_cancel_v0) */
 } KiottyNetCode;
 ```
 
@@ -791,6 +792,7 @@ public:
     KiottyNetCode   connect(const KiottyNetAddress& address);                                               // 평문
     KiottyNetCode   connect(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls);   // TLS
     void            disconnect();
+    KiottyNetCode   cancel();                                                                               // 아무 thread
     KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
     KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
 };
@@ -802,10 +804,26 @@ typedef struct KiottyNetStreamClientResult { KiottyNetCode code; KiottyNetStream
 KiottyNetStreamClientResult KiottyNet_createStreamClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration);   /* 설정 오류나 메모리 부족이면 handle NULL, code 가 이유 */
 void            KiottyNet_destroyStreamClient(KiottyNetContext context, KiottyNetStreamClientHandle client);
 KiottyNetCode   KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client, const KiottyNetAddress* address, const KiottyNetTlsClientConfiguration* tls);   /* 연결돼 있으면 먼저 끊는다. tls 가 NULL 이면 평문. max_trial / trial_interval_milliseconds 만큼 재시도 */
-void            KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client);
+void            KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client);   /* 남은 cancel 도 지운다 */
+KiottyNetCode   KiottyNet_cancelStreamClient(KiottyNetStreamClientHandle client);       /* 아무 thread. 막힌 read / write / connect 를 깨운다. NULL 이면 KIOTTY_NET_CODE_INVALID_ARGUMENT */
 KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client, void* buffer, size_t length, uint32_t timeout_milliseconds);   /* 최대 length. 0 바이트면 KIOTTY_NET_CODE_PEER_CLOSED */
 KiottyNetResult KiottyNet_writeStreamClient(KiottyNetStreamClientHandle client, KiottyNetSpan data, uint32_t timeout_milliseconds);   /* 상대 바이트가 오면 { 보낸 만큼, KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING } 로 멈춘다. writeConnectionStream 과 같은 규칙 */
+```
 
+**StreamClient 취소 (D2, 2026-11-19, `design_peer_settings_and_cancel_v0.html` 3절).** 다른 thread 가 `KiottyNet_cancelStreamClient` 를 부르면 막혀 있던 호출이 깨어 `KIOTTY_NET_CODE_CANCELLED` 를 돌려준다. 깨움은 client 가 이미 가진 stop handle (Windows 는 자기에게 bind 한 UDP 소켓, POSIX 는 pipe) 이 소켓 기다림에 같이 들어 있어서 된다.
+
+| 막혀 있던 호출 | 돌려받는 것 | 연결 |
+|---|---|---|
+| read | `{ 0, CANCELLED }`. TLS 의 반쯤 온 레코드는 남아 다음 read 가 잇는다 | 그대로 |
+| write (평문) | `{ 보낸 길이, CANCELLED }`. `data + bytes` 부터 이어 보낼 수 있다 | 그대로 |
+| write (TLS) | `{ 받아들인 길이, CANCELLED }`. 레코드로 만든 조각까지 센다. 보내지 못한 암호문은 다음 read / write 가 먼저 보낸다 | 그대로 |
+| connect (시도, 시도 사이 쉼, TLS handshake) | `CANCELLED` | 없음 |
+
+- 막힌 호출이 없을 때의 cancel 은 남아 있다가 다음 read / write / connect 가 시작하자마자 `{ 0, CANCELLED }` 로 받는다. 수신 Stage 에 바이트가 있어도 cancel 이 먼저다. 여러 번의 cancel 은 한 번으로 친다. disconnect 는 남은 cancel 을 지운다.
+- write 를 취소하면 앱 프로토콜의 메시지가 중간에서 끊겨 있을 수 있다. 같은 연결을 계속 쓰려면 남은 바이트를 보내 메시지를 끝내거나 끊는다.
+- HttpClient 의 close 는 그대로 `CLOSED` 다 (요청 중간에 끊긴 HTTP/1.1 연결은 다시 쓸 수 없다). 서버의 work stream 에는 cancel 이 없다.
+
+```c
 typedef struct KiottyNetEventClient* KiottyNetEventClientHandle;
 typedef struct KiottyNetEventClientResult { KiottyNetCode code; KiottyNetEventClientHandle handle; } KiottyNetEventClientResult;
 KiottyNetEventClientResult KiottyNet_createEventClient(KiottyNetContext context, const KiottyNetClientConfiguration* configuration);

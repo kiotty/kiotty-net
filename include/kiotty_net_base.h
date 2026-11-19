@@ -55,7 +55,8 @@ typedef enum KiottyNetCode
     KIOTTY_NET_CODE_OUT_OF_MEMORY,
     KIOTTY_NET_CODE_INVALID_ENCODING,
     KIOTTY_NET_CODE_PEER_NOT_READING,
-    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING
+    KIOTTY_NET_CODE_DATA_ARRIVED_WHILE_WRITING,
+    KIOTTY_NET_CODE_CANCELLED
 } KiottyNetCode;
 
 typedef struct KiottyNetResult
@@ -443,6 +444,8 @@ KIOTTY_NET_API KiottyNetCode KiottyNet_connectStreamClient(
     const KiottyNetTlsClientConfiguration* tls);
 KIOTTY_NET_API void KiottyNet_disconnectStreamClient(
     KiottyNetStreamClientHandle client);
+KIOTTY_NET_API KiottyNetCode KiottyNet_cancelStreamClient(
+    KiottyNetStreamClientHandle client);
 KIOTTY_NET_API KiottyNetResult             KiottyNet_readStreamClient(
     KiottyNetStreamClientHandle client,
     void* buffer,
@@ -801,6 +804,7 @@ public:
     KiottyNetCode   connect(const KiottyNetAddress& address);
     KiottyNetCode   connect(const KiottyNetAddress& address, const KiottyNetTlsClientConfiguration& tls);
     void            disconnect();
+    KiottyNetCode   cancel();
     KiottyNetResult read(void* buffer, size_t length, uint32_t timeout_milliseconds);
     KiottyNetResult write(KiottyNetSpan data, uint32_t timeout_milliseconds);
 
@@ -1367,6 +1371,11 @@ inline KiottyNetCode KiottyNet_StreamClient::connect(
 inline void KiottyNet_StreamClient::disconnect()
 {
     KiottyNet_disconnectStreamClient(_handle.get());
+}
+
+inline KiottyNetCode KiottyNet_StreamClient::cancel()
+{
+    return KiottyNet_cancelStreamClient(_handle.get());
 }
 
 inline KiottyNetResult KiottyNet_StreamClient::read(

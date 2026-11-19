@@ -8,7 +8,7 @@ write 중 도착 (A1 ~ A3, `docs/design/design_write_arrival_v0.html`) 과 HttpC
 
 계획 문서의 남은 미결은 WebSocket streaming (사이클 없음, 이름 / 켜는 단위 / 조각 크기를 정해야 함) 하나다.
 
-다음은 D2 (2026-11-19 에 DICOM 적용 변경 요청으로 정함, 설계 `docs/design/design_peer_settings_and_cancel_v0.html` 3절, 계획 문서 2절의 표). D1 은 끝 (`docs/progress/261119_progress_peer_settings_d1.md`).
+DICOM 적용 변경 요청 D1 ~ D2 (2026-11-19, 설계 `docs/design/design_peer_settings_and_cancel_v0.html`) 도 끝났다. 기록은 `docs/progress/261119_progress_peer_settings_d1.md`, `261119_progress_stream_client_cancel_d2.md`.
 
 - D1 (끝): 상대에 따라 정해지는 다섯 설정 (`connect_timeout_milliseconds`, `max_trial`, `trial_interval_milliseconds`, `no_delay`, `send_timeout_milliseconds`) 을 `KiottyNetAddress` 로 옮기고, create 의 설정은 메모리 크기 (`max_clients`, 세 capacity) 만 남긴다. 세 번째 설정 구조체는 만들지 않는다.
-- D2: `KiottyNet_cancelStreamClient` (다른 thread 에서 `StopSignal::raise`, read / write / connect 를 깨우고 연결은 살려 둠, `KIOTTY_NET_CODE_CANCELLED`). 서버 work stream 에는 cancel 을 넣지 않는다.
+- D2 (끝): `KiottyNet_cancelStreamClient` (다른 thread 에서 `StopSignal::raise`, read / write / connect 를 깨우고 연결은 살려 둠, `KIOTTY_NET_CODE_CANCELLED`). 서버 work stream 에는 cancel 을 넣지 않는다.

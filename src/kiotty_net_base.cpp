@@ -397,13 +397,19 @@ KiottyNetCode KiottyNet_connectStreamClient(KiottyNetStreamClientHandle client,
 {
     if (client == nullptr || address == nullptr) { return INVALID; }
     const KiottyNetAddress copied = *address;
-    return client->connect(copied, tls);
+    return net::connectStreamClient(*client, copied, tls);
 }
 
 void KiottyNet_disconnectStreamClient(KiottyNetStreamClientHandle client)
 {
     if (client == nullptr) { return; }
-    client->disconnect();
+    net::disconnectStreamClient(*client);
+}
+
+KiottyNetCode KiottyNet_cancelStreamClient(KiottyNetStreamClientHandle client)
+{
+    if (client == nullptr) { return INVALID; }
+    return net::cancelStreamClient(*client);
 }
 
 KiottyNetResult KiottyNet_readStreamClient(KiottyNetStreamClientHandle client,

@@ -264,6 +264,8 @@ SCU thread : connect → CANCELLED (연결 없음). 다른 PACS 로 connect 하�
   <li><b>새 메모리 / 운영체제 자원 없음.</b> <code>StopSignal</code> 은 StreamClient 마다 이미 하나 있다.</li>
 </ul>
 
+<p class="note">D2 구현 (2026-11-19): 남은 cancel 을 지우는 것은 <code>StreamClient::disconnect</code> 가 아니라 공개 <code>KiottyNet_disconnectStreamClient</code> 의 usecase (<code>disconnectStreamClient</code>) 가 한다. <code>StreamClient::disconnect</code> 는 connect 의 실패 경로와 HttpClient 도 부르는데, 거기서 지우면 HttpClient 의 close 가 걸어 둔 stop 을 먹을 수 있다. 시작 확인과 <code>CLOSED</code> → <code>CANCELLED</code> 는 connect / read / write 의 usecase 셋이 한다. TLS write 의 길이는 바꿀 것이 없었다: 조각을 넣기 전에 늘 flush 하므로 조각 하나는 BIO 에 다 들어가고, 멈춤은 flush 에서만 일어난다.</p>
+
 <h2 id="s6">6. 정할 것</h2>
 <p>모두 닫음 (2026-11-19, 사용자).</p>
 <ol>

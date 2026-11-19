@@ -11,6 +11,11 @@
 namespace kiotty::net::implementation
 {
     size_t          clientMemorySize(const KiottyNetClientConfiguration& configuration);
+    KiottyNetCode   connectStreamClient(StreamClient& client,
+                                        const KiottyNetAddress& address,
+                                        const KiottyNetTlsClientConfiguration* tls);
+    void            disconnectStreamClient(StreamClient& client);
+    KiottyNetCode   cancelStreamClient(StreamClient& client);
     KiottyNetResult readStreamClient(StreamClient& client,
                                      Span<char> buffer,
                                      uint32_t timeout_milliseconds);

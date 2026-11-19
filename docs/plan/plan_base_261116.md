@@ -31,7 +31,7 @@
 | U1 ~ U3 | `design_http_client_v1.html` 9절 | HttpClient v1 (요청 body 조각 올리기) | U1, U2 끝, U3 끝 (commit 전) |
 | R0 ~ R7, R4w | `design_module_layout_v0.html` 9절 | 모듈 정리 (base / statemachine / http / websocket) | R0 ~ R7 끝 |
 | A1 ~ A3 | `design_write_arrival_v0.html` 9절 | write 가 상대 바이트를 보면 멈추고 `DATA_ARRIVED_WHILE_WRITING` | 설계 확정 (2026-11-18), 끝 (A1 `a2aa570`, A2 `ad5a0b2`, A3 `108b70b`) |
-| D1 ~ D2 | `design_peer_settings_and_cancel_v0.html` 7절 | 상대에 따른 설정을 `KiottyNetAddress` 로, `cancelStreamClient` | 설계 확정 (2026-11-19), D1 끝 |
+| D1 ~ D2 | `design_peer_settings_and_cancel_v0.html` 7절 | 상대에 따른 설정을 `KiottyNetAddress` 로, `cancelStreamClient` | 설계 확정 (2026-11-19), 끝 (D1, D2) |
 
 ## 2. 앞으로의 순서
 
@@ -98,3 +98,5 @@ R0 → R1 → R2 → R3 → R4a → R4b → R4w → R5 → R6 → R7 → U2 → 
 2026-11-18 HttpClient v1 U3 (`docs/progress/261118_progress_http_client_u3.md`), commit 전: `KiottyNet_sendHttpFile` (파일 크기로 Content-Length, `send_capacity` 조각마다 base writeFile, 조각을 시작할 때 먼저 온 응답을 봄, 열 수 없으면 `NOT_FOUND`, timeout 은 전체 하나), C++ `begin` / `write` / `finish` / `sendFile`, user guide 2.14, requirement 11절, 구현 가이드 6.9, 테스트 계획 25.6, Python http.server 외부 확인 46 개. MSVC 879, WSL 880 x 6, release 879.
 
 2026-11-19 상대에 따른 설정과 취소 설계 (`docs/design/design_peer_settings_and_cancel_v0.html`, 정할 것 넷 닫음) 와 D1 (`docs/progress/261119_progress_peer_settings_d1.md`): 연결 시간 / 재시도 / `no_delay` / 송신 시간을 `KiottyNetAddress` 로 (`initialization_mark`, `KiottyNet_setAddress*`, C++ `KiottyNet_AddressBuilder`), create 의 설정은 메모리 크기만, 서버 run 은 address 의 `no_delay` / 송신 시간, 송신 시간은 `LoopParts` 로. MSVC 881, WSL 882 × 6, release-tls 881.
+
+2026-11-19 StreamClient 취소 D2 (`docs/progress/261119_progress_stream_client_cancel_d2.md`): `KiottyNet_cancelStreamClient`, `KIOTTY_NET_CODE_CANCELLED` (enum 끝), 이미 있는 stop handle 로 막힌 read / write / connect / TLS handshake 를 깨우고 read / write 의 연결은 그대로, 막힌 호출이 없으면 다음 호출이 받음, 공개 disconnect 가 남은 cancel 을 지움. MSVC 890, WSL 891 × 6, release-tls 890.
